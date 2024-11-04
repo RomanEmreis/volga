@@ -111,6 +111,9 @@ macro_rules! ok {
             headers
         })
     }};
+    ($($arg:tt)*) => {
+        $crate::Results::json(&format!($($arg)*))
+    };
 }
 
 /// Produces `OK 200` response with file body
@@ -334,6 +337,15 @@ mod tests {
 
         assert!(response.is_ok());
         assert_eq!(String::from_utf8_lossy(response.unwrap().body()), "\"test\"");
+    }
+
+    #[test]
+    fn it_creates_formatted_text_ok_response() {
+        let text = "test";
+        let response = ok!("This is text: {}", text);
+
+        assert!(response.is_ok());
+        assert_eq!(String::from_utf8_lossy(response.unwrap().body()), "\"This is text: test\"");
     }
     
     #[test]
