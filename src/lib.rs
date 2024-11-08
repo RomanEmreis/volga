@@ -26,10 +26,13 @@
 
 pub mod app;
 
+#[cfg(test)]
+pub mod test_utils;
+
 pub use crate::app::{App, HttpContext};
 pub use crate::app::endpoints::mapping::{asynchronous::AsyncEndpointsMapping, synchronous::SyncEndpointsMapping};
 pub use crate::app::middlewares::{Next, mapping::asynchronous::AsyncMiddlewareMapping};
-pub use crate::app::results::{HttpResponse, HttpResult, Results, ResponseContext};
+pub use crate::app::results::{HttpResponse, HttpResult, HttpHeaders, Results, ResponseContext};
 pub use crate::app::request::{HttpRequest, RequestParams, payload::Payload, params::Params, cancel::Cancel};
 
 // Exposing shortcut for CancellationToken for convenience

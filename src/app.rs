@@ -1,16 +1,21 @@
-﻿use std::future::Future;
-use httparse::EMPTY_HEADER;
-use std::sync::Arc;
+﻿use std::sync::Arc;
+use std::future::Future;
 use std::time::Duration;
 use bytes::BytesMut;
-use tokio_util::sync::CancellationToken;
+use httparse::EMPTY_HEADER;
+use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use http::{HeaderMap, HeaderValue};
+use http_body_util::BodyExt;
+use tokio::io::Interest;
 use tokio::{
     net::{TcpListener, TcpStream},
     io::{self, AsyncReadExt, AsyncWriteExt},
     sync::broadcast,
     signal
 };
-use tokio::io::Interest;
+use tokio_util::{
+    sync::CancellationToken,
+};
 use crate::app::{
     endpoints::{Endpoints, EndpointContext},
     middlewares::{Middlewares, mapping::asynchronous::AsyncMiddlewareMapping},
@@ -193,7 +198,7 @@ impl App {
         loop {
             match Self::handle_request(pipeline, &mut socket, &mut buffer).await {
                 Ok(response) => {
-                    if let Err(err) = Self::write_response(&mut socket, &response).await {
+                    if let Err(err) = Self::write_response(&mut socket, response).await {
                         if cfg!(debug_assertions) {
                             eprintln!("Failed to write to socket: {:?}", err);
                         }
@@ -270,19 +275,20 @@ impl App {
         RawRequest::convert_to_http_request(parse_req)
     }
 
-    async fn write_response(socket: &mut TcpStream, response: &HttpResponse) -> io::Result<()> {
+    async fn write_response(socket: &mut TcpStream, response: HttpResponse) -> io::Result<()> {
+        let (parts, mut body) = response.into_parts();
+        
         let mut response_bytes = BytesMut::new();
-
         // Start with the HTTP status line
         let status_line = format!(
             "HTTP/1.1 {} {}\r\n",
-            response.status().as_u16(),
-            response.status().canonical_reason().unwrap_or("unknown status")
+            &parts.status.as_u16(),
+            &parts.status.canonical_reason().unwrap_or("unknown status")
         );
         response_bytes.extend_from_slice(status_line.as_bytes());
-
+                
         // Write headers
-        for (key, value) in response.headers() {
+        for (key, value) in &parts.headers {
             let header_value = match value.to_str() {
                 Ok(v) => v,
                 Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid header value")),
@@ -294,12 +300,38 @@ impl App {
         // End of headers section
         response_bytes.extend_from_slice(b"\r\n");
 
-        // Write body
-        if !response.body().is_empty() {
-            response_bytes.extend_from_slice(response.body());
+        socket.write_all(&response_bytes).await?;
+        
+        let (content_length, content_type) = Self::get_response_metadata(&parts.headers);
+        
+        if content_length > 0 {
+            if content_type == mime::APPLICATION_OCTET_STREAM {
+                while let Some(next) = body.frame().await {
+                    let frame = next?;
+                    if let Some(chunk) = frame.data_ref() {
+                        socket.write_all(chunk).await?;
+                    }
+                }
+            } else {
+                let bytes = body.collect().await?.to_bytes();
+                socket.write_all(&bytes).await?;
+            }
         }
         
-        socket.write_all(&response_bytes).await?;
         socket.flush().await
+    }
+    
+    #[inline]
+    fn get_response_metadata(headers: &HeaderMap<HeaderValue>) -> (usize, &str) {
+        let content_length = headers.get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|string| string.parse::<usize>().ok())
+            .unwrap_or(0);
+
+        let content_type = headers.get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or(mime::APPLICATION_JSON.as_ref());
+
+        (content_length, content_type)
     }
 }
