@@ -1,12 +1,11 @@
-﻿use std::sync::Arc;
-use http::Method;
+﻿use http::Method;
 use crate::{App, SyncEndpointsMapping, HttpRequest, HttpResult};
 use crate::app::endpoints::mapping::synchronous::SyncMapping;
 
 impl SyncEndpointsMapping for App {
     fn map_get<F>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> HttpResult + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> HttpResult + Send + Sync + 'static,
     {
         let endpoints = self.endpoints();
         endpoints.map(Method::GET, pattern, handler);
@@ -14,7 +13,7 @@ impl SyncEndpointsMapping for App {
 
     fn map_post<F>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> HttpResult + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> HttpResult + Send + Sync + 'static,
     {
         let endpoints = self.endpoints();
         endpoints.map(Method::POST, pattern, handler);
@@ -22,7 +21,7 @@ impl SyncEndpointsMapping for App {
 
     fn map_put<F>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> HttpResult + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> HttpResult + Send + Sync + 'static,
     {
         let endpoints = self.endpoints();
         endpoints.map(Method::PUT, pattern, handler);
@@ -30,7 +29,7 @@ impl SyncEndpointsMapping for App {
 
     fn map_patch<F>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> HttpResult + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> HttpResult + Send + Sync + 'static,
     {
         let endpoints = self.endpoints();
         endpoints.map(Method::PATCH, pattern, handler);
@@ -38,7 +37,7 @@ impl SyncEndpointsMapping for App {
 
     fn map_delete<F>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> HttpResult + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> HttpResult + Send + Sync + 'static,
     {
         let endpoints = self.endpoints();
         endpoints.map(Method::DELETE, pattern, handler);

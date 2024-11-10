@@ -1,16 +1,12 @@
 ﻿use std::collections::HashMap;
 use tokio::fs::File;
+use tokio::io;
 use bytes::Bytes;
 use chrono::Utc;
 use serde::Serialize;
 use http::{HeaderName, HeaderValue, Response, StatusCode};
 use http::response::Builder;
-use http_body_util::{BodyExt, Full, StreamBody};
-use hyper::body::Frame;
-use tokio::io;
-use tokio_util::io::ReaderStream;
-use futures_util::TryStreamExt;
-
+use crate::app::body::{BoxBody, HttpBody};
 use http::header::{ 
     CONTENT_DISPOSITION,
     CONTENT_LENGTH,
@@ -57,7 +53,6 @@ pub struct ResponseContext<T: Serialize> {
     pub headers: HttpHeaders
 }
 
-type BoxBody = http_body_util::combinators::BoxBody<Bytes, io::Error>;
 pub type HttpResponse = Response<BoxBody>;
 pub type HttpResult = io::Result<HttpResponse>;
 pub type HttpHeaders = HashMap<String, String>;
@@ -73,7 +68,7 @@ impl Results {
         Self::create_custom_builder(headers)
             .status(StatusCode::from_u16(status).unwrap_or(StatusCode::OK))
             .header(CONTENT_LENGTH, content.len())
-            .body(Full::new(Bytes::from(content)).map_err(|never| match never {}).boxed())
+            .body(HttpBody::full(content))
             .map_err(|_| Self::response_error())
     }
 
@@ -119,13 +114,7 @@ impl Results {
     #[inline]
     pub async fn file(file_name: &str, content: File) -> HttpResult {
         let metadata = content.metadata().await?;
-
-        // Wrap to a tokio_util::io::ReaderStream
-        let reader_stream = ReaderStream::new(content);
-
-        // Convert to http_body_util::BoxBody
-        let stream_body = StreamBody::new(reader_stream.map_ok(Frame::data));
-        let boxed_body = stream_body.boxed();
+        let boxed_body = HttpBody::wrap_stream(content);
         
         let file_name = format!("attachment; filename=\"{}\"", file_name);
         Self::create_default_builder()
@@ -146,12 +135,7 @@ impl Results {
             APPLICATION_OCTET_STREAM.as_ref().into()
         );
 
-        // Wrap to a tokio_util::io::ReaderStream
-        let reader_stream = ReaderStream::new(content);
-
-        // Convert to http_body_util::BoxBody
-        let stream_body = StreamBody::new(reader_stream.map_ok(Frame::data));
-        let boxed_body = stream_body.boxed();
+        let boxed_body = HttpBody::wrap_stream(content);
         
         let file_name = format!("attachment; filename=\"{}\"", file_name);
         Self::create_custom_builder(headers)
@@ -215,7 +199,7 @@ impl Results {
             .status(status)
             .header(CONTENT_LENGTH, content.len())
             .header(CONTENT_TYPE, content_type)
-            .body(Full::new(content).map_err(|e| match e {}).boxed())
+            .body(HttpBody::create(content))
             .map_err(|_| Self::response_error())
     }
 

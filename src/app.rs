@@ -2,16 +2,23 @@
 use std::future::Future;
 use std::time::Duration;
 use bytes::BytesMut;
-use httparse::EMPTY_HEADER;
-use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use http::header::{
+    CONTENT_LENGTH, 
+    CONTENT_TYPE
+};
 use http::{HeaderMap, HeaderValue};
 use http_body_util::BodyExt;
-use tokio::io::Interest;
 use tokio::{
     net::{TcpListener, TcpStream},
-    io::{self, AsyncReadExt, AsyncWriteExt},
+    io::{self, Error, AsyncReadExt, AsyncWriteExt, BufReader, Interest},
     sync::broadcast,
-    signal
+    signal,
+    sync::Mutex
+};
+use tokio::io::ErrorKind::{
+    InvalidData,
+    InvalidInput,
+    BrokenPipe,
 };
 use tokio_util::{
     sync::CancellationToken,
@@ -25,6 +32,7 @@ use crate::app::{
 
 pub mod middlewares;
 pub mod endpoints;
+pub mod body;
 pub mod request;
 pub mod results;
 pub mod mapping;
@@ -59,7 +67,7 @@ struct Connection {
 }
 
 pub struct HttpContext {
-    pub request: Arc<HttpRequest>,
+    pub request: Mutex<Option<HttpRequest>>,
     endpoint_context: EndpointContext
 }
 
@@ -68,8 +76,13 @@ pub(crate) type BoxedHttpResultFuture = Box<dyn Future<Output = HttpResult> + Se
 impl HttpContext {
     #[inline]
     async fn execute(&self) -> HttpResult {
-        let request = &self.request;
-        self.endpoint_context.handler.call(request.clone()).await
+        let mut request_guard = self.request.lock().await;
+        if let Some(request) = request_guard.take() {
+            drop(request_guard);
+            self.endpoint_context.handler.call(request).await    
+        } else {
+            Results::internal_server_error(None)            
+        }
     }
 }
 
@@ -99,7 +112,7 @@ impl App {
     /// ```
     pub async fn build(socket: &str) -> io::Result<App> {
         if socket.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "An empty socket has been provided."));
+            return Err(Error::new(InvalidData, "An empty socket has been provided."));
         }
 
         let tcp_listener = TcpListener::bind(socket).await?;
@@ -193,7 +206,7 @@ impl App {
 
     #[inline]
     async fn handle_connection(pipeline: &Arc<Pipeline>, mut socket: TcpStream) {
-        let mut buffer = [0; 1024];
+        let mut buffer = BytesMut::with_capacity(4096);
         
         loop {
             match Self::handle_request(pipeline, &mut socket, &mut buffer).await {
@@ -227,14 +240,19 @@ impl App {
         }
     }
 
-    async fn handle_request(pipeline: &Arc<Pipeline>, socket: &mut TcpStream, buffer: &mut [u8]) -> io::Result<HttpResponse> {
-        let bytes_read = socket.read(buffer).await?;
+    async fn handle_request(pipeline: &Arc<Pipeline>, socket: &mut TcpStream, buffer: &mut BytesMut) -> io::Result<HttpResponse> {
+        let mut buf_reader = BufReader::new(socket);
+        buffer.clear();
+        
+        let bytes_read = buf_reader.read_buf(buffer).await?;
         if bytes_read == 0 {
-            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "Client closed the connection"));
+            return Err(Error::new(BrokenPipe, "Client closed the connection"));
         }
         
-        let mut http_request = Self::parse_http_request(&mut buffer[..bytes_read])?;
+        let mut http_request = RawRequest::parse(&buffer[..bytes_read])?;
         let cancellation_token = CancellationToken::new();
+
+        let socket = buf_reader.into_inner();
         
         if let Some(endpoint_context) = pipeline.endpoints.get_endpoint(&http_request).await {
             let extensions = http_request.extensions_mut();
@@ -245,7 +263,7 @@ impl App {
             }
 
             let context = HttpContext {
-                request: Arc::new(http_request),
+                request: Mutex::new(http_request.into()),
                 endpoint_context
             };
                 
@@ -259,20 +277,12 @@ impl App {
             
             match response {
                 Ok(response) => Ok(response),
-                Err(error) if error.kind() == io::ErrorKind::InvalidInput => Results::bad_request(Some(error.to_string())),
+                Err(error) if error.kind() == InvalidInput => Results::bad_request(Some(error.to_string())),
                 Err(error) => Results::internal_server_error(Some(error.to_string()))
             }
         } else {
             Results::not_found()
         }
-    }
-    
-    #[inline]
-    fn parse_http_request(buffer: &mut [u8]) -> io::Result<HttpRequest> {
-        let mut headers = [EMPTY_HEADER; 16]; // Adjust header size as necessary
-        let parse_req = RawRequest::parse_request(buffer, &mut headers)?;
-        
-        RawRequest::convert_to_http_request(parse_req)
     }
 
     async fn write_response(socket: &mut TcpStream, response: HttpResponse) -> io::Result<()> {
@@ -291,7 +301,7 @@ impl App {
         for (key, value) in &parts.headers {
             let header_value = match value.to_str() {
                 Ok(v) => v,
-                Err(_) => return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid header value")),
+                Err(_) => return Err(Error::new(InvalidData, "Invalid header value")),
             };
             let header = format!("{}: {}\r\n", key, header_value);
             response_bytes.extend_from_slice(header.as_bytes());

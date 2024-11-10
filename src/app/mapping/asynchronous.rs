@@ -13,7 +13,7 @@ use crate::{
 impl AsyncEndpointsMapping for App {
     fn map_get<F, Fut>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> Fut + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
@@ -24,7 +24,7 @@ impl AsyncEndpointsMapping for App {
 
     fn map_post<F, Fut>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> Fut + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
@@ -35,7 +35,7 @@ impl AsyncEndpointsMapping for App {
 
     fn map_put<F, Fut>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> Fut + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
@@ -46,7 +46,7 @@ impl AsyncEndpointsMapping for App {
 
     fn map_delete<F, Fut>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> Fut + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
@@ -57,7 +57,7 @@ impl AsyncEndpointsMapping for App {
 
     fn map_patch<F, Fut>(&mut self, pattern: &str, handler: F)
     where
-        F: Fn(Arc<HttpRequest>) -> Fut + Send + Sync + 'static,
+        F: Fn(HttpRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
