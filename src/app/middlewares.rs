@@ -12,6 +12,7 @@ pub(crate) struct Middlewares {
 }
 
 impl Middlewares {
+    #[inline]
     pub(crate) fn new() -> Self {
         Self { pipeline: Vec::new() }
     }
@@ -36,7 +37,7 @@ impl Middlewares {
             let handler = request_handler.clone();
             // Call the last middleware, ignoring its `next` argument with an empty placeholder
             Box::pin(async move {
-                (handler)(ctx, Arc::new(|_| Box::pin(async { Results::not_found() }))).await
+                handler(ctx, Arc::new(|_| Box::pin(async { Results::not_found() }))).await
             })
         });
 
@@ -48,7 +49,7 @@ impl Middlewares {
                 let current_mw = current_mw.clone();
                 let prev_next = prev_next.clone();
                 Box::pin(async move {
-                    (current_mw)(ctx, prev_next).await
+                    current_mw(ctx, prev_next).await
                 })
             });
         }

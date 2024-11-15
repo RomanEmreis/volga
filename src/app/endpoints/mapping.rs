@@ -1,5 +1,5 @@
 ﻿use std::{sync::Arc, future::Future};
-use http::Method;
+use hyper::Method;
 use crate::{HttpResult, HttpRequest};
 use crate::app::endpoints::{
     Endpoints,

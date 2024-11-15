@@ -265,18 +265,18 @@ macro_rules! status {
     };
     ($status:expr, { $($json:tt)* }) => {
         $crate::Results::json_with_status(
-            http::StatusCode::from_u16($status).unwrap_or(http::StatusCode::OK), 
+            hyper::StatusCode::from_u16($status).unwrap_or(hyper::StatusCode::OK), 
             &serde_json::json_internal!({ $($json)* }))
     };
     ($status:expr) => {
         $crate::Results::status(
-            http::StatusCode::from_u16($status).unwrap_or(http::StatusCode::OK), 
+            hyper::StatusCode::from_u16($status).unwrap_or(hyper::StatusCode::OK), 
             mime::TEXT_PLAIN.as_ref(), 
-            bytes::Bytes::new())
+            $crate::app::body::HttpBody::empty())
     };
     ($status:expr, $e:expr) => {
         $crate::Results::json_with_status(
-            http::StatusCode::from_u16($status).unwrap_or(http::StatusCode::OK),
+            hyper::StatusCode::from_u16($status).unwrap_or(hyper::StatusCode::OK),
             $e)
     };
 }
@@ -640,7 +640,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "\"ok\"");
-        assert_eq!(response.headers().len(), 4);
+        assert_eq!(response.headers().len(), 2);
     }
 
     #[tokio::test]

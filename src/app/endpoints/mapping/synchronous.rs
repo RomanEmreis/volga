@@ -1,5 +1,5 @@
 ﻿use crate::{HttpResult, HttpRequest};
-use http::Method;
+use hyper::Method;
 
 pub trait SyncMapping {
     fn map<F>(&mut self, method: Method, pattern: &str, handler: F)

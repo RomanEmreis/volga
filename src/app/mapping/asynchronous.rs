@@ -1,5 +1,5 @@
 ﻿use std::{sync::Arc, future::Future};
-use http::Method;
+use hyper::Method;
 use crate::{
     App, 
     HttpResult, 
@@ -18,7 +18,7 @@ impl AsyncEndpointsMapping for App {
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
 
-        let endpoints = self.endpoints();
+        let endpoints = self.endpoints_mut();
         endpoints.map(Method::GET, pattern, handler);
     }
 
@@ -29,7 +29,7 @@ impl AsyncEndpointsMapping for App {
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
 
-        let endpoints = self.endpoints();
+        let endpoints = self.endpoints_mut();
         endpoints.map(Method::POST, pattern, handler);
     }
 
@@ -40,7 +40,7 @@ impl AsyncEndpointsMapping for App {
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
 
-        let endpoints = self.endpoints();
+        let endpoints = self.endpoints_mut();
         endpoints.map(Method::PUT, pattern, handler);
     }
 
@@ -51,7 +51,7 @@ impl AsyncEndpointsMapping for App {
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
 
-        let endpoints = self.endpoints();
+        let endpoints = self.endpoints_mut();
         endpoints.map(Method::DELETE, pattern, handler);
     }
 
@@ -62,7 +62,7 @@ impl AsyncEndpointsMapping for App {
     {
         use crate::app::endpoints::mapping::asynchronous::AsyncMapping;
 
-        let endpoints = self.endpoints();
+        let endpoints = self.endpoints_mut();
         endpoints.map(Method::PATCH, pattern, handler);
     }
 }
@@ -75,7 +75,7 @@ impl AsyncMiddlewareMapping for App {
     {
         use crate::app::middlewares::mapping::asynchronous::AsyncMapping;
 
-        let middlewares = self.middlewares();
+        let middlewares = self.middlewares_mut();
         middlewares.use_middleware(handler);
     }
 }

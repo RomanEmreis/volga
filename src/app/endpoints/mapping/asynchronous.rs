@@ -1,6 +1,6 @@
 ﻿use crate::{HttpResult, HttpRequest};
 use std::future::Future;
-use http::Method;
+use hyper::Method;
 
 pub trait AsyncMapping {
     fn map<F, Fut>(&mut self, method: Method, pattern: &str, handler: F)

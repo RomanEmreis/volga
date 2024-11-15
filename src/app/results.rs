@@ -2,20 +2,17 @@
 use tokio::fs::File;
 use tokio::io;
 use bytes::Bytes;
-use chrono::Utc;
 use serde::Serialize;
-use http::{HeaderName, HeaderValue, Response, StatusCode};
-use http::response::Builder;
+use hyper::{Response, StatusCode};
+use hyper::header::{HeaderName, HeaderValue};
+use hyper::http::response::Builder;
 use crate::app::body::{BoxBody, HttpBody};
-use http::header::{ 
+use hyper::header::{ 
     CONTENT_DISPOSITION,
-    CONTENT_LENGTH,
     CONTENT_TYPE,
-    SERVER,
-    DATE
+    SERVER
 };
 use mime::{
-    APPLICATION_OCTET_STREAM,
     APPLICATION_JSON,
     TEXT_PLAIN
 };
@@ -67,7 +64,6 @@ impl Results {
         
         Self::create_custom_builder(headers)
             .status(StatusCode::from_u16(status).unwrap_or(StatusCode::OK))
-            .header(CONTENT_LENGTH, content.len())
             .body(HttpBody::full(content))
             .map_err(|_| Self::response_error())
     }
@@ -79,11 +75,10 @@ impl Results {
         ?Sized + Serialize
     {
         let content = serde_json::to_vec(content)?;
-        let body = Bytes::from(content);
         Self::status(
             StatusCode::OK,
             APPLICATION_JSON.as_ref(),
-            body)
+            HttpBody::full(content))
     }
 
     /// Produces a response with `StatusCode` the `JSON` body.
@@ -93,34 +88,30 @@ impl Results {
         ?Sized + Serialize
     {
         let content = serde_json::to_vec(content)?;
-        let body = Bytes::from(content);
         Self::status(
             status,
             APPLICATION_JSON.as_ref(),
-            body)
+            HttpBody::full(content))
     }
 
     /// Produces an `OK 200` response with the plain text body.
     #[inline]
     pub fn text(content: &str) -> HttpResult {
-        let body = Bytes::from(String::from(content));
+        let content = Bytes::from(String::from(content));
         Self::status(
             StatusCode::OK,
             TEXT_PLAIN.as_ref(),
-            body)
+            HttpBody::full(content))
     }
 
     /// Produces an `OK 200` response with the file body.
     #[inline]
     pub async fn file(file_name: &str, content: File) -> HttpResult {
-        let metadata = content.metadata().await?;
         let boxed_body = HttpBody::wrap_stream(content);
-        
         let file_name = format!("attachment; filename=\"{}\"", file_name);
+        
         Self::create_default_builder()
             .status(StatusCode::OK)
-            .header(CONTENT_LENGTH, metadata.len())
-            .header(CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref())
             .header(CONTENT_DISPOSITION, file_name)
             .body(boxed_body)
             .map_err(|_| Self::response_error())
@@ -128,19 +119,12 @@ impl Results {
 
     /// Produces an `OK 200` response with the file body and custom headers.
     #[inline]
-    pub async fn file_with_custom_headers(file_name: &str, content: File, mut headers: HttpHeaders) -> HttpResult {
-        let metadata = content.metadata().await?;
-        headers.insert(
-            CONTENT_TYPE.as_str().into(),
-            APPLICATION_OCTET_STREAM.as_ref().into()
-        );
-
+    pub async fn file_with_custom_headers(file_name: &str, content: File, headers: HttpHeaders) -> HttpResult {
         let boxed_body = HttpBody::wrap_stream(content);
-        
         let file_name = format!("attachment; filename=\"{}\"", file_name);
+        
         Self::create_custom_builder(headers)
             .status(StatusCode::OK)
-            .header(CONTENT_LENGTH, metadata.len())
             .header(CONTENT_DISPOSITION, file_name)
             .body(boxed_body)
             .map_err(|_| Self::response_error())
@@ -152,7 +136,7 @@ impl Results {
         Self::status(
             StatusCode::OK,
             TEXT_PLAIN.as_ref(),
-            Bytes::new())
+            HttpBody::empty())
     }
 
     /// Produces an `NOT FOUND 400` response.
@@ -161,7 +145,7 @@ impl Results {
         Self::status(
             StatusCode::NOT_FOUND,
             TEXT_PLAIN.as_ref(),
-            Bytes::new())
+            HttpBody::empty())
     }
 
     /// Produces an `INTERNAL SERVER ERROR 500` response.
@@ -171,17 +155,17 @@ impl Results {
         Self::status(
             StatusCode::INTERNAL_SERVER_ERROR,
             TEXT_PLAIN.as_ref(),
-            body)
+            HttpBody::full(body))
     }
 
     /// Produces an `BAD REQUEST 400` response.
     #[inline]
     pub fn bad_request(error: Option<String>) -> HttpResult {
-        let body = Self::get_error_bytes(error);
+        let content = Self::get_error_bytes(error);
         Self::status(
             StatusCode::BAD_REQUEST,
             TEXT_PLAIN.as_ref(),
-            body)
+            HttpBody::full(content))
     }
 
     /// Produces an `CLIENT CLOSED REQUEST 499` response.
@@ -190,24 +174,21 @@ impl Results {
         Self::status(
             StatusCode::from_u16(499).unwrap(),
             TEXT_PLAIN.as_ref(),
-            Bytes::new())
+            HttpBody::empty())
     }
 
     #[inline]
-    pub fn status(status: StatusCode, content_type: &str, content: Bytes) -> HttpResult {
+    pub fn status(status: StatusCode, content_type: &str, body: BoxBody) -> HttpResult {
         Self::create_default_builder()
             .status(status)
-            .header(CONTENT_LENGTH, content.len())
             .header(CONTENT_TYPE, content_type)
-            .body(HttpBody::create(content))
+            .body(body)
             .map_err(|_| Self::response_error())
     }
 
     #[inline]
     fn create_default_builder() -> Builder {
-        Response::builder()
-            .header(DATE, Utc::now().to_rfc2822())
-            .header(SERVER, "Volga")
+        Response::builder().header(SERVER, "Volga")
     }
 
     #[inline]
@@ -254,12 +235,12 @@ impl Results {
 mod tests {
     use std::collections::HashMap;
     use std::path::Path;
-    use bytes::Bytes;
-    use http::StatusCode;
+    use hyper::StatusCode;
     use http_body_util::BodyExt;
     use serde::Serialize;
     use tokio::fs::File;
     use crate::{headers, ResponseContext, Results};
+    use crate::app::body::HttpBody;
     use crate::test_utils::read_file_bytes;
 
     #[derive(Serialize)]
@@ -375,7 +356,6 @@ mod tests {
         
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/octet-stream");
     }
 
     #[tokio::test]
@@ -384,7 +364,8 @@ mod tests {
         let file_name = path.file_name().and_then(|name| name.to_str()).unwrap();
 
         let headers = headers![
-            ("x-api-key", "some api key")
+            ("x-api-key", "some api key"),
+            ("Content-Type", "application/octet-stream")
         ];
         
         let file = File::open(path).await.unwrap();
@@ -477,7 +458,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_empty_custom_response() {
-        let mut response = Results::status(StatusCode::UNAUTHORIZED, mime::APPLICATION_PDF.as_ref(), Bytes::new()).unwrap();
+        let mut response = Results::status(StatusCode::UNAUTHORIZED, mime::APPLICATION_PDF.as_ref(), HttpBody::empty()).unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
         
@@ -491,7 +472,7 @@ mod tests {
         let mut response = Results::status(
             StatusCode::FORBIDDEN,
             mime::TEXT_PLAIN.as_ref(), 
-            Bytes::from(String::from("Hello World!"))).unwrap();
+            HttpBody::full("Hello World!")).unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
         

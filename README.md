@@ -1,5 +1,5 @@
 # Volga
-Fast & Easy Web Framework for Rust based on [Tokio](https://tokio.rs/) runtime for fun and painless microservices crafting.
+Fast, Easy, and very flexible Web Framework for Rust based on [Tokio](https://tokio.rs/) runtime and [hyper](https://hyper.rs/) for fun and painless microservices crafting.
 
 [![latest](https://img.shields.io/badge/latest-0.2.4-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.80+-964B00)](https://crates.io/crates/volga)
@@ -19,8 +19,8 @@ Fast & Easy Web Framework for Rust based on [Tokio](https://tokio.rs/) runtime f
 ### Dependencies
 ```toml
 [dependencies]
-volga = "0.2.4"
-tokio = "1.41.0"
+volga = "0.3.0"
+tokio = "1.41.1"
 ```
 ### Asynchronous handler (Recommended):
 ```rust
@@ -154,7 +154,7 @@ async fn main() -> std::io::Result<()> {
     // POST /hello
     // { name: "John", age: 35 }
     app.map_post("/hello", |req| async move {
-        let params: User = req.payload()?;
+        let params: User = req.payload().await?;
 
         ok!("Hello World!")
     });

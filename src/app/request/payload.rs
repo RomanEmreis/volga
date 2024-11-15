@@ -32,7 +32,5 @@ pub trait Payload {
     ///    app.run().await
     ///}
     /// ```
-    fn payload<T>(self) -> impl Future<Output = Result<T, std::io::Error>>
-    where
-        T: DeserializeOwned;
+    fn payload<T: DeserializeOwned>(self) -> impl Future<Output = Result<T, std::io::Error>>;
 }
