@@ -1,4 +1,6 @@
-﻿use std::{
+﻿use tokio::io;
+use tokio_util::sync::CancellationToken;
+use std::{
     io::{Error, ErrorKind::InvalidInput},
     future::Future,
     pin::Pin,
@@ -9,8 +11,6 @@ use hyper::{
     body::Incoming,
     service::Service
 };
-use tokio::io;
-use tokio_util::sync::CancellationToken;
 use crate::{
     app::Pipeline, 
     HttpContext, 
@@ -21,7 +21,7 @@ use crate::{
 #[derive(Clone)]
 pub(crate) struct Scope {
     pub(crate) pipeline: Arc<Pipeline>,
-    cancellation_token: CancellationToken
+    pub(crate) cancellation_token: CancellationToken
 }
 
 impl Service<Request<Incoming>> for Scope {
@@ -35,21 +35,15 @@ impl Service<Request<Incoming>> for Scope {
 }
 
 impl Scope {
-    #[inline]
     pub(crate) fn new(pipeline: Arc<Pipeline>) -> Self {
         Self { 
             cancellation_token: CancellationToken::new(),
             pipeline
         }
     }
-
-    #[inline]
-    pub(crate) fn cancellation_token(&self) -> CancellationToken {
-        self.cancellation_token.clone()
-    }
     
     pub(crate) async fn handle_request(mut request: Request<Incoming>, pipeline: Arc<Pipeline>, cancellation_token: CancellationToken) -> io::Result<HttpResponse> {
-        if let Some(endpoint_context) = pipeline.endpoints.get_endpoint(&request).await {
+        if let Some(endpoint_context) = pipeline.endpoints().get_endpoint(&request).await {
             let extensions = request.extensions_mut();
             extensions.insert(cancellation_token);
 
@@ -57,9 +51,8 @@ impl Scope {
                 extensions.insert(endpoint_context.params.clone());
             }
             
-            let context = HttpContext::new(request, endpoint_context);
-            let response = pipeline.middlewares.execute(Arc::new(context)).await;
-            match response {
+            let ctx = HttpContext::new(request, endpoint_context.handler);
+            match pipeline.execute(ctx).await {
                 Ok(response) => Ok(response),
                 Err(error) if error.kind() == InvalidInput => Results::bad_request(Some(error.to_string())),
                 Err(error) => Results::internal_server_error(Some(error.to_string()))

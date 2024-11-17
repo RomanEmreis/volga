@@ -1,4 +1,4 @@
-﻿use std::{sync::Arc, future::Future};
+﻿use std::future::Future;
 use hyper::Method;
 use crate::{
     App, 
@@ -70,8 +70,8 @@ impl AsyncEndpointsMapping for App {
 impl AsyncMiddlewareMapping for App {
     fn use_middleware<F, Fut>(&mut self, handler: F)
     where
-        F: 'static + Send + Sync + Fn(Arc<HttpContext>, Next) -> Fut,
-        Fut: Future<Output = HttpResult> + Send + 'static,
+        F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = HttpResult> + Send,
     {
         use crate::app::middlewares::mapping::asynchronous::AsyncMapping;
 

@@ -12,10 +12,11 @@ use tokio::io::ErrorKind::{
     InvalidData
 };
 use crate::app::{
-    scope::Scope,
-    endpoints::Endpoints,
     middlewares::{Middlewares, mapping::asynchronous::AsyncMiddlewareMapping},
-    results::HttpResult
+    pipeline::{Pipeline, PipelineBuilder},
+    endpoints::Endpoints,
+    results::HttpResult,
+    scope::Scope,
 };
 
 pub mod middlewares;
@@ -26,6 +27,7 @@ pub mod results;
 pub mod mapping;
 pub(crate) mod scope;
 pub(crate) mod http_context;
+pub(crate) mod pipeline;
 
 /// The web application used to configure the HTTP pipeline, and routes.
 ///
@@ -41,13 +43,8 @@ pub(crate) mod http_context;
 ///}
 /// ```
 pub struct App {
-    pipeline: Pipeline,
+    pipeline: PipelineBuilder,
     connection: Connection
-}
-
-pub(crate) struct Pipeline {
-    middlewares: Middlewares,
-    endpoints: Endpoints
 }
 
 struct Connection {
@@ -88,14 +85,9 @@ impl App {
             shutdown_signal: shutdown_receiver
         };
         
-        let pipeline = Pipeline { 
-            middlewares: Middlewares::new(),
-            endpoints: Endpoints::new()
-        }; 
-        
         let server = Self {
             connection,
-            pipeline
+            pipeline:PipelineBuilder::new()
         };
 
         println!("Start listening: {socket}");
@@ -109,7 +101,7 @@ impl App {
         self.use_endpoints();
 
         let connection = &mut self.connection;
-        let pipeline = Arc::new(self.pipeline);
+        let pipeline = Arc::new(self.pipeline.build());
         
         loop {
             tokio::select! {
@@ -141,14 +133,12 @@ impl App {
         };
     }
 
-    #[inline]
     pub(crate) fn middlewares_mut(&mut self) -> &mut Middlewares {
-        &mut self.pipeline.middlewares
+        self.pipeline.middlewares_mut()
     }
 
-    #[inline]
     pub(crate) fn endpoints_mut(&mut self) -> &mut Endpoints {
-        &mut self.pipeline.endpoints
+        self.pipeline.endpoints_mut()
     }
 
     #[inline]
@@ -167,7 +157,6 @@ impl App {
         });
     }
     
-    #[inline]
     fn use_endpoints(&mut self) {
         self.use_middleware(|ctx, _| async move {
             ctx.execute().await
@@ -177,7 +166,7 @@ impl App {
     #[inline]
     async fn handle_connection(io: TokioIo<TcpStream>, pipeline: Arc<Pipeline>) {
         let scope = Scope::new(pipeline);
-        let scoped_cancellation_token = scope.cancellation_token();
+        let scoped_cancellation_token = scope.cancellation_token.clone();
         
         let connection_builder = http1::Builder::new();
         let connection = connection_builder.serve_connection(io, scope);
