@@ -9,10 +9,12 @@ use hyper::http::response::Builder;
 use crate::app::body::{BoxBody, HttpBody};
 use hyper::header::{ 
     CONTENT_DISPOSITION,
+    TRANSFER_ENCODING,
     CONTENT_TYPE,
     SERVER
 };
 use mime::{
+    APPLICATION_OCTET_STREAM,
     APPLICATION_JSON,
     TEXT_PLAIN
 };
@@ -112,20 +114,26 @@ impl Results {
         
         Self::create_default_builder()
             .status(StatusCode::OK)
-            .header(CONTENT_DISPOSITION, file_name)
+            .header(CONTENT_TYPE, file_name)
+            .header(TRANSFER_ENCODING, "chunked")
+            .header(CONTENT_DISPOSITION, APPLICATION_OCTET_STREAM.as_ref())
             .body(boxed_body)
             .map_err(|_| Self::response_error())
     }
 
     /// Produces an `OK 200` response with the file body and custom headers.
     #[inline]
-    pub async fn file_with_custom_headers(file_name: &str, content: File, headers: HttpHeaders) -> HttpResult {
+    pub async fn file_with_custom_headers(file_name: &str, content: File, mut headers: HttpHeaders) -> HttpResult {
+        headers.entry(CONTENT_TYPE.as_str().into())
+            .or_insert_with(|| APPLICATION_OCTET_STREAM.as_ref().into());
+        
         let boxed_body = HttpBody::wrap_stream(content);
         let file_name = format!("attachment; filename=\"{}\"", file_name);
         
         Self::create_custom_builder(headers)
             .status(StatusCode::OK)
             .header(CONTENT_DISPOSITION, file_name)
+            .header(TRANSFER_ENCODING, "chunked")
             .body(boxed_body)
             .map_err(|_| Self::response_error())
     }
