@@ -16,8 +16,8 @@ keywords = ["volga", "server", "http", "web", "framework"]
 bytes = "1.8.0"
 futures-util = "0.3.31"
 http-body-util = "0.1.2"
-hyper = { version = "1.5.0", features = ["full"] }
-hyper-util = { version = "0.1.10", features = ["full"] }
+hyper = { version = "1.5.0", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-graceful", "http1", "http2", "service", "tokio"] }
 mime = "0.3.17"
 tokio = { version = "1.41.1", features = ["full"] }
 tokio-util = "0.7.12"
@@ -27,3 +27,43 @@ serde = { version = "1.0.214", features = ["derive"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12.9", features = ["blocking", "json"] }
+
+[[example]]
+name = "hello_world"
+path = "examples/hello_world.rs"
+
+[[example]]
+name = "sync_api"
+path = "examples/sync_api.rs"
+
+[[example]]
+name = "middleware"
+path = "examples/middleware.rs"
+
+[[example]]
+name = "query_params"
+path = "examples/query_params.rs"
+
+[[example]]
+name = "route_params"
+path = "examples/route_params.rs"
+
+[[example]]
+name = "json"
+path = "examples/json.rs"
+
+[[example]]
+name = "headers"
+path = "examples/headers.rs"
+
+[[example]]
+name = "file_download"
+path = "examples/file_download.rs"
+
+[[example]]
+name = "file_upload"
+path = "examples/file_upload.rs"
+
+[[example]]
+name = "long_running_task"
+path = "examples/long_running_task.rs"
