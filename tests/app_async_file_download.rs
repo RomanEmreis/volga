@@ -18,9 +18,7 @@ async fn it_writes_file_response() {
 
     let response = tokio::spawn(async {
         let client = reqwest::Client::new();
-        let response = client.get("http://127.0.0.1:7897/test").send().await.unwrap().bytes().await.unwrap();
-        
-        response
+        client.get("http://127.0.0.1:7897/test").send().await.unwrap().bytes().await.unwrap()
     }).await.unwrap();
 
     let mut bytes = response.to_vec();
