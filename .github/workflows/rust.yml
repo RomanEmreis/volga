@@ -36,3 +36,7 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+    - name: Run tests
+      run: cargo test --features http1 --verbose
+    - name: Run tests
+      run: cargo test --features http2 --verbose
