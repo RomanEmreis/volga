@@ -83,7 +83,7 @@ async fn it_writes_json_using_macro_response() {
         } else {
             reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
         };
-        client.get("http://127.0.0.1:7886/test").send().await.unwrap().json::<User>().await
+        client.get("http://127.0.0.1:7893/test").send().await.unwrap().json::<User>().await
     }).await.unwrap().unwrap();
 
     assert_eq!(response.name, "John");
@@ -108,7 +108,7 @@ async fn it_writes_untyped_json_response() {
         } else {
             reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
         };
-        client.get("http://127.0.0.1:7886/test").send().await.unwrap().json::<User>().await
+        client.get("http://127.0.0.1:7894/test").send().await.unwrap().json::<User>().await
     }).await.unwrap().unwrap();
 
     assert_eq!(response.name, "John");
