@@ -18,8 +18,10 @@ async fn it_writes_file_response() {
 
     let response = tokio::spawn(async {
         let client = reqwest::Client::new();
-        client.get("http://127.0.0.1:7897/test").send().await.unwrap().bytes().await
-    }).await.unwrap().unwrap();
+        let response = client.get("http://127.0.0.1:7897/test").send().await.unwrap().bytes().await.unwrap();
+        
+        response
+    }).await.unwrap();
 
     let mut bytes = response.to_vec();
     // If the file starts with a UTF-8 BOM (EF BB BF), remove it
