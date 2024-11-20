@@ -32,7 +32,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::build("127.0.0.1:7878").await?;
 
     // Example of asynchronous request handler
-    app.map_get("/hello/{name}", |req| async {
+    app.map_get("/hello/{name}", |req| async move {
         let name = req.param("name")?;
         ok!("Hello {}!", name)
     });
