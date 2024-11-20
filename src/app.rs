@@ -57,7 +57,6 @@ struct Connection {
 
 pub(crate) type BoxedHttpResultFuture = Box<dyn Future<Output = HttpResult> + Send>;
 
-#[cfg(any(feature = "http1", feature = "http2"))]
 impl App {
     /// Initializes a new instance of the `App` on specified `socket`.
     /// 

@@ -1,5 +1,6 @@
 ﻿use serde::{Deserialize, Serialize};
-use volga::{App, Results, SyncEndpointsMapping, ok};
+use volga::{App, Results, ok};
+use volga::SyncEndpointsMapping;
 
 #[derive(Deserialize, Serialize)]
 struct User {
