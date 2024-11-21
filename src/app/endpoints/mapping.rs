@@ -11,7 +11,6 @@ pub mod synchronous;
 
 #[cfg(feature = "async")]
 impl asynchronous::AsyncMapping for Endpoints  {
-    #[inline]
     fn map<F, Fut>(&mut self, method: Method, pattern: &str, handler: F)
     where
         F: Fn(HttpRequest) -> Fut + Send + Sync + 'static,
@@ -24,7 +23,6 @@ impl asynchronous::AsyncMapping for Endpoints  {
 
 #[cfg(feature = "sync")]
 impl synchronous::SyncMapping for Endpoints {
-    #[inline]
     fn map<F>(&mut self, method: Method, pattern: &str, handler: F)
     where
         F: Fn(HttpRequest) -> HttpResult + Send + Sync + 'static,

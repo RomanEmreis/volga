@@ -178,10 +178,9 @@ impl App {
         }
     }
     
-    #[inline]
     async fn handle_connection(io: TokioIo<TcpStream>, pipeline: Arc<Pipeline>) {
-        let scope = Scope::new(pipeline);
         let server = Server::new(io);
+        let scope = Scope::new(pipeline);
         
         server.serve(scope).await;
     }
