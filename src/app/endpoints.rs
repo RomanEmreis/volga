@@ -20,11 +20,15 @@ pub(crate) struct EndpointContext {
     pub(crate) params: HashMap<String, String>
 }
 
+impl EndpointContext {
+    pub(crate) fn into_parts(self) -> (RouteHandler, HashMap<String, String>) {
+        (self.handler, self.params)
+    }
+}
+
 impl Endpoints {
     pub(crate) fn new() -> Self {
-        Self {
-            routes: HashMap::new()
-        }
+        Self { routes: HashMap::new() }
     }
 
     #[inline]
