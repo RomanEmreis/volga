@@ -12,7 +12,7 @@
 //! ## Example
 //! ```toml
 //! [dependencies]
-//! volga = "0.3.2"
+//! volga = "0.3.3"
 //! tokio = "1.41.1"
 //! ```
 //! ```no_run
