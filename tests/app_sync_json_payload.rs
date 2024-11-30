@@ -1,5 +1,5 @@
 ﻿use serde::{Deserialize, Serialize};
-use volga::{App, Results, ok, SyncPayload};
+use volga::{App, Results, ok, Json};
 use volga::SyncEndpointsMapping;
 
 #[derive(Deserialize, Serialize)]
@@ -13,8 +13,7 @@ async fn it_reads_json_payload() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7891");
 
-        app.map_post("/test", |req| {
-            let user: User = req.payload()?;
+        app.map_post("/test", |user: Json<User>| {
             let response = format!("My name is: {}, I'm {} years old", user.name, user.age);
 
             Results::text(&response)
@@ -38,7 +37,7 @@ async fn it_writes_json_response() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7897");
 
-        app.map_get("/test", |_req| {
+        app.map_get("/test", || {
             let user = User { name: String::from("John"), age: 35 };
 
             Results::json(&user)
@@ -65,7 +64,7 @@ async fn it_writes_json_using_macro_response() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7895");
 
-        app.map_get("/test", |_req| {
+        app.map_get("/test", || {
             let user = User { name: String::from("John"), age: 35 };
 
             ok!(&user)
@@ -92,7 +91,7 @@ async fn it_writes_untyped_json_response() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7896");
 
-        app.map_get("/test", |_req| {
+        app.map_get("/test", || {
             ok!({ "name": "John", "age": 35 })
         });
 

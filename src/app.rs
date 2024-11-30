@@ -1,23 +1,21 @@
 ﻿use std::net::SocketAddr;
 use std::sync::Arc;
+
 use hyper_util::rt::TokioIo;
 
 use tokio::{
     net::{TcpListener, TcpStream},
-    io::{self, Error},
+    io::self,
     sync::broadcast, 
     signal
 };
-use tokio::io::ErrorKind::{
-    InvalidData
-};
+
 use crate::app::{
     pipeline::{Pipeline, PipelineBuilder},
     endpoints::Endpoints,
     scope::Scope,
     server::Server
 };
-
 #[cfg(feature = "middleware")]
 use crate::app::middlewares::{
     Middlewares, 
@@ -111,33 +109,6 @@ impl App {
     pub fn bind(mut self, socket: &str) -> Self {
         self.connection = Connection::new(socket);
         self
-    }
-    
-    /// Initializes a new instance of the `App` on specified `socket`.
-    /// 
-    ///# Examples
-    /// ```no_run
-    ///use volga::App;
-    ///
-    ///#[tokio::main]
-    ///async fn main() -> std::io::Result<()> {
-    ///    let app = App::build("127.0.0.1:7878").await?;
-    ///    
-    ///    app.run().await
-    ///}
-    /// ```
-    #[deprecated(note = "This method is obsolete, use `App::new()` or `App::new().bind()` instead.")]
-    pub async fn build(socket: &str) -> io::Result<App> {
-        if socket.is_empty() {
-            return Err(Error::new(InvalidData, "An empty socket has been provided."));
-        }
-        
-        let server = Self {
-            connection: Connection::new(socket),
-            pipeline:PipelineBuilder::new()
-        };
-        
-        Ok(server)
     }
 
     /// Runs the `App`

@@ -8,6 +8,8 @@ use crate::app::endpoints::{
 
 pub(crate) mod handlers;
 pub(super) mod route;
+#[cfg(feature = "async")]
+pub mod args;
 
 pub mod mapping;
 
@@ -17,11 +19,11 @@ pub(crate) struct Endpoints {
 
 pub(crate) struct EndpointContext {
     pub(crate) handler: RouteHandler,
-    pub(crate) params: HashMap<String, String>
+    pub(crate) params: Vec<(String, String)>
 }
 
 impl EndpointContext {
-    pub(crate) fn into_parts(self) -> (RouteHandler, HashMap<String, String>) {
+    pub(crate) fn into_parts(self) -> (RouteHandler, Vec<(String, String)>) {
         (self.handler, self.params)
     }
 }
@@ -35,21 +37,11 @@ impl Endpoints {
     pub(crate) async fn get_endpoint(&self, request: &HttpRequest) -> Option<EndpointContext> {
         let uri = request.uri();
 
-        let mut query_map = HashMap::new();
-        if let Some(query_str) = uri.query() {
-            query_map = query_str
-                .split('&')
-                .filter_map(|x| x.split_once('='))
-                .map(|(key, value)| (String::from(key), String::from(value)))
-                .collect();
-        }
-
         let path_segments = Self::split_path(uri.path());
         self.routes
             .get(request.method())
             .and_then(|router| router.find(&path_segments))
-            .and_then(|mut route_params| {
-                route_params.params.extend(query_map);
+            .and_then(|route_params| {
                 match route_params.route {
                     Route::Handler(handler) => Some(EndpointContext { handler: handler.clone(), params: route_params.params }),
                     _ => None
@@ -58,7 +50,7 @@ impl Endpoints {
     }
 
     #[inline]
-    fn map_route(&mut self, method: Method, pattern: &str, handler: RouteHandler) {
+    pub(super) fn map_route(&mut self, method: Method, pattern: &str, handler: RouteHandler) {
         let path_segments = Self::split_path(pattern);
         self.routes.entry(method)
             .or_insert_with(|| Route::Static(HashMap::new()))

@@ -4,7 +4,7 @@
 };
 use futures_util::future::BoxFuture;
 use crate::{
-    app::middlewares::{Middlewares, mapping::asynchronous::AsyncMapping}, 
+    app::middlewares::{Middlewares, mapping::asynchronous::AsyncMiddlewareMapping}, 
     HttpResult, 
     HttpContext, 
     Next
@@ -12,7 +12,7 @@ use crate::{
 
 pub mod asynchronous;
 
-impl AsyncMapping for Middlewares {
+impl AsyncMiddlewareMapping for Middlewares {
     fn use_middleware<F, Fut>(&mut self, middleware: F)
     where
         F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,

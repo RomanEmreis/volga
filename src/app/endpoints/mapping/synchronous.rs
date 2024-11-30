@@ -1,11 +1,4 @@
 ﻿use crate::{HttpResult, HttpRequest};
-use hyper::Method;
-
-pub trait SyncMapping {
-    fn map<F>(&mut self, method: Method, pattern: &str, handler: F)
-    where
-        F: Fn(HttpRequest) -> HttpResult + Send + Sync + 'static;
-}
 
 pub trait SyncEndpointsMapping {
     /// Adds a request handler that matches HTTP GET requests for the specified pattern.
@@ -16,7 +9,7 @@ pub trait SyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_get("/test", |_req| {
     ///        Results::text("Pass!")
@@ -37,7 +30,7 @@ pub trait SyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_post("/test", |_req| {
     ///        Results::text("Pass!")
@@ -58,7 +51,7 @@ pub trait SyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_put("/test", |_req| {
     ///        Results::text("Pass!")
@@ -79,7 +72,7 @@ pub trait SyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_patch("/test", |_req| {
     ///        Results::text("Pass!")
@@ -100,7 +93,7 @@ pub trait SyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_delete("/test", |_req| {
     ///        Results::text("Pass!")

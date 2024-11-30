@@ -1,13 +1,7 @@
-﻿use crate::{HttpResult, HttpRequest};
-use std::future::Future;
-use hyper::Method;
-
-pub trait AsyncMapping {
-    fn map<F, Fut>(&mut self, method: Method, pattern: &str, handler: F)
-    where
-        F: Fn(HttpRequest) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = HttpResult> + Send + 'static;
-}
+﻿use std::future::Future;
+use crate::{HttpResult, HttpRequest};
+use crate::app::endpoints::args::FromRequest;
+use crate::app::endpoints::handlers::GenericHandler;
 
 pub trait AsyncEndpointsMapping {
     /// Adds a request handler that matches HTTP GET requests for the specified pattern.
@@ -18,7 +12,7 @@ pub trait AsyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_get("/test", |_req| async {
     ///        Results::text("Pass!")
@@ -40,7 +34,7 @@ pub trait AsyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_post("/test", |_req| async {
     ///        Results::text("Pass!")
@@ -62,7 +56,7 @@ pub trait AsyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_put("/test", |_req| async {
     ///        Results::text("Pass!")
@@ -84,7 +78,7 @@ pub trait AsyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_delete("/test", |_req| async {
     ///        Results::text("Pass!")
@@ -106,7 +100,7 @@ pub trait AsyncEndpointsMapping {
     ///
     ///#[tokio::main]
     ///async fn main() -> std::io::Result<()> {
-    ///    let mut app = App::build("127.0.0.1:7878").await?;
+    ///    let mut app = App::new();
     ///
     ///    app.map_patch("/test", |_req| async {
     ///        Results::text("Pass!")
@@ -119,4 +113,50 @@ pub trait AsyncEndpointsMapping {
     where
         F: Fn(HttpRequest) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static;
+}
+
+pub trait EndpointsMapping {
+    /// Adds a request handler that matches HTTP GET requests for the specified pattern.
+    /// 
+    /// # Examples
+    /// ```no_run
+    ///use volga::{App, EndpointsMapping, ok};
+    ///
+    ///#[tokio::main]
+    ///async fn main() -> std::io::Result<()> {
+    ///    let mut app = App::new();
+    ///
+    ///    app.map_get("/hello", || async {
+    ///        ok!("Hello World!")
+    ///    });
+    ///
+    ///    app.run().await
+    ///}
+    /// ```
+    fn map_get<F, Args>(&mut self, pattern: &str, handler: F)
+    where
+        F: GenericHandler<Args, Output = HttpResult>,
+        Args: FromRequest + Send + Sync + 'static;
+
+    /// Adds a request handler that matches HTTP POST requests for the specified pattern.
+    /// 
+    /// # Examples
+    /// ```no_run
+    ///use volga::{App, EndpointsMapping, ok};
+    ///
+    ///#[tokio::main]
+    ///async fn main() -> std::io::Result<()> {
+    ///    let mut app = App::new();
+    ///
+    ///    app.map_post("/hello", || async {
+    ///        ok!("Hello World!")
+    ///    });
+    ///
+    ///    app.run().await
+    ///}
+    /// ```
+    fn map_post<F, Args>(&mut self, pattern: &str, handler: F)
+    where
+        F: GenericHandler<Args, Output = HttpResult>,
+        Args: FromRequest + Send + Sync + 'static;
 }
