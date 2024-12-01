@@ -46,7 +46,7 @@ impl<T: Display> Display for Path<T> {
 
 impl<T: DeserializeOwned> Path<T> {
     #[inline]
-    pub(super) fn from_str(route_params: &Vec<(String, String)>) -> Result<Self, Error> {
+    pub(super) fn from_str(route_params: &[(String, String)]) -> Result<Self, Error> {
         let route_str = route_params
             .iter()
             .map(|(key, value)| format!("{}={}", key, value))

@@ -100,7 +100,7 @@ macro_rules! ok {
 /// ```
 /// ## Custom headers
 ///```no_run
-/// use volga::{file, App, AsyncEndpointsMapping};
+/// use volga::{file, App, Router};
 /// use tokio::fs::File;
 ///
 /// # async fn dox() -> std::io::Result<()> {

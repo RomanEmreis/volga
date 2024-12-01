@@ -110,14 +110,15 @@ impl Route {
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
-    use crate::{ok, HttpRequest};
-    use crate::app::endpoints::handlers::AsyncHandler;
+    
+    use crate::ok;
+    use crate::app::endpoints::handlers::Func;
     use crate::app::endpoints::route::Route;
 
     #[test]
     fn it_inserts_and_finds_route() {
-        let handler = |_req: HttpRequest| async { ok!() };
-        let handler = Arc::new(AsyncHandler(handler));
+        let handler = || async { ok!() };
+        let handler = Arc::new(Func::new(handler));
         
         let path = ["test".into()];
         
@@ -131,8 +132,8 @@ mod tests {
 
     #[test]
     fn it_inserts_and_finds_route_with_params() {
-        let handler = |_req: HttpRequest| async { ok!() };
-        let handler = Arc::new(AsyncHandler(handler));
+        let handler = || async { ok!() };
+        let handler = Arc::new(Func::new(handler));
 
         let path = ["test".into(), "{value}".into()];
 

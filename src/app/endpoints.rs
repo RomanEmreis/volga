@@ -1,5 +1,7 @@
 ﻿use std::collections::HashMap;
+
 use hyper::Method;
+
 use crate::HttpRequest;
 use crate::app::endpoints::{
     route::Route,
@@ -8,15 +10,14 @@ use crate::app::endpoints::{
 
 pub(crate) mod handlers;
 pub(super) mod route;
-#[cfg(feature = "async")]
 pub mod args;
 
-pub mod mapping;
-
+/// Describes a mapping between HTTP Verbs, routes and request handlers
 pub(crate) struct Endpoints {
     routes: HashMap<Method, Route>
 }
 
+/// Describes a context of the executing route
 pub(crate) struct EndpointContext {
     pub(crate) handler: RouteHandler,
     pub(crate) params: Vec<(String, String)>
@@ -33,6 +34,7 @@ impl Endpoints {
         Self { routes: HashMap::new() }
     }
 
+    /// Gets a context of the executing route by its `HttpRequest`
     #[inline]
     pub(crate) async fn get_endpoint(&self, request: &HttpRequest) -> Option<EndpointContext> {
         let uri = request.uri();
@@ -49,6 +51,7 @@ impl Endpoints {
             })
     }
 
+    /// Maps the request handler to the current HTTP Verb and route pattern
     #[inline]
     pub(super) fn map_route(&mut self, method: Method, pattern: &str, handler: RouteHandler) {
         let path_segments = Self::split_path(pattern);

@@ -1,8 +1,8 @@
 ﻿use tokio::time::{interval, Duration};
 use volga::{
     App,
+    Router,
     ok,
-    EndpointsMapping,
     CancellationToken
 };
 

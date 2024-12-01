@@ -1,5 +1,5 @@
 ﻿use serde::{Deserialize, Serialize};
-use volga::{App, ok, Results, EndpointsMapping, Json};
+use volga::{App, ok, Results, Router, Json};
 
 #[derive(Deserialize, Serialize)]
 struct User {

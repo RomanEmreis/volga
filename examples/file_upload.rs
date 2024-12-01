@@ -1,7 +1,7 @@
 ﻿use volga::{
     App,
+    Router,
     ok,
-    EndpointsMapping,
     File
 };
 

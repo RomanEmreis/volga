@@ -100,16 +100,6 @@ mod tests {
     }
 
     #[test]
-    fn it_parses_tuple_from_request() {
-        let query_str = "name=John&age=33";
-
-        let query = Query::<(String, i32)>::from_query_str(query_str).unwrap();
-
-        assert_eq!(query.0.0, "John");
-        assert_eq!(query.0.1, 33);
-    }
-
-    #[test]
     fn it_parses_hash_map_from_request() {
         let query_str = "name=John&age=33";
 

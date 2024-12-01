@@ -1,10 +1,10 @@
-﻿use volga::{App, Results, AsyncEndpointsMapping};
+﻿use volga::{App, Results, Router};
 
 #[tokio::test]
 async fn it_maps_to_get_request() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7877");
-        app.map_get("/test", |_req| async {
+        app.map_get("/test", || async {
             Results::text("Pass!")
         });
        app.run().await
@@ -27,7 +27,7 @@ async fn it_maps_to_get_request() {
 async fn it_maps_to_post_request() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7876");
-        app.map_post("/test", |_req| async {
+        app.map_post("/test", || async {
             Results::text("Pass!")
         });
        app.run().await
@@ -50,7 +50,7 @@ async fn it_maps_to_post_request() {
 async fn it_maps_to_put_request() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7875");
-        app.map_put("/test", |_req| async {
+        app.map_put("/test", || async {
             Results::text("Pass!")
         });
        app.run().await
@@ -73,7 +73,7 @@ async fn it_maps_to_put_request() {
 async fn it_maps_to_patch_request() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7874");
-        app.map_patch("/test", |_req| async {
+        app.map_patch("/test", || async {
             Results::text("Pass!")
         });
        app.run().await
@@ -96,7 +96,7 @@ async fn it_maps_to_patch_request() {
 async fn it_maps_to_delete_request() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7873");
-        app.map_delete("/test", |_req| async {
+        app.map_delete("/test", || async {
             Results::text("Pass!")
         });
        app.run().await

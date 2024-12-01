@@ -2,9 +2,9 @@
 use serde::Deserialize;
 use volga::{
     App, 
+    Router,
     ok,
-    Path,
-    EndpointsMapping
+    Path
 };
 
 #[derive(Deserialize)]

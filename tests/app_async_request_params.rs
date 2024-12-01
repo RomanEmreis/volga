@@ -1,6 +1,6 @@
 ﻿use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
-use volga::{App, Results, EndpointsMapping, Query};
+use serde::Deserialize;
+use volga::{App, Results, Router, Query};
 
 #[derive(Deserialize)]
 struct User {

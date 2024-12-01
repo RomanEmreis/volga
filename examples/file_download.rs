@@ -1,8 +1,8 @@
 ﻿use tokio::fs::File;
 use volga::{
     App,
-    file,
-    EndpointsMapping
+    Router,
+    file
 };
 
 #[tokio::main]

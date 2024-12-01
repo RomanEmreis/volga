@@ -16,11 +16,9 @@ use crate::app::{
     scope::Scope,
     server::Server
 };
+
 #[cfg(feature = "middleware")]
-use crate::app::middlewares::{
-    Middlewares, 
-    mapping::asynchronous::AsyncMiddlewareMapping
-};
+use crate::app::middlewares::{Middlewares, Middleware};
 
 #[cfg(feature = "middleware")]
 pub mod middlewares;
@@ -30,7 +28,7 @@ pub mod endpoints;
 pub mod body;
 pub mod request;
 pub mod results;
-pub mod mapping;
+pub mod router;
 pub(crate) mod pipeline;
 mod scope;
 mod server;

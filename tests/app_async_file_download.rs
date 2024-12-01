@@ -1,4 +1,4 @@
-﻿use volga::{App, file, EndpointsMapping};
+﻿use volga::{App, file, Router};
 use tokio::fs::File;
 
 #[tokio::test]
