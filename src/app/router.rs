@@ -120,7 +120,7 @@ pub trait Router {
     /// let mut app = App::new();
     /// 
     /// app.map_delete("/delete/{id}", |id: i32| async move {
-    ///    ok!("Item with ID: {} has been removed!" id)
+    ///    ok!("Item with ID: {} has been removed!", id)
     /// });
     ///# app.run().await
     ///# }

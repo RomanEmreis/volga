@@ -84,7 +84,7 @@ async fn it_reads_query_as_hash_map_params() {
         } else {
             reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
         };
-        client.get("http://127.0.0.1:7888/test?name=John&age=35").send().await
+        client.get("http://127.0.0.1:7898/test?name=John&age=35").send().await
     }).await.unwrap().unwrap();
 
     assert!(response.status().is_success());
