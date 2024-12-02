@@ -268,6 +268,19 @@ mod tests {
         
         assert_eq!(String::from_utf8_lossy(body), "\"This is text: test\"");
     }
+
+    //#[tokio::test]
+    //async fn it_creates_interpolated_text_ok_response() {
+    //    let text = "test";
+    //    let response = ok!("This is text: {text}");
+//
+    //    assert!(response.is_ok());
+//
+    //    let mut response = response.unwrap();
+    //    let body = &response.body_mut().collect().await.unwrap().to_bytes();
+//
+    //    assert_eq!(String::from_utf8_lossy(body), "\"This is text: test\"");
+    //}
     
     #[tokio::test]
     async fn it_creates_empty_ok_response() {

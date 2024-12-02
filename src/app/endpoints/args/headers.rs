@@ -1,7 +1,11 @@
-﻿use std::collections::HashMap;
-use std::io::Error;
+﻿use std::{
+    marker::PhantomData,
+    io::Error,
+    fmt::{Display, Formatter},
+    ops::{Deref, DerefMut}
+};
 
-use futures_util::future::{ready, Ready};
+use futures_util::future::{ok, Ready};
 
 use hyper::{
     http::request::Parts,
@@ -9,24 +13,76 @@ use hyper::{
     HeaderMap
 };
 
-use crate::app::endpoints::args::{FromPayload, Payload, PayloadType};
+use crate::app::endpoints::args::{
+    FromPayload,
+    PayloadType,
+    Payload
+};
 
+pub mod extract;
+
+#[derive(Debug)]
 pub struct Headers {
-    inner: HashMap<String, String>
+    inner: HeaderMap<HeaderValue>
+}
+
+impl Deref for Headers {
+    type Target = HeaderMap<HeaderValue>;
+
+    fn deref(&self) -> &HeaderMap<HeaderValue> {
+        &self.inner
+    }
+}
+
+impl DerefMut for Headers {
+    fn deref_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
+        &mut self.inner
+    }
 }
 
 impl Headers {
-    pub fn into_inner(self) -> HashMap<String, String> {
+    pub fn into_inner(self) -> HeaderMap<HeaderValue> {
         self.inner
     }
-    
-    pub(super) fn from_headers_map(headers: &HeaderMap<HeaderValue>) -> Result<Self, Error> {
-        let headers: HashMap<String, String> = headers
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap().to_string()))
-            .collect();
+}
 
-        Ok(Headers { inner: headers })
+pub trait FromHeaders {
+    fn from_headers(headers: &HeaderMap) -> &HeaderValue;
+}
+
+pub struct Header<T: FromHeaders> {
+    value: HeaderValue,
+    _marker: PhantomData<T>
+}
+
+impl<T: FromHeaders> Header<T> {
+    pub fn new(header_value: &HeaderValue) -> Self {
+        Self { value: header_value.clone(), _marker: PhantomData }
+    }
+    
+    pub fn into_inner(self) -> HeaderValue {
+        self.value
+    }
+}
+
+impl<T: FromHeaders> Deref for Header<T> {
+    type Target = HeaderValue;
+
+    fn deref(&self) -> &HeaderValue {
+        &self.value
+    }
+}
+
+impl<T: FromHeaders> DerefMut for Header<T> {
+    fn deref_mut(&mut self) -> &mut HeaderValue {
+        &mut self.value
+    }
+}
+
+impl<T: FromHeaders> Display for Header<T>  {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let str = self.value.to_str().map_err(|_| std::fmt::Error)?;
+        Display::fmt(str, f)
     }
 }
 
@@ -35,8 +91,8 @@ impl FromPayload for Headers {
 
     #[inline]
     fn from_payload(req: &Parts, _payload: Payload) -> Self::Future {
-        let headers = Self::from_headers_map(&req.headers);
-        ready(headers)
+        let headers = req.headers.clone();
+        ok(Headers { inner: headers })
     }
 
     #[inline]
@@ -45,25 +101,17 @@ impl FromPayload for Headers {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use hyper::Request;
-    use crate::Headers;
+impl<T: FromHeaders + Send> FromPayload for Header<T> {
+    type Future = Ready<Result<Self, Error>>;
 
-    #[test]
-    fn it_parses_headers() {
-        let request = Request::get("http://localhost:8000/test")
-            .header("User-Agent", "Mozilla/5.0")
-            .header("accept-encoding", "gzip")
-            .body(())
-            .unwrap();
-        
-        let headers = Headers::from_headers_map(request.headers())
-            .unwrap()
-            .into_inner();
-        
-        assert_eq!(headers.len(), 2);
-        assert_eq!(headers.get("user-agent").unwrap(), "Mozilla/5.0");
-        assert_eq!(headers.get("accept-encoding").unwrap(), "gzip");
+    #[inline]
+    fn from_payload(req: &Parts, _payload: Payload) -> Self::Future {
+        let header_value = T::from_headers(&req.headers);
+        ok(Header::new(header_value))
+    }
+
+    #[inline]
+    fn payload_type() -> PayloadType {
+        PayloadType::Headers
     }
 }

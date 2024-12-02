@@ -2,7 +2,7 @@
 
 use std::{
     io::{Error, ErrorKind::InvalidInput},
-    fmt::{self, Display, Formatter}, 
+    fmt::{self, Display, Formatter},
     ops::{Deref, DerefMut}
 };
 

@@ -15,9 +15,9 @@ async fn main() -> std::io::Result<()> {
     // Read request headers
     app.map_get("/hi", |headers: Headers|async move { 
         let request_headers = headers.into_inner();
-        let api_key = request_headers.get("x-api-key");
+        let api_key = request_headers.get("x-api-key").unwrap();
         
-        ok!(&api_key)
+        ok!(api_key.to_str().unwrap())
     });
     
     // Respond with headers

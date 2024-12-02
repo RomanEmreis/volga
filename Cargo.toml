@@ -46,7 +46,7 @@ http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2"]
 middleware = []
 
 [[test]]
-name = "app_async_middleware_mapping_tests"
+name = "middleware_mapping_tests"
 required-features = ["middleware"]
 
 [[example]]

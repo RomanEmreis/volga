@@ -40,7 +40,7 @@ pub mod app;
 #[cfg(test)]
 pub mod test_utils;
 
-pub use crate::app::{App, router::Router};
+pub use crate::app::{App, router::Router, body::{BoxBody, HttpBody}};
 pub use crate::app::results::{HttpResponse, HttpResult, HttpHeaders, Results, ResponseContext};
 pub use crate::app::request::HttpRequest;
 
@@ -53,10 +53,8 @@ pub use crate::app::middlewares::{Next, Middleware};
 pub use crate::app::endpoints::args::{
     path::Path,
     query::Query,
-    headers::Headers, 
+    headers::{self, Header, Headers},
     json::Json,
     file::File,
     cancellation_token::CancellationToken,
 };
-
-pub use crate::app::body::BoxBody;
