@@ -218,7 +218,7 @@ mod tests {
         #[cfg(target_os = "windows")]
         assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
+        assert_eq!(connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
     }
 
     #[test]
@@ -235,7 +235,7 @@ mod tests {
         #[cfg(target_os = "windows")]
         assert_eq!(app.connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(app.connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
+        assert_eq!(app.connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
     }
 
     #[test]
