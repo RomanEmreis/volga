@@ -215,6 +215,9 @@ mod tests {
     fn it_creates_connection_with_default_socket() {
         let connection = Connection::default();
 
+        #[cfg(target_os = "windows")]
+        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
+        #[cfg(not(target_os = "windows"))]
         assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
     }
 
@@ -229,6 +232,9 @@ mod tests {
     fn it_creates_app_with_default_socket() {
         let app = App::new();
         
+        #[cfg(target_os = "windows")]
+        assert_eq!(app.connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
+        #[cfg(not(target_os = "windows"))]
         assert_eq!(app.connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
     }
 
