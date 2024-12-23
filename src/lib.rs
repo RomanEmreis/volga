@@ -77,14 +77,4 @@ pub mod di {
 }
 
 // Re-exporting HTTP status codes, Response and some headers from hyper/http
-pub use hyper::{
-    StatusCode, 
-    Response, 
-    header::{    
-        CONTENT_DISPOSITION,
-        TRANSFER_ENCODING,
-        CONTENT_TYPE,
-        CONTENT_LENGTH,
-        SERVER
-    }
-};
+pub use hyper::{StatusCode, Response};
