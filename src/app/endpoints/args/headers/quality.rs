@@ -72,11 +72,17 @@ impl QualityError {
 }
 
 #[cfg(test)]
+#[cfg(any(
+    feature = "brotli",
+    feature = "gzip",
+    feature = "zstd",
+    feature = "compression-full"
+))]
 mod tests {
     use super::Quality;
     use std::str::FromStr;
-    use crate::encoding::Encoding;
     use crate::headers::quality::Ranked;
+    use crate::encoding::Encoding;
 
     #[test]
     fn it_parses_from_str_with_value() {

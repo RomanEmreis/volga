@@ -80,7 +80,12 @@ pub mod di {
     };
 }
 
-#[cfg(any(feature = "brotli", feature = "gzip"))]
+#[cfg(any(
+    feature = "brotli",
+    feature = "gzip",
+    feature = "zstd",
+    feature = "compression-full"
+))]
 pub mod encoding {
     pub use crate::app::encoding::Encoding;
 }
