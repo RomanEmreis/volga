@@ -30,7 +30,14 @@ pub use hyper::{
 
 use crate::HttpRequest;
 
+#[cfg(any(
+    feature = "brotli",
+    feature = "gzip",
+    feature = "zstd",
+    feature = "compression-full"
+))]
 pub use encoding::Encoding;
+
 pub use quality::Quality;
 pub use macros::custom_headers;
 pub use extract::*;
