@@ -1,8 +1,6 @@
 ﻿//! Extractors for typed JSON data
 
-use bytes::Buf;
 use futures_util::ready;
-use hyper::body::Incoming;
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
 
@@ -18,11 +16,14 @@ use std::{
     task::{Context, Poll}
 };
 
-use crate::http::endpoints::args::{
-    FromPayload,
-    Payload, 
-    Source
+use crate::http::{
+    endpoints::args::{
+        FromPayload,
+        Payload,
+        Source
+    }
 };
+use crate::HttpBody;
 
 /// Wraps typed JSON data
 ///
@@ -74,7 +75,7 @@ pin_project! {
     /// A future that collects an incoming body stream into bytes and deserializes it into a JSON object.
     pub struct ExtractJsonPayloadFut<T> {
         #[pin]
-        fut: Collect<Incoming>,
+        fut: Collect<HttpBody>,
         _marker: PhantomData<T>
     }
 }
@@ -87,8 +88,8 @@ impl<T: DeserializeOwned + Send> Future for ExtractJsonPayloadFut<T> {
         let this = self.project();
         let result = ready!(this.fut.poll(cx))
             .map_err(JsonError::collect_error)?;
-        let body = result.aggregate();
-        let json = serde_json::from_reader(body.reader())
+        let body = result.to_bytes();
+        let json = serde_json::from_slice(&body)
             .map(Json::<T>)
             .map_err(JsonError::from_serde_error);
         Poll::Ready(json)
@@ -122,7 +123,7 @@ impl JsonError {
     }
 
     #[inline]
-    fn collect_error(err: hyper::Error) -> Error {
+    fn collect_error(err: Error/*hyper::Error*/) -> Error {
         Error::new(InvalidInput, format!("JSON parsing error: {}", err))
     }
 }

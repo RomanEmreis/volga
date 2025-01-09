@@ -22,15 +22,15 @@ hyper = { version = "1.5.2", features = ["server"], optional = true }
 hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
 itoa = "1.0.14"
 mime = "0.3.17"
-pin-project-lite = "0.2.15"
+pin-project-lite = "0.2.16"
 tokio = { version = "1.42.0", features = ["full"] }
 tokio-util = "0.7.13"
 serde = "1.0.217"
-serde_json = "1.0.134"
+serde_json = "1.0.135"
 serde_urlencoded = "0.7.1"
 
 [dev-dependencies]
-reqwest = { version = "0.12.12", features = ["blocking", "json", "http2"] }
+reqwest = { version = "0.12.12", features = ["blocking", "json", "http2", "brotli", "deflate", "gzip", "zstd"] }
 serde = { version = "1.0.217", features = ["derive"] }
 uuid = { version = "1.11.0", features = ["v4"] }
 
@@ -38,7 +38,14 @@ uuid = { version = "1.11.0", features = ["v4"] }
 # Default HTTP/1 only server
 default = ["http1"]
 # HTTP/1 and HTTP/2 server
-full = ["http1", "http2", "middleware", "di", "compression-full"]
+full = [
+    "http1", 
+    "http2", 
+    "middleware", 
+    "di", 
+    "compression-full", 
+    "decompression-full"
+]
 
 # Mimimal HTTP/1
 mini = ["http1"]
@@ -51,10 +58,15 @@ http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2"]
 middleware = []
 di = []
 
-compression-full = ["brotli", "gzip", "zstd"]
-brotli = ["middleware", "async-compression/brotli"]
-gzip = ["middleware", "async-compression/zlib", "async-compression/gzip"]
-zstd = ["middleware", "async-compression/zstd"]
+compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
+compression-brotli = ["middleware", "async-compression/brotli"]
+compression-gzip = ["middleware", "async-compression/zlib", "async-compression/gzip"]
+compression-zstd = ["middleware", "async-compression/zstd"]
+
+decompression-full = ["decompression-brotli", "decompression-gzip", "decompression-zstd"]
+decompression-brotli = ["middleware", "async-compression/brotli"]
+decompression-gzip = ["middleware", "async-compression/zlib", "async-compression/gzip"]
+decompression-zstd = ["middleware", "async-compression/zstd"]
 
 [package.metadata.docs.rs]
 all-features = true
@@ -62,6 +74,14 @@ all-features = true
 [[test]]
 name = "middleware_mapping_tests"
 required-features = ["middleware"]
+
+[[test]]
+name = "compression"
+required-features = ["compression-full"]
+
+[[test]]
+name = "decompression"
+required-features = ["decompression-full"]
 
 [[example]]
 name = "hello_world"
@@ -134,3 +154,8 @@ path = "examples/route_groups.rs"
 name = "compression"
 path = "examples/compression.rs"
 required-features = ["compression-full"]
+
+[[example]]
+name = "decompression"
+path = "examples/decompression.rs"
+required-features = ["decompression-full"]

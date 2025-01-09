@@ -2,13 +2,12 @@
 
 use std::{future::Future, io::Error};
 use hyper::{
-    body::Incoming,
     http::Extensions,
     HeaderMap,
     Uri,
 };
 
-use crate::HttpRequest;
+use crate::{HttpBody, HttpRequest};
 
 #[cfg(feature = "di")]
 use crate::di::Container;
@@ -25,7 +24,7 @@ pub mod request;
 pub(crate) enum Payload<'a> {
     None,
     Full(HttpRequest),
-    Body(Incoming),
+    Body(HttpBody),
     Query(&'a Uri),
     Headers(&'a HeaderMap),
     Path(&'a (String, String)),

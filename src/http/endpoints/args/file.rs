@@ -3,6 +3,7 @@
 use bytes::Bytes;
 use futures_util::future::{ok, Ready};
 use http_body_util::BodyExt;
+use hyper::body::Body;
 use tokio::io::{AsyncWriteExt, BufWriter};
 
 use std::{
@@ -10,16 +11,17 @@ use std::{
     path::Path
 };
 
-use hyper::body::{Body, Incoming};
-
-use crate::http::endpoints::args::{
-    FromPayload,
-    Payload,
-    Source
+use crate::http::{
+    HttpBody,
+    endpoints::args::{
+        FromPayload,
+        Payload,
+        Source
+    }
 };
 
 /// See [`FileStream<B>`] for more details.
-pub type File = FileStream<Incoming>;
+pub type File = FileStream<HttpBody>;
 
 /// Describes a single file stream
 /// 

@@ -1,5 +1,10 @@
 ﻿//! Extractors for Dependency Injection
 
+use super::{Container, Inject};
+use crate::http::endpoints::args::{FromPayload, Payload, Source};
+use futures_util::{pin_mut, ready};
+use pin_project_lite::pin_project;
+
 use std::{
     ops::{Deref, DerefMut},
     task::{Context, Poll},
@@ -8,12 +13,6 @@ use std::{
     io::Error,
     pin::Pin,
 };
-
-use futures_util::{pin_mut, ready};
-use pin_project_lite::pin_project;
-
-use crate::http::endpoints::args::{FromPayload, Payload, Source};
-use crate::di::{Container, Inject};
 
 /// `Dc` stands for Dependency Container, This struct wraps the injectable type of `T` 
 /// `T` must be registered in Dependency Injection Container
