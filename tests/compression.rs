@@ -148,7 +148,7 @@ async fn it_returns_multiple_default_quality_compressed() {
 #[tokio::test]
 async fn it_returns_multiple_different_quality_compressed() {
     tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7912");
+        let mut app = App::new().bind("127.0.0.1:7913");
         app.use_compression();
         app.map_get("/compressed", || async {
             let values= get_test_data();
@@ -164,7 +164,7 @@ async fn it_returns_multiple_different_quality_compressed() {
             reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
         };
         client
-            .get("http://127.0.0.1:7912/compressed")
+            .get("http://127.0.0.1:7913/compressed")
             .header("accept-encoding", "br;q=0.9, gzip;q=1, zstd;q=0.8")
             .send()
             .await.unwrap()
