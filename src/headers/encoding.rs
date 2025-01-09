@@ -1,4 +1,4 @@
-﻿use crate::headers::{
+﻿use super::{
     quality::Ranked,
     HeaderValue
 };
@@ -13,13 +13,25 @@ use std::{
 pub enum Encoding {
     Any,
     Identity,
-    #[cfg(feature = "brotli")]
+    #[cfg(any(
+        feature = "compression-brotli", 
+        feature = "decompression-brotli"
+    ))]
     Brotli,
-    #[cfg(feature = "gzip")]
+    #[cfg(any(
+        feature = "compression-gzip",
+        feature = "decompression-gzip"
+    ))]
     Gzip,
-    #[cfg(feature = "gzip")]
+    #[cfg(any(
+        feature = "compression-gzip",
+        feature = "decompression-gzip"
+    ))]
     Deflate,
-    #[cfg(feature = "zstd")]
+    #[cfg(any(
+        feature = "compression-zstd",
+        feature = "decompression-zstd"
+    ))]
     Zstd
 }
 
@@ -36,13 +48,25 @@ impl Ranked for Encoding {
     #[inline]
     fn rank(&self) -> u8 {
         match self {
-            #[cfg(feature = "brotli")]
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "decompression-brotli"
+            ))]
             Encoding::Brotli => 5,
-            #[cfg(feature = "zstd")]
+            #[cfg(any(
+                feature = "compression-zstd",
+                feature = "decompression-zstd"
+            ))]
             Encoding::Zstd => 4,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(
+                feature = "compression-gzip",
+                feature = "decompression-gzip"
+            ))]
             Encoding::Gzip => 3,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(
+                feature = "compression-gzip",
+                feature = "decompression-gzip"
+            ))]
             Encoding::Deflate => 2,
             Encoding::Any => 1,
             Encoding::Identity => 0,
@@ -58,13 +82,25 @@ impl FromStr for Encoding {
         match s {
             "*" => Ok(Encoding::Any),
             "identity" => Ok(Encoding::Identity),
-            #[cfg(feature = "brotli")]
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "decompression-brotli"
+            ))]
             "br" => Ok(Encoding::Brotli),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(
+                feature = "compression-gzip",
+                feature = "decompression-gzip"
+            ))]
             "gzip" => Ok(Encoding::Gzip),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(
+                feature = "compression-gzip",
+                feature = "decompression-gzip"
+            ))]
             "deflate" => Ok(Encoding::Deflate),
-            #[cfg(feature = "zstd")]
+            #[cfg(any(
+                feature = "compression-zstd",
+                feature = "decompression-zstd"
+            ))]
             "zstd" => Ok(Encoding::Zstd),
             _ => Err(EncodingError::unknown())
         }
@@ -77,13 +113,25 @@ impl fmt::Display for Encoding {
         f.write_str(match *self { 
             Encoding::Any => "*",
             Encoding::Identity => "identity",
-            #[cfg(feature = "brotli")]
+            #[cfg(any(
+                feature = "compression-brotli",
+                feature = "decompression-brotli"
+            ))]
             Encoding::Brotli => "br",
-            #[cfg(feature = "gzip")]
+            #[cfg(any(
+                feature = "compression-gzip",
+                feature = "decompression-gzip"
+            ))]
             Encoding::Gzip => "gzip",
-            #[cfg(feature = "gzip")]
+            #[cfg(any(
+                feature = "compression-gzip",
+                feature = "decompression-gzip"
+            ))]
             Encoding::Deflate => "deflate",
-            #[cfg(feature = "zstd")]
+            #[cfg(any(
+                feature = "compression-zstd",
+                feature = "decompression-zstd"
+            ))]
             Encoding::Zstd => "zstd"
         })
     }
@@ -94,6 +142,14 @@ impl From<Encoding> for HeaderValue {
     fn from(encoding: Encoding) -> HeaderValue {
         HeaderValue::from_str(&encoding.to_string())
             .unwrap_or(HeaderValue::from_static("identity"))
+    }
+}
+
+impl From<HeaderValue> for Encoding {
+    #[inline]
+    fn from(header_value: HeaderValue) -> Encoding {
+        let val = header_value.to_str().unwrap_or("identity");
+        Encoding::from_str(val).unwrap_or(Encoding::Identity)
     }
 }
 
@@ -116,13 +172,13 @@ mod tests {
         let encodings = [
             ("*", Encoding::Any),
             ("identity", Encoding::Identity),
-            #[cfg(feature = "brotli")]
+            #[cfg(any(feature = "compression-brotli", feature = "decompression-brotli"))]
             ("br", Encoding::Brotli),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             ("gzip", Encoding::Gzip),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             ("deflate", Encoding::Deflate),
-            #[cfg(feature = "zstd")]
+            #[cfg(any(feature = "compression-zstd", feature = "decompression-zstd"))]
             ("zstd", Encoding::Zstd),
         ];
         
@@ -136,13 +192,13 @@ mod tests {
         let encodings = [
             ("*", Encoding::Any),
             ("identity", Encoding::Identity),
-            #[cfg(feature = "brotli")]
+            #[cfg(any(feature = "compression-brotli", feature = "decompression-brotli"))]
             ("br", Encoding::Brotli),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             ("gzip", Encoding::Gzip),
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             ("deflate", Encoding::Deflate),
-            #[cfg(feature = "zstd")]
+            #[cfg(any(feature = "compression-zstd", feature = "decompression-zstd"))]
             ("zstd", Encoding::Zstd),
         ];
 
@@ -169,13 +225,13 @@ mod tests {
     fn it_returns_false_for_other_encodings() {
         let encodings = [
             Encoding::Identity,
-            #[cfg(feature = "brotli")]
+            #[cfg(any(feature = "compression-brotli", feature = "decompression-brotli"))]
             Encoding::Brotli,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             Encoding::Gzip,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             Encoding::Deflate,
-            #[cfg(feature = "zstd")]
+            #[cfg(any(feature = "compression-zstd", feature = "decompression-zstd"))]
             Encoding::Zstd
         ];
 
@@ -189,13 +245,13 @@ mod tests {
         let encodings = [
             Encoding::Any,
             Encoding::Identity,
-            #[cfg(feature = "brotli")]
+            #[cfg(any(feature = "compression-brotli", feature = "decompression-brotli"))]
             Encoding::Brotli,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             Encoding::Gzip,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             Encoding::Deflate,
-            #[cfg(feature = "zstd")]
+            #[cfg(any(feature = "compression-zstd", feature = "decompression-zstd"))]
             Encoding::Zstd
         ];
 
@@ -209,13 +265,13 @@ mod tests {
         let encodings = [
             Encoding::Identity,
             Encoding::Any,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             Encoding::Deflate,
-            #[cfg(feature = "gzip")]
+            #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
             Encoding::Gzip,
-            #[cfg(feature = "zstd")]
+            #[cfg(any(feature = "compression-zstd", feature = "decompression-zstd"))]
             Encoding::Zstd,
-            #[cfg(feature = "brotli")]
+            #[cfg(any(feature = "compression-brotli", feature = "decompression-brotli"))]
             Encoding::Brotli,
         ];
 

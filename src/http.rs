@@ -3,7 +3,7 @@
 // Re-exporting HTTP status codes, Response and some headers from hyper/http
 pub use hyper::{Response, StatusCode};
 
-pub use body::{BoxBody, HttpBody};
+pub use body::{BoxBody, UnsyncBoxBody, HttpBody};
 pub use request::HttpRequest;
 pub use results::{
     HttpHeaders,

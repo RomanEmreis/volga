@@ -29,6 +29,11 @@ impl HttpContext {
         Self { request, handler }
     }
     
+    #[allow(dead_code)]
+    pub(super) fn into_parts(self) -> (HttpRequest, RouteHandler) {
+        (self.request, self.handler)
+    }
+    
     /// Extracts a payload from request parts
     ///
     /// # Example

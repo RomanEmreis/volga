@@ -13,22 +13,25 @@ use std::{
 use std::io::ErrorKind;
 use crate::{
     headers::{FromHeaders, Header},
+    HttpBody,
+    UnsyncBoxBody,
     BoxBody
 };
 
 #[cfg(feature = "di")]
 use crate::di::{Container, Inject};
+use crate::http::body::InnerBody;
 use crate::http::endpoints::args::FromRequestRef;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
-    pub inner: Request<Incoming>,
+    pub inner: Request<HttpBody>,
     #[cfg(feature = "di")]
     pub(crate) container: Container
 }
 
 impl Deref for HttpRequest {
-    type Target = Request<Incoming>;
+    type Target = Request<HttpBody>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -44,59 +47,69 @@ impl DerefMut for HttpRequest {
 impl HttpRequest {
     #[cfg(not(feature = "di"))]
     pub fn new(request: Request<Incoming>) -> Self {
-        Self { inner: request }
+        Self { inner: request.map(HttpBody::incoming) }
     }
 
     #[cfg(feature = "di")]
     pub fn new(request: Request<Incoming>, container: Container) -> Self {
-        Self { inner: request, container }
+        Self { inner: request.map(HttpBody::incoming), container }
     }
     
     /// Unwraps the inner request
     #[inline]
-    pub fn into_inner(self) -> Request<Incoming> {
+    pub fn into_inner(self) -> Request<HttpBody> {
         self.inner
     }
 
     /// Consumes the request and returns just the body
     #[inline]
-    pub fn into_body(self) -> Incoming {
+    pub fn into_body(self) -> HttpBody {
         self.inner.into_body()
     }
 
-    /// Consumes the request and returns the body as boxed trait object
+    /// Consumes the request and returns the body as boxed trait object that
     #[inline]
     pub fn into_boxed_body(self) -> BoxBody {
+        match self.inner.into_body().into_inner() {
+            InnerBody::Boxed { inner } => inner,
+            InnerBody::Incoming { inner } => inner
+                .map_err(|e| Error::new(ErrorKind::InvalidInput, e))
+                .boxed(),
+        }
+    }
+
+    /// Consumes the request and returns the body as boxed trait object that is !Sync
+    #[inline]
+    pub fn into_boxed_unsync_body(self) -> UnsyncBoxBody {
         self.inner.into_body()
-            .map_err(|e| Error::new(ErrorKind::InvalidInput, e))
-            .boxed()
+            .boxed_unsync()
     }
 
     /// Consumes the request and returns request head and body
     #[cfg(not(feature = "di"))]
-    pub fn into_parts(self) -> (Parts, Incoming) {
+    pub fn into_parts(self) -> (Parts, HttpBody) {
         self.inner.into_parts()
     }
 
     /// Creates a new `HttpRequest` with the given head and body
     #[cfg(not(feature = "di"))]
-    pub fn from_parts(parts: Parts, body: Incoming) -> Self {
+    pub fn from_parts(parts: Parts, body: HttpBody) -> Self {
         let request = Request::from_parts(parts, body);
-        Self::new(request)
+        Self { inner: request }
     }
 
     /// Consumes the request and returns request head, body and scoped DI container
     #[cfg(feature = "di")]
-    pub fn into_parts(self) -> (Parts, Incoming, Container) {
+    pub fn into_parts(self) -> (Parts, HttpBody, Container) {
         let (parts, body) = self.inner.into_parts();
         (parts, body, self.container)
     }
     
     /// Creates a new `HttpRequest` with the given head, body and scoped DI container
     #[cfg(feature = "di")]
-    pub fn from_parts(parts: Parts, body: Incoming, container: Container) -> Self {
+    pub fn from_parts(parts: Parts, body: HttpBody, container: Container) -> Self {
         let request = Request::from_parts(parts, body);
-        Self::new(request, container)
+        Self { inner: request, container }
     }
 
     /// Resolves a service from Dependency Container

@@ -12,12 +12,19 @@ use crate::{
 };
 
 #[cfg(any(
-    feature = "brotli",
-    feature = "gzip",
-    feature = "zstd",
+    feature = "compression-brotli",
+    feature = "compression-gzip",
+    feature = "compression-zstd",
     feature = "compression-full"
 ))]
 pub mod compress;
+#[cfg(any(
+    feature = "decompression-brotli",
+    feature = "decompression-gzip",
+    feature = "decompression-zstd",
+    feature = "decompression-full"
+))]
+pub mod decompress;
 pub mod http_context;
 
 /// Points to the next middleware or request handler

@@ -1,6 +1,6 @@
 ﻿use super::Container;
-use std::{io::Error, future::Future};
 use futures_util::future::ok;
+use std::{io::Error, future::Future};
 
 /// A trait that adds the ability to inject dependencies when resolving a type from the DI container
 ///
