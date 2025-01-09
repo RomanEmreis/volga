@@ -61,7 +61,7 @@ pub struct ResponseContext<T: Serialize> {
     pub headers: HttpHeaders
 }
 
-pub type HttpResponse = Response<BoxBody>;
+pub type HttpResponse = Response<HttpBody>;
 pub type HttpResult = io::Result<HttpResponse>;
 pub type HttpHeaders = HashMap<String, String>;
 
@@ -113,7 +113,7 @@ impl Results {
     /// Produces an `OK 200` response with the stream body.
     #[inline]
     pub fn stream(content: BoxBody) -> HttpResult {
-        response!(StatusCode::OK, content)
+        response!(StatusCode::OK, HttpBody::new(content))
     }
 
     /// Produces an `OK 200` response with the file body.
@@ -311,7 +311,7 @@ mod tests {
         let file = File::open(path).await.unwrap();
         let body = HttpBody::wrap_stream(file);
         
-        let mut response = Results::stream(body).unwrap();
+        let mut response = Results::stream(body.into_boxed()).unwrap();
 
         let body = read_file_bytes(&mut response).await;
 

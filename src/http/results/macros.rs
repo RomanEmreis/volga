@@ -229,12 +229,15 @@ macro_rules! file {
 #[macro_export]
 macro_rules! stream {
     ($body:expr) => {
-        $crate::response!($crate::http::StatusCode::OK, $body)
+        $crate::response!(
+            $crate::http::StatusCode::OK,
+            $crate::HttpBody::new($body)
+        )
     };
     ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $body,
+            $crate::HttpBody::new($body),
             [ $( ($key, $value) ),* ]
         )
     };
@@ -658,9 +661,9 @@ mod tests {
     async fn it_creates_stream_response() {
         let path = Path::new("tests/resources/test_file.txt");
         let file = File::open(path).await.unwrap();
-        let box_body = HttpBody::wrap_stream(file);
+        let body = HttpBody::wrap_stream(file);
 
-        let response = stream!(box_body);
+        let response = stream!(body.into_boxed());
 
         assert!(response.is_ok());
 
@@ -675,9 +678,9 @@ mod tests {
     async fn it_creates_stream_response_with_custom_headers() {
         let path = Path::new("tests/resources/test_file.txt");
         let file = File::open(path).await.unwrap();
-        let box_body = HttpBody::wrap_stream(file);
+        let body = HttpBody::wrap_stream(file);
 
-        let response = stream!(box_body, [
+        let response = stream!(body.into_boxed(), [
             ("x-api-key", "some api key")
         ]);
 

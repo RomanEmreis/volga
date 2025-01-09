@@ -141,7 +141,7 @@ mod tests {
         encoder.shutdown().await.unwrap();
         let compressed = encoder.into_inner();
         
-        let body = HttpBody::boxed(HttpBody::full(compressed));
+        let body = HttpBody::full(compressed);
         let body = brotli(body);
         
         assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));
@@ -158,7 +158,7 @@ mod tests {
         encoder.shutdown().await.unwrap();
         let compressed = encoder.into_inner();
             
-        let body = HttpBody::boxed(HttpBody::full(compressed));
+        let body = HttpBody::full(compressed);
         let body = gzip(body);
 
         assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));
@@ -175,7 +175,7 @@ mod tests {
         encoder.shutdown().await.unwrap();
         let compressed = encoder.into_inner();
 
-        let body = HttpBody::boxed(HttpBody::full(compressed));
+        let body = HttpBody::full(compressed);
         let body = deflate(body);
 
         assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));
@@ -192,7 +192,7 @@ mod tests {
         encoder.shutdown().await.unwrap();
         let compressed = encoder.into_inner();
 
-        let body = HttpBody::boxed(HttpBody::full(compressed));
+        let body = HttpBody::full(compressed);
         let body = zstd(body);
 
         assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));

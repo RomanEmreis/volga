@@ -1,6 +1,4 @@
-﻿use http_body_util::BodyExt;
-
-use hyper::{
+﻿use hyper::{
     body::Incoming,
     http::request::Parts,
     Request
@@ -10,7 +8,7 @@ use std::{
     io::Error,
     ops::{Deref, DerefMut}
 };
-use std::io::ErrorKind;
+
 use crate::{
     headers::{FromHeaders, Header},
     HttpBody,
@@ -20,7 +18,6 @@ use crate::{
 
 #[cfg(feature = "di")]
 use crate::di::{Container, Inject};
-use crate::http::body::InnerBody;
 use crate::http::endpoints::args::FromRequestRef;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
@@ -67,22 +64,20 @@ impl HttpRequest {
         self.inner.into_body()
     }
 
-    /// Consumes the request and returns the body as boxed trait object that
+    /// Consumes the request and returns the body as boxed trait object
     #[inline]
     pub fn into_boxed_body(self) -> BoxBody {
-        match self.inner.into_body().into_inner() {
-            InnerBody::Boxed { inner } => inner,
-            InnerBody::Incoming { inner } => inner
-                .map_err(|e| Error::new(ErrorKind::InvalidInput, e))
-                .boxed(),
-        }
+        self.inner
+            .into_body()
+            .into_boxed()
     }
 
     /// Consumes the request and returns the body as boxed trait object that is !Sync
     #[inline]
     pub fn into_boxed_unsync_body(self) -> UnsyncBoxBody {
-        self.inner.into_body()
-            .boxed_unsync()
+        self.inner
+            .into_body()
+            .into_boxed_unsync()
     }
 
     /// Consumes the request and returns request head and body

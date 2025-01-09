@@ -123,7 +123,32 @@ impl JsonError {
     }
 
     #[inline]
-    fn collect_error(err: Error/*hyper::Error*/) -> Error {
+    fn collect_error(err: Error) -> Error {
         Error::new(InvalidInput, format!("JSON parsing error: {}", err))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::{Deserialize, Serialize};
+    use crate::HttpBody;
+    use crate::http::endpoints::args::{FromPayload, Payload};
+    use super::Json;
+    
+    #[derive(Serialize, Deserialize)]
+    struct User {
+        age: i32,
+        name: String,
+    }
+    
+    #[tokio::test]
+    async fn it_reads_from_payload() {
+        let user = User { age: 33, name: "John".into() };
+        let body = HttpBody::boxed(HttpBody::json(user));
+        
+        let user = Json::<User>::from_payload(Payload::Body(body)).await.unwrap();
+        
+        assert_eq!(user.age, 33);
+        assert_eq!(user.name, "John");
     }
 }
