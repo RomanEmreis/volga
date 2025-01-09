@@ -40,7 +40,7 @@ use crate::{
     },
     HttpResponse,
     HttpResult,
-    BoxBody,
+    HttpBody,
     status
 };
 
@@ -58,11 +58,11 @@ static SUPPORTED_ENCODINGS: &[Encoding] = &[
 
 macro_rules! impl_compressor {
     ($algo:ident, $encoder:ident, $level:expr) => {
-        fn $algo(body: BoxBody) -> BoxBody {
+        fn $algo(body: HttpBody) -> HttpBody {
             let stream_reader = StreamReader::new(body.into_data_stream());
             let encoder = $encoder::with_quality(stream_reader, $level);
             let compressed_body = ReaderStream::new(encoder);
-            StreamBody::new(compressed_body.map_ok(Frame::data)).boxed()
+            HttpBody::boxed(StreamBody::new(compressed_body.map_ok(Frame::data)))
         }
     };
 }
@@ -178,7 +178,7 @@ impl App {
         }
     }
 
-    fn compress_body(parts: &mut Parts, encoding: Encoding, body: BoxBody) -> BoxBody {
+    fn compress_body(parts: &mut Parts, encoding: Encoding, body: HttpBody) -> HttpBody {
         match encoding {
             #[cfg(feature = "compression-brotli")]
             Encoding::Brotli => {

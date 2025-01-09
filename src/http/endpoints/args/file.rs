@@ -110,8 +110,28 @@ mod tests {
     use std::path::Path;
     use crate::http::body::HttpBody;
     use crate::http::endpoints::args::file::FileStream;
+    use crate::http::endpoints::args::{FromPayload, Payload};
     use crate::test_utils::read_file;
 
+    #[tokio::test]
+    async fn it_reads_from_payload() {
+        let path = Path::new("tests/resources/test_file.txt");
+
+        let file = tokio::fs::File::open(path).await.unwrap();
+        let body = HttpBody::boxed(HttpBody::wrap_stream(file));
+        
+        let file_stream = FileStream::from_payload(Payload::Body(body)).await.unwrap();
+
+        let path = Path::new("tests/resources/test_file_saved.txt");
+        file_stream.save(path).await.unwrap();
+
+        let saved_bytes = read_file(path).await;
+        let content = String::from_utf8_lossy(&saved_bytes);
+
+        assert_eq!(content, "Hello, this is some file content!");
+        assert_eq!(content.len(), 33);
+    }
+    
     #[tokio::test]
     async fn it_saves_request_body_to_file() {
         let path = Path::new("tests/resources/test_file.txt");
