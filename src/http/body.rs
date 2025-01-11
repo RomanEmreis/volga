@@ -125,6 +125,23 @@ impl HttpBody {
         Self { inner: InnerBody::Boxed { inner } }
     }
 
+    /// Creates a new [`HttpBody`] from Form Data object
+    #[inline]
+    pub fn form<T: Serialize>(content: T) -> HttpBody {
+        let inner = match serde_urlencoded::to_string(&content) {
+            Ok(content) => Full::from(content)
+                .map_err(|never| match never {})
+                .boxed(),
+            Err(e) => {
+                let error_message = format!("Form Data serialization error: {}", e);
+                Full::from(error_message)
+                    .map_err(|never| match never {})
+                    .boxed()
+            }
+        };
+        Self { inner: InnerBody::Boxed { inner } }
+    }
+
     /// Creates a new [`HttpBody`] from object that is convertable to byte array
     #[inline]
     pub fn full<T: Into<Bytes>>(chunk: T) -> HttpBody {

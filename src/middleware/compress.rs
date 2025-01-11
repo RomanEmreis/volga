@@ -97,11 +97,16 @@ impl App {
     
     fn negotiate(accept_encoding: Header<AcceptEncoding>, http_result: HttpResult) -> HttpResult {
         let accept_encoding = accept_encoding.into_inner();
+        if  accept_encoding.is_empty() {
+            return http_result;
+        }
+        
         let mut encodings_with_weights = vec![];
         if let Ok(header_value) = accept_encoding.to_str() {
             for part in header_value.split(',') {
-                let quality = Quality::<Encoding>::from_str(part.trim())?;
-                encodings_with_weights.push(quality);
+                if let Ok(quality) = Quality::<Encoding>::from_str(part.trim()) {
+                    encodings_with_weights.push(quality);
+                }
             }
             encodings_with_weights
                 .sort_by(|a, b| b.value
@@ -110,15 +115,7 @@ impl App {
                 );
         }
         
-        if encodings_with_weights.is_empty() { 
-            return http_result;
-        } 
-        
-        let supported = SUPPORTED_ENCODINGS
-            .iter()
-            .collect::<HashSet<_>>();
-        
-        if encodings_with_weights[0].item.is_any() {
+        if !encodings_with_weights.is_empty() && encodings_with_weights[0].item.is_any() {
             #[cfg(feature = "compression-brotli")]
             return Self::compress(Encoding::Brotli, http_result);
             
@@ -144,25 +141,22 @@ impl App {
             return http_result;
         }
 
+        let supported = SUPPORTED_ENCODINGS
+            .iter()
+            .collect::<HashSet<_>>();
+        
         for encoding in encodings_with_weights {
             if supported.contains(&encoding.item) { 
                 return Self::compress(encoding.item, http_result);
             }
         }
-        
-        let supported_encodings_str = supported
-            .iter()
-            .map(|&encoding| encoding.to_string())
-            .collect::<Vec<String>>()
-            .join(",");
-        
-        status!(
-            406, 
-            supported_encodings_str, 
-            [(VARY, ACCEPT_ENCODING)]
-        )
-    }
 
+        status!(406, [
+            (VARY, ACCEPT_ENCODING),
+            (ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))
+        ])
+    }
+    
     fn compress(encoding: Encoding, http_result: HttpResult) -> HttpResult {
         if let Ok(response) = http_result {
             let (mut parts, body) = response.into_parts();

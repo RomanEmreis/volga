@@ -64,12 +64,12 @@ struct QualityError;
 impl QualityError {
     #[inline]
     fn parsing_error(err: ParseFloatError) -> Error {
-        Error::new(ErrorKind::InvalidData, format!("Q-value error: {err}"))
+        Error::new(ErrorKind::InvalidInput, format!("Q-value error: {err}"))
     }
 
     #[inline]
     fn missing_value() -> Error {
-        Error::new(ErrorKind::InvalidData, "Q-value error: missing value")
+        Error::new(ErrorKind::InvalidInput, "Q-value error: missing value")
     }
 }
 
