@@ -42,6 +42,16 @@ impl Encoding {
     pub(crate) fn is_any(&self) -> bool {
         self == &Encoding::Any
     }
+    
+    /// Creates a comma-separated string of encodings from given list
+    #[inline]
+    #[allow(dead_code)]
+    pub(crate) fn stringify(encoding_list: &[Encoding]) -> String {
+        encoding_list.iter()
+            .map(|&encoding| encoding.to_string())
+            .collect::<Vec<String>>()
+            .join(",")
+    }
 }
 
 impl Ranked for Encoding {
@@ -145,11 +155,18 @@ impl From<Encoding> for HeaderValue {
     }
 }
 
-impl From<HeaderValue> for Encoding {
-    #[inline]
-    fn from(header_value: HeaderValue) -> Encoding {
-        let val = header_value.to_str().unwrap_or("identity");
-        Encoding::from_str(val).unwrap_or(Encoding::Identity)
+impl TryFrom<HeaderValue> for Encoding {
+    type Error = Error;
+    
+    fn try_from(header_value: HeaderValue) -> Result<Encoding, Error> {
+        if header_value.is_empty() { 
+            return Err(EncodingError::empty());
+        } 
+        
+        let val = header_value
+            .to_str()
+            .map_err(|_| EncodingError::unknown())?;
+        Encoding::from_str(val)
     }
 }
 
@@ -157,6 +174,10 @@ struct EncodingError;
 impl EncodingError {
     fn unknown() -> Error { 
         Error::new(ErrorKind::InvalidInput, "Encoding error: Unknown encoding")
+    }
+
+    fn empty() -> Error {
+        Error::new(ErrorKind::InvalidData, "Encoding error: Empty encoding")
     }
 }
 
@@ -278,5 +299,14 @@ mod tests {
         for (i, encoding) in encodings.iter().enumerate() {
             assert_eq!(i, encoding.rank() as usize);
         }
+    }
+    
+    #[test]
+    #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
+    fn it_stringifies_list_of_encodings() {
+        let encodings = [Encoding::Identity, Encoding::Gzip, Encoding::Deflate];
+        let encodings_str = Encoding::stringify(&encodings);
+        
+        assert_eq!(encodings_str, "identity,gzip,deflate");
     }
 }

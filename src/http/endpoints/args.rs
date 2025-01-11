@@ -19,6 +19,7 @@ pub mod json;
 pub mod file;
 pub mod cancellation_token;
 pub mod request;
+pub mod form;
 
 /// Holds the payload for extractors
 pub(crate) enum Payload<'a> {

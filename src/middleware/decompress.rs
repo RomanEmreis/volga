@@ -27,13 +27,28 @@ use crate::{
         ContentEncoding,
         Header,
         Encoding,
+        ACCEPT_ENCODING,
         CONTENT_ENCODING,
         CONTENT_LENGTH,
+        VARY
     }, 
     middleware::HttpContext, 
     HttpRequest, 
-    HttpBody
+    HttpBody,
+    status
 };
+
+static SUPPORTED_ENCODINGS: &[Encoding] = &[
+    Encoding::Identity,
+    #[cfg(feature = "decompression-brotli")]
+    Encoding::Brotli,
+    #[cfg(feature = "decompression-gzip")]
+    Encoding::Gzip,
+    #[cfg(feature = "decompression-gzip")]
+    Encoding::Deflate,
+    #[cfg(feature = "decompression-zstd")]
+    Encoding::Zstd,
+];
 
 macro_rules! impl_decompressor {
     ($algo:ident, $decoder:ident, $mm:literal) => {
@@ -72,9 +87,20 @@ impl App {
     pub fn use_decompression(&mut self) -> &mut Self {
         self.use_middleware(|mut ctx, next| async move {
             if let Ok(content_encoding) = ctx.extract::<Header<ContentEncoding>>() {
-                let (req, handler) = ctx.into_parts();
-                let req = Self::decompress(content_encoding, req);
-                ctx = HttpContext::new(req, handler);
+                match content_encoding.into_inner().try_into() {
+                    Ok(encoding) => {
+                        let (req, handler) = ctx.into_parts();
+                        let req = Self::decompress(encoding, req);
+                        ctx = HttpContext::new(req, handler);
+                    }
+                    Err(error) if error.kind() == ErrorKind::InvalidData => (),
+                    Err(_) => {
+                        return status!(415, [
+                            (VARY, CONTENT_ENCODING),
+                            (ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))
+                        ]);
+                    }
+                }
             }
             next(ctx).await
         });
@@ -82,8 +108,7 @@ impl App {
     }
 
     #[cfg(feature = "di")]
-    fn decompress(content_encoding: Header<ContentEncoding>, request: HttpRequest) -> HttpRequest {
-        let encoding: Encoding = content_encoding.into_inner().into();
+    fn decompress(encoding: Encoding, request: HttpRequest) -> HttpRequest {
         let (mut parts, body, container) = request.into_parts();
         
         parts.headers.remove(CONTENT_LENGTH);
@@ -95,8 +120,7 @@ impl App {
     }
 
     #[cfg(not(feature = "di"))]
-    fn decompress(content_encoding: Header<ContentEncoding>, request: HttpRequest) -> HttpRequest {
-        let encoding: Encoding = content_encoding.into_inner().into();
+    fn decompress(encoding: Encoding, request: HttpRequest) -> HttpRequest {
         let (mut parts, body) = request.into_parts();
         
         parts.headers.remove(CONTENT_LENGTH);
