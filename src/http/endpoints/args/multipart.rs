@@ -11,7 +11,7 @@ use std::{
     path::Path
 };
 
-use crate::headers::{HeaderMap, CONTENT_DISPOSITION, CONTENT_TYPE};
+use crate::headers::{HeaderMap, CONTENT_TYPE};
 use crate::http::{
     endpoints::args::{
         FromPayload,
