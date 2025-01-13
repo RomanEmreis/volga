@@ -2,7 +2,10 @@
 
 use std::{future::Future, io::Error};
 use hyper::{
-    http::Extensions,
+    http::{
+        request::Parts, 
+        Extensions
+    },
     HeaderMap,
     Uri,
 };
@@ -20,12 +23,15 @@ pub mod file;
 pub mod cancellation_token;
 pub mod request;
 pub mod form;
+#[cfg(feature = "multipart")]
+pub mod multipart;
 
 /// Holds the payload for extractors
 pub(crate) enum Payload<'a> {
     None,
     Full(HttpRequest),
     Body(HttpBody),
+    Parts(&'a Parts, HttpBody),
     Query(&'a Uri),
     Headers(&'a HeaderMap),
     Path(&'a (String, String)),
@@ -38,6 +44,7 @@ pub(crate) enum Payload<'a> {
 pub(crate) enum Source {
     None,
     Full,
+    Parts,
     Path,
     Query,
     Headers,
@@ -109,6 +116,10 @@ macro_rules! define_generic_from_request {
                         },
                         Source::Body => match body.take() {
                             Some(body) => Payload::Body(body),
+                            None => Payload::None
+                        },
+                        Source::Parts => match body.take() {
+                            Some(body) => Payload::Parts(&parts, body),
                             None => Payload::None
                         },
                         Source::Full => match body.take() {

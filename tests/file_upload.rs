@@ -6,7 +6,7 @@ async fn it_saves_uploaded_file() {
         let mut app = App::new().bind("127.0.0.1:7899");
 
         app.map_post("/upload", |file: File| async move {
-            file.save("tests/resources/test_file_saved.txt").await?;
+            file.save_as("tests/resources/test_file_saved.txt").await?;
             ok!()
         });
 

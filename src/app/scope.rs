@@ -66,7 +66,7 @@ impl Scope {
             ]),
             RouteOption::Ok(endpoint_context) => {
                 let (handler, params) = endpoint_context.into_parts();
-
+                
                 #[cfg(feature = "di")]
                 let mut request = HttpRequest::new(request, shared.container.create_scope());
                 #[cfg(not(feature = "di"))]

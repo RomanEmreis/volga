@@ -50,18 +50,18 @@ pub mod test_utils;
 
 pub use crate::app::App;
 pub use crate::http::{
-    results::builder::{RESPONSE_ERROR, SERVER_NAME},
+    response::builder::{RESPONSE_ERROR, SERVER_NAME},
     endpoints::args::{
         cancellation_token::CancellationToken,
         file::File,
         json::Json,
         path::Path,
         query::Query,
-        form::Form
+        form::Form,
     },
     BoxBody,
     UnsyncBoxBody,
-    HttpBody, 
+    HttpBody,
     HttpRequest,
     HttpResponse,
     HttpResult,
@@ -69,6 +69,9 @@ pub use crate::http::{
     ResponseContext,
     Results
 };
+
+#[cfg(feature = "multipart")]
+pub use crate::http::endpoints::args::multipart::Multipart;
 
 pub mod routing {
     pub use crate::app::router::RouteGroup;
