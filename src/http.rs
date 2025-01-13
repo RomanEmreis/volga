@@ -5,7 +5,7 @@ pub use hyper::{Response, StatusCode};
 
 pub use body::{BoxBody, UnsyncBoxBody, HttpBody};
 pub use request::HttpRequest;
-pub use results::{
+pub use response::{
     HttpHeaders,
     HttpResponse,
     HttpResult,
@@ -15,5 +15,5 @@ pub use results::{
 
 pub mod body;
 pub mod request;
-pub mod results;
+pub mod response;
 pub mod endpoints;

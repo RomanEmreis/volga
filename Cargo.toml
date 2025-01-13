@@ -22,6 +22,7 @@ hyper = { version = "1.5.2", features = ["server"], optional = true }
 hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
 itoa = "1.0.14"
 mime = "0.3.17"
+multer = { version = "3.1.0", optional = true }
 pin-project-lite = "0.2.16"
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = "0.7.13"
@@ -42,7 +43,8 @@ full = [
     "http1", 
     "http2", 
     "middleware", 
-    "di", 
+    "di",
+    "multipart",
     "compression-full", 
     "decompression-full"
 ]
@@ -57,6 +59,7 @@ http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2"]
 
 middleware = []
 di = []
+multipart = ["dep:multer"]
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]
@@ -163,3 +166,8 @@ required-features = ["compression-full"]
 name = "decompression"
 path = "examples/decompression.rs"
 required-features = ["decompression-full"]
+
+[[example]]
+name = "multipart"
+path = "examples/multipart.rs"
+required-features = ["multipart"]

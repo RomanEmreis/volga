@@ -83,7 +83,7 @@ impl App {
     /// let mut app = App::new();
     /// 
     /// app.map_post("/upload", |file: File| async move {
-    ///     file.save("example.txt").await?;
+    ///     file.save_as("example.txt").await?;
     ///     ok!()
     /// });
     ///# app.run().await
