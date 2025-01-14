@@ -9,7 +9,7 @@ async fn it_writes_file_response() {
         app.map_get("/download", || async move {
             let file_name = "tests/resources/test_file.txt";
             let file = File::open(file_name).await?;
-
+            
             file!("test_file.txt", file)
         });
 

@@ -169,6 +169,7 @@ mod tests {
     use crate::http::endpoints::args::file::FileStream;
     use crate::http::endpoints::args::{FromPayload, Payload};
     use crate::test_utils::read_file;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn it_reads_from_payload() {
@@ -185,15 +186,17 @@ mod tests {
         let file_stream = FileStream::from_payload(Payload::Parts(&parts, body)).await.unwrap();
 
         assert_eq!(file_stream.name(), Some("test_file.txt"));
-        
-        let path = Path::new("tests/resources/test_file_saved.txt");
-        file_stream.save_as(path).await.unwrap();
 
-        let saved_bytes = read_file(path).await;
+        let path = Path::new("tests/resources").join(format!("test_file_{}.txt", Uuid::new_v4()));
+        file_stream.save_as(&path).await.unwrap();
+
+        let saved_bytes = read_file(&path).await;
         let content = String::from_utf8_lossy(&saved_bytes);
 
         assert_eq!(content, "Hello, this is some file content!");
         assert_eq!(content.len(), 33);
+
+        tokio::fs::remove_file(path).await.unwrap();
     }
     
     #[tokio::test]
@@ -205,13 +208,15 @@ mod tests {
 
         let file_stream = FileStream::new(None, body);
 
-        let path = Path::new("tests/resources/test_file_saved.txt");
-        file_stream.save_as(path).await.unwrap();
+        let path = Path::new("tests/resources").join(format!("test_file_{}.txt", Uuid::new_v4()));
+        file_stream.save_as(&path).await.unwrap();
 
-        let saved_bytes = read_file(path).await;
+        let saved_bytes = read_file(&path).await;
         let content = String::from_utf8_lossy(&saved_bytes);
 
         assert_eq!(content, "Hello, this is some file content!");
         assert_eq!(content.len(), 33);
+        
+        tokio::fs::remove_file(path).await.unwrap();
     }
 }

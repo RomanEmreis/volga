@@ -3,7 +3,10 @@
 use futures_util::future::BoxFuture;
 
 use crate::{HttpResult, HttpRequest};
-use crate::http::endpoints::args::FromRequest;
+use crate::http::{
+    endpoints::args::FromRequest,
+    IntoResponse
+};
 
 /// Represents a specific registered request handler
 pub(crate) type RouteHandler = Arc<
@@ -18,18 +21,20 @@ pub(crate) trait Handler {
 
 /// Represents a function request handler that could take different arguments
 /// that implements [`FromRequest`] trait.
-pub(crate) struct Func<F, Args>
+pub(crate) struct Func<F, R, Args>
 where
-    F: GenericHandler<Args, Output = HttpResult>,
+    F: GenericHandler<Args, Output = R>,
+    R: IntoResponse,
     Args: FromRequest
 {
     func: F,
     _marker: std::marker::PhantomData<Args>,
 }
 
-impl<F, Args> Func<F, Args>
+impl<F, R ,Args> Func<F, R, Args>
 where
-    F: GenericHandler<Args, Output = HttpResult>,
+    F: GenericHandler<Args, Output = R>,
+    R: IntoResponse,
     Args: FromRequest
 {
     /// Creates a new [`Func`] wrapped into [`Arc`]
@@ -39,16 +44,20 @@ where
     }
 }
 
-impl<F, Args> Handler for Func<F, Args>
+impl<F, R, Args> Handler for Func<F, R, Args>
 where
-    F: GenericHandler<Args, Output = HttpResult>,
+    F: GenericHandler<Args, Output = R>,
+    R: IntoResponse,
     Args: FromRequest + Send + Sync
 {
     #[inline]
     fn call(&self, req: HttpRequest) -> BoxFuture<HttpResult> {
         Box::pin(async move {
             let args = Args::from_request(req).await?;
-            self.func.call(args).await
+            self.func
+                .call(args)
+                .await
+                .into_response()
         })
     }
 }

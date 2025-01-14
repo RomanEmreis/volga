@@ -1,5 +1,5 @@
 ﻿use serde::{Deserialize, Serialize};
-use volga::{App, Form, ok, form};
+use volga::{App, Form, form};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct User {
@@ -37,14 +37,14 @@ async fn main() -> std::io::Result<()> {
     // POST /user
     // name=John&age=35
     app.map_post("/user", |user: Form<User>| async move {
-        ok!("User payload: {:?}", user)
+        user
     });
 
     // Read Form Data
     // POST /user
     // name=John
     app.map_post("/user-optional", |user: Form<OptionalUser>| async move {
-        ok!("User payload: {:?}", user)
+        user
     });
     
     app.run().await

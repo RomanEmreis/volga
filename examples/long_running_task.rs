@@ -1,5 +1,5 @@
 ﻿use tokio::time::{interval, Duration};
-use volga::{App, CancellationToken, ok};
+use volga::{App, CancellationToken};
 
 async fn long_running_task() {
     let mut interval = interval(Duration::from_millis(1000));
@@ -38,8 +38,7 @@ async fn main() -> std::io::Result<()> {
             },
             _ = long_running_task() => ()
         }
-    
-        ok!("done")
+        "done"
     });
 
     // Example of long-running task with spawned task
@@ -50,7 +49,7 @@ async fn main() -> std::io::Result<()> {
 
         long_running_task.await.unwrap();
         
-        ok!("done")
+        "done"
     });
 
     app.run().await

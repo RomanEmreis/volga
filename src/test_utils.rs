@@ -20,7 +20,7 @@ pub async fn read_file_bytes(response: &mut HttpResponse) -> Vec<u8> {
     buffer
 }
 
-pub async fn read_file(path: &Path) -> Vec<u8> {
+pub async fn read_file(path: impl AsRef<Path>) -> Vec<u8> {
     let mut file = tokio::fs::File::open(path).await.unwrap();
     let mut bytes = vec![];
     

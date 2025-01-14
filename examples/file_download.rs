@@ -7,7 +7,6 @@ async fn main() -> std::io::Result<()> {
     
     app.map_get("/download", || async {
         let file = File::open("examples/files/download.txt").await?;
-
         file!("download.txt", file)
     });
     

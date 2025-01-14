@@ -15,7 +15,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll}
 };
-
+use serde::Serialize;
 use crate::http::{
     endpoints::args::{
         FromPayload,
@@ -48,6 +48,13 @@ impl<T> Json<T> {
     /// Unwraps the inner `T`
     pub fn into_inner(self) -> T {
         self.0
+    }
+}
+
+impl<T: Serialize> From<T> for Json<T> {
+    #[inline]
+    fn from(value: T) -> Self {
+        Json(value)
     }
 }
 
@@ -150,5 +157,14 @@ mod tests {
         
         assert_eq!(user.age, 33);
         assert_eq!(user.name, "John");
+    }
+    
+    #[test]
+    fn it_converts_to_json() {
+        let user = User { age: 33, name: "John".into() };
+        let json: Json<User> = user.into();
+
+        assert_eq!(json.age, 33);
+        assert_eq!(json.name, "John");
     }
 }

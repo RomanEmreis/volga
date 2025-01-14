@@ -1,4 +1,4 @@
-﻿use volga::{App, Results, ResponseContext, headers, ok};
+﻿use volga::{App, ResponseContext, headers, ok};
 use volga::headers::{
     Header, 
     Headers, 
@@ -37,12 +37,12 @@ async fn main() -> std::io::Result<()> {
             ("x-api-key", "some api key"),
             ("Content-Type", "text/plain")
         ];
-        
-        Results::from(ResponseContext {
+
+        ResponseContext {
             content: "Hello World!",
             status: 200,
             headers
-        })
+        }
     });
 
     app.run().await

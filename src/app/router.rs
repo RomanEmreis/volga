@@ -1,7 +1,6 @@
 ﻿use hyper::Method;
-use crate::{
-    App, HttpResult
-};
+use crate::App;
+use crate::http::IntoResponse;
 use crate::http::endpoints::{
     args::FromRequest,
     handlers::{Func, GenericHandler}
@@ -56,9 +55,10 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_get<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_get<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = HttpResult>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
         Args: FromRequest + Send + Sync + 'static
     {
         let handler = Func::new(handler);
@@ -89,9 +89,10 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_post<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_post<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = HttpResult>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
         Args: FromRequest + Send + Sync + 'static,
     {
         let handler = Func::new(handler);
@@ -117,9 +118,10 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_put<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_put<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = HttpResult>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
         Args: FromRequest + Send + Sync + 'static,
     {
         let handler = Func::new(handler);
@@ -145,9 +147,10 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_patch<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_patch<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = HttpResult>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
         Args: FromRequest + Send + Sync + 'static,
     {
         let handler = Func::new(handler);
@@ -173,9 +176,10 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_delete<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_delete<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = HttpResult>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
         Args: FromRequest + Send + Sync + 'static,
     {
         let handler = Func::new(handler);
@@ -201,9 +205,10 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_head<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_head<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = HttpResult>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
         Args: FromRequest + Send + Sync + 'static,
     {
         let handler = Func::new(handler);
@@ -229,9 +234,10 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_options<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_options<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = HttpResult>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
         Args: FromRequest + Send + Sync + 'static,
     {
         let handler = Func::new(handler);
@@ -257,9 +263,10 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_trace<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_trace<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = HttpResult>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
         Args: FromRequest + Send + Sync + 'static,
     {
         let handler = Func::new(handler);
@@ -285,9 +292,10 @@ macro_rules! define_route_group_methods({$($method:ident)*} => {
             
         $(
         #[doc = concat!("See [`App::", stringify!($method), "`] for more details.")]
-        pub fn $method<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+        pub fn $method<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
         where
-            F: GenericHandler<Args, Output = HttpResult>,
+            F: GenericHandler<Args, Output = R>,
+            R: IntoResponse + 'static,
             Args: FromRequest + Send + Sync + 'static
         {
             let pattern = [self.prefix, pattern].concat();
