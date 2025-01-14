@@ -14,7 +14,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll}
 };
-
+use serde::Serialize;
 use crate::HttpBody;
 use crate::http::endpoints::args::{FromPayload, Payload, Source};
 
@@ -41,6 +41,13 @@ impl<T> Form<T> {
     /// Unwraps the inner `T`
     pub fn into_inner(self) -> T {
         self.0
+    }
+}
+
+impl<T: Serialize> From<T> for Form<T> {
+    #[inline]
+    fn from(value: T) -> Self {
+        Form(value)
     }
 }
 
@@ -191,5 +198,14 @@ mod tests {
 
         assert!(user.get("age").is_none());
         assert_eq!(user.get("name").unwrap(), "John");
+    }
+
+    #[test]
+    fn it_converts_to_form() {
+        let user = User { age: 33, name: "John".into() };
+        let json: Form<User> = user.into();
+
+        assert_eq!(json.age, 33);
+        assert_eq!(json.name, "John");
     }
 }

@@ -6,8 +6,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     app.map_post("/upload", |files: Multipart| async move {
-        files.save_all("examples/files").await?;
-        ok!("Files have been uploaded!")
+        files.save_all("examples/files").await
     });
     
     app.map_post("/manual-upload", |mut files: Multipart| async move {
@@ -26,6 +25,6 @@ async fn main() -> std::io::Result<()> {
         }
         ok!(results)
     });
-
+    
     app.run().await
 }

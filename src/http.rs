@@ -6,6 +6,7 @@ pub use hyper::{Response, StatusCode};
 pub use body::{BoxBody, UnsyncBoxBody, HttpBody};
 pub use request::HttpRequest;
 pub use response::{
+    into_response::IntoResponse,
     HttpHeaders,
     HttpResponse,
     HttpResult,

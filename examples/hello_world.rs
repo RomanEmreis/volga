@@ -1,4 +1,4 @@
-﻿use volga::{App, ok};
+﻿use volga::App;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -6,8 +6,8 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
     
     // Example of asynchronous request handler
-    app.map_get("/hello", || async {
-        ok!("Hello World!")
+    app.map_get("/hello", || async { 
+        "Hello World!"
     });
 
     app.run().await

@@ -3,7 +3,7 @@ use tokio_util::sync::CancellationToken;
 use futures_util::future::BoxFuture;
 
 use std::{
-    io::{Error, ErrorKind::InvalidInput},
+    io::Error,
     sync::Arc
 };
 
@@ -19,7 +19,7 @@ use hyper::{
 use crate::{HttpResponse, HttpRequest, HttpBody, status};
 use crate::app::AppInstance;
 use crate::http::endpoints::RouteOption;
-
+use crate::http::IntoResponse;
 #[cfg(feature = "middleware")]
 use crate::middleware::HttpContext;
 
@@ -94,10 +94,9 @@ impl Scope {
                             Self::keep_content_length(response.size_hint(), response.headers_mut());
                             *response.body_mut() = HttpBody::empty();
                         }
-                        Ok(response)
+                        response.into_response()
                     },
-                    Err(error) if error.kind() == InvalidInput => status!(400, error.to_string()),
-                    Err(error) => status!(500, error.to_string())
+                    Err(error) => error.into_response()
                 }
             }
         }

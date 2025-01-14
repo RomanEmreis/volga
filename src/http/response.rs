@@ -1,8 +1,4 @@
-﻿use crate::{
-    builder,
-    response,
-    RESPONSE_ERROR
-};
+﻿use crate::{builder, response, RESPONSE_ERROR};
 
 use std::collections::HashMap;
 use tokio::{fs::File, io};
@@ -20,10 +16,17 @@ use mime::{
     APPLICATION_OCTET_STREAM,
     TEXT_PLAIN
 };
+
 use crate::http::body::{BoxBody, HttpBody};
 
 pub mod builder;
 pub mod macros;
+pub mod ok;
+pub mod form;
+pub mod file;
+pub mod stream;
+pub mod status;
+pub mod into_response;
 
 /// A customized response context with custom response `headers` and `content_type`
 /// > NOTE: This is not suitable for file response use the `file!` or `Results::file()` instead
@@ -63,9 +66,16 @@ pub struct ResponseContext<T: Serialize> {
 
 pub type HttpResponse = Response<HttpBody>;
 pub type HttpResult = io::Result<HttpResponse>;
+pub struct HttpResultWrapper(io::Result<HttpResponse>);
 pub type HttpHeaders = HashMap<String, String>;
 
 pub struct Results;
+
+impl From<HttpResultWrapper> for io::Result<HttpResponse> {
+    fn from(result: HttpResultWrapper) -> Self {
+        result.0
+    }
+}
 
 impl Results {
     /// Produces a customized `OK 200` response

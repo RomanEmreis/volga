@@ -37,14 +37,14 @@ async fn main() -> std::io::Result<()> {
     // POST /user
     // { name: "John", age: 35 }
     app.map_post("/user", |user: Json<User>| async move {
-        ok!("User payload: {:?}", user)
+        user
     });
 
     // Read JSON body
     // POST /user
     // {}
     app.map_post("/user-optional", |user: Json<OptionalUser>| async move {
-        ok!("User payload: {:?}", user)
+        user
     });
 
     app.run().await
