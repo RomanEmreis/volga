@@ -11,8 +11,8 @@ async fn main() -> std::io::Result<()> {
     app.run().await
 }
 
-async fn get_user(_id: i32) -> HttpResult {
-    ok!("John")
+async fn get_user(_id: i32) -> &'static str {
+    "John"
 }
 
 async fn create_user(name: String) -> HttpResult {

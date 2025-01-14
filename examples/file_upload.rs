@@ -1,12 +1,11 @@
-﻿use volga::{App, ok, File};
+﻿use volga::{App, File};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     app.map_post("/upload", |file: File| async move {
-        file.save_as("examples/files/upload_test.txt").await?;
-        ok!()
+        file.save_as("examples/files/upload_test.txt").await
     });
 
     app.run().await

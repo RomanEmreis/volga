@@ -1,4 +1,4 @@
-﻿use super::{HttpResponse, HttpResult, HttpBody};
+﻿use super::{HttpResponse, HttpResult, HttpBody, Results, ResponseContext};
 use crate::{Json, Form, ok, status, form, response};
 use crate::http::StatusCode;
 use crate::headers::CONTENT_TYPE;
@@ -83,23 +83,44 @@ impl IntoResponse for String {
     }
 }
 
+impl<T: IntoResponse> IntoResponse for Option<T> {
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        match self { 
+            Some(ok) => ok.into_response(),
+            None => status!(404)
+        }
+    }
+}
+
 impl<T: Serialize> IntoResponse for Json<T> {
+    #[inline]
     fn into_response(self) -> HttpResult {
         ok!(self.into_inner())
     }
 }
 
 impl<T: Serialize> IntoResponse for Form<T> {
+    #[inline]
     fn into_response(self) -> HttpResult {
         form!(self.into_inner())
     }
 }
 
+impl<T: Serialize> IntoResponse for ResponseContext<T> {
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        Results::from(self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::io::{Error, ErrorKind};
     use http_body_util::BodyExt;
     use serde::Serialize;
+    use crate::ResponseContext;
     use super::IntoResponse;
 
     #[derive(Serialize)]
@@ -223,6 +244,54 @@ mod tests {
 
         assert_eq!(String::from_utf8_lossy(body), "name=test");
         assert_eq!(response.headers().get("Content-Type").unwrap(), "application/x-www-form-urlencoded");
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_converts_option_some_into_response() {
+        let response = Some("test").into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "test");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_converts_option_none_into_response() {
+        let response = Option::<&str>::None.into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(body.len(), 0);
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert_eq!(response.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn it_converts_response_context_into_response() {
+        let response = ResponseContext {
+            content: "test",
+            status: 200,
+            headers: HashMap::from([
+                ("x-api-key".to_string(), "some api key".to_string())
+            ])
+        };
+        
+        let response = response.into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "\"test\"");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
         assert_eq!(response.status(), 200);
     }
 }

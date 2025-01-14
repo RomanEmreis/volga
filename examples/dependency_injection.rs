@@ -4,7 +4,6 @@ use volga::{
     di::{Inject, Container, Dc},
     headers::HeaderValue,
     middleware::{HttpContext, Next},
-    ok, not_found
 };
 use std::{
     collections::HashMap,
@@ -85,18 +84,13 @@ async fn log_request<T: RequestIdGenerator + Inject>(mut ctx: HttpContext, next:
     response
 }
 
-async fn get_value<T: Cache + Inject>(id: String, cache: Dc<T>) -> HttpResult {
-    let item = cache.get(&id);
-    match item { 
-        Some(value) => ok!(value),
-        None => not_found!()
-    }
+async fn get_value<T: Cache + Inject>(id: String, cache: Dc<T>) -> Option<String> {
+    cache.get(&id)
 }
 
-async fn set_value<T: Cache + Inject>(item: Json<Item>, cache: Dc<T>) -> HttpResult {
+async fn set_value<T: Cache + Inject>(item: Json<Item>, cache: Dc<T>) {
     let item = item.into_inner();
     cache.set(item.id, item.value);
-    ok!()
 }
 
 impl Cache for InMemoryCache {
