@@ -190,7 +190,7 @@ mod tests {
         file_stream.save_as(path).await.unwrap();
 
         let saved_bytes = read_file(path).await;
-        let content = String::from_utf8_lossy(&saved_bytes);
+        let content = String::from_utf8_lossy(&saved_bytes).to_string();
 
         assert_eq!(content, "Hello, this is some file content!");
         assert_eq!(content.len(), 33);
@@ -209,7 +209,7 @@ mod tests {
         file_stream.save_as(path).await.unwrap();
 
         let saved_bytes = read_file(path).await;
-        let content = String::from_utf8_lossy(&saved_bytes);
+        let content = String::from_utf8_lossy(&saved_bytes).to_string();
 
         assert_eq!(content, "Hello, this is some file content!");
         assert_eq!(content.len(), 33);
