@@ -8,6 +8,7 @@ use tokio_util::io::ReaderStream;
 use tokio::fs::File;
 
 use std::{
+    borrow::Cow,
     io::{Error, ErrorKind},
     task::{Context, Poll},
     pin::Pin,
@@ -166,6 +167,16 @@ impl HttpBody {
         let reader_stream = ReaderStream::new(content);
         let stream_body = StreamBody::new(reader_stream.map_ok(Frame::data));
         Self { inner: InnerBody::Boxed { inner: stream_body.boxed() } }
+    }
+}
+
+impl From<Cow<'static, str>> for HttpBody {
+    #[inline]
+    fn from(value: Cow<'static, str>) -> Self {
+        let inner = Full::from(value)
+            .map_err(|never| match never {})
+            .boxed();
+        Self { inner: InnerBody::Boxed { inner } }
     }
 }
 

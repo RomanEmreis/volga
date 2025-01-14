@@ -7,6 +7,7 @@ use mime::TEXT_PLAIN_UTF_8;
 use std::{
     io::{Error, ErrorKind::InvalidInput},
     convert::Infallible,
+    borrow::Cow
 };
 use serde::Serialize;
 
@@ -64,9 +65,16 @@ where
 impl IntoResponse for &'static str {
     #[inline]
     fn into_response(self) -> HttpResult {
+        Cow::Borrowed(self).into_response()
+    }
+}
+
+impl IntoResponse for Cow<'static, str> {
+    #[inline]
+    fn into_response(self) -> HttpResult {
         response!(
             StatusCode::OK,
-            HttpBody::full(self),
+            HttpBody::from(self),
             [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
         )
     }
@@ -75,11 +83,7 @@ impl IntoResponse for &'static str {
 impl IntoResponse for String {
     #[inline]
     fn into_response(self) -> HttpResult {
-        response!(
-            StatusCode::OK,
-            HttpBody::full(self),
-            [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
-        )
+        Cow::<'static, str>::Owned(self).into_response()
     }
 }
 

@@ -31,7 +31,7 @@ async fn it_writes_file_response() {
         bytes.drain(0..3); // This removes the first three bytes
     }
     
-    let content = String::from_utf8_lossy(&bytes).to_string();
+    let content = String::from_utf8_lossy(&bytes);
     
     assert_eq!(content, "Hello, this is some file content!");
     assert_eq!(content.len(), 33);
