@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.4.7"
+version = "0.4.8"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -24,6 +24,7 @@ itoa = "1.0.14"
 mime = "0.3.17"
 multer = { version = "3.1.0", optional = true }
 pin-project-lite = "0.2.16"
+tokio-rustls = { version = "0.26.1", default-features = false, features = ["tls12", "ring"], optional = true }
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = "0.7.13"
 serde = "1.0.217"
@@ -31,7 +32,7 @@ serde_json = "1.0.135"
 serde_urlencoded = "0.7.1"
 
 [dev-dependencies]
-reqwest = { version = "0.12.12", features = ["blocking", "json", "http2", "brotli", "deflate", "gzip", "zstd"] }
+reqwest = { version = "0.12.12", features = ["blocking", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
 serde = { version = "1.0.217", features = ["derive"] }
 uuid = { version = "1.12.0", features = ["v4"] }
 
@@ -44,6 +45,7 @@ full = [
     "http2", 
     "middleware", 
     "di",
+    "tls",
     "multipart",
     "compression-full", 
     "decompression-full"
@@ -60,6 +62,7 @@ http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2"]
 middleware = []
 di = []
 multipart = ["dep:multer"]
+tls = ["dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]
@@ -85,6 +88,10 @@ required-features = ["compression-full"]
 [[test]]
 name = "decompression"
 required-features = ["decompression-full"]
+
+[[test]]
+name = "tls"
+required-features = ["tls"]
 
 [[example]]
 name = "hello_world"
@@ -171,3 +178,8 @@ required-features = ["decompression-full"]
 name = "multipart"
 path = "examples/multipart.rs"
 required-features = ["multipart"]
+
+[[example]]
+name = "tls"
+path = "examples/tls.rs"
+required-features = ["tls"]

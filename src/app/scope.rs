@@ -46,7 +46,7 @@ impl Service<Request<Incoming>> for Scope {
 }
 
 impl Scope {
-    pub(super) fn new(shared: Arc<AppInstance>) -> Self {
+    pub(crate) fn new(shared: Arc<AppInstance>) -> Self {
         Self {
             cancellation_token: CancellationToken::new(),
             shared
