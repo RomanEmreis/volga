@@ -2,6 +2,7 @@
 
 use std::{
     future::Future,
+    io::Error,
     net::SocketAddr,
     sync::Arc
 };
@@ -16,6 +17,7 @@ use tokio::{
 };
 
 use crate::server::Server;
+
 use self::{
     pipeline::{Pipeline, PipelineBuilder},
     scope::Scope
@@ -23,6 +25,12 @@ use self::{
 
 #[cfg(feature = "di")]
 use crate::di::{Container, ContainerBuilder};
+
+#[cfg(feature = "tls")]
+use tokio_rustls::TlsAcceptor;
+
+#[cfg(feature = "tls")]
+use crate::tls::TlsConfig;
 
 pub mod router;
 pub(crate) mod pipeline;
@@ -46,6 +54,8 @@ const DEFAULT_PORT: u16 = 7878;
 pub struct App {
     #[cfg(feature = "di")]
     pub(super) container: ContainerBuilder,
+    #[cfg(feature = "tls")]
+    pub(super) tls_config: Option<TlsConfig>,
     pub(super) pipeline: PipelineBuilder,
     connection: Connection
 }
@@ -77,19 +87,33 @@ impl Connection {
 
 /// Contains a shared resources of running Web Server
 pub(crate) struct AppInstance {
+    #[cfg(feature = "tls")]
+    pub(super) acceptor: Option<TlsAcceptor>,
     #[cfg(feature = "di")]
     container: Container,
     pipeline: Pipeline
 }
 
-impl AppInstance {
-    fn new(app: App) -> Arc<Self> {
-        let this = Self {
+impl TryFrom<App> for AppInstance {
+    type Error = Error;
+
+    fn try_from(app: App) -> Result<Self, Self::Error> {
+        #[cfg(feature = "tls")]
+        let acceptor = {
+            let tls_config = app.tls_config
+                .map(|config| config.build())
+                .transpose()?;
+            tls_config
+                .map(|config| TlsAcceptor::from(Arc::new(config)))
+        };
+        let app_instance = Self {
+            pipeline: app.pipeline.build(),
             #[cfg(feature = "di")]
             container: app.container.build(),
-            pipeline: app.pipeline.build()
+            #[cfg(feature = "tls")]
+            acceptor
         };
-        Arc::new(this)
+        Ok(app_instance)
     }
 }
 
@@ -113,6 +137,8 @@ impl App {
         Self {
             #[cfg(feature = "di")]
             container: ContainerBuilder::new(),
+            #[cfg(feature = "tls")]
+            tls_config: None,
             pipeline:PipelineBuilder::new(),
             connection: Default::default()
         }
@@ -153,15 +179,12 @@ impl App {
         let (shutdown_sender, mut shutdown_signal) = broadcast::channel::<()>(1);
 
         Self::subscribe_for_ctrl_c_signal(&shutdown_sender);
-
-        let app_instance = AppInstance::new(self);
+        let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
         loop {
             tokio::select! {
                 Ok((stream, _)) = tcp_listener.accept() => {
                     let app_instance = app_instance.clone();
-                    let io = TokioIo::new(stream);
-                    
-                    tokio::spawn(Self::handle_connection(io, app_instance));
+                    tokio::spawn(Self::handle_connection(stream, app_instance));
                 }
                 _ = shutdown_signal.recv() => {
                     println!("Shutting down server...");
@@ -188,7 +211,30 @@ impl App {
         });
     }
 
-    async fn handle_connection(io: TokioIo<TcpStream>, app_instance: Arc<AppInstance>) {
+    async fn handle_connection(stream: TcpStream, app_instance: Arc<AppInstance>) {
+        #[cfg(not(feature = "tls"))]
+        Self::serve(stream, app_instance).await;
+        
+        #[cfg(feature = "tls")]
+        if let Some(acceptor) = app_instance.acceptor() {
+            let stream = match acceptor.accept(stream).await {
+                Ok(tls_stream) => tls_stream,
+                Err(err) => {
+                    eprintln!("failed to perform tls handshake: {err:#}");
+                    return;
+                }
+            };
+            let io = TokioIo::new(stream);
+            Self::serve_tls(io, app_instance).await;
+        } else {
+            Self::serve(stream, app_instance).await;
+        }
+    }
+
+    #[inline]
+    async fn serve(stream: TcpStream, app_instance: Arc<AppInstance>) {
+        let io = TokioIo::new(stream);
+
         let server = Server::new(io);
         let scope = Scope::new(app_instance);
 

@@ -54,7 +54,7 @@ impl<T> Json<T> {
 impl<T: Serialize> From<T> for Json<T> {
     #[inline]
     fn from(value: T) -> Self {
-        Json(value)
+        Self(value)
     }
 }
 

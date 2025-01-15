@@ -47,7 +47,7 @@ impl<T> Form<T> {
 impl<T: Serialize> From<T> for Form<T> {
     #[inline]
     fn from(value: T) -> Self {
-        Form(value)
+        Self(value)
     }
 }
 
