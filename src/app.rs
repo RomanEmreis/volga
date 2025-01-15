@@ -99,11 +99,13 @@ impl TryFrom<App> for AppInstance {
 
     fn try_from(app: App) -> Result<Self, Self::Error> {
         #[cfg(feature = "tls")]
-        let tls_config = app.tls_config
-            .map(|config| config.build())
-            .transpose()?;
-        let acceptor = tls_config
-            .map(|config| TlsAcceptor::from(Arc::new(config)));
+        let acceptor = {
+            let tls_config = app.tls_config
+                .map(|config| config.build())
+                .transpose()?;
+            tls_config
+                .map(|config| TlsAcceptor::from(Arc::new(config)))
+        };
         let app_instance = Self {
             pipeline: app.pipeline.build(),
             #[cfg(feature = "di")]
