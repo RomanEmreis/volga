@@ -263,6 +263,8 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
         let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
             reqwest::Client::builder()
                 .http1_only()
+                .danger_accept_invalid_hostnames(true)
+                .danger_accept_invalid_certs(true)
                 .identity(identity)
                 .add_root_certificate(ca_certificate)
                 .build()
@@ -270,6 +272,8 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
         } else {
             reqwest::Client::builder()
                 .http2_prior_knowledge()
+                .danger_accept_invalid_hostnames(true)
+                .danger_accept_invalid_certs(true)
                 .identity(identity)
                 .add_root_certificate(ca_certificate)
                 .build()
@@ -278,7 +282,7 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
 
         client
             .get("http://127.0.0.1:7927/tls")
-            .header("host", "localhost:7927")
+            .header("host", "127.0.0.1:7927")
             .send()
             .await
             .unwrap()
