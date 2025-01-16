@@ -27,6 +27,7 @@ pub mod file;
 pub mod stream;
 pub mod status;
 pub mod into_response;
+mod redirect;
 
 /// A customized response context with custom response `headers` and `content_type`
 /// > NOTE: This is not suitable for file response use the `file!` or `Results::file()` instead

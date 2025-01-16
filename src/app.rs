@@ -177,8 +177,15 @@ impl App {
         println!("Start listening: {socket}");
 
         let (shutdown_sender, mut shutdown_signal) = broadcast::channel::<()>(1);
-
         Self::subscribe_for_ctrl_c_signal(&shutdown_sender);
+
+        #[cfg(feature = "tls")]
+        if let Some(tls_config) = &self.tls_config { 
+            if tls_config.use_https_redirection {
+                Self::run_https_redirection_middleware(socket, shutdown_sender.subscribe());
+            }
+        }
+        
         let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
         loop {
             tokio::select! {
