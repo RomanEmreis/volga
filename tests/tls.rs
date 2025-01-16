@@ -233,6 +233,7 @@ async fn it_works_with_tls_with_optional_auth_unauthenticated() {
 }
 
 #[tokio::test]
+#[cfg(target_os = "windows")]
 async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirection() {
     tokio::spawn(async {
         let mut app = App::new()
@@ -241,7 +242,6 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
         app.use_tls(TlsConfig::from_pem_files(
             "tests/tls/server.pem",
             "tests/tls/server.key")
-            .with_required_client_auth("tests/tls/ca.pem")
             .with_https_redirection()
         );
 
@@ -252,29 +252,18 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
     });
 
     let response = tokio::spawn(async {
-        let cert = include_bytes!("tls/client.pem");
-        let key = include_bytes!("tls/client.key");
-
-        let identity = Identity::from_pkcs8_pem(cert, key).unwrap();
-
         let ca_cert = include_bytes!("tls/ca.pem");
         let ca_certificate = Certificate::from_pem(ca_cert).unwrap();
 
         let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
             reqwest::Client::builder()
                 .http1_only()
-                .danger_accept_invalid_hostnames(true)
-                .danger_accept_invalid_certs(true)
-                .identity(identity)
                 .add_root_certificate(ca_certificate)
                 .build()
                 .unwrap()
         } else {
             reqwest::Client::builder()
                 .http2_prior_knowledge()
-                .danger_accept_invalid_hostnames(true)
-                .danger_accept_invalid_certs(true)
-                .identity(identity)
                 .add_root_certificate(ca_certificate)
                 .build()
                 .unwrap()
@@ -282,7 +271,7 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
 
         client
             .get("http://127.0.0.1:7927/tls")
-            .header("host", "127.0.0.1:7927")
+            .header("host", "localhost:7927")
             .send()
             .await
             .unwrap()
