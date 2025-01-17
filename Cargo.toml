@@ -51,18 +51,13 @@ full = [
     "decompression-full"
 ]
 
-# Mimimal HTTP/1
-mini = ["http1"]
-# Mimimal HTTP/2
-mini2 = ["http2"]
-
 http1 = ["dep:hyper", "hyper?/http1", "dep:hyper-util", "hyper-util?/http1"]
 http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2"]
 
 middleware = []
 di = []
 multipart = ["dep:multer"]
-tls = ["dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
+tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]

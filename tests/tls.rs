@@ -6,11 +6,10 @@ use reqwest::{Certificate, Identity};
 async fn it_works_with_tls_with_no_auth() {
     tokio::spawn(async {
         let mut app = App::new()
-            .bind("127.0.0.1:7921");
-
-        app.use_tls(TlsConfig::from_pem_files(
-            "tests/tls/server.pem",
-            "tests/tls/server.key"));
+            .bind("127.0.0.1:7921")
+            .with_tls(TlsConfig::from_pem_files(
+                "tests/tls/server.pem",
+                "tests/tls/server.key"));
         
         app.map_get("/tls", || async {
             "Pass!"
@@ -42,12 +41,11 @@ async fn it_works_with_tls_with_no_auth() {
 async fn it_works_with_tls_with_required_auth_authenticated() {
     tokio::spawn(async {
         let mut app = App::new()
-            .bind("127.0.0.1:7922");
-        
-        app.use_tls(TlsConfig::from_pem_files(
-            "tests/tls/server.pem",
-            "tests/tls/server.key")
-            .with_required_client_auth("tests/tls/ca.pem"));
+            .bind("127.0.0.1:7922")
+            .with_tls(TlsConfig::default()
+                .with_cert_path("tests/tls/server.pem")
+                .with_key_path("tests/tls/server.key")
+                .with_required_client_auth("tests/tls/ca.pem"));
         
         app.map_get("/tls", || async {
             "Pass!"
@@ -94,12 +92,11 @@ async fn it_works_with_tls_with_required_auth_authenticated() {
 async fn it_works_with_tls_with_required_auth_unauthenticated() {
     tokio::spawn(async {
         let mut app = App::new()
-            .bind("127.0.0.1:7923");
-
-        app.use_tls(TlsConfig::from_pem_files(
-            "tests/tls/server.pem",
-            "tests/tls/server.key")
-            .with_required_client_auth("tests/tls/ca.pem"));
+            .bind("127.0.0.1:7923")
+            .with_tls(TlsConfig::from_pem_files(
+                "tests/tls/server.pem",
+                "tests/tls/server.key")
+                .with_required_client_auth("tests/tls/ca.pem"));
         
         app.map_get("/tls", || async {
             "Pass!"
@@ -139,12 +136,11 @@ async fn it_works_with_tls_with_required_auth_unauthenticated() {
 async fn it_works_with_tls_with_optional_auth_authenticated() {
     tokio::spawn(async {
         let mut app = App::new()
-            .bind("127.0.0.1:7924");
-
-        app.use_tls(TlsConfig::from_pem_files(
-            "tests/tls/server.pem",
-            "tests/tls/server.key")
-            .with_optional_client_auth("tests/tls/ca.pem"));
+            .bind("127.0.0.1:7924")
+            .with_tls(TlsConfig::from_pem_files(
+                "tests/tls/server.pem",
+                "tests/tls/server.key")
+                .with_optional_client_auth("tests/tls/ca.pem"));
         
         app.map_get("/tls", || async {
             "Pass!"
@@ -191,12 +187,11 @@ async fn it_works_with_tls_with_optional_auth_authenticated() {
 async fn it_works_with_tls_with_optional_auth_unauthenticated() {
     tokio::spawn(async {
         let mut app = App::new()
-            .bind("127.0.0.1:7925");
-
-        app.use_tls(TlsConfig::from_pem_files(
-            "tests/tls/server.pem",
-            "tests/tls/server.key")
-            .with_optional_client_auth("tests/tls/ca.pem"));
+            .bind("127.0.0.1:7925")
+            .with_tls(TlsConfig::from_pem_files(
+                "tests/tls/server.pem",
+                "tests/tls/server.key")
+                .with_optional_client_auth("tests/tls/ca.pem"));
 
         app.map_get("/tls", || async {
             "Pass!"
@@ -237,13 +232,12 @@ async fn it_works_with_tls_with_optional_auth_unauthenticated() {
 async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirection() {
     tokio::spawn(async {
         let mut app = App::new()
-            .bind("127.0.0.1:7926");
-
-        app.use_tls(TlsConfig::from_pem_files(
-            "tests/tls/server.pem",
-            "tests/tls/server.key")
-            .with_https_redirection()
-        );
+            .bind(([127,0,0,1], 7926))
+            .with_tls(TlsConfig::from_pem_files(
+                "tests/tls/server.pem",
+                "tests/tls/server.key")
+                .with_https_redirection()
+                .with_http_port(7927));
 
         app.map_get("/tls", || async {
             "Pass!"

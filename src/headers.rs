@@ -7,6 +7,7 @@ pub use hyper::{
     header::{
         InvalidHeaderValue,
         ToStrError,
+        STRICT_TRANSPORT_SECURITY,
         ACCEPT_ENCODING,
         ACCEPT_RANGES,
         CONTENT_DISPOSITION,

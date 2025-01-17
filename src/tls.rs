@@ -1,13 +1,11 @@
-﻿use crate::{
-    app::{App, AppInstance, scope::Scope},
-    server::TlsServer
-};
+﻿use crate::app::{App, AppInstance};
 
 use std::{
-    io::{Result, Error, ErrorKind},
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    sync::Arc
+    fmt, 
+    io::{Result, Error, ErrorKind}, 
+    net::SocketAddr, 
+    path::{Path, PathBuf}, 
+    time::Duration
 };
 
 use hyper_util::rt::TokioIo;
@@ -25,7 +23,6 @@ use tokio_rustls::{
         RootCertStore,
         ServerConfig,
     },
-    server::TlsStream,
     TlsAcceptor
 };
 
@@ -50,12 +47,24 @@ pub(super) mod https_redirect;
 
 const CERT_FILE_NAME: &str = "cert.pem";
 const KEY_FILE_NAME: &str = "key.pem";
+const DEFAULT_PORT: u16 = 7879;
 
+/// Represents a TLS (Transport Layer Security) configuration options
 pub struct TlsConfig {
     pub cert: PathBuf,
     pub key: PathBuf,
     pub use_https_redirection: bool,
+    pub http_port: u16,
+    hsts_config: HstsConfig,
     client_auth: ClientAuth,
+}
+
+/// Represents a HSTS (HTTP Strict Transport Security Protocol) configuration options
+pub struct HstsConfig {
+    preload: bool,
+    include_sub_domains: bool,
+    max_age: Duration,
+    exclude_hosts: Vec<&'static str>
 }
 
 enum ClientAuth {
@@ -64,17 +73,48 @@ enum ClientAuth {
     Required(PathBuf)
 }
 
+impl Default for HstsConfig {
+    fn default() -> Self {
+        Self {
+            preload: true,
+            include_sub_domains: true,
+            max_age: Duration::from_secs(30 * 24 * 60 * 60), // 30 days = 2,592,000 seconds
+            exclude_hosts: Vec::new()
+        }
+    }
+}
+
 impl Default for TlsConfig {
     fn default() -> Self {
         let path = std::env::current_dir().unwrap_or_default();
         let cert = path.join(CERT_FILE_NAME);
         let key = path.join(KEY_FILE_NAME);
         Self { 
+            http_port: DEFAULT_PORT,
+            use_https_redirection: false,
+            client_auth: ClientAuth::None,
+            hsts_config: HstsConfig::default(),
             key, 
             cert, 
-            client_auth: ClientAuth::None,
-            use_https_redirection: false
         }
+    }
+}
+
+impl fmt::Display for HstsConfig {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut str = String::new();
+        str.push_str(&format!("max-age={}", self.max_age.as_secs()));
+        
+        if self.include_sub_domains {
+            str.push_str("; includeSubDomains");
+        }
+
+        if self.preload {
+            str.push_str("; preload");
+        }
+        
+        f.write_str(&str)
     }
 }
 
@@ -85,11 +125,12 @@ impl TlsConfig {
         let cert = path.join(CERT_FILE_NAME);
         let key = path.join(KEY_FILE_NAME);
         Self { 
+            http_port: DEFAULT_PORT,
+            use_https_redirection: false,
+            client_auth: ClientAuth::None,
+            hsts_config: HstsConfig::default(),
             key, 
             cert, 
-            client_auth: 
-            ClientAuth::None,
-            use_https_redirection: false,
         }
     }
 
@@ -100,27 +141,85 @@ impl TlsConfig {
             cert: cert_file_path.into(),
             client_auth: ClientAuth::None,
             use_https_redirection: false,
+            http_port: DEFAULT_PORT,
+            hsts_config: HstsConfig::default(),
         }
     }
     
+    /// Configures the port for HTTP listener that redirects to HTTPS
+    pub fn with_http_port(mut self, port: u16) -> Self {
+        self.http_port = port;
+        self
+    }
+    
+    /// Configure the path to the certificate
+    pub fn with_cert_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.cert = path.as_ref().into();
+        self
+    }
+
+    /// Configure the path to the private key
+    pub fn with_key_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.key = path.as_ref().into();
+        self
+    }
+    
     /// Configures the trust anchor for optional TLS client authentication.
+    /// 
+    /// Default: `None`
     pub fn with_optional_client_auth(mut self, path: impl AsRef<Path>) -> Self {
         self.client_auth = ClientAuth::Optional(path.as_ref().into());
         self
     }
 
     /// Configures the trust anchor for required TLS client authentication.
+    /// 
+    /// Default: `None`
     pub fn with_required_client_auth(mut self, path: impl AsRef<Path>) -> Self {
         self.client_auth = ClientAuth::Required(path.as_ref().into());
         self
     }
 
     /// Configures web server to redirect HTTP requests to HTTPS
+    /// 
+    /// Default: `false`
     pub fn with_https_redirection(mut self) -> Self {
         self.use_https_redirection = true;
         self
     }
     
+    /// Configures whether to set `preload` in HSTS header
+    /// 
+    /// Default value: `true`
+    pub fn with_hsts_preload(mut self, preload: bool) -> Self {
+        self.hsts_config.preload = preload;
+        self
+    }
+
+    /// Configures whether to set `includeSubDomains` in HSTS header
+    /// 
+    /// Default: `true`
+    pub fn with_hsts_sub_domains(mut self, include: bool) -> Self {
+        self.hsts_config.include_sub_domains = include;
+        self
+    }
+
+    /// Configures `max_age` for HSTS header
+    /// 
+    /// Default: 30 days (2,592,000 seconds)
+    pub fn with_hsts_max_age(mut self, max_age: Duration) -> Self {
+        self.hsts_config.max_age = max_age;
+        self
+    }
+
+    /// Configures a list of host names that will not add the HSTS header.
+    /// 
+    /// Default: empty list
+    pub fn with_hsts_exclude_hosts(mut self, exclude_hosts: &[&'static str]) -> Self {
+        self.hsts_config.exclude_hosts = exclude_hosts.into();
+        self
+    }
+
     pub(super) fn build(self) -> Result<ServerConfig> {
         let certs = Self::load_cert_file(&self.cert)?;
         let key = Self::load_key_file(&self.key)?;
@@ -216,15 +315,60 @@ impl AppInstance {
 /// TLS specific impl for [`App`]
 impl App {
     /// Configures web server with specified TLS configuration
-    pub fn use_tls(&mut self, config: TlsConfig) -> &mut Self {
+    /// 
+    /// Default: `None`
+    pub fn with_tls(mut self, config: TlsConfig) -> Self {
         self.tls_config = Some(config);
         self
     }
     
-    pub(super) fn run_https_redirection_middleware(socket: SocketAddr, mut shutdown_signal: broadcast::Receiver<()>) {
+    /// Adds middleware for using HSTS, which adds the `Strict-Transport-Security` HTTP header.
+    pub fn use_hsts(&mut self) -> &mut Self {
+        if let Some(tls_config) = &self.tls_config {
+            use crate::headers::{Header, Host, STRICT_TRANSPORT_SECURITY};
+            
+            let hsts_header_value = tls_config.hsts_config.to_string();
+            let exclude_hosts = tls_config.hsts_config.exclude_hosts.clone();
+            
+            let is_excluded = move |host: Option<&str>| {
+                if exclude_hosts.is_empty() { 
+                    return false;
+                }
+                if let Some(host) = host {
+                    return exclude_hosts.contains(&host);
+                }
+                false
+            };
+            
+            self.use_middleware(move |ctx, next| {
+                let hsts_header = STRICT_TRANSPORT_SECURITY.clone();
+                let hsts_header_value = hsts_header_value.clone();
+                let is_excluded = is_excluded.clone();
+                
+                async move {
+                    let host = ctx.extract::<Header<Host>>()?;
+                    let http_result = next(ctx).await;
+
+                    match http_result {
+                        Err(error) => Err(error),
+                        Ok(mut response) => {
+                            if !is_excluded(host.to_str().ok()) {
+                                response
+                                    .headers_mut()
+                                    .append(hsts_header, hsts_header_value.parse().unwrap());
+                            }
+                            Ok(response)
+                        }
+                    }
+                }
+            });
+        }
+        self
+    }
+    
+    pub(super) fn run_https_redirection_middleware(socket: SocketAddr, http_port: u16, mut shutdown_signal: broadcast::Receiver<()>) {
         tokio::spawn(async move {
             let https_port = socket.port();
-            let http_port = https_port + 1;
             let socket = SocketAddr::new(socket.ip(), http_port);
             println!("Start redirecting to HTTPS from {socket}");
             
@@ -244,14 +388,6 @@ impl App {
                 eprintln!("Unable to start HTTPS redirection listener");
             }
         });
-    }
-
-    #[inline]
-    pub(super) async fn serve_tls(io: TokioIo<TlsStream<TcpStream>>, app_instance: Arc<AppInstance>) {
-        let server = TlsServer::new(io);
-        let scope = Scope::new(app_instance);
-
-        server.serve(scope).await;
     }
     
     #[inline]

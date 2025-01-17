@@ -1,10 +1,6 @@
 ﻿//! HTTP Server tools
 
-use hyper_util::rt::TokioIo;
-use tokio::net::TcpStream;
-
-#[cfg(feature = "tls")]
-use tokio_rustls::server::TlsStream;
+use hyper::rt::{Read, Write};
 
 #[cfg(all(feature = "http1", not(feature = "http2")))]
 pub(super) mod http1;
@@ -14,12 +10,7 @@ pub(super) mod http1;
 ))]
 pub(super) mod http2;
 
-pub(super) struct Server {
-    io: TokioIo<TcpStream>
-}
-
-#[cfg(feature = "tls")]
-pub(super) struct TlsServer {
-    io: TokioIo<TlsStream<TcpStream>>
+pub(super) struct Server<I: Read + Write + Unpin> {
+    io: I
 }
 

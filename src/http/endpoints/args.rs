@@ -23,6 +23,7 @@ pub mod file;
 pub mod cancellation_token;
 pub mod request;
 pub mod form;
+
 #[cfg(feature = "multipart")]
 pub mod multipart;
 
