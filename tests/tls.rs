@@ -42,7 +42,7 @@ async fn it_works_with_tls_with_required_auth_authenticated() {
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7922")
-            .with_tls(TlsConfig::default()
+            .with_tls(TlsConfig::new()
                 .with_cert_path("tests/tls/server.pem")
                 .with_key_path("tests/tls/server.key")
                 .with_required_client_auth("tests/tls/ca.pem"));
@@ -188,9 +188,9 @@ async fn it_works_with_tls_with_optional_auth_unauthenticated() {
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7925")
-            .with_tls(TlsConfig::from_pem_files(
-                "tests/tls/server.pem",
-                "tests/tls/server.key")
+            .with_tls(TlsConfig::default()
+                .with_cert_path("tests/tls/server.pem")
+                .with_key_path("tests/tls/server.key")
                 .with_optional_client_auth("tests/tls/ca.pem"));
 
         app.map_get("/tls", || async {

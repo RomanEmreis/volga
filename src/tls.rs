@@ -119,6 +119,11 @@ impl fmt::Display for HstsConfig {
 }
 
 impl TlsConfig {
+    /// Creates a new, default TLS configuration
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
     /// Creates a configuration by loading cert and key files with default names from specified folder
     pub fn from_pem(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref();
