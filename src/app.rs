@@ -6,7 +6,8 @@ use std::{
     net::SocketAddr,
     sync::Arc
 };
-
+use std::net::IpAddr;
+use hyper::rt::{Read, Write};
 use hyper_util::rt::TokioIo;
 
 use tokio::{
@@ -60,7 +61,8 @@ pub struct App {
     connection: Connection
 }
 
-struct Connection {
+/// Wraps a socket
+pub struct Connection {
     socket: SocketAddr
 }
 
@@ -70,18 +72,24 @@ impl Default for Connection {
         let ip = [127, 0, 0, 1];
         #[cfg(not(target_os = "windows"))]
         let ip = [0, 0, 0, 0];
-        let socket = SocketAddr::from((ip, DEFAULT_PORT));
+        let socket = (ip, DEFAULT_PORT).into();
         Self { socket }
     }
 }
 
-impl Connection {
-    fn new(socket: &str) -> Self {
-        if let Ok(socket) = socket.parse::<SocketAddr>() {
-            Self { socket }    
-        } else { 
+impl From<&str> for Connection {
+    fn from(s: &str) -> Self {
+        if let Ok(socket) = s.parse::<SocketAddr>() {
+            Self { socket }
+        } else {
             Self::default()
         }
+    }
+}
+
+impl<I: Into<IpAddr>> From<(I, u16)> for Connection {
+    fn from(value: (I, u16)) -> Self {
+        Self { socket: SocketAddr::from(value) }
     }
 }
 
@@ -151,9 +159,10 @@ impl App {
     ///use volga::App;
     ///
     ///let app = App::new().bind("127.0.0.1:7878");
+    ///let app = App::new().bind(([127,0,0,1], 7878));
     /// ```
-    pub fn bind(mut self, socket: &str) -> Self {
-        self.connection = Connection::new(socket);
+    pub fn bind<S: Into<Connection>>(mut self, socket: S) -> Self {
+        self.connection = socket.into();
         self
     }
 
@@ -182,7 +191,10 @@ impl App {
         #[cfg(feature = "tls")]
         if let Some(tls_config) = &self.tls_config { 
             if tls_config.use_https_redirection {
-                Self::run_https_redirection_middleware(socket, shutdown_sender.subscribe());
+                Self::run_https_redirection_middleware(
+                    socket, 
+                    tls_config.http_port,
+                    shutdown_sender.subscribe());
             }
         }
         
@@ -220,7 +232,7 @@ impl App {
 
     async fn handle_connection(stream: TcpStream, app_instance: Arc<AppInstance>) {
         #[cfg(not(feature = "tls"))]
-        Self::serve(stream, app_instance).await;
+        Self::serve(TokioIo::new(stream), app_instance).await;
         
         #[cfg(feature = "tls")]
         if let Some(acceptor) = app_instance.acceptor() {
@@ -232,16 +244,15 @@ impl App {
                 }
             };
             let io = TokioIo::new(stream);
-            Self::serve_tls(io, app_instance).await;
+            Self::serve(io, app_instance).await;
         } else {
-            Self::serve(stream, app_instance).await;
-        }
+            let io = TokioIo::new(stream);
+            Self::serve(io, app_instance).await;
+        };
     }
 
     #[inline]
-    async fn serve(stream: TcpStream, app_instance: Arc<AppInstance>) {
-        let io = TokioIo::new(stream);
-
+    async fn serve<I: Read + Write + Unpin>(io: I, app_instance: Arc<AppInstance>) {
         let server = Server::new(io);
         let scope = Scope::new(app_instance);
 
@@ -267,7 +278,14 @@ mod tests {
 
     #[test]
     fn it_creates_connection_with_specified_socket() {
-        let connection = Connection::new("127.0.0.1:5000");
+        let connection: Connection = "127.0.0.1:5000".into();
+
+        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 5000)));
+    }
+
+    #[test]
+    fn it_creates_connection_with_specified_socket_from_tuple() {
+        let connection: Connection = ([127, 0, 0, 1], 5000).into();
 
         assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 5000)));
     }

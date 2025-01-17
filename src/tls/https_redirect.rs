@@ -1,6 +1,6 @@
 ﻿//! HTTP to HTTPS redirection middleware
 
-use crate::{HttpResponse, permanent_redirect, status};
+use crate::{HttpResponse, status};
 use futures_util::future::BoxFuture;
 use std::io::{Error, ErrorKind::Other};
 
@@ -12,6 +12,12 @@ use hyper::{
     service::Service, 
     Uri
 };
+
+#[cfg(debug_assertions)]
+use crate::temp_redirect;
+
+#[cfg(not(debug_assertions))]
+use crate::permanent_redirect;
 
 /// Represents a middleware that redirects all HTTP requests to HTTPS
 pub(super) struct HttpsRedirectionMiddleware {
@@ -56,8 +62,14 @@ impl Service<Request<Incoming>> for HttpsRedirectionMiddleware {
                 
                 let uri = Uri::from_parts(uri_parts)
                     .map_err(HttpsRedirectionError::invalid_uri_parts)?;
-                
-                permanent_redirect!(uri.to_string())
+
+                // Link caching can cause unstable behavior in development environments. 
+                // So use temporary redirects rather than permanent redirects for debug mode
+                #[cfg(debug_assertions)]
+                let response = temp_redirect!(uri.to_string());
+                #[cfg(not(debug_assertions))]
+                let response = permanent_redirect!(uri.to_string());
+                response
             } else {
                 status!(404)
             }
