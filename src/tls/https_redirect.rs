@@ -62,7 +62,7 @@ impl Service<Request<Incoming>> for HttpsRedirectionMiddleware {
                 
                 let uri = Uri::from_parts(uri_parts)
                     .map_err(HttpsRedirectionError::invalid_uri_parts)?;
-
+                
                 // Link caching can cause unstable behavior in development environments. 
                 // So use temporary redirects rather than permanent redirects for debug mode
                 #[cfg(debug_assertions)]

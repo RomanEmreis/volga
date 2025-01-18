@@ -228,7 +228,6 @@ async fn it_works_with_tls_with_optional_auth_unauthenticated() {
 }
 
 #[tokio::test]
-#[cfg(target_os = "windows")]
 async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirection() {
     tokio::spawn(async {
         let mut app = App::new()
@@ -246,9 +245,14 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
     });
 
     let response = tokio::spawn(async {
+        use tokio::time::{sleep, Duration};
+        
+        // Giving a little more time for the task spawned above
+        sleep(Duration::from_millis(10)).await;
+        
         let ca_cert = include_bytes!("tls/ca.pem");
         let ca_certificate = Certificate::from_pem(ca_cert).unwrap();
-
+        
         let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
             reqwest::Client::builder()
                 .http1_only()
