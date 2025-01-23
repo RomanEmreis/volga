@@ -4,7 +4,7 @@ use futures_util::future::BoxFuture;
 
 use std::{
     io::Error,
-    sync::Arc
+    sync::Weak
 };
 
 use hyper::{
@@ -26,7 +26,7 @@ use crate::middleware::HttpContext;
 /// Represents the execution scope of the current connection
 #[derive(Clone)]
 pub(crate) struct Scope {
-    pub(crate) shared: Arc<AppInstance>,
+    pub(crate) shared: Weak<AppInstance>,
     pub(crate) cancellation_token: CancellationToken
 }
 
@@ -46,7 +46,7 @@ impl Service<Request<Incoming>> for Scope {
 }
 
 impl Scope {
-    pub(crate) fn new(shared: Arc<AppInstance>) -> Self {
+    pub(crate) fn new(shared: Weak<AppInstance>) -> Self {
         Self {
             cancellation_token: CancellationToken::new(),
             shared
@@ -55,9 +55,18 @@ impl Scope {
     
     pub(super) async fn handle_request(
         request: Request<Incoming>, 
-        shared: Arc<AppInstance>,
+        shared: Weak<AppInstance>,
         cancellation_token: CancellationToken
     ) -> io::Result<HttpResponse> {
+        let shared = match shared.upgrade() {
+            Some(shared) => shared,
+            None => {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("app instance could not be upgraded; aborting...");
+                return status!(500)
+            }
+        };
+        
         let pipeline = &shared.pipeline;
         match pipeline.endpoints().get_endpoint(request.method(), request.uri()) {
             RouteOption::RouteNotFound => status!(404),
@@ -89,13 +98,12 @@ impl Scope {
                 let response = handler.call(request).await;
 
                 match response {
-                    Ok(mut response) => {
-                        if request_method == Method::HEAD {
-                            Self::keep_content_length(response.size_hint(), response.headers_mut());
-                            *response.body_mut() = HttpBody::empty();
-                        }
+                    Ok(mut response) if request_method == Method::HEAD => {
+                        Self::keep_content_length(response.size_hint(), response.headers_mut());
+                        *response.body_mut() = HttpBody::empty();
                         response.into_response()
                     },
+                    Ok(response) => Ok(response),
                     Err(error) => error.into_response()
                 }
             }

@@ -8,7 +8,7 @@ pub use http_context::HttpContext;
 use crate::{
     App,
     HttpResult,
-    status
+    not_found
 };
 
 #[cfg(any(
@@ -69,7 +69,7 @@ impl Middlewares {
             let handler = request_handler.clone();
             // Call the last middleware, ignoring its `next` argument with an empty placeholder
             Box::pin(async move {
-                handler(ctx, Arc::new(|_| Box::pin(async { status!(404) }))).await
+                handler(ctx, Arc::new(|_| Box::pin(async { not_found!() }))).await
             })
         });
 
@@ -113,16 +113,15 @@ impl App {
         Fut: Future<Output = HttpResult> + Send,
     {
         let middleware = Arc::new(middleware);
-        let mw = Arc::new(move |ctx: HttpContext, next: Next| {
-            let middleware = middleware.clone(); // cloning for each invocation
-            Box::pin(async move {
-                // Here, middleware() can be invoked repeatedly because it’s wrapped in an Arc and cloned.
-                middleware(ctx, next).await
-            }) as BoxFuture<HttpResult>
+        let mw: MiddlewareFn = Arc::new(move |ctx: HttpContext, next: Next| {
+            let middleware = middleware.clone();
+            Box::pin(async move { middleware(ctx, next).await })
         });
 
-        let middlewares = self.pipeline.middlewares_mut();
-        middlewares.pipeline.push(mw);
+        self.pipeline
+            .middlewares_mut()
+            .pipeline
+            .push(mw);
         self
     }
 

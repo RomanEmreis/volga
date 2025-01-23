@@ -4,14 +4,15 @@ use std::{
     fmt, 
     io::{Result, Error, ErrorKind}, 
     net::SocketAddr, 
-    path::{Path, PathBuf}, 
-    time::Duration
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
 };
 
-use hyper_util::rt::TokioIo;
+use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::broadcast;
+use tokio::sync::watch;
 use tokio_rustls::{
     rustls::{
         pki_types::{
@@ -48,16 +49,23 @@ pub(super) mod https_redirect;
 const CERT_FILE_NAME: &str = "cert.pem";
 const KEY_FILE_NAME: &str = "key.pem";
 const DEFAULT_PORT: u16 = 7879;
+const DEFAULT_MAX_AGE: u64 = 30 * 24 * 60 * 60; // 30 days = 2,592,000 seconds
 
 /// Represents a TLS (Transport Layer Security) configuration options
 pub struct TlsConfig {
     pub cert: PathBuf,
     pub key: PathBuf,
-    pub use_https_redirection: bool,
-    pub http_port: u16,
+    pub https_redirection_config: RedirectionConfig,
     hsts_config: HstsConfig,
     client_auth: ClientAuth,
 }
+
+/// Represents an HTTPS redirection configuration options
+#[derive(Clone)]
+pub struct RedirectionConfig {
+    pub enabled: bool,
+    pub http_port: u16,
+} 
 
 /// Represents a HSTS (HTTP Strict Transport Security Protocol) configuration options
 pub struct HstsConfig {
@@ -67,10 +75,20 @@ pub struct HstsConfig {
     exclude_hosts: Vec<&'static str>
 }
 
+#[derive(Debug, PartialEq)]
 enum ClientAuth {
     None,
     Optional(PathBuf),
     Required(PathBuf)
+}
+
+impl Default for RedirectionConfig {
+    fn default() -> Self {
+        Self { 
+            enabled: false,
+            http_port: DEFAULT_PORT,
+        }
+    }
 }
 
 impl Default for HstsConfig {
@@ -78,7 +96,7 @@ impl Default for HstsConfig {
         Self {
             preload: true,
             include_sub_domains: true,
-            max_age: Duration::from_secs(30 * 24 * 60 * 60), // 30 days = 2,592,000 seconds
+            max_age: Duration::from_secs(DEFAULT_MAX_AGE), // 30 days = 2,592,000 seconds
             exclude_hosts: Vec::new()
         }
     }
@@ -90,8 +108,7 @@ impl Default for TlsConfig {
         let cert = path.join(CERT_FILE_NAME);
         let key = path.join(KEY_FILE_NAME);
         Self { 
-            http_port: DEFAULT_PORT,
-            use_https_redirection: false,
+            https_redirection_config: RedirectionConfig::default(),
             client_auth: ClientAuth::None,
             hsts_config: HstsConfig::default(),
             key, 
@@ -129,9 +146,8 @@ impl TlsConfig {
         let path = path.as_ref();
         let cert = path.join(CERT_FILE_NAME);
         let key = path.join(KEY_FILE_NAME);
-        Self { 
-            http_port: DEFAULT_PORT,
-            use_https_redirection: false,
+        Self {
+            https_redirection_config: RedirectionConfig::default(),
             client_auth: ClientAuth::None,
             hsts_config: HstsConfig::default(),
             key, 
@@ -145,16 +161,9 @@ impl TlsConfig {
             key: key_file_path.into(), 
             cert: cert_file_path.into(),
             client_auth: ClientAuth::None,
-            use_https_redirection: false,
-            http_port: DEFAULT_PORT,
+            https_redirection_config: RedirectionConfig::default(),
             hsts_config: HstsConfig::default(),
         }
-    }
-    
-    /// Configures the port for HTTP listener that redirects to HTTPS
-    pub fn with_http_port(mut self, port: u16) -> Self {
-        self.http_port = port;
-        self
     }
     
     /// Configure the path to the certificate
@@ -189,7 +198,13 @@ impl TlsConfig {
     /// 
     /// Default: `false`
     pub fn with_https_redirection(mut self) -> Self {
-        self.use_https_redirection = true;
+        self.https_redirection_config.enabled = true;
+        self
+    }
+
+    /// Configures the port for HTTP listener that redirects to HTTPS
+    pub fn with_http_port(mut self, port: u16) -> Self {
+        self.https_redirection_config.http_port = port;
         self
     }
     
@@ -355,15 +370,14 @@ impl App {
                     let http_result = next(ctx).await;
 
                     match http_result {
-                        Err(error) => Err(error),
-                        Ok(mut response) => {
-                            if !is_excluded(host.to_str().ok()) {
-                                response
-                                    .headers_mut()
-                                    .append(hsts_header, hsts_header_value.parse().unwrap());
-                            }
+                        Ok(mut response) if !is_excluded(host.to_str().ok()) => {
+                            response
+                                .headers_mut()
+                                .append(hsts_header, hsts_header_value.parse().unwrap());
                             Ok(response)
-                        }
+                        },
+                        Ok(response) => Ok(response),
+                        Err(error) => Err(error),
                     }
                 }
             });
@@ -371,32 +385,42 @@ impl App {
         self
     }
     
-    pub(super) fn run_https_redirection_middleware(socket: SocketAddr, http_port: u16, mut shutdown_signal: broadcast::Receiver<()>) {
+    pub(super) fn run_https_redirection_middleware(
+        socket: SocketAddr, 
+        http_port: u16,
+        shutdown_tx: Arc<watch::Sender<()>>
+    ) {
         tokio::spawn(async move {
             let https_port = socket.port();
             let socket = SocketAddr::new(socket.ip(), http_port);
-            println!("Start redirecting to HTTPS from {socket}");
+            #[cfg(feature = "tracing")]
+            tracing::info!("listening on: http://{socket}");
             
             if let Ok(tcp_listener) = TcpListener::bind(socket).await {
+                let graceful_shutdown = GracefulShutdown::new();
                 loop {
-                    tokio::select! {
-                        Ok((stream, _)) = tcp_listener.accept() => {
-                            tokio::spawn(Self::serve_http_redirection(https_port, stream));
-                        }
-                        _ = shutdown_signal.recv() => {
-                            println!("Stop redirecting to HTTPS");
-                            break;
-                        }
-                    }
+                    let (stream, _) = tokio::select! {
+                        _ = shutdown_tx.closed() => break,
+                        Ok(connection) = tcp_listener.accept() => connection
+                    };
+                    Self::serve_http_redirection(https_port, stream, &graceful_shutdown);
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(super::app::GRACEFUL_SHUTDOWN_TIMEOUT)) => (),
+                    _ = graceful_shutdown.shutdown() => {
+                        #[cfg(feature = "tracing")]
+                        tracing::info!("shutting down HTTPS redirection...");
+                    },
                 }
             } else {
-                eprintln!("Unable to start HTTPS redirection listener");
+                #[cfg(feature = "tracing")]
+                tracing::error!("unable to start HTTPS redirection listener");
             }
         });
     }
     
     #[inline]
-    async fn serve_http_redirection(https_port: u16, stream: TcpStream) {
+    fn serve_http_redirection(https_port: u16, stream: TcpStream, graceful_shutdown: &GracefulShutdown) {
         let io = TokioIo::new(stream);
 
         #[cfg(all(feature = "http1", not(feature = "http2")))]
@@ -411,10 +435,84 @@ impl App {
         let connection = connection_builder.serve_connection(
             io,
             HttpsRedirectionMiddleware::new(https_port));
-
-        if let Err(err) = connection.await {
-            eprintln!("Error serving connection: {:?}", err);
-        }
+        
+        let connection = graceful_shutdown.watch(connection);
+        tokio::spawn(async move {
+            if let Err(_err) = connection.await {
+                #[cfg(feature = "tracing")]
+                tracing::error!("error serving connection: {_err:#}");
+            }
+        });
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use super::{
+        TlsConfig, 
+        HstsConfig, 
+        RedirectionConfig,
+        ClientAuth,
+        KEY_FILE_NAME,
+        CERT_FILE_NAME,
+        DEFAULT_PORT,
+        DEFAULT_MAX_AGE
+    };
+    
+    #[test]
+    fn it_creates_new_tls_config() {
+        let tls_config = TlsConfig::new();
+        
+        let path = std::env::current_dir().unwrap_or_default();
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+        
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert!(tls_config.hsts_config.preload);
+        assert!(tls_config.hsts_config.include_sub_domains);
+        
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_creates_default_tls_config() {
+        let tls_config = TlsConfig::default();
+
+        let path = std::env::current_dir().unwrap_or_default();
+        
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert!(tls_config.hsts_config.preload);
+        assert!(tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_creates_default_hsts_config() {
+        let hsts_config = HstsConfig::default();
+
+        assert_eq!(hsts_config.exclude_hosts.len(), 0);
+        assert_eq!(hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert!(hsts_config.preload);
+        assert!(hsts_config.include_sub_domains);
+    }
+
+    #[test]
+    fn it_creates_default_redirect_config() {
+        let https_redirection_config = RedirectionConfig::default();
+
+        assert!(!https_redirection_config.enabled);
+        assert_eq!(https_redirection_config.http_port, DEFAULT_PORT);
+    }
+}

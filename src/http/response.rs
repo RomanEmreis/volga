@@ -184,7 +184,8 @@ impl Results {
                 );
             }
         } else if cfg!(debug_assertions) {
-            eprintln!("Failed to write to HTTP headers");
+            #[cfg(feature = "tracing")]
+            tracing::error!("failed to write to HTTP headers");
         }
         builder
     }

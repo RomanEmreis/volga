@@ -1,7 +1,12 @@
 ﻿use volga::{App, HttpRequest, stream};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+    
     let mut app = App::new();
 
     // Example of TRACE handler
