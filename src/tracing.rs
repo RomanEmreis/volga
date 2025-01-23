@@ -7,7 +7,14 @@ const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
 /// Represents a tracing configuration
 #[derive(Clone)]
 pub struct TracingConfig {
+    /// Specifies whether include a span id HTTP header
+    /// 
+    /// Default: `false`
     include_header: bool,
+    
+    /// Specifies a span id HTTP header name
+    /// 
+    /// Default: `request-id`
     span_header_name: &'static str,
 }
 

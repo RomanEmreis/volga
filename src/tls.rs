@@ -11,8 +11,12 @@ use std::{
 
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::watch;
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::watch,
+    time::sleep
+};
+
 use tokio_rustls::{
     rustls::{
         pki_types::{
@@ -53,28 +57,58 @@ const DEFAULT_MAX_AGE: u64 = 30 * 24 * 60 * 60; // 30 days = 2,592,000 seconds
 
 /// Represents a TLS (Transport Layer Security) configuration options
 pub struct TlsConfig {
+    /// Path to a certificate
     pub cert: PathBuf,
+    
+    /// Path to a private key
     pub key: PathBuf,
+    
+    /// HTTPS redirection configuration options
     pub https_redirection_config: RedirectionConfig,
+    
+    /// HSTS configuration options
     hsts_config: HstsConfig,
+    
+    /// Client Auth options
     client_auth: ClientAuth,
 }
 
 /// Represents an HTTPS redirection configuration options
 #[derive(Clone)]
 pub struct RedirectionConfig {
+    /// Specifies whether HTTPS redirection is enabled
+    /// 
+    /// Default: `false`
     pub enabled: bool,
+    
+    /// Specifies HTTP port for redirection middleware
+    /// 
+    /// Default: `7879`
     pub http_port: u16,
 } 
 
 /// Represents a HSTS (HTTP Strict Transport Security Protocol) configuration options
 pub struct HstsConfig {
+    /// Specifies whether include a `preload` to HSTS header
+    /// 
+    /// Default: `true`
     preload: bool,
+    
+    /// Specifies whether include a `includeSubDomains` to HSTS header
+    /// 
+    /// Default: `true`
     include_sub_domains: bool,
+    
+    /// Max age for HSTS header
+    /// 
+    /// Default: 30 days (2,592,000 seconds)
     max_age: Duration,
+    
+    /// A list of hosts names that will not add the HSTS header.
     exclude_hosts: Vec<&'static str>
 }
 
+/// Represents a types of Client Auth
 #[derive(Debug, PartialEq)]
 enum ClientAuth {
     None,
@@ -406,7 +440,7 @@ impl App {
                     Self::serve_http_redirection(https_port, stream, &graceful_shutdown);
                 }
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(super::app::GRACEFUL_SHUTDOWN_TIMEOUT)) => (),
+                    _ = sleep(Duration::from_secs(super::app::GRACEFUL_SHUTDOWN_TIMEOUT)) => (),
                     _ = graceful_shutdown.shutdown() => {
                         #[cfg(feature = "tracing")]
                         tracing::info!("shutting down HTTPS redirection...");
@@ -420,7 +454,11 @@ impl App {
     }
     
     #[inline]
-    fn serve_http_redirection(https_port: u16, stream: TcpStream, graceful_shutdown: &GracefulShutdown) {
+    fn serve_http_redirection(
+        https_port: u16, 
+        stream: TcpStream, 
+        graceful_shutdown: &GracefulShutdown
+    ) {
         let io = TokioIo::new(stream);
 
         #[cfg(all(feature = "http1", not(feature = "http2")))]
