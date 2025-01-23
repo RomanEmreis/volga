@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.4.8"
+version = "0.4.9"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -27,14 +27,16 @@ pin-project-lite = "0.2.16"
 tokio-rustls = { version = "0.26.1", default-features = false, features = ["tls12", "ring"], optional = true }
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = "0.7.13"
+tracing = { version = "0.1.41", default-features = false, optional = true }
 serde = "1.0.217"
-serde_json = "1.0.135"
+serde_json = "1.0.137"
 serde_urlencoded = "0.7.1"
 
 [dev-dependencies]
 reqwest = { version = "0.12.12", features = ["blocking", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
 serde = { version = "1.0.217", features = ["derive"] }
-uuid = { version = "1.12.0", features = ["v4"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+uuid = { version = "1.12.1", features = ["v4"] }
 
 [features]
 # Default HTTP/1 only server
@@ -42,10 +44,11 @@ default = ["http1"]
 # HTTP/1 and HTTP/2 server
 full = [
     "http1", 
-    "http2", 
+    "http2",
     "middleware", 
     "di",
     "tls",
+    "tracing",
     "multipart",
     "compression-full", 
     "decompression-full"
@@ -58,6 +61,7 @@ middleware = []
 di = []
 multipart = ["dep:multer"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
+tracing = ["dep:tracing"]
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]
@@ -149,6 +153,7 @@ path = "examples/http_request_handler.rs"
 [[example]]
 name = "trace_request"
 path = "examples/trace_request.rs"
+required-features = ["tracing"]
 
 [[example]]
 name = "dependency_injection"

@@ -1,27 +1,22 @@
 ﻿//! Main application entry point
+//! 
+use crate::server::Server;
+use self::pipeline::{Pipeline, PipelineBuilder};
+use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
+use std::net::IpAddr;
 
 use std::{
     future::Future,
     io::Error,
     net::SocketAddr,
-    sync::Arc
+    sync::{Arc, Weak}
 };
-use std::net::IpAddr;
-use hyper::rt::{Read, Write};
-use hyper_util::rt::TokioIo;
 
 use tokio::{
     io::self,
     net::{TcpListener, TcpStream},
     signal,
-    sync::broadcast
-};
-
-use crate::server::Server;
-
-use self::{
-    pipeline::{Pipeline, PipelineBuilder},
-    scope::Scope
+    sync::watch
 };
 
 #[cfg(feature = "di")]
@@ -33,10 +28,14 @@ use tokio_rustls::TlsAcceptor;
 #[cfg(feature = "tls")]
 use crate::tls::TlsConfig;
 
+#[cfg(feature = "tracing")]
+use crate::tracing::TracingConfig;
+
 pub mod router;
 pub(crate) mod pipeline;
 pub(crate) mod scope;
 
+pub(super) const GRACEFUL_SHUTDOWN_TIMEOUT: u64 = 10;
 const DEFAULT_PORT: u16 = 7878;
 
 /// The web application used to configure the HTTP pipeline, and routes.
@@ -53,11 +52,22 @@ const DEFAULT_PORT: u16 = 7878;
 ///}
 /// ```
 pub struct App {
+    /// Dependency Injection container builder
     #[cfg(feature = "di")]
     pub(super) container: ContainerBuilder,
+    
+    /// TLS configuration options
     #[cfg(feature = "tls")]
     pub(super) tls_config: Option<TlsConfig>,
+    
+    /// Tracing configuration options
+    #[cfg(feature = "tracing")]
+    pub(super) tracing_config: Option<TracingConfig>,
+    
+    /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
+    
+    /// TCP connection parameters
     connection: Connection
 }
 
@@ -95,11 +105,19 @@ impl<I: Into<IpAddr>> From<(I, u16)> for Connection {
 
 /// Contains a shared resources of running Web Server
 pub(crate) struct AppInstance {
+    /// Incoming TLS connection acceptor
     #[cfg(feature = "tls")]
     pub(super) acceptor: Option<TlsAcceptor>,
+    
+    /// Dependency Injection container
     #[cfg(feature = "di")]
     container: Container,
-    pipeline: Pipeline
+    
+    /// Graceful shutdown utilities
+    pub(super) graceful_shutdown: GracefulShutdown,
+    
+    /// Request/Middleware pipeline
+    pipeline: Pipeline,
 }
 
 impl TryFrom<App> for AppInstance {
@@ -116,12 +134,30 @@ impl TryFrom<App> for AppInstance {
         };
         let app_instance = Self {
             pipeline: app.pipeline.build(),
+            graceful_shutdown: GracefulShutdown::new(),
             #[cfg(feature = "di")]
             container: app.container.build(),
             #[cfg(feature = "tls")]
             acceptor
         };
         Ok(app_instance)
+    }
+}
+
+impl AppInstance {
+    /// Gracefully shutdown current instance
+    #[inline]
+    async fn shutdown(self) {
+        tokio::select! {
+            _ = self.graceful_shutdown.shutdown() => {
+                #[cfg(feature = "tracing")]
+                tracing::info!("shutting down the server...");
+            },
+            _ = tokio::time::sleep(std::time::Duration::from_secs(GRACEFUL_SHUTDOWN_TIMEOUT)) => {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("timed out wait for all connections to close");
+            }
+        }
     }
 }
 
@@ -147,6 +183,8 @@ impl App {
             container: ContainerBuilder::new(),
             #[cfg(feature = "tls")]
             tls_config: None,
+            #[cfg(feature = "tracing")]
+            tracing_config: None,
             pipeline:PipelineBuilder::new(),
             connection: Default::default()
         }
@@ -183,80 +221,94 @@ impl App {
     async fn run_internal(self) -> io::Result<()> {
         let socket = self.connection.socket;
         let tcp_listener = TcpListener::bind(socket).await?;
-        println!("Start listening: {socket}");
+        #[cfg(feature = "tracing")]
+        {
+            #[cfg(feature = "tls")]
+            if self.tls_config.is_some() { 
+                tracing::info!("listening on: https://{socket}")
+            } else { 
+                tracing::info!("listening on: http://{socket}") 
+            };
+            #[cfg(not(feature = "tls"))]
+            tracing::info!("listening on: http://{socket}");
+        }
 
-        let (shutdown_sender, mut shutdown_signal) = broadcast::channel::<()>(1);
-        Self::subscribe_for_ctrl_c_signal(&shutdown_sender);
+        let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
+        let shutdown_tx = Arc::new(shutdown_tx);
+        Self::shutdown_signal(shutdown_rx);
 
         #[cfg(feature = "tls")]
-        if let Some(tls_config) = &self.tls_config { 
-            if tls_config.use_https_redirection {
-                Self::run_https_redirection_middleware(
-                    socket, 
-                    tls_config.http_port,
-                    shutdown_sender.subscribe());
-            }
-        }
+        let redirection_config = self.tls_config
+            .as_ref()
+            .map(|config| config.https_redirection_config.clone());
         
         let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
-        loop {
-            tokio::select! {
-                Ok((stream, _)) = tcp_listener.accept() => {
-                    let app_instance = app_instance.clone();
-                    tokio::spawn(Self::handle_connection(stream, app_instance));
-                }
-                _ = shutdown_signal.recv() => {
-                    println!("Shutting down server...");
-                    break;
-                }
+        
+        #[cfg(feature = "tls")]
+        if let Some(redirection_config) = redirection_config {
+            if redirection_config.enabled {
+                Self::run_https_redirection_middleware(
+                    socket,
+                    redirection_config.http_port,
+                    shutdown_tx.clone());
             }
+        }
+
+        loop {
+            let (stream, _) = tokio::select! {
+                Ok(connection) = tcp_listener.accept() => connection,
+                _ = shutdown_tx.closed() => break,
+            };
+            
+            let instance = Arc::downgrade(&app_instance);
+            tokio::spawn(Self::handle_connection(stream, instance));
+        }
+    
+        drop(tcp_listener);
+
+        if let Some(app_instance) = Arc::into_inner(app_instance) {
+            app_instance.shutdown().await;
         }
         Ok(())
     }
-
+    
     #[inline]
-    fn subscribe_for_ctrl_c_signal(shutdown_sender: &broadcast::Sender<()>) {
-        let ctrl_c_shutdown_sender = shutdown_sender.clone();
+    fn shutdown_signal(shutdown_rx: watch::Receiver<()>) {
         tokio::spawn(async move {
             match signal::ctrl_c().await {
                 Ok(_) => (),
-                Err(err) => eprintln!("Unable to listen for shutdown signal: {}", err)
-            };
-
-            match ctrl_c_shutdown_sender.send(()) {
-                Ok(_) => (),
-                Err(err) => eprintln!("Failed to send shutdown signal: {}", err)
+                #[cfg(feature = "tracing")]
+                Err(err) => tracing::error!("unable to listen for shutdown signal: {}", err),
+                #[cfg(not(feature = "tracing"))]
+                Err(_) => ()
             }
+            #[cfg(feature = "tracing")]
+            tracing::trace!("shutdown signal received, not accepting new requests");
+            drop(shutdown_rx); 
         });
     }
 
-    async fn handle_connection(stream: TcpStream, app_instance: Arc<AppInstance>) {
+    #[inline]
+    async fn handle_connection(stream: TcpStream, app_instance: Weak<AppInstance>) {
         #[cfg(not(feature = "tls"))]
-        Self::serve(TokioIo::new(stream), app_instance).await;
+        Server::new(TokioIo::new(stream)).serve(app_instance).await;
         
         #[cfg(feature = "tls")]
-        if let Some(acceptor) = app_instance.acceptor() {
+        if let Some(acceptor) = app_instance.upgrade().and_then(|app| app.acceptor()) {
             let stream = match acceptor.accept(stream).await {
                 Ok(tls_stream) => tls_stream,
                 Err(err) => {
-                    eprintln!("failed to perform tls handshake: {err:#}");
+                    #[cfg(feature = "tracing")]
+                    tracing::error!("failed to perform tls handshake: {err:#}");
                     return;
                 }
             };
             let io = TokioIo::new(stream);
-            Self::serve(io, app_instance).await;
+            Server::new(io).serve(app_instance).await;
         } else {
             let io = TokioIo::new(stream);
-            Self::serve(io, app_instance).await;
+            Server::new(io).serve(app_instance).await;
         };
-    }
-
-    #[inline]
-    async fn serve<I: Read + Write + Unpin>(io: I, app_instance: Arc<AppInstance>) {
-        let server = Server::new(io);
-        let scope = Scope::new(app_instance);
-
-        server.serve(scope).await;
     }
 }
 
