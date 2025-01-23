@@ -61,7 +61,7 @@ middleware = []
 di = []
 multipart = ["dep:multer"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
-tracing = ["dep:tracing"]
+tracing = ["middleware", "dep:tracing"]
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]
@@ -183,3 +183,8 @@ required-features = ["multipart"]
 name = "tls"
 path = "examples/tls.rs"
 required-features = ["tls"]
+
+[[example]]
+name = "tracing"
+path = "examples/tracing.rs"
+required-features = ["tracing"]
