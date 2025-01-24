@@ -37,6 +37,7 @@ reqwest = { version = "0.12.12", features = ["blocking", "json", "http2", "brotl
 serde = { version = "1.0.217", features = ["derive"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 uuid = { version = "1.12.1", features = ["v4"] }
+criterion = { version = "0.5.1", features = ["async_tokio", ] }
 
 [features]
 # Default HTTP/1 only server
@@ -75,6 +76,10 @@ decompression-zstd = ["middleware", "async-compression/zstd"]
 
 [package.metadata.docs.rs]
 all-features = true
+
+[[bench]]
+name = "server"
+harness = false
 
 [[test]]
 name = "middleware_mapping_tests"
