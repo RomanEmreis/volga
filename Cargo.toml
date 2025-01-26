@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.4.9"
+version = "0.4.10"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -192,4 +192,9 @@ required-features = ["tls"]
 [[example]]
 name = "tracing"
 path = "examples/tracing.rs"
+required-features = ["tracing"]
+
+[[example]]
+name = "global_error_handler"
+path = "examples/global_error_handler.rs"
 required-features = ["tracing"]

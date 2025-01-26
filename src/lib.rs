@@ -12,7 +12,7 @@
 //! ## Example
 //! ```toml
 //! [dependencies]
-//! volga = "0.4.9"
+//! volga = "0.4.10"
 //! tokio = { version = "1", features = ["full"] }
 //! ```
 //! ```no_run
@@ -41,6 +41,7 @@ pub mod app;
 pub mod http;
 pub mod headers;
 pub mod json;
+pub mod error;
 #[cfg(feature = "di")]
 pub mod di;
 #[cfg(feature = "middleware")]

@@ -16,10 +16,24 @@ async fn main() -> std::io::Result<()> {
     
     let mut app = App::new()
         .with_tracing(tracing);
+
+    // this middleware won't be in the request span scope 
+    // since it's defined above the tracing middleware
+    app.use_middleware(|ctx, next| async move {
+        trace!("inner middleware");
+        next(ctx).await
+    });
     
     // Enable tracing middleware
     app.use_tracing();
 
+    // this middleware will be in the request span scope 
+    // since it's defined below the tracing middleware
+    app.use_middleware(|ctx, next| async move {
+        trace!("inner middleware");
+        next(ctx).await
+    });
+    
     app.map_get("/tracing", || async {
         trace!("handling the request!");
         "Done!"

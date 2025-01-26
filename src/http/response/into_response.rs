@@ -5,7 +5,7 @@ use crate::headers::CONTENT_TYPE;
 use mime::TEXT_PLAIN_UTF_8;
 
 use std::{
-    io::{Error, ErrorKind::InvalidInput},
+    io::Error,
     convert::Infallible,
     borrow::Cow
 };
@@ -33,11 +33,7 @@ impl IntoResponse for () {
 impl IntoResponse for Error {
     #[inline]
     fn into_response(self) -> HttpResult {
-        if self.kind() == InvalidInput {
-            status!(400, self.to_string())
-        } else {
-            status!(500, self.to_string())
-        } 
+        Err(self)
     }
 }
 
@@ -172,6 +168,13 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_converts_err_into_response() {
+        let response = Error::new(ErrorKind::InvalidInput, "some error").into_response();
+
+        assert!(response.is_err());
+    }
+    
+    #[tokio::test]
     async fn it_converts_ok_result_into_response() {
         let response = Result::<&str, Error>::Ok("test").into_response();
 
@@ -185,29 +188,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_converts_input_err_result_into_response() {
+    async fn it_converts_err_result_into_response() {
         let response = Result::<&str, Error>::Err(Error::new(ErrorKind::InvalidInput, "some error")).into_response();
 
-        assert!(response.is_ok());
-        let mut response = response.unwrap();
-        let body = &response.body_mut().collect().await.unwrap().to_bytes();
-
-        assert_eq!(String::from_utf8_lossy(body), "\"some error\"");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
-        assert_eq!(response.status(), 400);
-    }
-
-    #[tokio::test]
-    async fn it_converts_err_result_into_response() {
-        let response = Result::<&str, Error>::Err(Error::new(ErrorKind::InvalidData, "some error")).into_response();
-
-        assert!(response.is_ok());
-        let mut response = response.unwrap();
-        let body = &response.body_mut().collect().await.unwrap().to_bytes();
-
-        assert_eq!(String::from_utf8_lossy(body), "\"some error\"");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
-        assert_eq!(response.status(), 500);
+        assert!(response.is_err());
     }
 
     #[tokio::test]

@@ -1,4 +1,6 @@
 ﻿use crate::app::{App, AppInstance};
+use futures_util::TryFutureExt;
+use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 
 use std::{
     fmt, 
@@ -8,8 +10,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-
-use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -401,17 +401,20 @@ impl App {
                 
                 async move {
                     let host = ctx.extract::<Header<Host>>()?;
-                    let http_result = next(ctx).await;
+                    let error_handler = ctx.error_handler.clone();
+                    let http_result = next(ctx)
+                        .or_else(|err| async { error_handler.call(err).await })
+                        .await;
 
-                    match http_result {
-                        Ok(mut response) if !is_excluded(host.to_str().ok()) => {
+                    if !is_excluded(host.to_str().ok()) {
+                        http_result.map(|mut response| {
                             response
                                 .headers_mut()
                                 .append(hsts_header, hsts_header_value.parse().unwrap());
-                            Ok(response)
-                        },
-                        Ok(response) => Ok(response),
-                        Err(error) => Err(error),
+                            response
+                        })
+                    } else { 
+                        http_result
                     }
                 }
             });
