@@ -6,6 +6,7 @@ use crate::http::endpoints::{
 };
 
 use crate::{
+    error::PipelineErrorHandler,
     headers::{Header, FromHeaders},
     HttpRequest, 
     HttpResult
@@ -19,19 +20,25 @@ use crate::di::Inject;
 pub struct HttpContext {
     /// Current HTTP request
     pub request: HttpRequest,
+    /// Global Request/Middleware error handler
+    pub(crate) error_handler: PipelineErrorHandler,
     /// Current handler that mapped to handle the HTTP request
-    handler: RouteHandler
+    handler: RouteHandler,
 }
 
 impl HttpContext {
     /// Creates a new [`HttpContext`]
-    pub(crate) fn new(request: HttpRequest, handler: RouteHandler) -> Self {
-        Self { request, handler }
+    pub(crate) fn new(
+        request: HttpRequest,
+        handler: RouteHandler, 
+        error_handler: PipelineErrorHandler
+    ) -> Self {
+        Self { request, handler, error_handler }
     }
     
     #[allow(dead_code)]
-    pub(super) fn into_parts(self) -> (HttpRequest, RouteHandler) {
-        (self.request, self.handler)
+    pub(super) fn into_parts(self) -> (HttpRequest, RouteHandler, PipelineErrorHandler) {
+        (self.request, self.handler, self.error_handler)
     }
     
     /// Extracts a payload from request parts

@@ -1,5 +1,5 @@
 ﻿use crate::App;
-
+use futures_util::TryFutureExt;
 use tracing::{Instrument, trace_span};
 
 const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
@@ -87,22 +87,28 @@ impl App {
         self.use_middleware(move |ctx, next| {
             let tracing_config = tracing_config.clone();
             async move {
-                let span = trace_span!("request");
+                let method = ctx.request.method();
+                let path = ctx.request.uri();
+                
+                let span = trace_span!("request", %method, %path);
                 let span_id = span.id();
+                let error_handler = ctx.error_handler.clone();
                 
-                let http_result = next(ctx).instrument(span).await;
-                
-                match (span_id, http_result) {
-                    (Some(span_id), Ok(mut response)) if tracing_config.include_header => {
+                let http_result = next(ctx)
+                    .or_else(|err| async { error_handler.call(err).await })
+                    .instrument(span)
+                    .await;
+
+                if tracing_config.include_header && span_id.is_some() {
+                    http_result.map(|mut response| {
                         response.headers_mut().append(
                             tracing_config.span_header_name,
-                            span_id.into_u64().into(),
-                        );
-                        Ok(response)
-                    },
-                    (_, Err(e)) => Err(e),
-                    (_, Ok(response)) => Ok(response)
-                }
+                            span_id.map_or(0, |id| id.into_u64()).into());
+                        response
+                    })
+                } else { 
+                    http_result
+                } 
             }
         })
     }

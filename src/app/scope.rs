@@ -16,10 +16,15 @@ use hyper::{
     HeaderMap
 };
 
-use crate::{HttpResponse, HttpRequest, HttpBody, status};
-use crate::app::AppInstance;
-use crate::http::endpoints::RouteOption;
-use crate::http::IntoResponse;
+use crate::{
+    app::AppInstance,
+    http::endpoints::RouteOption,
+    HttpResponse, 
+    HttpRequest, 
+    HttpBody, 
+    status
+};
+
 #[cfg(feature = "middleware")]
 use crate::middleware::HttpContext;
 
@@ -87,24 +92,26 @@ impl Scope {
                 
                 let request_method = request.method().clone();
 
+                let error_handler = pipeline.error_handler();
+                
                 #[cfg(feature = "middleware")]
                 let response = if pipeline.has_middleware_pipeline() {
-                    let ctx = HttpContext::new(request, handler);
+                    let ctx = HttpContext::new(request, handler, error_handler.clone());
                     pipeline.execute(ctx).await
                 } else {
                     handler.call(request).await
                 };
                 #[cfg(not(feature = "middleware"))]
                 let response = handler.call(request).await;
-
+                
                 match response {
-                    Ok(mut response) if request_method == Method::HEAD => {
+                    Err(error) => error_handler.call(error).await,
+                    Ok(response) if request_method != Method::HEAD => Ok(response),
+                    Ok(mut response) => {
                         Self::keep_content_length(response.size_hint(), response.headers_mut());
                         *response.body_mut() = HttpBody::empty();
-                        response.into_response()
-                    },
-                    Ok(response) => Ok(response),
-                    Err(error) => error.into_response()
+                        Ok(response)
+                    }
                 }
             }
         }

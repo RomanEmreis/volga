@@ -1,4 +1,7 @@
-﻿use crate::http::endpoints::Endpoints;
+﻿use crate::{
+    error::{ErrorFunc, PipelineErrorHandler, default_error_handler},
+    http::endpoints::Endpoints
+};
 
 #[cfg(feature = "middleware")]
 use crate::{
@@ -9,13 +12,15 @@ use crate::{
 pub(crate) struct PipelineBuilder {
     #[cfg(feature = "middleware")]
     middlewares: Middlewares,
-    endpoints: Endpoints
+    endpoints: Endpoints,
+    error_handler: PipelineErrorHandler
 }
 
 pub(crate) struct Pipeline {
     #[cfg(feature = "middleware")]
     start: Option<Next>,
-    endpoints: Endpoints
+    endpoints: Endpoints,
+    error_handler: PipelineErrorHandler
 }
 
 impl PipelineBuilder {
@@ -23,13 +28,17 @@ impl PipelineBuilder {
     pub(super) fn new() -> Self {
         Self {
             middlewares: Middlewares::new(),
-            endpoints: Endpoints::new()
+            endpoints: Endpoints::new(),
+            error_handler: ErrorFunc(default_error_handler).into()
         }
     }
 
     #[cfg(not(feature = "middleware"))]
     pub(super) fn new() -> Self {
-        Self { endpoints: Endpoints::new() }
+        Self { 
+            endpoints: Endpoints::new(),
+            error_handler: ErrorFunc(default_error_handler).into()
+        }
     }
 
     #[cfg(feature = "middleware")]
@@ -37,13 +46,17 @@ impl PipelineBuilder {
         let start = self.middlewares.compose();
         Pipeline {
             endpoints: self.endpoints,
+            error_handler: self.error_handler,
             start
         }
     }
 
     #[cfg(not(feature = "middleware"))]
     pub(super) fn build(self) -> Pipeline {
-        Pipeline { endpoints: self.endpoints }
+        Pipeline { 
+            endpoints: self.endpoints,
+            error_handler: self.error_handler
+        }
     }
 
     #[cfg(feature = "middleware")]
@@ -59,12 +72,21 @@ impl PipelineBuilder {
     pub(super) fn endpoints_mut(&mut self) -> &mut Endpoints {
         &mut self.endpoints
     }
+    
+    pub(crate) fn set_error_handler(&mut self, handler: PipelineErrorHandler) {
+        self.error_handler = handler;
+    }
 }
 
 impl Pipeline {
     #[inline]
     pub(crate) fn endpoints(&self) -> &Endpoints {
         &self.endpoints
+    }
+
+    #[inline]
+    pub(super) fn error_handler(&self) -> PipelineErrorHandler {
+        self.error_handler.clone()
     }
     
     #[cfg(feature = "middleware")]
