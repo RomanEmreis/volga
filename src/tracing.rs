@@ -103,7 +103,7 @@ impl App {
                     http_result.map(|mut response| {
                         response.headers_mut().append(
                             tracing_config.span_header_name,
-                            span_id.unwrap().into_u64().into());
+                            span_id.map_or(0, |id| id.into_u64()).into());
                         response
                     })
                 } else { 
