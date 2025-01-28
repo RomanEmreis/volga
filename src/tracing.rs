@@ -1,4 +1,4 @@
-﻿use crate::App;
+﻿use crate::{App, error::call_weak_err_handler};
 use futures_util::TryFutureExt;
 use tracing::{Instrument, trace_span};
 
@@ -95,7 +95,7 @@ impl App {
                 let error_handler = ctx.error_handler.clone();
                 
                 let http_result = next(ctx)
-                    .or_else(|err| async { error_handler.call(err).await })
+                    .or_else(|err| async { call_weak_err_handler(error_handler, err).await })
                     .instrument(span)
                     .await;
 

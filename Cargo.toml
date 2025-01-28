@@ -51,6 +51,7 @@ full = [
     "tls",
     "tracing",
     "multipart",
+    "problem-details",
     "compression-full", 
     "decompression-full"
 ]
@@ -63,6 +64,7 @@ di = []
 multipart = ["dep:multer"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]
+problem-details = []
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]
@@ -197,4 +199,4 @@ required-features = ["tracing"]
 [[example]]
 name = "global_error_handler"
 path = "examples/global_error_handler.rs"
-required-features = ["tracing"]
+required-features = ["tracing", "problem-details"]

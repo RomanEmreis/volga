@@ -18,10 +18,11 @@ use hyper::{
 
 use crate::{
     app::AppInstance,
+    error::call_weak_err_handler,
     http::endpoints::RouteOption,
-    HttpResponse, 
-    HttpRequest, 
-    HttpBody, 
+    HttpResponse,
+    HttpRequest,
+    HttpBody,
     status
 };
 
@@ -91,7 +92,6 @@ impl Scope {
                 extensions.insert(params);
                 
                 let request_method = request.method().clone();
-
                 let error_handler = pipeline.error_handler();
                 
                 #[cfg(feature = "middleware")]
@@ -105,7 +105,7 @@ impl Scope {
                 let response = handler.call(request).await;
                 
                 match response {
-                    Err(error) => error_handler.call(error).await,
+                    Err(err) => call_weak_err_handler(error_handler, err).await,
                     Ok(response) if request_method != Method::HEAD => Ok(response),
                     Ok(mut response) => {
                         Self::keep_content_length(response.size_hint(), response.headers_mut());

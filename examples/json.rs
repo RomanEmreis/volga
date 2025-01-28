@@ -20,7 +20,7 @@ async fn main() -> std::io::Result<()> {
     // Return untyped JSON
     // GET /health
     app.map_get("/health", || async {
-        ok!({ "status": "healthy" }) // { status: "healthy" }
+        ok! { "status": "healthy" } // { status: "healthy" }
     });
     
     // Return strongly typed JSON
