@@ -1,6 +1,10 @@
-﻿use crate::app::{App, AppInstance};
-use futures_util::TryFutureExt;
+﻿use futures_util::TryFutureExt;
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
+use crate::{
+    App, 
+    app::AppInstance, 
+    error::call_weak_err_handler
+};
 
 use std::{
     fmt, 
@@ -403,7 +407,7 @@ impl App {
                     let host = ctx.extract::<Header<Host>>()?;
                     let error_handler = ctx.error_handler.clone();
                     let http_result = next(ctx)
-                        .or_else(|err| async { error_handler.call(err).await })
+                        .or_else(|err| async { call_weak_err_handler(error_handler, err).await })
                         .await;
 
                     if !is_excluded(host.to_str().ok()) {

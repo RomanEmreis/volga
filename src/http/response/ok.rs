@@ -73,6 +73,17 @@ macro_rules! ok {
         )
     };
     
+    // handles ok! { json }
+    { $($name:tt : $value:tt),* $(,)? } => {
+        $crate::response!(
+            $crate::http::StatusCode::OK,
+            $crate::HttpBody::json($crate::json::json_internal!({ $($name: $value),* })),
+            [
+                ($crate::headers::CONTENT_TYPE, "application/json"),
+            ]
+        )
+    };
+    
     // handles ok!({ json }, [("key", "val")])
     ({ $($json:tt)* }, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
@@ -178,7 +189,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_creates_anonymous_type_json_ok_response() {
+    async fn it_creates_anonymous_type_json_ok_variant_1_response() {
         let response = ok!({ "name": "test" });
 
         assert!(response.is_ok());
@@ -187,6 +198,22 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_creates_anonymous_type_json_ok_variant_2_response() {
+        let response = ok! { 
+            "name_1": 1,
+            "name_2": "test 2"
+        };
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "{\"name_1\":1,\"name_2\":\"test 2\"}");
         assert_eq!(response.status(), 200);
     }
 
