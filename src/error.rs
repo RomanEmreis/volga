@@ -1,84 +1,146 @@
 ﻿//! Error Handling tools
 
-use futures_util::future::BoxFuture;
-use super::{
-    App, 
-    http::IntoResponse, 
-    HttpResult,
-    status
-};
+use super::{App, http::{StatusCode, IntoResponse}};
 
 use std::{
-    future::Future,
-    io::{Error, ErrorKind::InvalidInput},
-    sync::{Arc, Weak}
+    convert::Infallible,
+    fmt,
+    future::Future, 
+    io::Error as IoError,
+    error::Error as StdError
 };
 use std::io::ErrorKind;
+pub use self::handler::{ErrorHandler, ErrorFunc};
+
 #[cfg(feature = "problem-details")]
 pub use self::problem::Problem;
 
+pub mod handler;
 #[cfg(feature = "problem-details")]
 pub mod problem;
 
-/// Holds a reference to global error handler
-pub(super) type PipelineErrorHandler = Arc<dyn ErrorHandler + Send + Sync>;
+type BoxError = Box<
+    dyn StdError 
+    + Send 
+    + Sync
+>;
 
-/// Weak version of [`PipelineErrorHandler`]
-pub(super) type WeakErrorHandler = Weak<dyn ErrorHandler + Send + Sync>;
-
-/// Default error handler that creates a [`HttpResult`] from [`std::io::Error`]
-#[inline]
-pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
-    if err.kind() == InvalidInput {
-        status!(400, err.to_string())
-    } else {
-        status!(500, err.to_string())
-    } 
+/// Generic error
+#[derive(Debug)]
+pub struct Error {
+    pub status: StatusCode,
+    pub instance: Option<String>,
+    pub(crate) inner: BoxError
 }
 
-#[inline]
-pub(crate) async fn call_weak_err_handler(error_handler: WeakErrorHandler, err: Error) -> HttpResult {
-    error_handler
-        .upgrade()
-        .ok_or(Error::new(ErrorKind::Other, "Server Error: error handler could not be upgraded"))?
-        .call(err)
-        .await
-}
-
-/// Trait for types that represents an error handler
-pub trait ErrorHandler {
-    fn call(&self, err: Error) -> BoxFuture<HttpResult>;
-}
-
-/// Owns a closure that handles an error
-pub struct ErrorFunc<F>(pub(super) F);
-
-impl<F, R, Fut> ErrorHandler for ErrorFunc<F>
-where
-    F: Fn(Error) -> Fut + Send + Sync,
-    R: IntoResponse,
-    Fut: Future<Output = R> + Send,
-{
-    #[inline]
-    fn call(&self, err: Error) -> BoxFuture<HttpResult> {
-        Box::pin(async move {
-            match self.0(err).await.into_response() { 
-                Ok(resp) => Ok(resp),
-                Err(err) => default_error_handler(err).await,
-            }
-        })
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
     }
 }
 
-impl<F, R, Fut> From<ErrorFunc<F>> for PipelineErrorHandler
-where
-    F: Fn(Error) -> Fut + Send + Sync + 'static,
-    R: IntoResponse,
-    Fut: Future<Output = R> + Send
-{
+impl StdError for Error {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(self.inner.as_ref())
+    }
+}
+
+impl From<Infallible> for Error {
+    fn from(infallible: Infallible) -> Error {
+        match infallible {}
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Error {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            inner: err.into(),
+            instance: None
+        }
+    }
+}
+
+impl From<IoError> for Error {
     #[inline]
-    fn from(func: ErrorFunc<F>) -> Self {
-        Arc::new(func)
+    fn from(err: IoError) -> Self {
+        let status = match err.kind() { 
+            ErrorKind::NotFound => StatusCode::NOT_FOUND,
+            ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
+            ErrorKind::ConnectionRefused => StatusCode::BAD_GATEWAY,
+            ErrorKind::ConnectionReset => StatusCode::BAD_GATEWAY,
+            ErrorKind::ConnectionAborted => StatusCode::BAD_GATEWAY,
+            ErrorKind::NotConnected => StatusCode::BAD_GATEWAY,
+            ErrorKind::AddrInUse => StatusCode::BAD_GATEWAY,
+            ErrorKind::AddrNotAvailable => StatusCode::BAD_GATEWAY,
+            ErrorKind::BrokenPipe => StatusCode::BAD_GATEWAY,
+            ErrorKind::AlreadyExists => StatusCode::CONFLICT,
+            ErrorKind::InvalidInput => StatusCode::BAD_REQUEST,
+            ErrorKind::InvalidData => StatusCode::BAD_REQUEST,
+            ErrorKind::TimedOut => StatusCode::REQUEST_TIMEOUT,
+            ErrorKind::Unsupported => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            _ => StatusCode::INTERNAL_SERVER_ERROR
+        };
+        
+        Self { 
+            instance: None, 
+            inner: err.into(),
+            status
+        }
+    }
+}
+
+impl From<Error> for IoError {
+    #[inline]
+    fn from(err: Error) -> Self {
+        Self::other(err)
+    }
+}
+
+impl Error {
+    /// Creates a new [`Error`]
+    pub fn new(instance: &str, err: impl Into<BoxError>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            inner: err.into(),
+            instance: Some(instance.into())
+        }
+    }
+    
+    /// Creates an internal server error
+    #[inline]
+    pub fn server_error(err: impl Into<BoxError>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            inner: err.into(),
+            instance: None
+        }
+    }
+
+    /// Creates a client error
+    #[inline]
+    pub fn client_error(err: impl Into<BoxError>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            inner: err.into(),
+            instance: None
+        }
+    }
+    
+    /// Creates [`Error`] from status code, instance and underlying error
+    #[inline]
+    pub fn from_parts(status: StatusCode, instance: Option<String>, err: impl Into<BoxError>) -> Self {
+        Self { status, instance, inner: err.into() }
+    }
+    
+    /// Unwraps the inner error
+    pub fn into_inner(self) -> BoxError {
+        self.inner
+    }
+    
+    /// Unwraps the error into a tuple of status code, instance value and underlying error
+    pub fn into_parts(self) -> (StatusCode, Option<String>, BoxError) {
+        (self.status, self.instance, self.inner)
     }
 }
 
@@ -87,8 +149,7 @@ impl App {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, status};
-    /// use std::io::Error;
+    /// use volga::{App, error::Error, status};
     /// 
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {

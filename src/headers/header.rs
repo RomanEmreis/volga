@@ -1,7 +1,7 @@
 //! Extractors for HTTP headers
 
 use futures_util::future::{Ready, ok, ready};
-use crate::HttpRequest;
+use crate::{error::Error, HttpRequest};
 
 use super::{
     FromHeaders, 
@@ -19,7 +19,6 @@ use crate::http::endpoints::args::{
 
 use std::{
     fmt::{Display, Formatter},
-    io::Error,
     marker::PhantomData,
     ops::{Deref, DerefMut}
 };

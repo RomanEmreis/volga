@@ -6,12 +6,11 @@ use serde::de::DeserializeOwned;
 
 use std::{
     fmt::{self, Display, Formatter},
-    io::{Error, ErrorKind::{InvalidData, InvalidInput}},
     ops::{Deref, DerefMut},
     str::FromStr
 };
 
-use crate::HttpRequest;
+use crate::{error::Error, HttpRequest};
 use crate::http::endpoints::{
     args::{FromPayload, FromRequestRef, Payload, Source},
     route::PathArguments
@@ -142,17 +141,17 @@ struct PathError;
 impl PathError {
     #[inline]
     fn from_serde_error(err: serde::de::value::Error) -> Error {
-        Error::new(InvalidInput, format!("Path parsing error: {}", err))
+        Error::client_error(format!("Path parsing error: {}", err))
     }
 
     #[inline]
     fn type_mismatch(arg: &str) -> Error {
-        Error::new(InvalidData, format!("Path parsing error: argument `{arg}` type mismatch"))
+        Error::client_error(format!("Path parsing error: argument `{arg}` type mismatch"))
     }
 
     #[inline]
     fn args_missing() -> Error {
-        Error::new(InvalidData, "Path parsing error: missing arguments")
+        Error::client_error("Path parsing error: missing arguments")
     }
 }
 

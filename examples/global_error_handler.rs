@@ -1,5 +1,5 @@
 ﻿use volga::{App, problem};
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 use tracing_subscriber::prelude::*;
 use volga::tracing::TracingConfig;
 
@@ -16,16 +16,17 @@ async fn main() -> std::io::Result<()> {
     
     app.map_get("/error", || async {
         tracing::trace!("producing error");
-        Error::new(ErrorKind::Other, "some error")
+        Error::other("some error")
     });
 
     // Enabling global error handler
     app.map_err(|error| async move {
         tracing::error!("{:?}", error);
+        let (status, instance, err) = error.into_parts();
         problem! {
-            "status": 500,
-            "detail": (error.to_string()),
-            "prop": "some val"
+            "status": status.as_u16(),
+            "detail": (err.to_string()),
+            "instance": instance,
         }
     });
 

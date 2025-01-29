@@ -5,17 +5,18 @@ use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
 
 use http_body_util::{combinators::Collect, BodyExt};
+use serde::Serialize;
+use crate::{error::Error, HttpBody};
 
 use std::{
     future::Future,
     fmt::{self, Display, Formatter},
-    io::{Error, ErrorKind::InvalidInput},
     marker::PhantomData,
     ops::{Deref, DerefMut},
     pin::Pin,
     task::{Context, Poll}
 };
-use serde::Serialize;
+
 use crate::http::{
     endpoints::args::{
         FromPayload,
@@ -23,7 +24,6 @@ use crate::http::{
         Source
     }
 };
-use crate::HttpBody;
 
 /// Wraps typed JSON data
 ///
@@ -126,12 +126,12 @@ struct JsonError;
 impl JsonError {
     #[inline]
     fn from_serde_error(err: serde_json::Error) -> Error {
-        Error::new(InvalidInput, format!("JSON parsing error: {}", err))
+        Error::client_error(format!("JSON parsing error: {}", err))
     }
 
     #[inline]
-    fn collect_error(err: Error) -> Error {
-        Error::new(InvalidInput, format!("JSON parsing error: {}", err))
+    fn collect_error(err: std::io::Error) -> Error {
+        Error::client_error(format!("JSON parsing error: {}", err))
     }
 }
 

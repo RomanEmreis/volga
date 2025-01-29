@@ -1,11 +1,6 @@
-﻿use tokio::io;
-use tokio_util::sync::CancellationToken;
+﻿use tokio_util::sync::CancellationToken;
 use futures_util::future::BoxFuture;
-
-use std::{
-    io::Error,
-    sync::Weak
-};
+use std::sync::Weak;
 
 use hyper::{
     header::{HeaderValue, CONTENT_LENGTH, ALLOW}, 
@@ -17,12 +12,10 @@ use hyper::{
 };
 
 use crate::{
-    app::AppInstance,
-    error::call_weak_err_handler,
+    app::AppInstance, 
+    error::{Error, handler::call_weak_err_handler}, 
     http::endpoints::RouteOption,
-    HttpResponse,
-    HttpRequest,
-    HttpBody,
+    HttpResponse, HttpRequest, HttpBody, HttpResult,
     status
 };
 
@@ -63,7 +56,7 @@ impl Scope {
         request: Request<Incoming>, 
         shared: Weak<AppInstance>,
         cancellation_token: CancellationToken
-    ) -> io::Result<HttpResponse> {
+    ) -> HttpResult {
         let shared = match shared.upgrade() {
             Some(shared) => shared,
             None => {
@@ -92,6 +85,7 @@ impl Scope {
                 extensions.insert(params);
                 
                 let request_method = request.method().clone();
+                let uri = request.uri().clone();
                 let error_handler = pipeline.error_handler();
                 
                 #[cfg(feature = "middleware")]
@@ -105,7 +99,7 @@ impl Scope {
                 let response = handler.call(request).await;
                 
                 match response {
-                    Err(err) => call_weak_err_handler(error_handler, err).await,
+                    Err(err) => call_weak_err_handler(error_handler, &uri, err).await,
                     Ok(response) if request_method != Method::HEAD => Ok(response),
                     Ok(mut response) => {
                         Self::keep_content_length(response.size_hint(), response.headers_mut());

@@ -26,6 +26,6 @@ macro_rules! response {
             .header($key, $value)
         )*
             .body($body)
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, $crate::RESPONSE_ERROR))
+            .map_err(|_| $crate::error::Error::server_error($crate::RESPONSE_ERROR))
     };
 }

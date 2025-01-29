@@ -1,6 +1,9 @@
 ﻿use std::sync::Arc;
 use crate::{
-    error::{ErrorFunc, PipelineErrorHandler, default_error_handler},
+    error::{
+        ErrorFunc, 
+        handler::{PipelineErrorHandler, WeakErrorHandler, default_error_handler}
+    },
     http::endpoints::Endpoints
 };
 
@@ -9,7 +12,6 @@ use crate::{
     middleware::{Middlewares, HttpContext, Next},
     HttpResult
 };
-use crate::error::WeakErrorHandler;
 
 pub(crate) struct PipelineBuilder {
     #[cfg(feature = "middleware")]

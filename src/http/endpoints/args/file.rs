@@ -5,12 +5,9 @@ use futures_util::future::{ok, Ready};
 use http_body_util::BodyExt;
 use hyper::body::Body;
 use tokio::io::{AsyncWriteExt, BufWriter};
+use std::path::Path;
 
-use std::{
-    io::{Error, ErrorKind::{InvalidInput, InvalidData}},
-    path::Path
-};
-
+use crate::{error::Error, headers::CONTENT_DISPOSITION};
 use crate::http::{
     HttpBody,
     endpoints::args::{
@@ -19,7 +16,6 @@ use crate::http::{
         Source
     }
 };
-use crate::headers::CONTENT_DISPOSITION;
 
 /// See [`FileStream<B>`] for more details.
 pub type File = FileStream<HttpBody>;
@@ -66,7 +62,7 @@ impl<B: Body<Data = Bytes> + Unpin> FileStream<B> {
     /// # }
     /// ```
     #[inline]
-    pub async fn save(self, path: impl AsRef<Path>) -> Result<(), Error> {
+    pub async fn save(self, path: impl AsRef<Path>) -> Result<(), std::io::Error> {
         let file_name = self.name().ok_or(FileStreamError::missing_name())?;
         let file_path = path.as_ref().join(file_name);
         
@@ -86,7 +82,7 @@ impl<B: Body<Data = Bytes> + Unpin> FileStream<B> {
     /// # }
     /// ```
     #[inline]
-    pub async fn save_as(self, file_path: impl AsRef<Path>) -> Result<(), Error> {
+    pub async fn save_as(self, file_path: impl AsRef<Path>) -> Result<(), std::io::Error> {
         let file = tokio::fs::File::create(file_path).await?;
         
         let mut writer = BufWriter::new(file);
@@ -150,13 +146,14 @@ struct FileStreamError;
 
 impl FileStreamError {
     #[inline]
-    fn read_error() -> Error {
-        Error::new(InvalidInput, "File Stream error: Unable to read a file")
+    fn read_error() -> std::io::Error {
+        use std::io::{Error, ErrorKind};
+        Error::new(ErrorKind::InvalidInput, "File Stream error: Unable to read a file")
     }
 
     #[inline]
     fn missing_name() -> Error {
-        Error::new(InvalidData, "File Stream error: file name is missing in the \"Content-Disposition\" header")
+        Error::client_error("File Stream error: file name is missing in the \"Content-Disposition\" header")
     }
 }
 

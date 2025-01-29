@@ -5,13 +5,12 @@ use serde::de::DeserializeOwned;
 
 use std::{
     fmt::{self, Display, Formatter},
-    io::{Error, ErrorKind::InvalidInput},
     ops::{Deref, DerefMut}
 };
 
 use hyper::Uri;
 
-use crate::HttpRequest;
+use crate::{error::Error, HttpRequest};
 use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source};
 
 /// Wraps typed data extracted from [`Uri`]
@@ -66,7 +65,7 @@ impl<T: DeserializeOwned> Query<T> {
     pub(crate) fn from_query_str(query_str: &str) -> Result<Self, Error> {
         serde_urlencoded::from_str::<T>(query_str)
             .map(Query)
-            .map_err(QueryError::from_serde_error)
+            .map_err(QueryError::from)
     }
 
     /// Parses the request [`Uri`] into [`Query<T>`]
@@ -107,11 +106,9 @@ impl<T: DeserializeOwned + Send> FromPayload for Query<T> {
 
 /// Describes errors of query extractor
 struct QueryError;
-
 impl QueryError {
-    #[inline]
-    fn from_serde_error(err: serde::de::value::Error) -> Error {
-        Error::new(InvalidInput, format!("Query parsing error: {}", err))
+    fn from(err: serde::de::value::Error) -> Error {
+        Error::client_error(format!("Query parsing error: {}", err))
     }
 }
 

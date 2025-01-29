@@ -1,4 +1,6 @@
 ﻿use crate::{builder, response, RESPONSE_ERROR};
+use crate::error::Error;
+use crate::http::body::{BoxBody, HttpBody};
 
 use std::collections::HashMap;
 use tokio::{fs::File, io};
@@ -16,8 +18,6 @@ use mime::{
     APPLICATION_OCTET_STREAM,
     TEXT_PLAIN
 };
-
-use crate::http::body::{BoxBody, HttpBody};
 
 pub mod builder;
 pub mod macros;
@@ -66,7 +66,8 @@ pub struct ResponseContext<T: Serialize> {
 }
 
 pub type HttpResponse = Response<HttpBody>;
-pub type HttpResult = io::Result<HttpResponse>;
+//pub type HttpResult = io::Result<HttpResponse>;
+pub type HttpResult = Result<HttpResponse, Error>;
 pub struct HttpResultWrapper(io::Result<HttpResponse>);
 pub type HttpHeaders = HashMap<String, String>;
 
@@ -200,7 +201,7 @@ impl<T: Serialize> From<ResponseContext<T>> for HttpResult {
 
         Results::create_custom_builder(status, headers)
             .body(HttpBody::full(content))
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, RESPONSE_ERROR))
+            .map_err(|_| Error::server_error(RESPONSE_ERROR))
     }
 }
 

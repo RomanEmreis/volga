@@ -8,14 +8,13 @@ use serde::de::DeserializeOwned;
 use std::{
     future::Future,
     fmt::{self, Display, Formatter},
-    io::{Error, ErrorKind::InvalidInput},
     marker::PhantomData,
     ops::{Deref, DerefMut},
     pin::Pin,
     task::{Context, Poll}
 };
 use serde::Serialize;
-use crate::HttpBody;
+use crate::{error::Error, HttpBody};
 use crate::http::endpoints::args::{FromPayload, Payload, Source};
 
 /// Wraps typed data extracted from [`Uri`]
@@ -118,16 +117,15 @@ impl<T: DeserializeOwned + Send> FromPayload for Form<T> {
 
 /// Describes errors of form data extractor
 struct FormError;
-
 impl FormError {
     #[inline]
     fn from_serde_error(err: serde::de::value::Error) -> Error {
-        Error::new(InvalidInput, format!("Form Data parsing error: {}", err))
+        Error::client_error(format!("Form Data parsing error: {}", err))
     }
 
     #[inline]
-    fn collect_error(err: Error) -> Error {
-        Error::new(InvalidInput, format!("Form Data parsing error: {}", err))
+    fn collect_error(err: std::io::Error) -> Error {
+        Error::client_error(format!("Form Data parsing error: {}", err))
     }
 }
 

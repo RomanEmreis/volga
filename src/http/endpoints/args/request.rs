@@ -1,7 +1,6 @@
 ﻿//! Extractors for the whole HTTP request
 
-use crate::HttpRequest;
-use std::io::Error;
+use crate::{error::Error, HttpRequest};
 use futures_util::future::{ok, Ready};
 
 use crate::http::endpoints::args::{

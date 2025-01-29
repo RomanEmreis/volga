@@ -3,12 +3,12 @@ use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 use crate::{
     App, 
     app::AppInstance, 
-    error::call_weak_err_handler
+    error::handler::call_weak_err_handler
 };
 
 use std::{
     fmt, 
-    io::{Result, Error, ErrorKind}, 
+    io::{Result, Error}, 
     net::SocketAddr, 
     path::{Path, PathBuf},
     sync::Arc,
@@ -343,22 +343,22 @@ struct TlsError;
 impl TlsError {
     #[inline]
     fn from_rustls_error(error: tokio_rustls::rustls::Error) -> Error {
-        Error::new(ErrorKind::Other, format!("TLS config error: {}", error))
+        Error::other(format!("TLS config error: {}", error))
     }
 
     #[inline]
     fn from_rustls_pem_error(error: tokio_rustls::rustls::pki_types::pem::Error) -> Error {
-        Error::new(ErrorKind::Other, format!("TLS config error: {}", error))
+        Error::other(format!("TLS config error: {}", error))
     }
 
     #[inline]
     fn from_rustls_auth_error(error: tokio_rustls::rustls::server::VerifierBuilderError) -> Error {
-        Error::new(ErrorKind::Other, format!("TLS config error: {}", error))
+        Error::other(format!("TLS config error: {}", error))
     }
 
     #[inline]
     fn cert_parse_error() -> Error {
-        Error::new(ErrorKind::Other, "TLS config error: certificate parse error")
+        Error::other("TLS config error: certificate parse error")
     }
 }
 
@@ -406,8 +406,9 @@ impl App {
                 async move {
                     let host = ctx.extract::<Header<Host>>()?;
                     let error_handler = ctx.error_handler.clone();
+                    let uri = ctx.request.uri().clone();
                     let http_result = next(ctx)
-                        .or_else(|err| async { call_weak_err_handler(error_handler, err).await })
+                        .or_else(|err| async { call_weak_err_handler(error_handler, &uri, err).await })
                         .await;
 
                     if !is_excluded(host.to_str().ok()) {

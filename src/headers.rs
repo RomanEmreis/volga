@@ -1,7 +1,5 @@
 ﻿//! Tools for HTTP headers
 
-use std::io::{Error, ErrorKind};
-
 // Re-exporting HeaderMap, HeaderValue and some headers from hyper
 pub use hyper::{
     header::{
@@ -25,6 +23,7 @@ pub use hyper::{
 };
 
 pub use self::{
+    super::{error::Error, http::StatusCode},
     encoding::Encoding,
     extract::*,
     header::{Header, Headers},
@@ -51,16 +50,20 @@ struct HeaderError;
 impl HeaderError {
     #[inline]
     fn header_missing<T: FromHeaders>() -> Error {
-        Error::new(ErrorKind::NotFound, format!("Header: `{}` not found", T::header_type()))
+        Error::from_parts(
+            StatusCode::NOT_FOUND, 
+            None, 
+            format!("Header: `{}` not found", T::header_type())
+        )
     }
 
     #[inline]
     fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
-        Error::new(ErrorKind::InvalidData, format!("Header: {}", error))
+        Error::client_error(format!("Header: {}", error))
     }
 
     #[inline]
     fn from_to_str_error(error: ToStrError) -> Error {
-        Error::new(ErrorKind::InvalidData, format!("Header: {}", error))
+        Error::client_error(format!("Header: {}", error))
     }
 }

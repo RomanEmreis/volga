@@ -1,5 +1,4 @@
 ﻿use std::{sync::Arc, future::Future};
-
 use futures_util::future::BoxFuture;
 
 use crate::{HttpResult, HttpRequest};

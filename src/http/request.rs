@@ -4,12 +4,10 @@
     Request
 };
 
-use std::{
-    io::Error,
-    ops::{Deref, DerefMut}
-};
+use std::ops::{Deref, DerefMut};
 
 use crate::{
+    error::Error,
     headers::{FromHeaders, Header},
     HttpBody,
     UnsyncBoxBody,

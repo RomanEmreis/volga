@@ -6,11 +6,11 @@ use http_body_util::BodyExt;
 use tokio::io::{AsyncWriteExt, BufWriter};
 
 use std::{
-    io::{Error, ErrorKind::{InvalidInput, InvalidData}},
     ops::{Deref, DerefMut},
     path::Path
 };
 
+use crate::error::Error;
 use crate::headers::{HeaderMap, CONTENT_TYPE};
 use crate::http::{
     endpoints::args::{
@@ -83,7 +83,7 @@ impl Field {
     /// }
     /// ```
     #[inline]
-    pub async fn save(self, path: impl AsRef<Path>) -> Result<(), Error> {
+    pub async fn save(self, path: impl AsRef<Path>) -> Result<(), std::io::Error> {
         let file_name = self.try_get_file_name()?;
         let file_path = path.as_ref().join(file_name);
         
@@ -108,7 +108,7 @@ impl Field {
     /// }
     /// ```
     #[inline]
-    pub async fn save_as(mut self, path: impl AsRef<Path>) -> Result<(), Error> {
+    pub async fn save_as(mut self, path: impl AsRef<Path>) -> Result<(), std::io::Error> {
         let file = tokio::fs::File::create(path).await?;
         let mut writer = BufWriter::new(file);
         while let Some(ref chunk) = self.chunk().await? {
@@ -215,21 +215,20 @@ impl FromPayload for Multipart {
 }
 
 struct MultipartError;
-
 impl MultipartError {
     #[inline]
     fn invalid_boundary() -> Error {
-        Error::new(InvalidInput, "Multipart error: invalid boundary")
+        Error::client_error("Multipart error: invalid boundary")
     }
 
     #[inline]
     fn missing_file_name() -> Error {
-        Error::new(InvalidInput, "Multipart error: file name is missing")
+        Error::client_error("Multipart error: file name is missing")
     }
 
     #[inline]
     fn read_error(error: multer::Error) -> Error {
-        Error::new(InvalidData, format!("Multipart error: {error}"))
+        Error::client_error(format!("Multipart error: {error}"))
     }
 }
 
