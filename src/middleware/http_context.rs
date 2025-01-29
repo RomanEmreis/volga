@@ -1,12 +1,10 @@
-﻿use std::io::Error;
-
-use crate::http::endpoints::{
+﻿use crate::http::endpoints::{
     handlers::RouteHandler,
     args::FromRequestRef
 };
 
 use crate::{
-    error::WeakErrorHandler,
+    error::{Error, handler::WeakErrorHandler},
     headers::{Header, FromHeaders},
     HttpRequest, 
     HttpResult

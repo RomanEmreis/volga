@@ -1,8 +1,7 @@
 ﻿//! HTTP to HTTPS redirection middleware
 
-use crate::{HttpResponse, status};
+use crate::{HttpResponse, error::Error, status};
 use futures_util::future::BoxFuture;
-use std::io::{Error, ErrorKind::Other};
 
 use hyper::{
     header::HOST, 
@@ -54,7 +53,7 @@ impl Service<Request<Incoming>> for HttpsRedirectionMiddleware {
                 let (host, _) = host
                     .rsplit_once(':')
                     .unwrap_or((host, ""));
-
+                
                 uri_parts.authority = Some(format!("{host}:{https_port}")
                     .parse()
                     .map_err(HttpsRedirectionError::invalid_uri)?
@@ -82,11 +81,11 @@ struct HttpsRedirectionError;
 impl HttpsRedirectionError {
     #[inline]
     fn invalid_uri(error: hyper::http::uri::InvalidUri) -> Error {
-        Error::new(Other, error)
+        Error::server_error(error)
     }
     
     #[inline]
     fn invalid_uri_parts(error: hyper::http::uri::InvalidUriParts) -> Error {
-        Error::new(Other, error)
+        Error::server_error(error)
     }
 }

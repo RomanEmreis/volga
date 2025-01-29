@@ -1,16 +1,13 @@
 ﻿//! Extractors for HTTP request parts and body
 
-use std::{future::Future, io::Error};
+use std::future::Future;
 use hyper::{
-    http::{
-        request::Parts, 
-        Extensions
-    },
+    http::{request::Parts, Extensions},
     HeaderMap,
     Uri,
 };
 
-use crate::{HttpBody, HttpRequest};
+use crate::{HttpBody, HttpRequest, error::Error};
 
 #[cfg(feature = "di")]
 use crate::di::Container;

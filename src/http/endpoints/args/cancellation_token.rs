@@ -3,15 +3,12 @@
 use tokio_util::sync::CancellationToken as TokioCancellationToken;
 use futures_util::future::{ready, Ready};
 use hyper::http::Extensions;
+use std::ops::{Deref, DerefMut};
 
-use std::{
-    io::Error,
-    ops::{Deref, DerefMut}
+use crate::{
+    error::Error, HttpRequest,
+    http::endpoints::args::{Source, FromPayload, FromRequestRef, Payload}
 };
-
-use crate::HttpRequest;
-use crate::http::endpoints::args::Source;
-use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload};
 
 /// See [`tokio_util::sync::CancellationToken`] for more details.
 pub type CancellationToken = TokenGuard;

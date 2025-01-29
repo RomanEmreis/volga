@@ -1,11 +1,12 @@
 ﻿use super::{HttpResponse, HttpResult, HttpBody, Results, ResponseContext};
 use crate::{Json, Form, ok, status, form, response};
+use crate::error::Error;
 use crate::http::StatusCode;
 use crate::headers::CONTENT_TYPE;
 use mime::TEXT_PLAIN_UTF_8;
 
 use std::{
-    io::Error,
+    io::Error as IoError,
     convert::Infallible,
     borrow::Cow
 };
@@ -27,6 +28,13 @@ impl IntoResponse for () {
     #[inline]
     fn into_response(self) -> HttpResult {
         ok!()
+    }
+}
+
+impl IntoResponse for IoError {
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        Err(self.into())
     }
 }
 

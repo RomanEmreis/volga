@@ -1,4 +1,4 @@
-﻿use crate::{App, error::call_weak_err_handler};
+﻿use crate::{App, error::handler::call_weak_err_handler};
 use futures_util::TryFutureExt;
 use tracing::{Instrument, trace_span};
 
@@ -88,14 +88,14 @@ impl App {
             let tracing_config = tracing_config.clone();
             async move {
                 let method = ctx.request.method();
-                let path = ctx.request.uri();
+                let uri = ctx.request.uri().clone();
                 
-                let span = trace_span!("request", %method, %path);
+                let span = trace_span!("request", %method, %uri);
                 let span_id = span.id();
                 let error_handler = ctx.error_handler.clone();
                 
                 let http_result = next(ctx)
-                    .or_else(|err| async { call_weak_err_handler(error_handler, err).await })
+                    .or_else(|err| async { call_weak_err_handler(error_handler, &uri, err).await })
                     .instrument(span)
                     .await;
 

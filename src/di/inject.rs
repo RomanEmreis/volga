@@ -1,6 +1,7 @@
 ﻿use super::Container;
+use crate::error::Error;
 use futures_util::future::ok;
-use std::{io::Error, future::Future};
+use std::future::Future;
 
 /// A trait that adds the ability to inject dependencies when resolving a type from the DI container
 ///
@@ -26,9 +27,9 @@ use std::{io::Error, future::Future};
 ///
 /// # Example
 /// ```no_run
-/// use std::io::Error;
 /// use volga::{
 ///     App,
+///     error::Error,
 ///     di::{Dc, Inject, Container},
 ///     ok
 /// };

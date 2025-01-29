@@ -2,13 +2,13 @@
 use volga::{
     App, HttpResult, Json,
     di::{Inject, Container, Dc},
+    error::Error,
     headers::HeaderValue,
     middleware::{HttpContext, Next},
 };
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
-    io::Error
+    sync::{Arc, Mutex}
 };
 
 trait RequestIdGenerator: Send + Sync {

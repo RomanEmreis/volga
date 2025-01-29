@@ -1,8 +1,8 @@
 ﻿use super::{Inject, DiError};
+use crate::error::Error;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    io::Error,
     sync::Arc
 };
 
@@ -139,9 +139,8 @@ impl Container {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::io::Error;
     use std::sync::{Arc, Mutex};
-    use super::{Container, ContainerBuilder, Inject};
+    use super::{Error, Container, ContainerBuilder, Inject};
 
     trait Cache: Send + Sync {
         fn get(&self, key: &str) -> Option<String>;

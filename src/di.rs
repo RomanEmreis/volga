@@ -1,8 +1,6 @@
 ﻿//! Tools for Dependency Injection
 
-use super::App;
-use std::io::{Error, ErrorKind};
-
+use super::{App, error::Error};
 pub use self::{
     container::{Container, ContainerBuilder},
     dc::Dc,
@@ -17,11 +15,11 @@ struct DiError;
 
 impl DiError {
     fn service_not_registered(type_name: &str) -> Error {
-        Error::new(ErrorKind::Other, format!("Services Error: service not registered: {}", type_name))
+        Error::client_error(format!("Services Error: service not registered: {}", type_name))
     }
 
     fn resolve_error(type_name: &str) -> Error {
-        Error::new(ErrorKind::Other, format!("Services Error: unable to resolve the service: {}", type_name))
+        Error::client_error(format!("Services Error: unable to resolve the service: {}", type_name))
     }
 }
 

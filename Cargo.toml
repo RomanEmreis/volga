@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.4.10"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -18,7 +18,7 @@ async-compression = { version = "0.4.18", features = ["tokio"], optional = true 
 bytes = "1.9.0"
 futures-util = { version = "0.3.31", default-features = false, features = ["alloc"] }
 http-body-util = "0.1.2"
-hyper = { version = "1.5.2", features = ["server"], optional = true }
+hyper = { version = "1.6.0", features = ["server"], optional = true }
 hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
 itoa = "1.0.14"
 mime = "0.3.17"
@@ -29,7 +29,7 @@ tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = "0.7.13"
 tracing = { version = "0.1.41", default-features = false, optional = true }
 serde = "1.0.217"
-serde_json = "1.0.137"
+serde_json = "1.0.138"
 serde_urlencoded = "0.7.1"
 
 [dev-dependencies]
@@ -37,7 +37,7 @@ reqwest = { version = "0.12.12", features = ["blocking", "json", "http2", "brotl
 serde = { version = "1.0.217", features = ["derive"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 uuid = { version = "1.12.1", features = ["v4"] }
-criterion = { version = "0.5.1", features = ["async_tokio", ] }
+criterion = { version = "0.5.1", features = ["async_tokio"] }
 
 [features]
 # Default HTTP/1 only server
