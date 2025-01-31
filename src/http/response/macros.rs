@@ -18,11 +18,26 @@ macro_rules! not_found {
     () => {
         $crate::status!(404)
     };
+    ({ $($json:tt)* }) => {
+        $crate::status!(404, { $($json)* })
+    };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(404, [ $( ($key, $value) ),* ])
     };
+    ($var:ident) => {
+        $crate::status!(404, $var)
+    };
+    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, $body, [ $( ($key, $value) ),* ])
+    };
+    ($fmt:tt) => {
+        $crate::status!(404, $fmt)
+    };
     ($body:expr) => {
         $crate::status!(404, $body)
+    };
+    ($($fmt:tt)*) => {
+        $crate::status!(404, $($fmt)*)
     };
 }
 
@@ -52,11 +67,20 @@ macro_rules! bad_request {
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(400, [ $( ($key, $value) ),* ])
     };
+    ($var:ident) => {
+        $crate::status!(400, $var)
+    };
     ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(400, $body, [ $( ($key, $value) ),* ])
     };
+    ($fmt:tt) => {
+        $crate::status!(400, $fmt)
+    };
     ($body:expr) => {
         $crate::status!(400, $body)
+    };
+    ($($fmt:tt)*) => {
+        $crate::status!(400, $($fmt)*)
     };
 }
 
@@ -119,6 +143,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_creates_400_with_interpolated_text_response() {
+        let text = "test";
+        let response = bad_request!("Error: {text}");
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "\"Error: test\"");
+        assert_eq!(response.status(), 400);
+    }
+
+    #[tokio::test]
+    async fn it_creates_400_with_formatted_text_response() {
+        let text = "test";
+        let response = bad_request!("Error: {}", text);
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "\"Error: test\"");
+        assert_eq!(response.status(), 400);
+    }
+
+    #[tokio::test]
     async fn it_creates_400_with_json_response() {
         let payload = TestPayload { name: "test".into() };
         let response = bad_request!(payload);
@@ -168,6 +220,61 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "\"User not found\"");
+        assert_eq!(response.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn it_creates_404_response_with_interpolated_text() {
+        let user = "User";
+        let response = not_found!("{user} not found");
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "\"User not found\"");
+        assert_eq!(response.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn it_creates_404_response_with_formatted_text() {
+        let user = "User";
+        let response = not_found!("{} not found", user);
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "\"User not found\"");
+        assert_eq!(response.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn it_creates_404_with_json_response() {
+        let payload = TestPayload { name: "test".into() };
+        let response = not_found!(payload);
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
+        assert_eq!(response.status(), 404);
+    }
+
+    #[tokio::test]
+    async fn it_creates_anonymous_type_404_response_with_json_body() {
+        let response = not_found!({ "name": "test" });
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 404);
     }
 

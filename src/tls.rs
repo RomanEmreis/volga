@@ -3,12 +3,11 @@ use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 use crate::{
     App, 
     app::AppInstance, 
-    error::handler::call_weak_err_handler
+    error::{Error, handler::call_weak_err_handler}
 };
 
 use std::{
     fmt, 
-    io::{Result, Error}, 
     net::SocketAddr, 
     path::{Path, PathBuf},
     sync::Arc,
@@ -278,7 +277,7 @@ impl TlsConfig {
         self
     }
 
-    pub(super) fn build(self) -> Result<ServerConfig> {
+    pub(super) fn build(self) -> Result<ServerConfig, Error> {
         let certs = Self::load_cert_file(&self.cert)?;
         let key = Self::load_key_file(&self.key)?;
         
@@ -289,21 +288,21 @@ impl TlsConfig {
                     WebPkiClientVerifier::builder(Self::read_trust_anchor(trust_anchor)?.into())
                         .allow_unauthenticated()
                         .build()
-                        .map_err(TlsError::from_rustls_auth_error)?;
+                        .map_err(Error::from)?;
                 ServerConfig::builder().with_client_cert_verifier(verifier)
             },
             ClientAuth::Required(trust_anchor) => {
                 let verifier =
                     WebPkiClientVerifier::builder(Self::read_trust_anchor(trust_anchor)?.into())
                         .build()
-                        .map_err(TlsError::from_rustls_auth_error)?;
+                        .map_err(Error::from)?;
                 ServerConfig::builder().with_client_cert_verifier(verifier)
             }
         };
         
         let mut config = builder
             .with_single_cert(certs, key)
-            .map_err(TlsError::from_rustls_error)?;
+            .map_err(Error::from)?;
         
         config.alpn_protocols = vec![
             #[cfg(feature = "http2")]
@@ -316,19 +315,19 @@ impl TlsConfig {
     }
     
     #[inline]
-    fn load_cert_file<'a>(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'a>>> {
+    fn load_cert_file<'a>(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'a>>, Error> {
         CertificateDer::pem_file_iter(path)
-            .map_err(TlsError::from_rustls_pem_error)?
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(TlsError::from_rustls_pem_error)
+            .map_err(Error::from)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::from)
     }
     
     #[inline]
-    fn load_key_file<'a>(path: impl AsRef<Path>) -> Result<PrivateKeyDer<'a>> {
-        PrivateKeyDer::from_pem_file(path).map_err(TlsError::from_rustls_pem_error)
+    fn load_key_file<'a>(path: impl AsRef<Path>) -> Result<PrivateKeyDer<'a>, Error> {
+        PrivateKeyDer::from_pem_file(path).map_err(Error::from)
     }
 
-    fn read_trust_anchor(path: impl AsRef<Path>) -> Result<RootCertStore> {
+    fn read_trust_anchor(path: impl AsRef<Path>) -> Result<RootCertStore, Error> {
         let trust_anchors = Self::load_cert_file(path)?;
         let mut store = RootCertStore::empty();
         let (added, _skipped) = store.add_parsable_certificates(trust_anchors);
@@ -339,26 +338,31 @@ impl TlsConfig {
     }
 }
 
+impl From<tokio_rustls::rustls::Error> for Error {
+    #[inline]
+    fn from(err: tokio_rustls::rustls::Error) -> Self {
+        Self::server_error(format!("TLS config error: {}", err))
+    }
+}
+
+impl From<tokio_rustls::rustls::pki_types::pem::Error> for Error {
+    fn from(err: tokio_rustls::rustls::pki_types::pem::Error) -> Self {
+        Self::server_error(format!("TLS config error: {}", err))
+    }
+}
+
+impl From<tokio_rustls::rustls::server::VerifierBuilderError> for Error {
+    #[inline]
+    fn from(err: tokio_rustls::rustls::server::VerifierBuilderError) -> Self {
+        Self::server_error(format!("TLS config error: {}", err))
+    }
+}
+
 struct TlsError;
 impl TlsError {
     #[inline]
-    fn from_rustls_error(error: tokio_rustls::rustls::Error) -> Error {
-        Error::other(format!("TLS config error: {}", error))
-    }
-
-    #[inline]
-    fn from_rustls_pem_error(error: tokio_rustls::rustls::pki_types::pem::Error) -> Error {
-        Error::other(format!("TLS config error: {}", error))
-    }
-
-    #[inline]
-    fn from_rustls_auth_error(error: tokio_rustls::rustls::server::VerifierBuilderError) -> Error {
-        Error::other(format!("TLS config error: {}", error))
-    }
-
-    #[inline]
     fn cert_parse_error() -> Error {
-        Error::other("TLS config error: certificate parse error")
+        Error::server_error("TLS config error: certificate parse error")
     }
 }
 

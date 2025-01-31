@@ -64,7 +64,7 @@ pub(crate) type WeakErrorHandler = Weak<
 /// Default error handler that creates a [`HttpResult`] from error
 #[inline]
 pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
-    status!(err.status.as_u16(), err.to_string())
+    status!(err.status.as_u16(), "{:?}", err)
 }
 
 #[inline]

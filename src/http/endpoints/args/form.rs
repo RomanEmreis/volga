@@ -124,7 +124,7 @@ impl FormError {
     }
 
     #[inline]
-    fn collect_error(err: std::io::Error) -> Error {
+    fn collect_error(err: Error) -> Error {
         Error::client_error(format!("Form Data parsing error: {}", err))
     }
 }

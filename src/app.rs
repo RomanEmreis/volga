@@ -1,9 +1,13 @@
 ﻿//! Main application entry point
-//! 
-use crate::server::Server;
+
 use self::pipeline::{Pipeline, PipelineBuilder};
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 use std::net::IpAddr;
+
+use crate::{
+    http::request::request_body_limit::RequestBodyLimit,
+    server::Server
+};
 
 use std::{
     future::Future,
@@ -68,7 +72,12 @@ pub struct App {
     pub(super) pipeline: PipelineBuilder,
     
     /// TCP connection parameters
-    connection: Connection
+    connection: Connection,
+    
+    /// Request body limit
+    /// 
+    /// Default: 5 MB
+    body_limit: RequestBodyLimit
 }
 
 /// Wraps a socket
@@ -116,6 +125,9 @@ pub(crate) struct AppInstance {
     /// Graceful shutdown utilities
     pub(super) graceful_shutdown: GracefulShutdown,
     
+    /// Request body limit
+    pub(super) body_limit: RequestBodyLimit,
+    
     /// Request/Middleware pipeline
     pipeline: Pipeline,
 }
@@ -133,6 +145,7 @@ impl TryFrom<App> for AppInstance {
                 .map(|config| TlsAcceptor::from(Arc::new(config)))
         };
         let app_instance = Self {
+            body_limit: app.body_limit,
             pipeline: app.pipeline.build(),
             graceful_shutdown: GracefulShutdown::new(),
             #[cfg(feature = "di")]
@@ -186,7 +199,8 @@ impl App {
             #[cfg(feature = "tracing")]
             tracing_config: None,
             pipeline:PipelineBuilder::new(),
-            connection: Default::default()
+            connection: Default::default(),
+            body_limit: Default::default(),
         }
     }
 
@@ -201,6 +215,20 @@ impl App {
     /// ```
     pub fn bind<S: Into<Connection>>(mut self, socket: S) -> Self {
         self.connection = socket.into();
+        self
+    }
+    
+    /// Sets a specific HTTP request body limit (in bytes)
+    /// 
+    /// Default: 5 MB
+    pub fn with_body_limit(mut self, limit: usize) -> Self {
+        self.body_limit = RequestBodyLimit::Enabled(limit);
+        self
+    }
+    
+    /// Disables a request body limit
+    pub fn without_body_limit(mut self) -> Self {
+        self.body_limit = RequestBodyLimit::Disabled;
         self
     }
 

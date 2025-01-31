@@ -1,5 +1,5 @@
-﻿use std::{
-    io::{Error, ErrorKind}, 
+﻿use super::Error;
+use std::{
     num::ParseFloatError, 
     str::FromStr
 };
@@ -64,12 +64,12 @@ struct QualityError;
 impl QualityError {
     #[inline]
     fn parsing_error(err: ParseFloatError) -> Error {
-        Error::new(ErrorKind::InvalidInput, format!("Q-value error: {err}"))
+        Error::client_error(format!("Q-value error: {err}"))
     }
 
     #[inline]
     fn missing_value() -> Error {
-        Error::new(ErrorKind::InvalidInput, "Q-value error: missing value")
+        Error::client_error("Q-value error: missing value")
     }
 }
 

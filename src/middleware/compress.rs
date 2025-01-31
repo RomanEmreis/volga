@@ -29,6 +29,7 @@ use tokio_util::io::{
 
 use crate::{
     App,
+    error::Error,
     headers::{
         AcceptEncoding,
         Header,
@@ -58,11 +59,14 @@ static SUPPORTED_ENCODINGS: &[Encoding] = &[
 
 macro_rules! impl_compressor {
     ($algo:ident, $encoder:ident, $level:expr) => {
+        #[inline]
         fn $algo(body: HttpBody) -> HttpBody {
             let stream_reader = StreamReader::new(body.into_data_stream());
             let encoder = $encoder::with_quality(stream_reader, $level);
             let compressed_body = ReaderStream::new(encoder);
-            HttpBody::boxed(StreamBody::new(compressed_body.map_ok(Frame::data)))
+            HttpBody::boxed(StreamBody::new(compressed_body
+                .map_err(Error::server_error)
+                .map_ok(Frame::data)))
         }
     };
 }

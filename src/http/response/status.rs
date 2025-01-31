@@ -56,6 +56,16 @@ macro_rules! status {
         )
     };
     
+    ($status:expr, $var:ident) => {
+        $crate::response!(
+            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+            $crate::HttpBody::json($var),
+            [
+                ($crate::headers::CONTENT_TYPE, "application/json"),
+            ]
+        )
+    };
+    
     ($status:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK), 
@@ -64,10 +74,30 @@ macro_rules! status {
         )
     };
     
+    ($status:expr, $fmt:tt) => {
+        $crate::response!(
+            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+            $crate::HttpBody::json(format!($fmt)),
+            [
+                ($crate::headers::CONTENT_TYPE, "application/json"),
+            ]
+        )
+    };
+    
     ($status:expr, $body:expr) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::json($body),
+            [
+                ($crate::headers::CONTENT_TYPE, "application/json"),
+            ]
+        )
+    };
+    
+    ($status:expr, $($fmt:tt)*) => {
+        $crate::response!(
+            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+            $crate::HttpBody::json(format!($($fmt)*)),
             [
                 ($crate::headers::CONTENT_TYPE, "application/json"),
             ]
@@ -162,6 +192,34 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "\"You are not authorized!\"");
+        assert_eq!(response.status(), 401);
+    }
+
+    #[tokio::test]
+    async fn it_creates_401_response_with_interpolated_text_body() {
+        let name = "John";
+        let response = status!(401, "{} is not authorized!", name);
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "\"John is not authorized!\"");
+        assert_eq!(response.status(), 401);
+    }
+    
+    #[tokio::test]
+    async fn it_creates_401_response_with_formatted_text_body() {
+        let name = "John";
+        let response = status!(401, "{name} is not authorized!");
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "\"John is not authorized!\"");
         assert_eq!(response.status(), 401);
     }
 

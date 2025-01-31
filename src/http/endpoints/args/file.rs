@@ -6,7 +6,7 @@ use http_body_util::BodyExt;
 use hyper::body::Body;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use std::path::Path;
-
+use futures_util::TryFutureExt;
 use crate::{error::Error, headers::CONTENT_DISPOSITION};
 use crate::http::{
     HttpBody,
@@ -31,12 +31,12 @@ pub type File = FileStream<HttpBody>;
 ///     ok!("File saved!")
 /// }
 /// ```
-pub struct FileStream<B: Body<Data = Bytes> + Unpin> {
+pub struct FileStream<B: Body<Data = Bytes, Error = Error> + Unpin> {
     name: Option<String>,
     stream: B
 }
 
-impl<B: Body<Data = Bytes> + Unpin> FileStream<B> {
+impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     /// Create a new file stream
     fn new(name: Option<&str>, stream: B) -> Self {
         Self { 
@@ -62,7 +62,7 @@ impl<B: Body<Data = Bytes> + Unpin> FileStream<B> {
     /// # }
     /// ```
     #[inline]
-    pub async fn save(self, path: impl AsRef<Path>) -> Result<(), std::io::Error> {
+    pub async fn save(self, path: impl AsRef<Path>) -> Result<(), Error> {
         let file_name = self.name().ok_or(FileStreamError::missing_name())?;
         let file_path = path.as_ref().join(file_name);
         
@@ -82,7 +82,7 @@ impl<B: Body<Data = Bytes> + Unpin> FileStream<B> {
     /// # }
     /// ```
     #[inline]
-    pub async fn save_as(self, file_path: impl AsRef<Path>) -> Result<(), std::io::Error> {
+    pub async fn save_as(self, file_path: impl AsRef<Path>) -> Result<(), Error> {
         let file = tokio::fs::File::create(file_path).await?;
         
         let mut writer = BufWriter::new(file);
@@ -97,10 +97,10 @@ impl<B: Body<Data = Bytes> + Unpin> FileStream<B> {
                         break
                     }
                 },
-                Err(_) => return Err(FileStreamError::read_error())
+                Err(err) => return Err(FileStreamError::read_error(err))
             };
         }
-        writer.flush().await
+        writer.flush().map_err(FileStreamError::flush_error).await
     }
 
     #[inline]
@@ -146,9 +146,13 @@ struct FileStreamError;
 
 impl FileStreamError {
     #[inline]
-    fn read_error() -> std::io::Error {
-        use std::io::{Error, ErrorKind};
-        Error::new(ErrorKind::InvalidInput, "File Stream error: Unable to read a file")
+    fn read_error(error: Error) -> Error {
+        Error::client_error(format!("File Stream error: {}", error))
+    }
+
+    #[inline]
+    fn flush_error(error: std::io::Error) -> Error {
+        Error::client_error(format!("File Stream error: {}", error))
     }
 
     #[inline]

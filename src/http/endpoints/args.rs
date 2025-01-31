@@ -7,11 +7,15 @@ use hyper::{
     Uri,
 };
 
-use crate::{HttpBody, HttpRequest, error::Error};
+use crate::{
+    http::endpoints::route::PathArguments,
+    HttpBody, 
+    HttpRequest, 
+    error::Error
+};
 
 #[cfg(feature = "di")]
 use crate::di::Container;
-use crate::http::endpoints::route::PathArguments;
 
 pub mod path;
 pub mod query;

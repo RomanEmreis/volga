@@ -142,6 +142,18 @@ impl Error {
     pub fn into_parts(self) -> (StatusCode, Option<String>, BoxError) {
         (self.status, self.instance, self.inner)
     }
+    
+    /// Check if status is within 500-599.
+    #[inline]
+    pub fn is_server_error(&self) -> bool {
+        self.status.is_server_error()
+    }
+
+    /// Check if status is within 400-499.
+    #[inline]
+    pub fn is_client_error(&self) -> bool {
+        self.status.is_client_error()
+    }
 }
 
 impl App {
