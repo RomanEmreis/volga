@@ -1,10 +1,9 @@
-﻿use hyper::{
+﻿use std::ops::{Deref, DerefMut};
+use hyper::{
     body::Incoming,
     http::request::Parts,
     Request
 };
-
-use std::ops::{Deref, DerefMut};
 
 use crate::{
     error::Error,
@@ -13,10 +12,12 @@ use crate::{
     UnsyncBoxBody,
     BoxBody
 };
+use crate::http::{endpoints::args::FromRequestRef, request::request_body_limit::RequestBodyLimit};
 
 #[cfg(feature = "di")]
 use crate::di::{Container, Inject};
-use crate::http::endpoints::args::FromRequestRef;
+
+pub mod request_body_limit;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
@@ -40,14 +41,40 @@ impl DerefMut for HttpRequest {
 }
 
 impl HttpRequest {
+    /// Creates a new [`HttpRequest`]
     #[cfg(not(feature = "di"))]
     pub fn new(request: Request<Incoming>) -> Self {
         Self { inner: request.map(HttpBody::incoming) }
     }
 
+    /// Creates a new [`HttpRequest`]
     #[cfg(feature = "di")]
     pub fn new(request: Request<Incoming>, container: Container) -> Self {
         Self { inner: request.map(HttpBody::incoming), container }
+    }
+    
+    /// Turns [`HttpRequest's`] body into limited body if it's specified
+    pub fn into_limited(self, body_limit: RequestBodyLimit) -> Self {
+        match body_limit {
+            RequestBodyLimit::Disabled => self,
+            RequestBodyLimit::Enabled(limit) => {
+                #[cfg(feature = "di")]
+                let (parts, body, container) = self.into_parts();
+
+                #[cfg(not(feature = "di"))]
+                let (parts, body) = self.into_parts();
+                
+                let body = HttpBody::limited(body, limit);
+
+                #[cfg(feature = "di")]
+                let req = Self::from_parts(parts, body, container);
+
+                #[cfg(not(feature = "di"))]
+                let req = Self::from_parts(parts, body);
+                
+                req
+            }
+        }
     }
     
     /// Unwraps the inner request

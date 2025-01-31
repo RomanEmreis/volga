@@ -2,8 +2,7 @@
 
 use std::sync::Weak;
 use hyper::rt::{Read, Write};
-use crate::app::AppInstance;
-use crate::app::scope::Scope;
+use crate::app::{AppInstance, scope::Scope};
 
 #[cfg(all(feature = "http1", not(feature = "http2")))]
 pub(super) mod http1;

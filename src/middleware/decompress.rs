@@ -2,8 +2,6 @@
 //!
 //! Middleware that decompress HTTP request body
 
-use std::io::{Error, ErrorKind};
-
 #[cfg(feature = "decompression-brotli")]
 use async_compression::tokio::bufread::BrotliDecoder;
 
@@ -22,7 +20,8 @@ use tokio_util::io::{
 };
 
 use crate::{
-    App, 
+    App,
+    error::Error,
     headers::{
         ContentEncoding,
         Header,
@@ -31,7 +30,8 @@ use crate::{
         CONTENT_ENCODING,
         CONTENT_LENGTH,
         VARY
-    }, 
+    },
+    http::request::request_body_limit::RequestBodyLimit,
     middleware::HttpContext, 
     HttpRequest, 
     HttpBody,
@@ -52,18 +52,16 @@ static SUPPORTED_ENCODINGS: &[Encoding] = &[
 
 macro_rules! impl_decompressor {
     ($algo:ident, $decoder:ident, $mm:literal) => {
+        #[inline]
         fn $algo(body:  HttpBody) -> HttpBody {
-            let body_stream = body
-                .map_err(|e| Error::new(ErrorKind::InvalidInput, e))
-                .into_data_stream();
-    
+            let body_stream = body.into_data_stream();
             let stream_reader = StreamReader::new(body_stream);
             let mut decoder = $decoder::new(stream_reader);
             decoder.multiple_members($mm);
             let decompressed_body = ReaderStream::new(decoder);
     
-            HttpBody::boxed(
-                StreamBody::new(decompressed_body
+            HttpBody::boxed(StreamBody::new(decompressed_body
+                .map_err(Error::client_error)
                 .map_ok(Frame::data))
             )
         }
@@ -93,7 +91,7 @@ impl App {
                         let req = Self::decompress(encoding, req);
                         ctx = HttpContext::new(req, handler, error_handler);
                     }
-                    Err(error) if error.kind() == ErrorKind::InvalidData => (),
+                    Err(error) if error.is_client_error() => (),
                     Err(_) => {
                         return status!(415, [
                             (VARY, CONTENT_ENCODING),
@@ -115,8 +113,12 @@ impl App {
         parts.headers.remove(CONTENT_ENCODING);
         
         let body = Self::decompress_body(encoding, body);
+        let body_limit = parts.extensions.get::<RequestBodyLimit>()
+            .cloned()
+            .unwrap_or_default();
         
         HttpRequest::from_parts(parts, body, container)
+            .into_limited(body_limit)
     }
 
     #[cfg(not(feature = "di"))]
@@ -127,8 +129,12 @@ impl App {
         parts.headers.remove(CONTENT_ENCODING);
         
         let body = Self::decompress_body(encoding, body);
+        let body_limit = parts.extensions.get::<RequestBodyLimit>()
+            .cloned()
+            .unwrap_or_default();
         
         HttpRequest::from_parts(parts, body)
+            .into_limited(body_limit)
     }
     
     #[inline]

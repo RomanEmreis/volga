@@ -76,13 +76,16 @@ impl Scope {
                 let (handler, params) = endpoint_context.into_parts();
                 
                 #[cfg(feature = "di")]
-                let mut request = HttpRequest::new(request, shared.container.create_scope());
+                let mut request = HttpRequest::new(request, shared.container.create_scope())
+                    .into_limited(shared.body_limit);
+                
                 #[cfg(not(feature = "di"))]
-                let mut request = HttpRequest::new(request);
+                let mut request = HttpRequest::new(request).into_limited(shared.body_limit);
                 
                 let extensions = request.extensions_mut();
                 extensions.insert(cancellation_token);
                 extensions.insert(params);
+                extensions.insert(shared.body_limit);
                 
                 let request_method = request.method().clone();
                 let uri = request.uri().clone();

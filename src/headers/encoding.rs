@@ -1,10 +1,10 @@
 ﻿use super::{
-    quality::Ranked,
-    HeaderValue
+    Error,
+    HeaderValue,
+    quality::Ranked
 };
 
 use std::{
-    io::{Error, ErrorKind},
     str::FromStr,
     fmt
 };
@@ -173,11 +173,11 @@ impl TryFrom<HeaderValue> for Encoding {
 struct EncodingError;
 impl EncodingError {
     fn unknown() -> Error { 
-        Error::new(ErrorKind::InvalidInput, "Encoding error: Unknown encoding")
+        Error::client_error("Encoding error: Unknown encoding")
     }
 
     fn empty() -> Error {
-        Error::new(ErrorKind::InvalidData, "Encoding error: Empty encoding")
+        Error::client_error("Encoding error: Empty encoding")
     }
 }
 
