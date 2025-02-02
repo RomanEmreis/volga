@@ -41,7 +41,7 @@ use crate::http::{
 ///     ok!("Hello {}", user.name)
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct Json<T>(pub T);
 
 impl<T> Json<T> {

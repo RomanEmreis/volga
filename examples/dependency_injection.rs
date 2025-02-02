@@ -88,8 +88,7 @@ async fn get_value<T: Cache + Inject>(id: String, cache: Dc<T>) -> Option<String
     cache.get(&id)
 }
 
-async fn set_value<T: Cache + Inject>(item: Json<Item>, cache: Dc<T>) {
-    let item = item.into_inner();
+async fn set_value<T: Cache + Inject>(Json(item): Json<Item>, cache: Dc<T>) {
     cache.set(item.id, item.value);
 }
 

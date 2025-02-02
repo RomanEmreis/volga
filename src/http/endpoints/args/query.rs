@@ -29,7 +29,7 @@ use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source}
 ///     ok!("Hello {}", params.name)
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Query<T>(pub T);
 
 impl<T> Query<T> {

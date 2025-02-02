@@ -60,7 +60,6 @@ impl HttpRequest {
             RequestBodyLimit::Enabled(limit) => {
                 #[cfg(feature = "di")]
                 let (parts, body, container) = self.into_parts();
-
                 #[cfg(not(feature = "di"))]
                 let (parts, body) = self.into_parts();
                 
@@ -68,10 +67,8 @@ impl HttpRequest {
 
                 #[cfg(feature = "di")]
                 let req = Self::from_parts(parts, body, container);
-
                 #[cfg(not(feature = "di"))]
                 let req = Self::from_parts(parts, body);
-                
                 req
             }
         }
