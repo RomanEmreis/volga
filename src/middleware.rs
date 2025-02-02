@@ -29,14 +29,14 @@ pub mod http_context;
 
 /// Points to the next middleware or request handler
 pub type Next = Arc<
-    dyn Fn(HttpContext) -> BoxFuture<'static, HttpResult> 
+    dyn Fn(HttpContext) -> BoxFuture<'static, HttpResult>
     + Send
     + Sync
 >;
 
 /// Point to a middleware function
 type MiddlewareFn = Arc<
-    dyn Fn(HttpContext, Next) -> BoxFuture<'static, HttpResult> 
+    dyn Fn(HttpContext, Next) -> BoxFuture<'static, HttpResult>
     + Send
     + Sync
 >;

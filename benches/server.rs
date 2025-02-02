@@ -12,7 +12,6 @@ use std::{
 async fn routing(iters: u64, url: &str) -> Duration {
     #[cfg(all(feature = "http1", not(feature = "http2")))]
     let client = Client::builder().http1_only().build().unwrap();
-    
     #[cfg(feature = "http2")]
     let client = Client::builder().http2_prior_knowledge().build().unwrap();
 
@@ -36,7 +35,7 @@ fn benchmark(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     rt.block_on(async {
         tokio::spawn(async {
-            let mut app = App::new();
+            let mut app = App::new().without_body_limit();
             app.map_get("/", || async { "Hello, World!" });
             app.map_get("/err", || async { Error::new(ErrorKind::Other, "error") });
             app.map_err(|err| async move { status!(500, err.to_string()) });

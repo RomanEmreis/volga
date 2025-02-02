@@ -1,5 +1,6 @@
 ﻿use super::{Inject, DiError};
 use crate::error::Error;
+use tokio::sync::OnceCell;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -14,7 +15,7 @@ type ArcService = Arc<
 
 pub(crate) enum ServiceEntry {
     Singleton(ArcService),
-    Scoped(Option<ArcService>),
+    Scoped(OnceCell<ArcService>),
     Transient,
 }
 
@@ -50,7 +51,7 @@ impl ContainerBuilder {
 
     /// Register a scoped service
     pub fn register_scoped<T: Inject + 'static>(&mut self) {
-        let entry = ServiceEntry::Scoped(None);
+        let entry = ServiceEntry::Scoped(OnceCell::new());
         self.services.insert(TypeId::of::<T>(), entry);
     }
 
@@ -88,7 +89,7 @@ impl Container {
         for (key, value) in &self.services {
             let cloned_value = match value {
                 ServiceEntry::Singleton(service) => ServiceEntry::Singleton(service.clone()),
-                ServiceEntry::Scoped(_) => ServiceEntry::Scoped(None),
+                ServiceEntry::Scoped(_) => ServiceEntry::Scoped(OnceCell::new()),
                 ServiceEntry::Transient => ServiceEntry::Transient,
             };
             new_services.insert(*key, cloned_value);
@@ -107,12 +108,12 @@ impl Container {
             return match service_entry {
                 ServiceEntry::Transient => T::inject(self).await,
                 ServiceEntry::Singleton(instance) => Self::resolve_internal(instance),
-                ServiceEntry::Scoped(maybe_instance) => {
-                    if let Some(instance) = maybe_instance {
-                        Self::resolve_internal(instance)
-                    } else {
-                        self.register_scoped(type_id).await
-                    }
+                ServiceEntry::Scoped(cell) => {
+                    let instance = cell
+                        .get_or_try_init(|| async { 
+                            self.clone().resolve_scoped::<T>().await
+                        }).await?;
+                    Self::resolve_internal(instance)
                 }
             }
         }
@@ -127,12 +128,9 @@ impl Container {
     }
 
     #[inline]
-    async fn register_scoped<T: Inject + 'static>(&mut self, type_id: TypeId) -> Result<T, Error> {
-        let new_instance = T::inject(self).await?;
-        let clone = new_instance.clone();
-        let entry = ServiceEntry::Scoped(Some(Arc::new(new_instance)));
-        self.services.insert(type_id, entry);
-        Ok(clone)
+    async fn resolve_scoped<T: Inject + 'static>(&mut self) -> Result<ArcService, Error> {
+        let scoped = T::inject(self).await?;
+        Ok(Arc::new(scoped))
     }
 }
 

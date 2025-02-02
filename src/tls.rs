@@ -332,7 +332,7 @@ impl TlsConfig {
         let mut store = RootCertStore::empty();
         let (added, _skipped) = store.add_parsable_certificates(trust_anchors);
         if added == 0 {
-            return Err(TlsError::cert_parse_error());
+            return Err(Error::server_error("TLS config error: certificate parse error"));
         }
         Ok(store)
     }
@@ -355,14 +355,6 @@ impl From<tokio_rustls::rustls::server::VerifierBuilderError> for Error {
     #[inline]
     fn from(err: tokio_rustls::rustls::server::VerifierBuilderError) -> Self {
         Self::server_error(format!("TLS config error: {}", err))
-    }
-}
-
-struct TlsError;
-impl TlsError {
-    #[inline]
-    fn cert_parse_error() -> Error {
-        Error::server_error("TLS config error: certificate parse error")
     }
 }
 

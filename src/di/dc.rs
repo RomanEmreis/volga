@@ -50,6 +50,7 @@ use std::{
 ///# app.run().await
 ///# }
 /// ```
+#[derive(Debug, Default, Copy, Clone)]
 pub struct Dc<T: Inject>(pub T);
 
 impl<T: Inject> Deref for Dc<T> {

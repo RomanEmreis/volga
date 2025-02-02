@@ -32,7 +32,7 @@ use crate::http::endpoints::{
 ///     ok!("Hello {}", params.name)
 /// }
 /// ```
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Path<T>(pub T);
 
 impl<T> Path<T> {

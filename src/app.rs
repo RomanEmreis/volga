@@ -325,9 +325,9 @@ impl App {
         if let Some(acceptor) = app_instance.upgrade().and_then(|app| app.acceptor()) {
             let stream = match acceptor.accept(stream).await {
                 Ok(tls_stream) => tls_stream,
-                Err(err) => {
+                Err(_err) => {
                     #[cfg(feature = "tracing")]
-                    tracing::error!("failed to perform tls handshake: {err:#}");
+                    tracing::error!("failed to perform tls handshake: {_err:#}");
                     return;
                 }
             };
