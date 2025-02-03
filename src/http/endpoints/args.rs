@@ -39,7 +39,7 @@ pub(crate) enum Payload<'a> {
     Path(&'a (String, String)),
     Ext(&'a Extensions),
     #[cfg(feature = "di")]
-    Dc(&'a mut Container)
+    Dc(&'a Container)
 }
 
 /// Describes a data source for extractors to read from
@@ -93,7 +93,7 @@ macro_rules! define_generic_from_request {
             #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
                 #[cfg(feature = "di")]
-                let (parts, body, mut container) = req.into_parts();
+                let (parts, body, container) = req.into_parts();
                 #[cfg(not(feature = "di"))]
                 let (parts, body) = req.into_parts();
                 
@@ -111,7 +111,7 @@ macro_rules! define_generic_from_request {
                         Source::Headers => Payload::Headers(&parts.headers),
                         Source::Ext => Payload::Ext(&parts.extensions),
                         #[cfg(feature = "di")]
-                        Source::Dc => Payload::Dc(&mut container),
+                        Source::Dc => Payload::Dc(&container),
                         Source::Path => match iter.next() {
                             Some(param) => Payload::Path(&param),
                             None => Payload::None
