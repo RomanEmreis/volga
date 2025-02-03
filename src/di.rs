@@ -14,12 +14,21 @@ pub mod container;
 struct DiError;
 
 impl DiError {
+    #[inline]
     fn service_not_registered(type_name: &str) -> Error {
-        Error::client_error(format!("Services Error: service not registered: {}", type_name))
+        Error::server_error(format!("Services Error: service not registered: {}", type_name))
     }
 
+    #[inline]
     fn resolve_error(type_name: &str) -> Error {
-        Error::client_error(format!("Services Error: unable to resolve the service: {}", type_name))
+        Error::server_error(format!("Services Error: unable to resolve the service: {}", type_name))
+    }
+
+    #[inline]
+    fn resolve_transient_error() -> Error {
+        Error::server_error(
+            "Services Error: cannot resolve a `Transient` service as ref, use `resolve::<T>()` or `Dc<T>` instead",
+        )
     }
 }
 

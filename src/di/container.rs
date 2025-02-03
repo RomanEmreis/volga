@@ -143,9 +143,7 @@ impl Container {
     /// Resolve a service as ref
     pub async fn resolve_ref<T: Inject + 'static>(&mut self) -> Result<&T, Error> {
         match self.get_service_entry::<T>()? {
-            ServiceEntry::Transient => Err(Error::server_error(
-                "cannot resolve a `Transient` service as ref, use `resolve::<T>()` or `Dc<T>` instead",
-            )),
+            ServiceEntry::Transient => Err(DiError::resolve_transient_error()),
             ServiceEntry::Singleton(instance) => Self::resolve_internal(instance),
             ServiceEntry::Scoped(cell) => {
                 let instance = cell
