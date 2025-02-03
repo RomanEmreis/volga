@@ -132,14 +132,14 @@ impl HttpRequest {
     /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve<T: Inject + 'static>(&mut self) -> Result<T, Error> {
+    pub async fn resolve<T: Inject + 'static>(&self) -> Result<T, Error> {
         self.container.resolve::<T>().await
     }
 
     /// Resolves a service from Dependency Container and returns a reference
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve_ref<T: Inject + 'static>(&mut self) -> Result<&T, Error> {
+    pub async fn resolve_ref<T: Inject + 'static>(&self) -> Result<&T, Error> {
         self.container.resolve_ref::<T>().await
     }
     

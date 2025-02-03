@@ -81,7 +81,7 @@ impl<T: Inject + 'static> Future for ExtractDependencyFut<T> {
     
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut this = self.project();
+        let this = self.project();
         let fut = this.container.resolve::<T>();
         pin_mut!(fut);
         let result = ready!(fut.poll(cx));
@@ -121,18 +121,18 @@ mod tests {
         container.register_scoped::<Cache>();
         
         let container = container.build();
-        let mut scope = container.create_scope();
+        let scope = container.create_scope();
         
         let vec = scope.resolve::<Cache>().await.unwrap();
         vec.lock().unwrap().push(1);
         
-        let dc = Dc::<Cache>::from_payload(Payload::Dc(&mut scope)).await.unwrap();
+        let dc = Dc::<Cache>::from_payload(Payload::Dc(&scope)).await.unwrap();
         dc.lock().unwrap().push(2);
 
-        let dc = Dc::<Cache>::from_payload(Payload::Dc(&mut scope)).await.unwrap();
+        let dc = Dc::<Cache>::from_payload(Payload::Dc(&scope)).await.unwrap();
         dc.lock().unwrap().push(3);
 
-        let dc = Dc::<Cache>::from_payload(Payload::Dc(&mut scope)).await.unwrap();
+        let dc = Dc::<Cache>::from_payload(Payload::Dc(&scope)).await.unwrap();
         let dc = dc.lock().unwrap();
         
         assert_eq!(dc[0], 1);

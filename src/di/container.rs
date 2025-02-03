@@ -123,39 +123,19 @@ impl Container {
     }
 
     /// Resolve a service
-    pub async fn resolve<T: Inject + 'static>(&mut self) -> Result<T, Error> {
+    #[inline]
+    pub async fn resolve<T: Inject + 'static>(&self) -> Result<T, Error> {
         match self.get_service_entry::<T>()? {
             ServiceEntry::Transient => T::inject(self).await,
-            ServiceEntry::Singleton(instance) => Self::resolve_internal(instance).cloned(),
-            ServiceEntry::Scoped(cell) => {
-                let instance = cell
-                    .get_or_try_init(|| async {
-                        T::inject(&mut self.clone())
-                            .map_ok(|scoped| Arc::new(scoped) as ArcService)
-                            .await
-                    })
-                    .await?;
-                Self::resolve_internal(instance).cloned()
-            }
+            service => self.resolve_service(service).await.cloned()
         }
     }
 
     /// Resolve a service as ref
-    pub async fn resolve_ref<T: Inject + 'static>(&mut self) -> Result<&T, Error> {
-        match self.get_service_entry::<T>()? {
-            ServiceEntry::Transient => Err(DiError::resolve_transient_error()),
-            ServiceEntry::Singleton(instance) => Self::resolve_internal(instance),
-            ServiceEntry::Scoped(cell) => {
-                let instance = cell
-                    .get_or_try_init(|| async {
-                        T::inject(&mut self.clone())
-                            .map_ok(|scoped| Arc::new(scoped) as ArcService)
-                            .await
-                    })
-                    .await?;
-                Self::resolve_internal(instance)
-            }
-        }
+    #[inline]
+    pub async fn resolve_ref<T: Inject + 'static>(&self) -> Result<&T, Error> {
+        let service = self.get_service_entry::<T>()?;
+        self.resolve_service(service).await
     }
 
     /// Fetch the service entry or return an error if not registered.
@@ -165,6 +145,27 @@ impl Container {
         self.services
             .get(&type_id)
             .ok_or_else(|| DiError::service_not_registered(std::any::type_name::<T>()))
+    }
+
+    #[inline]
+    async fn resolve_service<'a, T: Inject + 'static>(&self, service: &'a ServiceEntry) -> Result<&'a T, Error> {
+        match service {
+            ServiceEntry::Transient => Err(DiError::resolve_transient_error()),
+            ServiceEntry::Singleton(instance) => Self::resolve_internal(instance),
+            ServiceEntry::Scoped(cell) => Self::resolve_scoped::<T>(self, cell).await
+        }
+    }
+
+    #[inline]
+    async fn resolve_scoped<'a, T: Inject + 'static>(&self, cell: &'a OnceCell<ArcService>) -> Result<&'a T, Error> {
+        let instance = cell
+            .get_or_try_init(|| async {
+                T::inject(self)
+                    .map_ok(|scoped| Arc::new(scoped) as ArcService)
+                    .await
+            })
+            .await?;
+        Self::resolve_internal(instance)
     }
 
     #[inline]
@@ -214,7 +215,7 @@ mod tests {
     }
 
     impl Inject for CacheWrapper {
-        async fn inject(container: &mut Container) -> Result<Self, Error> {
+        async fn inject(container: &Container) -> Result<Self, Error> {
             Ok(Self { inner: container.resolve().await? })
         }
     }
@@ -224,7 +225,7 @@ mod tests {
         let mut container = ContainerBuilder::new();
         container.register_singleton(InMemoryCache::default());
 
-        let mut container = container.build();
+        let container = container.build();
 
         let cache = container.resolve::<InMemoryCache>().await.unwrap();
         cache.set("key", "value");
@@ -240,7 +241,7 @@ mod tests {
         let mut container = ContainerBuilder::new();
         container.register_singleton(InMemoryCache::default());
 
-        let mut container = container.build();
+        let container = container.build();
 
         let cache = container.resolve_ref::<InMemoryCache>().await.unwrap();
         cache.set("key", "value");
@@ -256,7 +257,7 @@ mod tests {
         let mut container = ContainerBuilder::new();
         container.register_transient::<InMemoryCache>();
 
-        let mut container = container.build();
+        let container = container.build();
 
         let cache = container.resolve::<InMemoryCache>().await.unwrap();
         cache.set("key", "value");
@@ -272,7 +273,7 @@ mod tests {
         let mut container = ContainerBuilder::new();
         container.register_scoped::<InMemoryCache>();
 
-        let mut container = container.build();
+        let container = container.build();
 
         // working in the initial scope
         let cache = container.resolve::<InMemoryCache>().await.unwrap();
@@ -280,7 +281,7 @@ mod tests {
 
         // create a new scope so new instance of InMemoryCache will be created
         {
-            let mut scope = container.create_scope();
+            let scope = container.create_scope();
             let cache = scope.resolve::<InMemoryCache>().await.unwrap();
             cache.set("key", "value 2");
 
@@ -292,7 +293,7 @@ mod tests {
 
         // create a new scope so new instance of InMemoryCache will be created
         {
-            let mut scope = container.create_scope();
+            let scope = container.create_scope();
             let cache = scope.resolve::<InMemoryCache>().await.unwrap();
             let key = cache.get("key");
 
@@ -309,7 +310,7 @@ mod tests {
         let mut container = ContainerBuilder::new();
         container.register_scoped::<InMemoryCache>();
 
-        let mut container = container.build();
+        let container = container.build();
 
         // working in the initial scope
         let cache = container.resolve::<InMemoryCache>().await.unwrap();
@@ -317,7 +318,7 @@ mod tests {
 
         // create a new scope so new instance of InMemoryCache will be created
         {
-            let mut scope = container.create_scope();
+            let scope = container.create_scope();
             let cache = scope.resolve_ref::<InMemoryCache>().await.unwrap();
             cache.set("key", "value 2");
 
@@ -329,7 +330,7 @@ mod tests {
 
         // create a new scope so new instance of InMemoryCache will be created
         {
-            let mut scope = container.create_scope();
+            let scope = container.create_scope();
             let cache = scope.resolve_ref::<InMemoryCache>().await.unwrap();
             let key = cache.get("key");
 
@@ -348,10 +349,10 @@ mod tests {
         container.register_singleton(InMemoryCache::default());
         container.register_scoped::<CacheWrapper>();
 
-        let mut container = container.build();
+        let container = container.build();
 
         {
-            let mut scope = container.create_scope();
+            let scope = container.create_scope();
             let cache = scope.resolve::<CacheWrapper>().await.unwrap();
             cache.inner.set("key", "value 1");
         }
@@ -369,10 +370,10 @@ mod tests {
         container.register_singleton(InMemoryCache::default());
         container.register_scoped::<CacheWrapper>();
 
-        let mut container = container.build();
+        let container = container.build();
 
         {
-            let mut scope = container.create_scope();
+            let scope = container.create_scope();
             let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
             cache.inner.set("key", "value 1");
         }
@@ -390,10 +391,10 @@ mod tests {
         container.register_scoped::<InMemoryCache>();
         container.register_scoped::<CacheWrapper>();
 
-        let mut container = container.build();
+        let container = container.build();
 
         {
-            let mut scope = container.create_scope();
+            let scope = container.create_scope();
             let cache = scope.resolve::<CacheWrapper>().await.unwrap();
             cache.inner.set("key", "value 1");
 
@@ -414,10 +415,10 @@ mod tests {
         container.register_scoped::<InMemoryCache>();
         container.register_scoped::<CacheWrapper>();
 
-        let mut container = container.build();
+        let container = container.build();
 
         {
-            let mut scope = container.create_scope();
+            let scope = container.create_scope();
             let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
             cache.inner.set("key", "value 1");
 
@@ -440,7 +441,7 @@ mod tests {
 
         let container = container.build();
 
-        let mut scope = container.create_scope();
+        let scope = container.create_scope();
         let cache = scope.resolve::<CacheWrapper>().await.unwrap();
         cache.inner.set("key1", "value 1");
 
@@ -462,7 +463,7 @@ mod tests {
 
         let container = container.build();
 
-        let mut scope = container.create_scope();
+        let scope = container.create_scope();
         let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
         cache.inner.set("key1", "value 1");
 
