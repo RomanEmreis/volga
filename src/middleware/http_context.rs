@@ -26,6 +26,7 @@ pub struct HttpContext {
 
 impl HttpContext {
     /// Creates a new [`HttpContext`]
+    #[inline]
     pub(crate) fn new(
         request: HttpRequest,
         handler: RouteHandler, 
@@ -34,6 +35,7 @@ impl HttpContext {
         Self { request, handler, error_handler }
     }
     
+    #[inline]
     #[allow(dead_code)]
     pub(super) fn into_parts(self) -> (HttpRequest, RouteHandler, WeakErrorHandler) {
         (self.request, self.handler, self.error_handler)
@@ -63,9 +65,17 @@ impl HttpContext {
     }
 
     /// Resolves a service from Dependency Container
+    #[inline]
     #[cfg(feature = "di")]
     pub async fn resolve<T: Inject + 'static>(&mut self) -> Result<T, Error> {
         self.request.resolve::<T>().await
+    }
+
+    /// Resolves a service from Dependency Container and returns a reference
+    #[inline]
+    #[cfg(feature = "di")]
+    pub async fn resolve_ref<T: Inject + 'static>(&mut self) -> Result<&T, Error> {
+        self.request.resolve_ref::<T>().await
     }
     
     /// Inserts the [`Header<T>`] to HTTP request headers
@@ -75,6 +85,7 @@ impl HttpContext {
     }
 
     /// Executes the request handler for current HTTP request
+    #[inline]
     pub(crate) async fn execute(self) -> HttpResult {
         self.handler.call(self.request).await
     }

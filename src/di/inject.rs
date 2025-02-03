@@ -64,6 +64,7 @@ pub trait Inject: Clone + Send + Sync {
 }
 
 impl<T: Default + Clone + Send + Sync> Inject for T {
+    #[inline]
     fn inject(_: &mut Container) -> impl Future<Output = Result<Self, Error>> + Send {
         ok(Self::default())
     }
