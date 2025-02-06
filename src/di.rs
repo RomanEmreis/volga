@@ -23,13 +23,6 @@ impl DiError {
     fn resolve_error(type_name: &str) -> Error {
         Error::server_error(format!("Services Error: unable to resolve the service: {}", type_name))
     }
-
-    #[inline]
-    fn resolve_transient_error() -> Error {
-        Error::server_error(
-            "Services Error: cannot resolve a `Transient` service as ref, use `resolve::<T>()` or `Dc<T>` instead",
-        )
-    }
 }
 
 /// DI specific impl for [`App`]

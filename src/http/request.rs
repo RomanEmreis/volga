@@ -16,6 +16,8 @@ use crate::http::{endpoints::args::FromRequestRef, request::request_body_limit::
 
 #[cfg(feature = "di")]
 use crate::di::{Container, Inject};
+#[cfg(feature = "di")]
+use std::sync::Arc;
 
 pub mod request_body_limit;
 
@@ -129,18 +131,22 @@ impl HttpRequest {
         Self { inner: request, container }
     }
 
+    /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
+    #[inline]
+    #[cfg(feature = "di")]
+    pub async fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
+        self.container
+            .resolve::<T>()
+            .await
+    }
+
     /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve<T: Inject + 'static>(&self) -> Result<T, Error> {
-        self.container.resolve::<T>().await
-    }
-
-    /// Resolves a service from Dependency Container and returns a reference
-    #[inline]
-    #[cfg(feature = "di")]
-    pub async fn resolve_ref<T: Inject + 'static>(&self) -> Result<&T, Error> {
-        self.container.resolve_ref::<T>().await
+    pub async fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
+        self.container
+            .resolve_shared::<T>()
+            .await
     }
     
     /// Extracts a payload from request parts

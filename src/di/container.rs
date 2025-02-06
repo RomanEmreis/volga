@@ -15,7 +15,6 @@ type ArcService = Arc<
     + Sync
 >;
 
-#[derive(Clone)]
 pub(crate) enum ServiceEntry {
     Singleton(ArcService),
     Scoped(OnceCell<ArcService>),
@@ -39,6 +38,11 @@ type ServiceMap = HashMap<TypeId, ServiceEntry, BuildHasherDefault<TypeIdHasher>
 struct TypeIdHasher(u64);
 
 impl Hasher for TypeIdHasher {
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
     fn write(&mut self, _: &[u8]) {
         unreachable!("TypeId calls write_u64");
     }
@@ -46,11 +50,6 @@ impl Hasher for TypeIdHasher {
     #[inline]
     fn write_u64(&mut self, id: u64) {
         self.0 = id;
-    }
-
-    #[inline]
-    fn finish(&self) -> u64 {
-        self.0
     }
 }
 
@@ -74,7 +73,7 @@ impl ContainerBuilder {
     /// Build a DI container
     pub fn build(self) -> Container {
         Container {
-            services: self.services
+            services: Arc::new(self.services),
         }
     }
 
@@ -98,18 +97,9 @@ impl ContainerBuilder {
 }
 
 /// Represents a DI container
+#[derive(Clone)]
 pub struct Container {
-    services: ServiceMap
-}
-
-impl Clone for Container {
-    #[inline]
-    fn clone(&self) -> Self {
-        let services = self.services.iter()
-            .map(|(key, value)| (*key, value.clone()))
-            .collect();
-        Self { services }
-    }
+    services: Arc<ServiceMap>
 }
 
 impl Container {
@@ -118,24 +108,28 @@ impl Container {
     pub fn create_scope(&self) -> Self {
         let services = self.services.iter()
             .map(|(key, value)| (*key, value.as_scope()))
-            .collect();
-        Self { services }
+            .collect::<HashMap<_, _, _>>();
+        Self { services: Arc::new(services) }
     }
 
-    /// Resolve a service
+    /// Resolves a service and returns a cloned instance. 
+    /// `T` must implement [`Clone`] otherwise use [`resolve_shared`] method 
+    /// that returns a shared pointer
     #[inline]
-    pub async fn resolve<T: Inject + 'static>(&self) -> Result<T, Error> {
+    pub async fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
+        self.resolve_shared::<T>()
+            .map_ok(|s| s.as_ref().clone())
+            .await
+    }
+
+    /// Resolves a service and returns a shared pointer
+    #[inline]
+    pub async fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
         match self.get_service_entry::<T>()? {
-            ServiceEntry::Transient => T::inject(self).await,
-            service => self.resolve_service(service).await.cloned()
+            ServiceEntry::Transient => T::inject(self).map_ok(Arc::new).await,
+            ServiceEntry::Scoped(cell) => self.resolve_scoped(cell).await,
+            ServiceEntry::Singleton(instance) => Self::resolve_internal(instance)
         }
-    }
-
-    /// Resolve a service as ref
-    #[inline]
-    pub async fn resolve_ref<T: Inject + 'static>(&self) -> Result<&T, Error> {
-        let service = self.get_service_entry::<T>()?;
-        self.resolve_service(service).await
     }
 
     /// Fetch the service entry or return an error if not registered.
@@ -148,16 +142,7 @@ impl Container {
     }
 
     #[inline]
-    async fn resolve_service<'a, T: Inject + 'static>(&self, service: &'a ServiceEntry) -> Result<&'a T, Error> {
-        match service {
-            ServiceEntry::Transient => Err(DiError::resolve_transient_error()),
-            ServiceEntry::Singleton(instance) => Self::resolve_internal(instance),
-            ServiceEntry::Scoped(cell) => Self::resolve_scoped::<T>(self, cell).await
-        }
-    }
-
-    #[inline]
-    async fn resolve_scoped<'a, T: Inject + 'static>(&self, cell: &'a OnceCell<ArcService>) -> Result<&'a T, Error> {
+    async fn resolve_scoped<T: Inject + 'static>(&self, cell: &OnceCell<ArcService>) -> Result<Arc<T>, Error> {
         let instance = cell
             .get_or_try_init(|| async {
                 T::inject(self)
@@ -169,10 +154,11 @@ impl Container {
     }
 
     #[inline]
-    fn resolve_internal<T: Inject + 'static>(instance: &ArcService) -> Result<&T, Error> {
-        (**instance)
-            .downcast_ref::<T>()
-            .ok_or(DiError::resolve_error(std::any::type_name::<T>()))
+    fn resolve_internal<T: Inject + 'static>(instance: &ArcService) -> Result<Arc<T>, Error> {
+        instance
+            .clone()
+            .downcast::<T>()
+            .map_err(|_| DiError::resolve_error(std::any::type_name::<T>()))
     }
 }
 
@@ -216,7 +202,8 @@ mod tests {
 
     impl Inject for CacheWrapper {
         async fn inject(container: &Container) -> Result<Self, Error> {
-            Ok(Self { inner: container.resolve().await? })
+            let inner = container.resolve::<InMemoryCache>().await?;
+            Ok(Self { inner })
         }
     }
 
@@ -231,22 +218,6 @@ mod tests {
         cache.set("key", "value");
 
         let cache = container.resolve::<InMemoryCache>().await.unwrap();
-        let key = cache.get("key").unwrap();
-
-        assert_eq!(key, "value");
-    }
-
-    #[tokio::test]
-    async fn it_registers_singleton_and_resolves_as_ref() {
-        let mut container = ContainerBuilder::new();
-        container.register_singleton(InMemoryCache::default());
-
-        let container = container.build();
-
-        let cache = container.resolve_ref::<InMemoryCache>().await.unwrap();
-        cache.set("key", "value");
-
-        let cache = container.resolve_ref::<InMemoryCache>().await.unwrap();
         let key = cache.get("key").unwrap();
 
         assert_eq!(key, "value");
@@ -306,43 +277,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_registers_scoped_and_resolves_as_ref() {
-        let mut container = ContainerBuilder::new();
-        container.register_scoped::<InMemoryCache>();
-
-        let container = container.build();
-
-        // working in the initial scope
-        let cache = container.resolve::<InMemoryCache>().await.unwrap();
-        cache.set("key", "value 1");
-
-        // create a new scope so new instance of InMemoryCache will be created
-        {
-            let scope = container.create_scope();
-            let cache = scope.resolve_ref::<InMemoryCache>().await.unwrap();
-            cache.set("key", "value 2");
-
-            let cache = scope.resolve_ref::<InMemoryCache>().await.unwrap();
-            let key = cache.get("key").unwrap();
-
-            assert_eq!(key, "value 2");
-        }
-
-        // create a new scope so new instance of InMemoryCache will be created
-        {
-            let scope = container.create_scope();
-            let cache = scope.resolve_ref::<InMemoryCache>().await.unwrap();
-            let key = cache.get("key");
-
-            assert!(key.is_none());
-        }
-
-        let key = cache.get("key").unwrap();
-
-        assert_eq!(key, "value 1");
-    }
-
-    #[tokio::test]
     async fn it_resolves_inner_dependencies() {
         let mut container = ContainerBuilder::new();
 
@@ -358,27 +292,6 @@ mod tests {
         }
 
         let cache = container.resolve::<InMemoryCache>().await.unwrap();
-        let key = cache.get("key").unwrap();
-
-        assert_eq!(key, "value 1");
-    }
-
-    #[tokio::test]
-    async fn it_resolves_inner_dependencies_as_ref() {
-        let mut container = ContainerBuilder::new();
-
-        container.register_singleton(InMemoryCache::default());
-        container.register_scoped::<CacheWrapper>();
-
-        let container = container.build();
-
-        {
-            let scope = container.create_scope();
-            let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
-            cache.inner.set("key", "value 1");
-        }
-
-        let cache = container.resolve_ref::<InMemoryCache>().await.unwrap();
         let key = cache.get("key").unwrap();
 
         assert_eq!(key, "value 1");
@@ -409,30 +322,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn inner_scope_does_not_affect_outer_with_ref() {
-        let mut container = ContainerBuilder::new();
-
-        container.register_scoped::<InMemoryCache>();
-        container.register_scoped::<CacheWrapper>();
-
-        let container = container.build();
-
-        {
-            let scope = container.create_scope();
-            let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
-            cache.inner.set("key", "value 1");
-
-            let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
-            cache.inner.set("key", "value 2");
-        }
-
-        let cache = container.resolve_ref::<InMemoryCache>().await.unwrap();
-        let key = cache.get("key");
-
-        assert!(key.is_none())
-    }
-
-    #[tokio::test]
     async fn it_resolves_inner_scoped_dependencies() {
         let mut container = ContainerBuilder::new();
 
@@ -449,28 +338,6 @@ mod tests {
         cache.inner.set("key2", "value 2");
 
         let cache = scope.resolve::<CacheWrapper>().await.unwrap();
-
-        assert_eq!(cache.inner.get("key1").unwrap(), "value 1");
-        assert_eq!(cache.inner.get("key2").unwrap(), "value 2");
-    }
-
-    #[tokio::test]
-    async fn it_resolves_inner_scoped_dependencies_as_ref() {
-        let mut container = ContainerBuilder::new();
-
-        container.register_scoped::<InMemoryCache>();
-        container.register_scoped::<CacheWrapper>();
-
-        let container = container.build();
-
-        let scope = container.create_scope();
-        let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
-        cache.inner.set("key1", "value 1");
-
-        let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
-        cache.inner.set("key2", "value 2");
-
-        let cache = scope.resolve_ref::<CacheWrapper>().await.unwrap();
 
         assert_eq!(cache.inner.get("key1").unwrap(), "value 1");
         assert_eq!(cache.inner.get("key2").unwrap(), "value 2");

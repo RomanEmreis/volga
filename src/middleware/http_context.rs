@@ -12,6 +12,8 @@ use crate::{
 
 #[cfg(feature = "di")]
 use crate::di::Inject;
+#[cfg(feature = "di")]
+use std::sync::Arc;
 
 /// Describes current HTTP context which consists of the current HTTP request data 
 /// and the reference to the method handler fot this request
@@ -64,18 +66,18 @@ impl HttpContext {
         self.request.extract()
     }
 
-    /// Resolves a service from Dependency Container
+    /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve<T: Inject + 'static>(&self) -> Result<T, Error> {
+    pub async fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
         self.request.resolve::<T>().await
     }
 
-    /// Resolves a service from Dependency Container and returns a reference
+    /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve_ref<T: Inject + 'static>(&self) -> Result<&T, Error> {
-        self.request.resolve_ref::<T>().await
+    pub async fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
+        self.request.resolve_shared::<T>().await
     }
     
     /// Inserts the [`Header<T>`] to HTTP request headers
