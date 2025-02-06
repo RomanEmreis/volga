@@ -44,7 +44,9 @@ use std::future::Future;
 ///
 /// impl Inject for TransientService {
 ///     async fn inject(container: &Container) -> Result<Self, Error> {
-///         let scoped_service = container.resolve::<ScopedService>().await?;
+///         let scoped_service = container
+///             .resolve::<ScopedService>()
+///             .await?;
 ///         Ok(Self { service: scoped_service })
 ///     }
 /// }
@@ -59,11 +61,11 @@ use std::future::Future;
 ///     ok!()
 /// });
 /// ```
-pub trait Inject: Clone + Send + Sync {
+pub trait Inject: Sized + Send + Sync {
     fn inject(container: &Container) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
-impl<T: Default + Clone + Send + Sync> Inject for T {
+impl<T: Default + Send + Sync> Inject for T {
     #[inline]
     fn inject(_: &Container) -> impl Future<Output = Result<Self, Error>> + Send {
         ok(Self::default())

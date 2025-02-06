@@ -34,7 +34,7 @@ struct RequestLog {
     inner: Arc<Mutex<Vec<String>>>
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct UuidGenerator;
 
 #[derive(serde::Deserialize)]
@@ -65,7 +65,7 @@ async fn main() -> std::io::Result<()> {
 }
 
 async fn log_request<T: RequestIdGenerator + Inject>(mut ctx: HttpContext, next: Next) -> HttpResult {
-    let log: RequestLog = ctx.resolve().await?;
+    let log = ctx.resolve_shared::<RequestLog>().await?;
     let req_id = HeaderValue::from_str(log.request_id.as_str()).unwrap();
     ctx.request
         .headers_mut()
@@ -126,7 +126,9 @@ impl RequestLog {
 /// Custom implementation of `Inject` trait that helps to construct the `RequestLog`
 impl Inject for RequestLog {
     async fn inject(container: &Container) -> Result<Self, Error> {
-        let req_gen = container.resolve::<UuidGenerator>().await?;
+        // We don't need to own this, and it's not implement a Clone, so we can resolve a shared pointer
+        let req_gen = container.resolve_shared::<UuidGenerator>().await?;
+        // Since we need to own ity, and it's a clonable struct, it is fine to resolve as a clone
         let cache = container.resolve::<InMemoryCache>().await?;
         Ok(Self { 
             request_id: req_gen.generate_id(), 

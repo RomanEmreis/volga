@@ -15,6 +15,7 @@ use std::{
     marker::PhantomData,
     future::Future,
     pin::Pin,
+    sync::Arc
 };
 
 /// `Dc` stands for Dependency Container, This struct wraps the injectable type of `T` 
@@ -50,8 +51,8 @@ use std::{
 ///# app.run().await
 ///# }
 /// ```
-#[derive(Debug, Default, Copy, Clone)]
-pub struct Dc<T: Inject>(pub T);
+#[derive(Debug, Default, Clone)]
+pub struct Dc<T: Inject>(Arc<T>);
 
 impl<T: Inject> Deref for Dc<T> {
     type Target = T;
@@ -61,9 +62,24 @@ impl<T: Inject> Deref for Dc<T> {
     }
 }
 
-impl<T: Inject> DerefMut for Dc<T> {
+impl<T: Inject + Clone> DerefMut for Dc<T> {
     fn deref_mut(&mut self) -> &mut T {
-        &mut self.0
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl<T: Inject> Dc<T> {
+    /// Unwraps the inner [`Arc`]
+    pub fn into_inner(self) -> Arc<T> {
+        self.0
+    }
+}
+
+impl<T: Inject + Clone> Dc<T> {
+    /// Returns a clone of the inner `T` if it implements [`Clone`]
+    #[inline]
+    pub fn cloned(&self) -> T {
+        self.0.as_ref().clone()
     }
 }
 
@@ -82,7 +98,7 @@ impl<T: Inject + 'static> Future for ExtractDependencyFut<T> {
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let fut = this.container.resolve::<T>();
+        let fut = this.container.resolve_shared::<T>();
         pin_mut!(fut);
         let result = ready!(fut.poll(cx));
         Poll::Ready(result.map(Dc))
