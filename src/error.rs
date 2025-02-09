@@ -1,21 +1,33 @@
 ﻿//! Error Handling tools
 
-use super::{App, http::{StatusCode, IntoResponse}};
-
 use std::{
     convert::Infallible,
     fmt,
     future::Future, 
-    io::Error as IoError,
+    io::{ErrorKind, Error as IoError},
     error::Error as StdError
 };
-use std::io::ErrorKind;
-pub use self::handler::{ErrorHandler, ErrorFunc};
+
+use super::{
+    App, 
+    http::{
+        GenericHandler, 
+        FromRawRequest, 
+        StatusCode, 
+        IntoResponse
+    }
+};
+
+pub use self::{
+    handler::{ErrorHandler, ErrorFunc},
+    fallback::{FallbackHandler, FallbackFunc}
+};
 
 #[cfg(feature = "problem-details")]
 pub use self::problem::Problem;
 
 pub mod handler;
+pub mod fallback;
 #[cfg(feature = "problem-details")]
 pub mod problem;
 
@@ -181,6 +193,33 @@ impl App {
     {
         self.pipeline
             .set_error_handler(ErrorFunc(handler).into());
+        self
+    }
+
+    /// Adds a special fallback handler that handles the unregistered paths
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, error::Error, not_found};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    ///  let mut app = App::new();
+    ///  
+    ///  app.map_fallback(|| async {
+    ///     not_found!()
+    ///  });
+    /// # app.run().await
+    /// # }
+    /// ```
+    pub fn map_fallback<F, Args, R>(&mut self, handler: F) -> &mut Self
+    where
+        F: GenericHandler<Args, Output = R>,
+        Args: FromRawRequest + Send + Sync + 'static,
+        R: IntoResponse
+    {
+        self.pipeline
+            .set_fallback_handler(FallbackFunc::new(handler).into());
         self
     }
 }

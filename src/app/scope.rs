@@ -68,7 +68,7 @@ impl Scope {
         
         let pipeline = &shared.pipeline;
         match pipeline.endpoints().get_endpoint(request.method(), request.uri()) {
-            RouteOption::RouteNotFound => status!(404),
+            RouteOption::RouteNotFound => pipeline.fallback(request).await,
             RouteOption::MethodNotFound(allowed) => status!(405, [
                 (ALLOW, allowed)
             ]),

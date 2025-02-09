@@ -1,9 +1,17 @@
 ﻿//! Base HTTP tools
 
 // Re-exporting HTTP status codes, Response and some headers from hyper/http
-pub use hyper::{Response, StatusCode};
+pub use hyper::{
+    http::{Uri, Method, Extensions},
+    Response, 
+    StatusCode,
+};
 
 pub use body::{BoxBody, UnsyncBoxBody, HttpBody};
+pub use endpoints::{
+    args::{FromRawRequest, FromRequestRef, FromRequest, FromRequestParts},
+    handlers::GenericHandler
+};
 pub use request::HttpRequest;
 pub use response::{
     into_response::IntoResponse,
