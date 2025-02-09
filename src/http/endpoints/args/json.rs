@@ -6,7 +6,6 @@ use serde::de::DeserializeOwned;
 
 use http_body_util::{combinators::Collect, BodyExt};
 use serde::Serialize;
-use crate::{error::Error, HttpBody};
 
 use std::{
     future::Future,
@@ -17,8 +16,9 @@ use std::{
     task::{Context, Poll}
 };
 
-use crate::http::{
-    endpoints::args::{
+use crate::{
+    error::Error, HttpBody,
+    http::endpoints::args::{
         FromPayload,
         Payload,
         Source
@@ -46,6 +46,7 @@ pub struct Json<T>(pub T);
 
 impl<T> Json<T> {
     /// Unwraps the inner `T`
+    #[inline]
     pub fn into_inner(self) -> T {
         self.0
     }
@@ -61,18 +62,21 @@ impl<T: Serialize> From<T> for Json<T> {
 impl<T> Deref for Json<T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &T {
         &self.0
     }
 }
 
 impl<T> DerefMut for Json<T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut T {
         &mut self.0
     }
 }
 
 impl<T: Display> Display for Json<T> {
+    #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
@@ -108,12 +112,10 @@ impl<T: DeserializeOwned + Send> Future for ExtractJsonPayloadFut<T> {
 impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
     type Future = ExtractJsonPayloadFut<T>;
 
+    #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Body(body) = payload {
-            ExtractJsonPayloadFut { fut: body.collect(), _marker: PhantomData }
-        } else {
-            unreachable!()
-        }
+        let Payload::Body(body) = payload else { unreachable!() };
+        ExtractJsonPayloadFut { fut: body.collect(), _marker: PhantomData }
     }
 
     fn source() -> Source {

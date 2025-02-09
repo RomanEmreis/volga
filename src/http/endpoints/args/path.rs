@@ -1,7 +1,7 @@
 ﻿//! Extractors for route/path segments
 
 use futures_util::future::{ready, Ready};
-use hyper::http::Extensions;
+use hyper::http::{request::Parts, Extensions};
 use serde::de::DeserializeOwned;
 
 use std::{
@@ -10,9 +10,9 @@ use std::{
     str::FromStr
 };
 
-use crate::{error::Error, HttpRequest};
+use crate::{HttpRequest, error::Error};
 use crate::http::endpoints::{
-    args::{FromPayload, FromRequestRef, Payload, Source},
+    args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
     route::PathArguments
 };
 
@@ -37,6 +37,7 @@ pub struct Path<T>(pub T);
 
 impl<T> Path<T> {
     /// Unwraps the inner `T`
+    #[inline]
     pub fn into_inner(self) -> T {
         self.0
     }
@@ -45,18 +46,21 @@ impl<T> Path<T> {
 impl<T> Deref for Path<T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &T {
         &self.0
     }
 }
 
 impl<T> DerefMut for Path<T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut T {
         &mut self.0
     }
 }
 
 impl<T: Display> Display for Path<T> {
+    #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -89,21 +93,10 @@ impl<T: DeserializeOwned> Path<T> {
 
 /// Extracts path args from request parts into `Path<T>`
 /// where T is deserializable `struct`
-impl<T: DeserializeOwned + Send> FromPayload for Path<T> {
-    type Future = Ready<Result<Self, Error>>;
-
+impl<T: DeserializeOwned + Send> FromRequestParts for Path<T> {
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Ext(extensions) = payload {
-            ready(Self::from_extensions(extensions))
-        } else {
-            unreachable!()
-        }
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Ext
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        Self::from_extensions(&parts.extensions)
     }
 }
 
@@ -116,17 +109,33 @@ impl<T: DeserializeOwned + Send> FromRequestRef for Path<T> {
     }
 }
 
+/// Extracts path args from request parts into `Path<T>`
+/// where T is deserializable `struct`
+impl<T: DeserializeOwned + Send> FromPayload for Path<T> {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ready(Self::from_parts(parts))
+    }
+
+    #[inline]
+    fn source() -> Source {
+        Source::Parts
+    }
+}
+
 /// Extracts path args directly into handler method args that implements `FromStr`
 impl<T: FromStr + Send> FromPayload for T {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Path((arg, value)) = payload {
-            ready(value.parse::<T>().map_err(|_| PathError::type_mismatch(arg)))
-        } else {
-            unreachable!()
-        }
+        let Payload::Path((arg, value)) = payload else { unreachable!() };
+        ready(value
+            .parse::<T>()
+            .map_err(|_| PathError::type_mismatch(arg)))
     }
 
     #[inline]
@@ -157,7 +166,7 @@ impl PathError {
 
 #[cfg(test)]
 mod tests {
-    use hyper::http::Extensions;
+    use hyper::{Request, http::Extensions};
     use serde::Deserialize;
     use crate::Path;
     use crate::http::endpoints::route::PathArguments;
@@ -184,11 +193,14 @@ mod tests {
             ("id".to_string(), "123".to_string()),
             ("name".to_string(), "John".to_string())
         ];
-        
-        let mut ext = Extensions::new();
-        ext.insert(args);
 
-        let path = Path::<Params>::from_payload(Payload::Ext(&ext)).await.unwrap();
+        let req = Request::get("/")
+            .extension(args)
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+        let path = Path::<Params>::from_payload(Payload::Parts(&parts)).await.unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")

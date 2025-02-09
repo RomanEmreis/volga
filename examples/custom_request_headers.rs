@@ -18,7 +18,7 @@ async fn main() -> std::io::Result<()> {
     // Setting up the "x-correlation-id" header if it's not provided
     app.use_middleware(|mut ctx, next| async move { 
         if ctx.extract::<Header<CorrelationId>>().is_err() {
-            let correlation_id = Header::<CorrelationId>::from_static("123-321-456");
+            let correlation_id = Header::<CorrelationId>::from("123-321-456");
             ctx.insert_header(correlation_id);
         } 
         next(ctx).await

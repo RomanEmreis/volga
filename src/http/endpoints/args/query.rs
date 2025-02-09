@@ -8,10 +8,10 @@ use std::{
     ops::{Deref, DerefMut}
 };
 
-use hyper::Uri;
+use hyper::{http::request::Parts, Uri};
 
-use crate::{error::Error, HttpRequest};
-use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source};
+use crate::{HttpRequest, error::Error};
+use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source};
 
 /// Wraps typed data extracted from [`Uri`]
 ///
@@ -34,6 +34,7 @@ pub struct Query<T>(pub T);
 
 impl<T> Query<T> {
     /// Unwraps the inner `T`
+    #[inline]
     pub fn into_inner(self) -> T {
         self.0
     }
@@ -42,18 +43,21 @@ impl<T> Query<T> {
 impl<T> Deref for Query<T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &T {
         &self.0
     }
 }
 
 impl<T> DerefMut for Query<T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut T {
         &mut self.0
     }
 }
 
 impl<T: Display> Display for Query<T> {
+    #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -75,6 +79,15 @@ impl<T: DeserializeOwned> Query<T> {
     }
 }
 
+/// Extracts `Uri` query from request parts into `Query<T>`
+/// where T is deserializable `struct`
+impl<T: DeserializeOwned> FromRequestParts for Query<T> {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        Self::from_uri(&parts.uri)
+    }
+}
+
 /// Extracts `Uri` query from request into `Query<T>`
 /// where T is deserializable `struct`
 impl<T: DeserializeOwned> FromRequestRef for Query<T> {
@@ -91,22 +104,20 @@ impl<T: DeserializeOwned + Send> FromPayload for Query<T> {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Query(uri) = payload {
-            ready(Self::from_uri(uri))
-        } else {
-            unreachable!()
-        }
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ready(Self::from_parts(parts))
     }
 
     #[inline]
     fn source() -> Source {
-        Source::Query
+        Source::Parts
     }
 }
 
 /// Describes errors of query extractor
 struct QueryError;
 impl QueryError {
+    #[inline]
     fn from(err: serde::de::value::Error) -> Error {
         Error::client_error(format!("Query parsing error: {}", err))
     }
@@ -115,7 +126,7 @@ impl QueryError {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use hyper::Uri;
+    use hyper::{Uri, Request};
     use serde::Deserialize;
     use crate::Query;
     use crate::http::endpoints::args::{FromPayload, Payload};
@@ -134,9 +145,14 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_from_payload() {
-        let uri = "https://www.example.com/api/get?name=John&age=33".parse::<Uri>().unwrap();
+        let req = Request::get("/get?name=John&age=33")
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+        //let uri = "https://www.example.com/api/get?name=John&age=33".parse::<Uri>().unwrap();
         
-        let query = Query::<User>::from_payload(Payload::Query(&uri)).await.unwrap();
+        let query = Query::<User>::from_payload(Payload::Parts(&parts)).await.unwrap();
 
         assert_eq!(query.name, "John");
         assert_eq!(query.age, 33);
@@ -144,9 +160,14 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_as_optional_from_payload() {
-        let uri = "https://www.example.com/api/get?name=John".parse::<Uri>().unwrap();
+        let req = Request::get("/get?name=John")
+            .body(())
+            .unwrap();
 
-        let query = Query::<OptionalUser>::from_payload(Payload::Query(&uri)).await.unwrap();
+        let (parts, _) = req.into_parts();
+        //let uri = "https://www.example.com/api/get?name=John".parse::<Uri>().unwrap();
+
+        let query = Query::<OptionalUser>::from_payload(Payload::Parts(&parts)).await.unwrap();
 
         assert!(query.age.is_none());
         assert_eq!(query.0.name.unwrap(), "John");
@@ -154,9 +175,14 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_hash_map_from_payload() {
-        let uri = "https://www.example.com/api/get?name=John&age=33".parse::<Uri>().unwrap();
+        let req = Request::get("/get?name=John&age=33")
+            .body(())
+            .unwrap();
 
-        let query = Query::<HashMap<String, String>>::from_payload(Payload::Query(&uri)).await.unwrap();
+        let (parts, _) = req.into_parts();
+        //let uri = "https://www.example.com/api/get?name=John&age=33".parse::<Uri>().unwrap();
+
+        let query = Query::<HashMap<String, String>>::from_payload(Payload::Parts(&parts)).await.unwrap();
 
         assert_eq!(query.0.get("name").unwrap(), "John");
         assert_eq!(query.0.get("age").unwrap(), "33");
