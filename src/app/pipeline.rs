@@ -1,30 +1,34 @@
 ﻿use std::sync::Arc;
+use hyper::{Request, body::Incoming};
+
 use crate::{
     error::{
-        ErrorFunc, 
+        ErrorFunc,
+        FallbackFunc,
+        fallback::{PipelineFallbackHandler, default_fallback_handler},
         handler::{PipelineErrorHandler, WeakErrorHandler, default_error_handler}
     },
-    http::endpoints::Endpoints
+    http::endpoints::Endpoints,
+    HttpResult
 };
 
 #[cfg(feature = "middleware")]
-use crate::{
-    middleware::{Middlewares, HttpContext, Next},
-    HttpResult
-};
+use crate::{middleware::{Middlewares, HttpContext, Next}};
 
 pub(crate) struct PipelineBuilder {
     #[cfg(feature = "middleware")]
     middlewares: Middlewares,
     endpoints: Endpoints,
-    error_handler: PipelineErrorHandler
+    error_handler: PipelineErrorHandler,
+    fallback_handler: PipelineFallbackHandler
 }
 
 pub(crate) struct Pipeline {
     #[cfg(feature = "middleware")]
     start: Option<Next>,
     endpoints: Endpoints,
-    error_handler: PipelineErrorHandler
+    error_handler: PipelineErrorHandler,
+    fallback_handler: PipelineFallbackHandler
 }
 
 impl PipelineBuilder {
@@ -33,7 +37,8 @@ impl PipelineBuilder {
         Self {
             middlewares: Middlewares::new(),
             endpoints: Endpoints::new(),
-            error_handler: ErrorFunc(default_error_handler).into()
+            error_handler: ErrorFunc(default_error_handler).into(),
+            fallback_handler: FallbackFunc::new(default_fallback_handler).into()
         }
     }
 
@@ -41,7 +46,8 @@ impl PipelineBuilder {
     pub(super) fn new() -> Self {
         Self { 
             endpoints: Endpoints::new(),
-            error_handler: ErrorFunc(default_error_handler).into()
+            error_handler: ErrorFunc(default_error_handler).into(),
+            fallback_handler: FallbackFunc::new(default_fallback_handler).into()
         }
     }
 
@@ -51,6 +57,7 @@ impl PipelineBuilder {
         Pipeline {
             endpoints: self.endpoints,
             error_handler: self.error_handler,
+            fallback_handler: self.fallback_handler,
             start
         }
     }
@@ -59,7 +66,8 @@ impl PipelineBuilder {
     pub(super) fn build(self) -> Pipeline {
         Pipeline { 
             endpoints: self.endpoints,
-            error_handler: self.error_handler
+            error_handler: self.error_handler,
+            fallback_handler: self.fallback_handler
         }
     }
 
@@ -80,6 +88,10 @@ impl PipelineBuilder {
     pub(crate) fn set_error_handler(&mut self, handler: PipelineErrorHandler) {
         self.error_handler = handler;
     }
+
+    pub(crate) fn set_fallback_handler(&mut self, handler: PipelineFallbackHandler) {
+        self.fallback_handler = handler;
+    }
 }
 
 impl Pipeline {
@@ -91,6 +103,11 @@ impl Pipeline {
     #[inline]
     pub(super) fn error_handler(&self) -> WeakErrorHandler {
         Arc::downgrade(&self.error_handler)
+    }
+    
+    #[inline]
+    pub(super) async fn fallback(&self, req: Request<Incoming>) -> HttpResult {
+        self.fallback_handler.call(req).await
     }
     
     #[cfg(feature = "middleware")]

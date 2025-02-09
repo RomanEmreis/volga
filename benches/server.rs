@@ -58,6 +58,7 @@ fn benchmark(c: &mut Criterion) {
             app.map_get("/", || async { "Hello, World!" });
             app.map_get("/err", || async { Error::new(ErrorKind::Other, "error") });
             app.map_err(|err| async move { status!(500, err.to_string()) });
+            app.map_fallback(|| async { status!(404) });
             _ = app.run().await;
         });
     });
@@ -67,6 +68,9 @@ fn benchmark(c: &mut Criterion) {
     ));
     c.bench_function("err", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/err")))
+    ));
+    c.bench_function("fallback", |b| b.iter_custom(
+        |iters| rt.block_on(routing(iters, black_box("/fall")))
     ));
     
     #[cfg(feature = "di")]

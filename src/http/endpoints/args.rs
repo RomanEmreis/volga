@@ -2,9 +2,11 @@
 
 use std::future::Future;
 use hyper::{
+    body::Incoming,
     http::{request::Parts, Extensions},
-    HeaderMap,
-    Uri,
+    HeaderMap, 
+    Request, 
+    Uri
 };
 
 use crate::{
@@ -61,9 +63,19 @@ pub trait FromRequest: Sized {
     fn from_request(req: HttpRequest) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
+/// Specifies extractors to read data from raw HTTP request
+pub trait FromRawRequest: Sized {
+    fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send;
+}
+
 /// Specifies extractors to read data from HTTP request
 pub trait FromRequestRef: Sized {
     fn from_request(req: &HttpRequest) -> Result<Self, Error>;
+}
+
+/// Specifies extractors to read data from HTTP request
+pub trait FromRequestParts: Sized {
+    fn from_parts(parts: &Parts) -> Result<Self, Error>;
 }
 
 /// Specifies extractor to read data from HTTP request
@@ -82,7 +94,14 @@ pub(crate) trait FromPayload: Send + Sized {
 
 impl FromRequest for () {
     #[inline]
-    async fn from_request(_req: HttpRequest) -> Result<Self, Error> {
+    async fn from_request(_: HttpRequest) -> Result<Self, Error> {
+        Ok(())
+    }
+}
+
+impl FromRawRequest for () {
+    #[inline]
+    async fn from_request(_: Request<Incoming>) -> Result<Self, Error> {
         Ok(())
     }
 }
@@ -143,6 +162,23 @@ macro_rules! define_generic_from_request {
     }
 }
 
+macro_rules! define_generic_from_raw_request {
+    ($($T: ident),*) => {
+        impl<$($T: FromRequestParts),+> FromRawRequest for ($($T,)+) {
+            #[inline]
+            async fn from_request(req: Request<Incoming>) -> Result<Self, Error> {
+                let (parts, _) = req.into_parts();
+                let tuple = (
+                    $(
+                    $T::from_parts(&parts)?,
+                    )*    
+                );
+                Ok(tuple)
+            }
+        }
+    }
+}
+
 define_generic_from_request! { T1 }
 define_generic_from_request! { T1, T2 }
 define_generic_from_request! { T1, T2, T3 }
@@ -153,3 +189,8 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
+
+define_generic_from_raw_request! { T1 }
+define_generic_from_raw_request! { T1, T2 }
+define_generic_from_raw_request! { T1, T2, T3 }
+define_generic_from_raw_request! { T1, T2, T3, T4 }
