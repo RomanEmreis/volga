@@ -125,20 +125,17 @@ impl FromPayload for File {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Parts(parts, body) = payload {
-            let name = parts.headers
-                .get(&CONTENT_DISPOSITION)
-                .and_then(|header| header.to_str().ok())
-                .and_then(Self::parse_file_name);
-            ok(FileStream::new(name, body))
-        } else {
-            unreachable!()
-        }
+        let Payload::Full(parts, body) = payload else { unreachable!() };
+        let name = parts.headers
+            .get(&CONTENT_DISPOSITION)
+            .and_then(|header| header.to_str().ok())
+            .and_then(Self::parse_file_name);
+        ok(FileStream::new(name, body))
     }
 
     #[inline]
     fn source() -> Source {
-        Source::Parts
+        Source::Full
     }
 }
 
@@ -184,7 +181,7 @@ mod tests {
         
         let (parts, body) = req.into_parts();
         
-        let file_stream = FileStream::from_payload(Payload::Parts(&parts, body)).await.unwrap();
+        let file_stream = FileStream::from_payload(Payload::Full(&parts, body)).await.unwrap();
 
         assert_eq!(file_stream.name(), Some("test_file.txt"));
 

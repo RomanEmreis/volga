@@ -57,14 +57,11 @@ impl FromPayload for HttpRequest {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Full(req) = payload {
-            ok(req)
-        } else {
-            unreachable!()
-        }
+        let Payload::Request(req) = payload else { unreachable!() };
+        ok(req)
     }
 
     fn source() -> Source {
-        Source::Full
+        Source::Request
     }
 }

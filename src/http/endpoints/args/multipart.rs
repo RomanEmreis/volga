@@ -12,12 +12,10 @@ use std::{
 
 use crate::error::Error;
 use crate::headers::{HeaderMap, CONTENT_TYPE};
-use crate::http::{
-    endpoints::args::{
-        FromPayload,
-        Payload,
-        Source
-    }
+use crate::http::endpoints::args::{
+    FromPayload,
+    Payload,
+    Source
 };
 
 /// Describes a multipart file/form data
@@ -121,12 +119,14 @@ impl Field {
 impl Deref for Field {
     type Target = multer::Field<'static>;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl DerefMut for Field {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -169,12 +169,14 @@ impl Multipart {
 impl Deref for Multipart {
     type Target = multer::Multipart<'static>;
 
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl DerefMut for Multipart {
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -185,17 +187,15 @@ impl<'a> TryFrom<Payload<'a>> for Multipart {
     
     #[inline]
     fn try_from(payload: Payload<'a>) -> Result<Self, Self::Error> {
-        if let Payload::Parts(parts, body) = payload {
-            let boundary = Self::parse_boundary(&parts.headers)
-                .ok_or(MultipartError::invalid_boundary())?;
+        let Payload::Full(parts, body) = payload else { unreachable!() };
 
-            let stream = body.into_data_stream();
-            let multipart = multer::Multipart::new(stream, boundary);
+        let boundary = Self::parse_boundary(&parts.headers)
+            .ok_or(MultipartError::invalid_boundary())?;
 
-            Ok(Multipart(multipart))
-        } else {
-            unreachable!()
-        }
+        let stream = body.into_data_stream();
+        let multipart = multer::Multipart::new(stream, boundary);
+
+        Ok(Multipart(multipart))
     }
 }
 
@@ -210,7 +210,7 @@ impl FromPayload for Multipart {
 
     #[inline]
     fn source() -> Source {
-        Source::Parts
+        Source::Full
     }
 }
 
@@ -250,7 +250,7 @@ mod tests {
             .unwrap();
         
         let (parts, body) = req.into_parts();
-        let mut multipart = Multipart::from_payload(Payload::Parts(&parts, body)).await.unwrap();
+        let mut multipart = Multipart::from_payload(Payload::Full(&parts, body)).await.unwrap();
 
         while let Some(field) = multipart.next_field().await.unwrap() {
             assert_eq!(field.name().unwrap(), "my_text_field");

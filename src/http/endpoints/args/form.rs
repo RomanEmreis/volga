@@ -38,6 +38,7 @@ pub struct Form<T>(pub T);
 
 impl<T> Form<T> {
     /// Unwraps the inner `T`
+    #[inline]
     pub fn into_inner(self) -> T {
         self.0
     }
@@ -53,18 +54,21 @@ impl<T: Serialize> From<T> for Form<T> {
 impl<T> Deref for Form<T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &T {
         &self.0
     }
 }
 
 impl<T> DerefMut for Form<T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut T {
         &mut self.0
     }
 }
 
 impl<T: Display> Display for Form<T> {
+    #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
@@ -102,11 +106,8 @@ impl<T: DeserializeOwned + Send> FromPayload for Form<T> {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Body(body) = payload {
-            ExtractFormPayloadFut { fut: body.collect(), _marker: PhantomData }
-        } else {
-            unreachable!()
-        }
+        let Payload::Body(body) = payload else { unreachable!() };
+        ExtractFormPayloadFut { fut: body.collect(), _marker: PhantomData }
     }
 
     #[inline]

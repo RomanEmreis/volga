@@ -1,7 +1,8 @@
 //! Extractors for HTTP headers
 
-use futures_util::future::{Ready, ok, ready};
-use crate::{error::Error, HttpRequest};
+use futures_util::future::{Ready, ready};
+use hyper::http::request::Parts;
+use crate::{HttpRequest, error::Error};
 
 use super::{
     FromHeaders, 
@@ -12,6 +13,7 @@ use super::{
 
 use crate::http::endpoints::args::{
     FromPayload, 
+    FromRequestParts,
     FromRequestRef,
     Payload,
     Source
@@ -43,12 +45,14 @@ pub struct Headers {
 impl Deref for Headers {
     type Target = HeaderMap<HeaderValue>;
 
+    #[inline]
     fn deref(&self) -> &HeaderMap<HeaderValue> {
         &self.inner
     }
 }
 
 impl DerefMut for Headers {
+    #[inline]
     fn deref_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
         &mut self.inner
     }
@@ -60,22 +64,43 @@ impl Headers {
     }
 }
 
+impl From<HeaderMap<HeaderValue>> for Headers {
+    #[inline]
+    fn from(inner: HeaderMap<HeaderValue>) -> Self {
+        Self { inner }
+    }
+}
+
+/// Extracts `HeadersMap` from request parts into [`Headers`]
+impl FromRequestParts for Headers {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        Ok(parts.headers.clone().into())
+    }
+}
+
+/// Extracts `HeaderValue` from request into `Header<T>``
+/// where T implements [`FromHeaders`] `struct`
+impl FromRequestRef for Headers {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Ok(req.headers().clone().into())
+    }
+}
+
 /// Extracts `HeaderMap` from request into `Headers`
 impl FromPayload for Headers {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Headers(headers) = payload {
-            ok(Headers { inner: headers.clone() })
-        } else {
-            unreachable!()
-        }
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ready(Self::from_parts(parts))
     }
 
     #[inline]
     fn source() -> Source {
-        Source::Headers
+        Source::Parts
     }
 }
 
@@ -96,24 +121,30 @@ pub struct Header<T: FromHeaders> {
     _marker: PhantomData<T>
 }
 
+impl<T: FromHeaders> From<HeaderValue> for Header<T> {
+    #[inline]
+    fn from(value: HeaderValue) -> Self {
+        Self { 
+            value, 
+            _marker: PhantomData
+        }
+    }
+}
+
+impl<T: FromHeaders> From<&'static str> for Header<T> {
+    #[inline]
+    fn from(value: &'static str) -> Self {
+        Self { 
+            value: HeaderValue::from_static(value), 
+            _marker: PhantomData
+        }
+    }
+}
+
 impl<T: FromHeaders> Header<T> {
     /// Creates a new instance of [`Header<T>`] from [`HeaderValue`]
     pub fn new(header_value: &HeaderValue) -> Self {
-        Self { value: header_value.clone(), _marker: PhantomData }
-    }
-
-    /// Creates a new instance of [`Header<T>`] from a static string
-    ///
-    /// # Examples
-    /// ```no_run
-    /// use volga::headers::{ContentType, Header};
-    ///
-    /// let content_type_header = Header::<ContentType>::from_static("text/plain");
-    /// assert_eq!(*content_type_header, "text/plain");
-    /// ```
-    #[inline]
-    pub fn from_static(str: &'static str) -> Self {
-        Self { value: HeaderValue::from_static(str), _marker: PhantomData }
+        header_value.clone().into()
     }
 
     /// Creates a new instance of [`Header<T>`] from `&str`
@@ -129,11 +160,11 @@ impl<T: FromHeaders> Header<T> {
     /// ```no_run
     /// use volga::headers::{ContentType, Header};
     ///
-    /// let content_type_header = Header::<ContentType>::from("\n");
+    /// let content_type_header = Header::<ContentType>::try_from("\n");
     /// assert!(content_type_header.is_err())
     /// ```
     #[inline]
-    pub fn from(str: &str) -> Result<Self, Error> {
+    pub fn try_from(str: &str) -> Result<Self, Error> {
         let header_value = HeaderValue::from_str(str)
             .map_err(HeaderError::from_invalid_header_value)?;
         Ok(Self { value: header_value, _marker: PhantomData })
@@ -190,26 +221,39 @@ impl<T: FromHeaders> Header<T> {
 impl<T: FromHeaders> Deref for Header<T> {
     type Target = HeaderValue;
 
+    #[inline]
     fn deref(&self) -> &HeaderValue {
         &self.value
     }
 }
 
 impl<T: FromHeaders> DerefMut for Header<T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut HeaderValue {
         &mut self.value
     }
 }
 
 impl<T: FromHeaders> Display for Header<T>  {
+    #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.value.to_str().map_err(|_| std::fmt::Error)?.fmt(f)
+    }
+}
+
+/// Extracts `HeaderValue` from request parts into `Header<T>``
+/// where T implements [`FromHeaders`] `struct`
+impl<T: FromHeaders + Send> FromRequestParts for Header<T> {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        Self::from_headers_map(&parts.headers)
     }
 }
 
 /// Extracts `HeaderValue` from request into `Header<T>``
 /// where T implements [`FromHeaders`] `struct`
 impl<T: FromHeaders + Send> FromRequestRef for Header<T> {
+    #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         Self::from_headers_map(req.headers())
     }
@@ -222,43 +266,48 @@ impl<T: FromHeaders + Send> FromPayload for Header<T> {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Headers(headers) = payload {
-            ready(Self::from_headers_map(headers))
-        } else {
-            unreachable!()
-        }
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ready(Self::from_parts(parts))
     }
 
     #[inline]
     fn source() -> Source {
-        Source::Headers
+        Source::Parts
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::ops::Deref;
-    use hyper::HeaderMap;
+    use hyper::{HeaderMap, Request};
     use hyper::http::HeaderValue;
     use crate::headers::{ContentType, Header, Headers};
     use crate::http::endpoints::args::{FromPayload, Payload};
 
     #[tokio::test]
     async fn it_reads_headers_from_payload() {
-        let mut headers = HeaderMap::new();
-        headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
+        let req = Request::get("/")
+            .header("Content-Type", HeaderValue::from_static("text/plain"))
+            .body(())
+            .unwrap();
 
-        let headers = Headers::from_payload(Payload::Headers(&headers)).await.unwrap();
+        let (parts, _) = req.into_parts();
+
+        let headers = Headers::from_payload(Payload::Parts(&parts)).await.unwrap();
 
         assert_eq!(headers.get("content-type").unwrap(), "text/plain");
     }
 
     #[tokio::test]
     async fn it_reads_header_from_payload() {
-        let mut headers = HeaderMap::new();
-        headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
+        let req = Request::get("/")
+            .header("Content-Type", HeaderValue::from_static("text/plain"))
+            .body(())
+            .unwrap();
 
-        let header: Header<ContentType> = Header::from_payload(Payload::Headers(&headers)).await.unwrap();
+        let (parts, _) = req.into_parts();
+
+        let header: Header<ContentType> = Header::from_payload(Payload::Parts(&parts)).await.unwrap();
 
         assert_eq!(header.deref(), "text/plain");
     }
@@ -296,21 +345,21 @@ mod tests {
     fn i_creates_header_from_str() {
         let header_value = "text/plain";
 
-        let header = Header::<ContentType>::from(header_value).unwrap();
+        let header = Header::<ContentType>::try_from(header_value).unwrap();
 
         assert_eq!(*header, "text/plain");
     }
 
     #[test]
     fn i_creates_header_from_static() {
-        let header = Header::<ContentType>::from_static("text/plain");
+        let header = Header::<ContentType>::from("text/plain");
 
         assert_eq!(*header, "text/plain");
     }
 
     #[test]
     fn it_creates_parts() {
-        let header = Header::<ContentType>::from_static("text/plain");
+        let header = Header::<ContentType>::from("text/plain");
 
         let (name, value) = header.into_parts();
 
@@ -320,7 +369,7 @@ mod tests {
 
     #[test]
     fn it_creates_string_parts() {
-        let header = Header::<ContentType>::from_static("text/plain");
+        let header = Header::<ContentType>::from("text/plain");
 
         let (name, value) = header.into_string_parts().unwrap();
 

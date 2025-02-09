@@ -3,10 +3,8 @@
 use std::future::Future;
 use hyper::{
     body::Incoming,
-    http::{request::Parts, Extensions},
-    HeaderMap, 
-    Request, 
-    Uri
+    http::request::Parts,
+    Request
 };
 
 use crate::{
@@ -33,13 +31,11 @@ pub mod multipart;
 /// Holds the payload for extractors
 pub(crate) enum Payload<'a> {
     None,
-    Full(HttpRequest),
+    Request(HttpRequest),
     Body(HttpBody),
-    Parts(&'a Parts, HttpBody),
-    Query(&'a Uri),
-    Headers(&'a HeaderMap),
+    Full(&'a Parts, HttpBody),
+    Parts(&'a Parts),
     Path(&'a (String, String)),
-    Ext(&'a Extensions),
     #[cfg(feature = "di")]
     Dc(&'a Container)
 }
@@ -47,13 +43,11 @@ pub(crate) enum Payload<'a> {
 /// Describes a data source for extractors to read from
 pub(crate) enum Source {
     None,
+    Request,
     Full,
     Parts,
     Path,
-    Query,
-    Headers,
     Body,
-    Ext,
     #[cfg(feature = "di")]
     Dc
 }
@@ -68,12 +62,12 @@ pub trait FromRawRequest: Sized {
     fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
-/// Specifies extractors to read data from HTTP request
+/// Specifies extractors to read data from borrowed HTTP request
 pub trait FromRequestRef: Sized {
     fn from_request(req: &HttpRequest) -> Result<Self, Error>;
 }
 
-/// Specifies extractors to read data from HTTP request
+/// Specifies extractors to read data from HTTP request parts
 pub trait FromRequestParts: Sized {
     fn from_parts(parts: &Parts) -> Result<Self, Error>;
 }
@@ -126,9 +120,7 @@ macro_rules! define_generic_from_request {
                     $(
                     $T::from_payload(match $T::source() {
                         Source::None => Payload::None,
-                        Source::Query => Payload::Query(&parts.uri),
-                        Source::Headers => Payload::Headers(&parts.headers),
-                        Source::Ext => Payload::Ext(&parts.extensions),
+                        Source::Parts => Payload::Parts(&parts),
                         #[cfg(feature = "di")]
                         Source::Dc => Payload::Dc(&container),
                         Source::Path => match iter.next() {
@@ -139,16 +131,16 @@ macro_rules! define_generic_from_request {
                             Some(body) => Payload::Body(body),
                             None => Payload::None
                         },
-                        Source::Parts => match body.take() {
-                            Some(body) => Payload::Parts(&parts, body),
+                        Source::Full => match body.take() {
+                            Some(body) => Payload::Full(&parts, body),
                             None => Payload::None
                         },
-                        Source::Full => match body.take() {
+                        Source::Request => match body.take() {
                             Some(body) => {
                                 #[cfg(feature = "di")]
-                                let req = Payload::Full(HttpRequest::from_parts(parts.clone(), body, container.clone()));
+                                let req = Payload::Request(HttpRequest::from_parts(parts.clone(), body, container.clone()));
                                 #[cfg(not(feature = "di"))]
-                                let req = Payload::Full(HttpRequest::from_parts(parts.clone(), body));
+                                let req = Payload::Request(HttpRequest::from_parts(parts.clone(), body));
                                 req
                             },
                             None => Payload::None
