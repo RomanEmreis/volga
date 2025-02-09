@@ -153,7 +153,7 @@ impl<T: FromHeaders> Header<T> {
     /// ```no_run
     /// use volga::headers::{ContentType, Header};
     ///
-    /// let content_type_header = Header::<ContentType>::from("text/plain").unwrap();
+    /// let content_type_header = Header::<ContentType>::try_from("text/plain").unwrap();
     /// assert_eq!(*content_type_header, "text/plain");
     /// ```
     /// An invalid value
