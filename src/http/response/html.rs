@@ -129,6 +129,6 @@ mod tests {
         let body = response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(body.len(), 0);
-        assert_eq!(response.status(), 200);
+        assert_eq!(response.status(), 204);
     }
 }
