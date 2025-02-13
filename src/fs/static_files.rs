@@ -174,7 +174,7 @@ impl App {
             self.map_fallback_to_file();
         }
         
-        self.map_static_assets("/", index)
+        self.map_static_assets()
     }
 
     /// Configures a static assets
