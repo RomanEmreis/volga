@@ -31,7 +31,7 @@ impl TryFrom<&Metadata> for ETag {
 
         hasher.update(duration.as_secs().to_string());
         
-        Ok(Self::from(format!("{:x}", hasher.finalize())))
+        Ok(Self::from(format!("\"{:x}\"", hasher.finalize())))
     }
 }
 
@@ -67,7 +67,7 @@ impl Display for ETag {
 impl ETag {
     #[inline]
     pub fn new(etag: &str) -> Self {
-        Self { inner: Cow::Owned(etag.to_owned()) }
+        Self::from(etag.to_owned())
     }
 }
 

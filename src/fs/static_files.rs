@@ -146,15 +146,14 @@ fn max_folder_depth<P: AsRef<Path>>(path: P) -> u32 {
         max_depth
     }
 
-    helper(path.as_ref(), 0)
+    helper(path.as_ref(), 1)
 }
 
 impl App {
     /// Configures a static files server
     ///
-    /// All the `GET`/`HEAD` requests to root `/` will be redirected to `/index.html`
-    /// as well as all the `GET`/`HEAD` requests to `/{file_name}` 
-    /// will respond with the appropriate page
+    /// This method combines logic [`map_static_assets`] and [`map_fallback_to_file`]. 
+    /// The last one is called if the `fallback_path` is explicitly provided in [`HostEnv`].
     ///    
     /// # Example
     /// ```no_run
@@ -170,6 +169,34 @@ impl App {
     /// # }
     /// ```
     pub fn use_static_files(&mut self) -> &mut Self {
+        // Enable fallback to file if it's provided
+        if self.host_env.fallback_path().is_some() {
+            self.map_fallback_to_file();
+        }
+        
+        self.map_static_assets("/", index)
+    }
+
+    /// Configures a static assets
+    ///
+    /// All the `GET`/`HEAD` requests to root `/` will be redirected to `/index.html`
+    /// as well as all the `GET`/`HEAD` requests to `/{file_name}` 
+    /// will respond with the appropriate page
+    ///    
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, app::HostEnv};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///  
+    /// // Enables static file server
+    /// app.map_static_assets();
+    /// # app.run().await
+    /// # }
+    /// ```
+    pub fn map_static_assets(&mut self) -> &mut Self {
         // Configure routes depending on root folder depth
         let folder_depth = max_folder_depth(self.host_env.content_root());
         let mut segment = String::new();
@@ -177,12 +204,6 @@ impl App {
             segment.push_str(&format!("/{{path_{}}}", i));
             self.map_get(&segment, respond_with_file);  
         }
-
-        // Enable fallback to file if it's provided
-        if self.host_env.fallback_path().is_some() {
-            self.use_fallback_to_file();
-        }
-
         self.map_get("/", index)
     }
 
@@ -204,11 +225,11 @@ impl App {
     ///  
     /// // Enables the special handler that will fall back
     /// // to the specified file
-    /// app.use_fallback_to_file();
+    /// app.map_fallback_to_file();
     /// # app.run().await
     /// # }
     /// ```
-    pub fn use_fallback_to_file(&mut self) -> &mut Self {
+    pub fn map_fallback_to_file(&mut self) -> &mut Self {
         self.map_fallback(fallback)
     }
 }
