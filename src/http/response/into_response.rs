@@ -91,6 +91,13 @@ impl IntoResponse for String {
     }
 }
 
+impl IntoResponse for Box<str> {
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        String::from(self).into_response()
+    }
+}
+
 impl<T: IntoResponse> IntoResponse for Option<T> {
     #[inline]
     fn into_response(self) -> HttpResult {

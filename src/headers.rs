@@ -8,15 +8,20 @@ pub use hyper::{
         STRICT_TRANSPORT_SECURITY,
         ACCEPT_ENCODING,
         ACCEPT_RANGES,
+        CACHE_CONTROL,
         CONTENT_DISPOSITION,
         CONTENT_ENCODING,
         CONTENT_LENGTH,
         CONTENT_RANGE,
         CONTENT_TYPE,
+        IF_NONE_MATCH,
+        IF_MODIFIED_SINCE,
+        LAST_MODIFIED,
         LOCATION,
         SERVER,
         TRANSFER_ENCODING,
-        VARY
+        VARY,
+        ETAG,
     },
     http::HeaderValue,
     HeaderMap
@@ -24,6 +29,8 @@ pub use hyper::{
 
 pub use self::{
     super::{error::Error, http::StatusCode},
+    etag::ETag,
+    cache_control::{CacheControl, ResponseCaching},
     encoding::Encoding,
     extract::*,
     header::{Header, Headers},
@@ -31,11 +38,14 @@ pub use self::{
     macros::custom_headers
 };
 
+pub(crate) mod helpers;
 pub mod extract;
 pub mod encoding;
 pub mod header;
 pub mod macros;
 pub mod quality;
+pub mod etag;
+pub mod cache_control;
 
 /// Describes a way to extract a specific HTTP header
 pub trait FromHeaders {

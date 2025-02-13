@@ -27,6 +27,8 @@ pub mod form;
 
 #[cfg(feature = "multipart")]
 pub mod multipart;
+#[cfg(feature = "static-files")]
+pub mod host_env;
 
 /// Holds the payload for extractors
 pub(crate) enum Payload<'a> {

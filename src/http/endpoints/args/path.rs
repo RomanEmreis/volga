@@ -1,5 +1,6 @@
 ﻿//! Extractors for route/path segments
 
+use crate::{HttpRequest, error::Error};
 use futures_util::future::{ready, Ready};
 use hyper::http::{request::Parts, Extensions};
 use serde::de::DeserializeOwned;
@@ -10,10 +11,14 @@ use std::{
     str::FromStr
 };
 
-use crate::{HttpRequest, error::Error};
 use crate::http::endpoints::{
-    args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
-    route::PathArguments
+    route::PathArguments,
+    args::{
+        FromPayload, 
+        FromRequestParts, 
+        FromRequestRef, 
+        Payload, Source
+    }
 };
 
 /// Wraps typed data extracted from path args

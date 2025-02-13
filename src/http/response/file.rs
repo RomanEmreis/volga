@@ -32,29 +32,22 @@
 #[macro_export]
 macro_rules! file {
     ($file_name:expr, $body:expr) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK, 
-            $crate::HttpBody::wrap_stream($body),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/octet-stream"),
-                ($crate::headers::TRANSFER_ENCODING, "chunked"),
-                ($crate::headers::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", $file_name))
-            ]
-        )
+        $crate::file!($file_name, $body, [])
     };
     
-    ($file_name:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($file_name:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+        let mime = $crate::fs::get_mime_or_octet_stream($file_name);
         $crate::response!(
             $crate::http::StatusCode::OK, 
             $crate::HttpBody::wrap_stream($body),
             [
-                ($crate::headers::CONTENT_TYPE, "application/octet-stream"),
+                ($crate::headers::CONTENT_TYPE, mime.as_ref()),
                 ($crate::headers::TRANSFER_ENCODING, "chunked"),
                 ($crate::headers::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", $file_name)),
                 $( ($key, $value) ),*
             ]
         )
-    };
+    }};
 }
 
 #[cfg(test)]
