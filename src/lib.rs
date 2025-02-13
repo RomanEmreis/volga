@@ -52,6 +52,7 @@ pub mod tls;
 pub mod tracing;
 #[cfg(test)]
 pub mod test_utils;
+pub mod fs;
 
 pub use crate::app::App;
 pub use crate::http::{

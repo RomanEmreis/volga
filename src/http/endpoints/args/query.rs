@@ -1,6 +1,8 @@
 ﻿//! Extractors for uri query
 
+use crate::{HttpRequest, error::Error};
 use futures_util::future::{ready, Ready};
+use hyper::{http::request::Parts, Uri};
 use serde::de::DeserializeOwned;
 
 use std::{
@@ -8,10 +10,12 @@ use std::{
     ops::{Deref, DerefMut}
 };
 
-use hyper::{http::request::Parts, Uri};
-
-use crate::{HttpRequest, error::Error};
-use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source};
+use crate::http::endpoints::args::{
+    FromPayload, 
+    FromRequestParts, 
+    FromRequestRef, 
+    Payload, Source
+};
 
 /// Wraps typed data extracted from [`Uri`]
 ///

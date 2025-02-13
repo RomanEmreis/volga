@@ -23,6 +23,7 @@ use tokio::{
     sync::watch
 };
 
+
 #[cfg(feature = "di")]
 use crate::di::{Container, ContainerBuilder};
 
@@ -35,6 +36,11 @@ use crate::tls::TlsConfig;
 #[cfg(feature = "tracing")]
 use crate::tracing::TracingConfig;
 
+#[cfg(feature = "static-files")]
+pub use self::env::HostEnv;
+
+#[cfg(feature = "static-files")]
+pub mod env;
 pub mod router;
 pub(crate) mod pipeline;
 pub(crate) mod scope;
@@ -67,6 +73,10 @@ pub struct App {
     /// Tracing configuration options
     #[cfg(feature = "tracing")]
     pub(super) tracing_config: Option<TracingConfig>,
+    
+    /// Web Server's Hosting Environment
+    #[cfg(feature = "static-files")]
+    pub(super) host_env: HostEnv,
     
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
@@ -121,6 +131,10 @@ pub(crate) struct AppInstance {
     /// Dependency Injection container
     #[cfg(feature = "di")]
     container: Container,
+
+    /// Web Server's Hosting Environment
+    #[cfg(feature = "static-files")]
+    pub(super) host_env: HostEnv,
     
     /// Graceful shutdown utilities
     pub(super) graceful_shutdown: GracefulShutdown,
@@ -148,6 +162,8 @@ impl TryFrom<App> for AppInstance {
             body_limit: app.body_limit,
             pipeline: app.pipeline.build(),
             graceful_shutdown: GracefulShutdown::new(),
+            #[cfg(feature = "static-files")]
+            host_env: app.host_env,
             #[cfg(feature = "di")]
             container: app.container.build(),
             #[cfg(feature = "tls")]
@@ -198,6 +214,8 @@ impl App {
             tls_config: None,
             #[cfg(feature = "tracing")]
             tracing_config: None,
+            #[cfg(feature = "static-files")]
+            host_env: HostEnv::default(),
             pipeline:PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),

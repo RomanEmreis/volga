@@ -53,7 +53,7 @@ impl Scope {
     }
     
     pub(super) async fn handle_request(
-        request: Request<Incoming>, 
+        request: Request<Incoming>,
         shared: Weak<AppInstance>,
         cancellation_token: CancellationToken
     ) -> HttpResult {
@@ -64,6 +64,13 @@ impl Scope {
                 tracing::warn!("app instance could not be upgraded; aborting...");
                 return status!(500)
             }
+        };
+        
+        #[cfg(feature = "static-files")]
+        let request = {
+            let mut request = request;
+            request.extensions_mut().insert(shared.host_env.clone());
+            request
         };
         
         let pipeline = &shared.pipeline;

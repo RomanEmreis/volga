@@ -22,12 +22,7 @@
 #[macro_export]
 macro_rules! html {
     ($body:expr) => {
-        $crate::html!(
-            $body,
-            [
-                ($crate::headers::CONTENT_TYPE, "text/html; charset=utf-8"),
-            ]
-        )
+        $crate::html!($body, [])
     };
     ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
@@ -39,6 +34,25 @@ macro_rules! html {
             ]
         )
     };
+}
+
+#[macro_export]
+macro_rules! html_file {
+    ($file_name:expr, $body:expr) => {
+        $crate::html_file!($file_name, $body, [])
+    };
+    ($file_name:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+        let mime = $crate::fs::get_mime_or_octet_stream($file_name);
+        $crate::response!(
+            $crate::http::StatusCode::OK, 
+            $crate::HttpBody::wrap_stream($body),
+            [
+                ($crate::headers::CONTENT_TYPE, mime.as_ref()),
+                ($crate::headers::TRANSFER_ENCODING, "chunked"),
+                $( ($key, $value) ),*
+            ]
+        )
+    }};
 }
 
 /// Produces `NO CONTENT 204` response

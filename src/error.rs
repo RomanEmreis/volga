@@ -7,13 +7,12 @@ use std::{
     io::{ErrorKind, Error as IoError},
     error::Error as StdError
 };
-
 use super::{
     App, 
     http::{
-        GenericHandler, 
-        FromRawRequest, 
-        StatusCode, 
+        GenericHandler,
+        FromRawRequest,
+        StatusCode,
         IntoResponse
     }
 };

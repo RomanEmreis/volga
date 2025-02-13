@@ -14,23 +14,31 @@ categories = ["web-programming::http-server"]
 keywords = ["volga", "server", "http", "web", "framework"]
 
 [dependencies]
-async-compression = { version = "0.4.18", features = ["tokio"], optional = true }
+# required
 bytes = "1.10.0"
 futures-util = { version = "0.3.31", default-features = false, features = ["alloc"] }
 http-body-util = "0.1.2"
-hyper = { version = "1.6.0", features = ["server"], optional = true }
-hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
 itoa = "1.0.14"
 mime = "0.3.17"
-multer = { version = "3.1.0", optional = true }
+mime_guess = "2.0.5"
 pin-project-lite = "0.2.16"
-tokio-rustls = { version = "0.26.1", default-features = false, features = ["tls12", "ring"], optional = true }
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-util = "0.7.13"
-tracing = { version = "0.1.41", default-features = false, optional = true }
 serde = "1.0.217"
 serde_json = "1.0.138"
 serde_urlencoded = "0.7.1"
+
+# optional
+async-compression = { version = "0.4.18", features = ["tokio"], optional = true }
+chrono = { version = "0.4.39", optional = true }
+handlebars = { version = "6.3.1", optional = true }
+httpdate = { version = "1.0.3", optional = true }
+hyper = { version = "1.6.0", features = ["server"], optional = true }
+hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
+multer = { version = "3.1.0", optional = true }
+sha1 = { version = "0.10.6", optional = true }
+tokio-rustls = { version = "0.26.1", default-features = false, features = ["tls12", "ring"], optional = true }
+tracing = { version = "0.1.41", default-features = false, optional = true }
 
 [dev-dependencies]
 reqwest = { version = "0.12.12", features = ["blocking", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
@@ -52,19 +60,21 @@ full = [
     "tracing",
     "multipart",
     "problem-details",
+    "static-files",
     "compression-full", 
     "decompression-full"
 ]
 
-http1 = ["dep:hyper", "hyper?/http1", "dep:hyper-util", "hyper-util?/http1"]
-http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2"]
+http1 = ["dep:hyper", "hyper?/http1", "dep:hyper-util", "hyper-util?/http1", "dep:httpdate"]
+http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2", "dep:httpdate"]
 
-middleware = []
 di = []
+middleware = []
 multipart = ["dep:multer"]
+problem-details = []
+static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]
-problem-details = []
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]
@@ -205,3 +215,8 @@ required-features = ["tracing", "problem-details"]
 name = "global_404_handler"
 path = "examples/global_404_handler.rs"
 required-features = ["tracing"]
+
+[[example]]
+name = "static_files"
+path = "examples/static_files.rs"
+required-features = ["tracing","static-files"]

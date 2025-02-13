@@ -1,9 +1,9 @@
 ﻿//! Error Handler
 
 use futures_util::future::BoxFuture;
+use hyper::Uri;
 use crate::{http::IntoResponse, HttpResult, status};
 use super::Error;
-use hyper::Uri;
 
 use std::{
     future::Future,
