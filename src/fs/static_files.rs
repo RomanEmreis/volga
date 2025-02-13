@@ -170,12 +170,19 @@ impl App {
     /// # }
     /// ```
     pub fn use_static_files(&mut self) -> &mut Self {
+        // Configure routes depending on root folder depth
         let folder_depth = max_folder_depth(self.host_env.content_root());
         let mut segment = String::new();
         for i in 0..folder_depth {
             segment.push_str(&format!("/{{path_{}}}", i));
             self.map_get(&segment, respond_with_file);  
         }
+
+        // Enable fallback to file if it's provided
+        if self.host_env.fallback_path().is_some() {
+            self.use_fallback_to_file();
+        }
+
         self.map_get("/", index)
     }
 
