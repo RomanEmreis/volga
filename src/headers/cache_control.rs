@@ -6,6 +6,9 @@ use crate::error::Error;
 #[cfg(feature = "static-files")]
 use std::fs::Metadata;
 
+#[cfg(feature = "static-files")]
+const DEFAULT_MAX_AGE: u32 = 60 * 60 * 24; // 24 hours
+
 /// Represents the HTTP [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
 /// header holds directives (instructions) in both requests and responses that control caching 
 /// in browsers and shared caches (e.g., Proxies, CDNs).
@@ -107,11 +110,16 @@ impl From<CacheControl> for String {
 /// [`Last-Modified`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified) and
 /// [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
 pub struct ResponseCaching {
-    /// Represents [`ETag`](https://developer.mozilla.org/ru/docs/Web/HTTP/Headers/ETag)
+    /// Represents 
+    /// [`ETag`](https://developer.mozilla.org/ru/docs/Web/HTTP/Headers/ETag)
     pub(crate) etag: ETag,
-    /// Represents [`Last-Modified`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified)
+    
+    /// Represents 
+    /// [`Last-Modified`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified)
     pub(crate) last_modified: SystemTime,
-    /// Represents [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
+    
+    /// Represents 
+    /// [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
     pub(crate) cache_control: CacheControl
 }
 
@@ -126,7 +134,7 @@ impl TryFrom<&Metadata> for ResponseCaching {
         let cache_control = CacheControl { 
             public: true, 
             immutable: true, 
-            max_age: Some(31536000), 
+            max_age: Some(DEFAULT_MAX_AGE), 
             ..Default::default()
         };
         
@@ -185,7 +193,7 @@ mod tests {
           cache_control: Default::default()
         };
         
-        assert_eq!(caching.etag(), "123");
+        assert_eq!(caching.etag(), "\"123\"");
     }
 
     #[test]

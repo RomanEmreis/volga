@@ -10,6 +10,7 @@ use crate::{
     HttpResult,
     app::HostEnv,
     http::StatusCode,
+    routing::RouteGroup,
     html_file,
     html,
     status
@@ -28,10 +29,7 @@ mod file_listing;
 async fn index(env: HostEnv) -> HttpResult {
     if env.show_files_listing() {
         let path = env.content_root().to_path_buf();
-        let metadata = metadata(&path).await?;
-        let caching = ResponseCaching::try_from(&metadata)?;
-        
-        respond_with_folder_impl(path, caching, true).await
+        respond_with_folder_impl(path, true).await
     } else {
         let index_path = env.index_path().to_path_buf();
         let metadata = metadata(&index_path).await?;
@@ -67,7 +65,6 @@ async fn respond_with_file(
             acc.push(v);
             acc
         });
-    
     let path = env.content_root().join(&path);
     match respond_with_file_or_dir_impl(path, headers, env.show_files_listing()).await {
         Ok(response) => Ok(response),
@@ -83,39 +80,28 @@ async fn respond_with_file_or_dir_impl(
     show_files_listing: bool
 ) -> HttpResult {
     let metadata = metadata(&path).await?;
-    let caching = ResponseCaching::try_from(&metadata)?;
-
-    if validate_etag(&caching.etag, &headers) {
-        return status!(304, [
-            (ETAG, caching.etag())
-        ]);
-    } 
-    
-    if validate_last_modified(caching.last_modified, &headers) {
-        return status!(304, [
-            (LAST_MODIFIED, caching.last_modified())
-        ]);
-    }
-    
     match (metadata.is_dir(), show_files_listing) {
         (true, false) => status!(403, "Access is denied."),
-        (true, true) => respond_with_folder_impl(path, caching, false).await,
-        (false, _) => respond_with_file_impl(path, caching).await,
+        (true, true) => respond_with_folder_impl(path, false).await,
+        (false, _) => {
+            let caching = ResponseCaching::try_from(&metadata)?;
+            if validate_etag(&caching.etag, &headers) ||
+                validate_last_modified(caching.last_modified, &headers) {
+                status!(304, [
+                    (ETAG, caching.etag()),
+                    (LAST_MODIFIED, caching.last_modified())
+                ])
+            } else {
+                respond_with_file_impl(path, caching).await
+            }
+        },
     }
 }
 
 #[inline]
-async fn respond_with_folder_impl(
-    path: PathBuf,
-    caching: ResponseCaching,
-    is_root: bool
-) -> HttpResult {
+async fn respond_with_folder_impl(path: PathBuf, is_root: bool) -> HttpResult {
     let html = file_listing::generate_html(&path, is_root).await?;
-    html!(html, [
-        (ETAG, caching.etag()),
-        (LAST_MODIFIED, caching.last_modified()),
-        (CACHE_CONTROL, caching.cache_control()),
-    ])
+    html!(html)
 }
 
 #[inline]
@@ -149,10 +135,72 @@ fn max_folder_depth<P: AsRef<Path>>(path: P) -> u32 {
     helper(path.as_ref(), 1)
 }
 
+impl RouteGroup<'_> {
+    /// Configures a static assets
+    ///
+    /// All the `GET`/`HEAD` requests to root `/` will be redirected to `/index.html`
+    /// as well as all the `GET`/`HEAD` requests to `/{file_name}` 
+    /// will respond with the appropriate page
+    ///    
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, app::HostEnv};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///  
+    /// // Enables static file server
+    /// app.map_group("/static")
+    ///     .map_static_assets();
+    /// # app.run().await
+    /// # }
+    /// ```
+    pub fn map_static_assets(&mut self) -> &mut Self {
+        // Configure routes depending on root folder depth
+        let folder_depth = max_folder_depth(self.app.host_env.content_root());
+        let mut segment = String::new();
+        for i in 0..folder_depth {
+            segment.push_str(&format!("/{{path_{}}}", i));
+            self.map_get(&segment, respond_with_file);
+        }
+        self.map_get("/", index)
+    }
+
+    /// Configures a static files server
+    ///
+    /// This method combines logic [`App::map_static_assets`] and [`App::map_fallback_to_file`]. 
+    /// The last one is called if the `fallback_path` is explicitly provided in [`HostEnv`].
+    ///    
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, app::HostEnv};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///  
+    /// // Enables static file server
+    /// app
+    ///     .map_group("/static")
+    ///     .use_static_files();
+    /// # app.run().await
+    /// # }
+    /// ```
+    pub fn use_static_files(&mut self) -> &mut Self {
+        // Enable fallback to file if it's provided
+        if self.app.host_env.fallback_path().is_some() {
+            self.app.map_fallback_to_file();
+        }
+
+        self.map_static_assets()
+    }
+}
+
 impl App {
     /// Configures a static files server
     ///
-    /// This method combines logic [`map_static_assets`] and [`map_fallback_to_file`]. 
+    /// This method combines logic [`App::map_static_assets`] and [`App::map_fallback_to_file`]. 
     /// The last one is called if the `fallback_path` is explicitly provided in [`HostEnv`].
     ///    
     /// # Example
