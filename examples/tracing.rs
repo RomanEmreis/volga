@@ -1,4 +1,4 @@
-﻿use volga::{App, tracing::TracingConfig};
+﻿use volga::App;
 use tracing::trace;
 use tracing_subscriber::prelude::*;
 
@@ -9,13 +9,10 @@ async fn main() -> std::io::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
     
-    // Configure tracing parameters
-    let tracing = TracingConfig::new()
-        .with_header()
-        .with_header_name("x-span-id");
-    
     let mut app = App::new()
-        .with_tracing(tracing);
+        .with_default_tracing()
+        .with_span_header()
+        .with_span_header_name("x-span-id");
 
     // this middleware won't be in the request span scope 
     // since it's defined above the tracing middleware

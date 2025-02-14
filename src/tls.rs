@@ -224,7 +224,7 @@ impl TlsConfig {
     }
 
     /// Configures the trust anchor for required TLS client authentication.
-    /// 
+    ///
     /// Default: `None`
     pub fn with_required_client_auth(mut self, path: impl AsRef<Path>) -> Self {
         self.client_auth = ClientAuth::Required(path.as_ref().into());
@@ -242,6 +242,18 @@ impl TlsConfig {
     /// Configures the port for HTTP listener that redirects to HTTPS
     pub fn with_http_port(mut self, port: u16) -> Self {
         self.https_redirection_config.http_port = port;
+        self
+    }
+
+    /// Configures HSTS header
+    ///
+    /// Default values:
+    /// - preload: `true`
+    /// - include_sub_domains: `true`
+    /// - max-age: 30 days (2,592,000 seconds)
+    /// - exclude_hosts: empty list
+    pub fn with_hsts(mut self, hsts_config: HstsConfig) -> Self {
+        self.hsts_config = hsts_config;
         self
     }
     
@@ -373,6 +385,213 @@ impl App {
     /// Default: `None`
     pub fn with_tls(mut self, config: TlsConfig) -> Self {
         self.tls_config = Some(config);
+        self
+    }
+
+    /// Configures web server with TLS configuration 
+    /// loaded from cert and key files with default names from specified folder 
+    ///
+    /// Default: `None`
+    pub fn with_tls_from_pem(self, path: impl AsRef<Path>) -> Self {
+        self.with_tls(TlsConfig::from_pem(path))
+    }
+
+    /// Configures web server with TLS configuration
+    /// loaded from provided cert and key files specifically
+    /// 
+    /// Default: `None`
+    pub fn with_tls_from_pem_files(self, cert_file_path: &str, key_file_path: &str) -> Self {
+        self.with_tls(TlsConfig::from_pem_files(cert_file_path, key_file_path))
+    }
+
+    /// If the [`TlsConfig`] has been specified, 
+    /// it configures the trust anchor for optional TLS client authentication.
+    ///
+    /// Default: `None`
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    ///
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_optional_client_auth("path/to/pem");
+    /// ```
+    pub fn with_optional_client_auth(mut self, path: impl AsRef<Path>) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_optional_client_auth(path));
+        self
+    }
+
+    /// If the [`TlsConfig`] has been specified, 
+    /// it configures the trust anchor for required TLS client authentication.
+    ///
+    /// Default: `None`
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    ///
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_required_client_auth("path/to/pem");
+    /// ```
+    pub fn with_required_client_auth(mut self, path: impl AsRef<Path>) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_required_client_auth(path));
+        self
+    }
+
+    /// If the [`TlsConfig`] has been specified,
+    /// it configures web server to redirect HTTP requests to HTTPS
+    ///
+    /// Default: `false`
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    ///
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_https_redirection();
+    /// ```
+    pub fn with_https_redirection(mut self) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_https_redirection());
+        self
+    }
+
+    /// If the [`TlsConfig`] has been specified, 
+    /// it configures the port for HTTP listener that redirects to HTTPS
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    ///
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_http_port(5000);
+    /// ```
+    pub fn with_http_port(mut self, port: u16) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_http_port(port));
+        self
+    }
+
+    /// If the [`TlsConfig`] has been specified, it configures HSTS header
+    ///
+    /// Default values:
+    /// - preload: `true`
+    /// - include_sub_domains: `true`
+    /// - max-age: 30 days (2,592,000 seconds)
+    /// - exclude_hosts: empty list
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    /// 
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_hsts(HstsConfig::default());
+    /// ```
+    pub fn with_hsts(mut self, hsts_config: HstsConfig) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_hsts(hsts_config));
+        self
+    }
+
+    /// If the [`TlsConfig`] has been specified, 
+    /// it configures whether to set `preload` in HSTS header
+    ///
+    /// Default value: `true`
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    ///
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_hsts_preload(true);
+    /// ```
+    pub fn with_hsts_preload(mut self, preload: bool) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_hsts_preload(preload));
+        self
+    }
+
+    /// If the [`TlsConfig`] has been specified, 
+    /// it configures whether to set `includeSubDomains` in HSTS header
+    ///
+    /// Default: `true`
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    ///
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_hsts_sub_domains(true);
+    /// ```
+    pub fn with_hsts_sub_domains(mut self, include: bool) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_hsts_sub_domains(include));
+        self
+    }
+
+    /// Configures `max_age` for HSTS header
+    ///
+    /// Default: 30 days (2,592,000 seconds)
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    /// use std::time::Duration;
+    ///
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_hsts_max_age(Duration::from_secs(60));
+    /// ```
+    pub fn with_hsts_max_age(mut self, max_age: Duration) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_hsts_max_age(max_age));
+        self
+    }
+
+    /// Configures a list of host names that will not add the HSTS header.
+    ///
+    /// Default: empty list
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::{TlsConfig, HstsConfig};
+    ///
+    /// let exclude = ["www.example.com", "www.example.net"];
+    /// 
+    /// let app = App::new()
+    ///     .with_tls(TlsConfig::new())
+    ///     .with_hsts_exclude_hosts(&exclude);
+    /// ```
+    pub fn with_hsts_exclude_hosts(mut self, exclude_hosts: &[&'static str]) -> Self {
+        self.tls_config = self
+            .tls_config
+            .map(|config| config.with_hsts_exclude_hosts(exclude_hosts));
         self
     }
     

@@ -279,8 +279,8 @@ impl App {
 
 /// Represents a group of routes
 pub struct RouteGroup<'a> {
-    app: &'a mut App,
-    prefix: &'a str,
+    pub(crate) app: &'a mut App,
+    pub(crate) prefix: &'a str,
 }
 
 macro_rules! define_route_group_methods({$($method:ident)*} => {

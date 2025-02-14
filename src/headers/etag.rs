@@ -12,6 +12,7 @@ use std::fs::Metadata;
 use std::time::UNIX_EPOCH;
 
 /// Represents Entity Tag (ETag) value
+#[derive(Debug, Clone)]
 pub struct ETag {
     inner: Cow<'static, str>,
 }
@@ -67,11 +68,25 @@ impl Display for ETag {
 impl ETag {
     #[inline]
     pub fn new(etag: &str) -> Self {
-        Self::from(etag.to_owned())
+        Self::from(format!("\"{etag}\""))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    
+    use crate::headers::ETag;
+
+    #[test]
+    fn it_creates_etag() {
+        let etag = ETag::new("foo");
+        
+        assert_eq!(etag.as_ref(), "\"foo\"");
+    }
+
+    #[test]
+    fn it_creates_etag_from_string() {
+        let etag = ETag::from(String::from("\"foo\""));
+
+        assert_eq!(etag.as_ref(), "\"foo\"");
+    }
 }
