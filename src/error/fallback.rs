@@ -75,3 +75,30 @@ pub(crate) type PipelineFallbackHandler = Arc<
 pub(crate) async fn default_fallback_handler() -> HttpResult {
     status!(404)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{default_fallback_handler, FallbackFunc};
+    use crate::status;
+
+    #[tokio::test]
+    async fn default_fallback_handler_returns_404() {
+        let response = default_fallback_handler().await;
+        assert!(response.is_ok());
+        
+        let response = response.unwrap();
+        assert_eq!(response.status(), 404);
+    }
+    
+    #[tokio::test]
+    async fn it_create_new_fallback() {
+        let fallback = || async { status!(404) };
+        let handler = FallbackFunc::new(fallback);
+        
+        let response = handler.0().await;
+        assert!(response.is_ok());
+
+        let response = response.unwrap();
+        assert_eq!(response.status(), 404);
+    }
+}

@@ -71,11 +71,18 @@ impl From<HeaderMap<HeaderValue>> for Headers {
     }
 }
 
+impl From<&Parts> for Headers {
+    #[inline]
+    fn from(parts: &Parts) -> Self {
+        parts.headers.clone().into()
+    }
+}
+
 /// Extracts `HeadersMap` from request parts into [`Headers`]
 impl FromRequestParts for Headers {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Ok(parts.headers.clone().into())
+        Ok(parts.into())
     }
 }
 

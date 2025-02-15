@@ -67,19 +67,32 @@ impl<T: Display> Display for Query<T> {
     }
 }
 
-impl<T: DeserializeOwned> Query<T> {
-    /// Parses the string slice into [`Query<T>`]
+impl<T: DeserializeOwned> TryFrom<&str> for Query<T> {
+    type Error = Error;
+
     #[inline]
-    pub(crate) fn from_query_str(query_str: &str) -> Result<Self, Error> {
+    fn try_from(query_str: &str) -> Result<Self, Error> {
         serde_urlencoded::from_str::<T>(query_str)
             .map(Query)
             .map_err(QueryError::from)
     }
+}
 
-    /// Parses the request [`Uri`] into [`Query<T>`]
+impl<T: DeserializeOwned> TryFrom<&Uri> for Query<T> {
+    type Error = Error;
+    
     #[inline]
-    pub(crate) fn from_uri(uri: &Uri) -> Result<Self, Error> {
-        Self::from_query_str(uri.query().unwrap_or(""))
+    fn try_from(uri: &Uri) -> Result<Self, Error> {
+        uri.query().unwrap_or("").try_into()
+    }
+}
+
+impl<T: DeserializeOwned> TryFrom<&Parts> for Query<T> {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(parts: &Parts) -> Result<Self, Error> {
+        Self::try_from(&parts.uri)
     }
 }
 
@@ -88,7 +101,7 @@ impl<T: DeserializeOwned> Query<T> {
 impl<T: DeserializeOwned> FromRequestParts for Query<T> {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::from_uri(&parts.uri)
+        parts.try_into()
     }
 }
 
@@ -97,7 +110,7 @@ impl<T: DeserializeOwned> FromRequestParts for Query<T> {
 impl<T: DeserializeOwned> FromRequestRef for Query<T> {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::from_uri(req.uri())
+        req.uri().try_into()
     }
 }
 
@@ -109,7 +122,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Query<T> {
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
-        ready(Self::from_parts(parts))
+        ready(parts.try_into())
     }
 
     #[inline]
@@ -196,7 +209,7 @@ mod tests {
     fn it_parses_struct_from_request() {
         let query_str = "name=John&age=33";
         
-        let query = Query::<User>::from_query_str(query_str).unwrap();
+        let query = Query::<User>::try_from(query_str).unwrap();
         
         assert_eq!(query.0.name, "John");
         assert_eq!(query.0.age, 33);
@@ -206,7 +219,7 @@ mod tests {
     fn it_parses_struct_with_option_from_request() {
         let query_str = "name=John";
 
-        let query = Query::<OptionalUser>::from_query_str(query_str).unwrap();
+        let query = Query::<OptionalUser>::try_from(query_str).unwrap();
 
         assert_eq!(query.0.name.unwrap(), "John");
         assert!(query.0.age.is_none());
@@ -216,7 +229,7 @@ mod tests {
     fn it_parses_empty_query_into_struct_with_option_from_request() {
         let query_str = "";
 
-        let query = Query::<OptionalUser>::from_query_str(query_str).unwrap();
+        let query = Query::<OptionalUser>::try_from(query_str).unwrap();
 
         assert!(query.0.name.is_none());
         assert!(query.0.age.is_none());
@@ -226,7 +239,7 @@ mod tests {
     fn it_parses_struct_from_uri() {
         let uri = "https://www.example.com/api/get?name=John&age=33".parse::<Uri>().unwrap();
 
-        let query = Query::<User>::from_uri(&uri).unwrap();
+        let query = Query::<User>::try_from(&uri).unwrap();
 
         assert_eq!(query.0.name, "John");
         assert_eq!(query.0.age, 33);
@@ -236,7 +249,7 @@ mod tests {
     fn it_parses_struct_with_option_from_uri() {
         let uri = "https://www.example.com/api/get?name=John".parse::<Uri>().unwrap();
 
-        let query = Query::<OptionalUser>::from_uri(&uri).unwrap();
+        let query = Query::<OptionalUser>::try_from(&uri).unwrap();
 
         assert_eq!(query.0.name.unwrap(), "John");
         assert!(query.0.age.is_none());
@@ -246,7 +259,7 @@ mod tests {
     fn it_parses_uri_without_query_into_struct_with_option_from_uri() {
         let uri = "https://www.example.com/api/get".parse::<Uri>().unwrap();
 
-        let query = Query::<OptionalUser>::from_uri(&uri).unwrap();
+        let query = Query::<OptionalUser>::try_from(&uri).unwrap();
 
         assert!(query.0.name.is_none());
         assert!(query.0.age.is_none());
@@ -256,7 +269,7 @@ mod tests {
     fn it_parses_hash_map_from_request() {
         let query_str = "name=John&age=33";
 
-        let query = Query::<HashMap<String, String>>::from_query_str(query_str).unwrap();
+        let query = Query::<HashMap<String, String>>::try_from(query_str).unwrap();
 
         assert_eq!(query.0.get("name").unwrap(), "John");
         assert_eq!(query.0.get("age").unwrap(), "33");
@@ -266,7 +279,7 @@ mod tests {
     fn it_parses_hash_map_from_uri() {
         let uri = "https://www.example.com/api/get?name=John&age=33".parse::<Uri>().unwrap();
 
-        let query = Query::<HashMap<String, String>>::from_uri(&uri).unwrap();
+        let query = Query::<HashMap<String, String>>::try_from(&uri).unwrap();
 
         assert_eq!(query.0.get("name").unwrap(), "John");
         assert_eq!(query.0.get("age").unwrap(), "33");
