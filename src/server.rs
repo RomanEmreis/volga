@@ -16,7 +16,7 @@ pub(super) struct Server<I: Read + Write + Unpin> {
     io: I
 }
 
-impl<I: Read + Write + Unpin + 'static> Server<I> {
+impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     #[inline]
     pub(super) fn new(io: I) -> Self {
         Self { io }

@@ -5,7 +5,7 @@ use hyper::{server::conn::http2, rt::{Read, Write}};
 use hyper_util::rt::TokioExecutor;
 
 /// HTTP/2 impl
-impl<I: Read + Write + Unpin + 'static> Server<I> {
+impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     #[inline]
     pub(super) async fn serve_core(self, scope: Scope, app_instance: Arc<AppInstance>) {
         let scoped_cancellation_token = scope.cancellation_token.clone();

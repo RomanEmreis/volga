@@ -75,6 +75,7 @@ problem-details = []
 static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]
+ws = []
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]
@@ -220,3 +221,8 @@ required-features = ["tracing"]
 name = "static_files"
 path = "examples/static_files.rs"
 required-features = ["tracing","static-files"]
+
+[[example]]
+name = "websockets"
+path = "examples/websockets.rs"
+required-features = ["ws","tracing","static-files"]

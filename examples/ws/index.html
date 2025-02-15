@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Client</title>
+</head>
+<body>
+    <button onclick="connect()">Connect</button>
+    <button onclick="send()">Send</button>
+    <script>
+        let ws;
+        const connect = () => {
+            ws = new WebSocket('ws://localhost:7878/ws');
+
+            ws.onopen = () => {
+                console.log('Connected to server');
+                ws.send('Hello from client!');
+            };
+
+            ws.onmessage = (event) => {
+                console.log('Received:', event.data);
+            };
+
+            ws.onclose = () => {
+                console.log('Connection closed');
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        };
+
+        const send = () => {
+            const message = `Client time: ${new Date().toISOString()}`;
+            ws.send(message);
+            console.log('Sent:', message);
+        };
+    </script>
+</body>
+</html>
