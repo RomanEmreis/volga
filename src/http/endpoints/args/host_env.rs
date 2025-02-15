@@ -1,22 +1,39 @@
 ﻿//! Extractors for the whole Hosting Environment request
 
-use crate::{app::HostEnv, error::Error};
+use crate::{app::HostEnv, error::Error, HttpRequest};
 use futures_util::future::{ready, Ready};
-use hyper::http::{request::Parts};
+use hyper::http::{request::Parts, Extensions};
 use crate::http::endpoints::args::{
     FromRequestParts,
+    FromRequestRef,
     FromPayload,
     Payload,
     Source
 };
 
+impl TryFrom<&Extensions> for HostEnv {
+    type Error = Error;
+    
+    #[inline]
+    fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
+        match extensions.get::<HostEnv>() {
+            Some(env) => Ok(env.clone()),
+            None => Err(Error::server_error("Server Error: hosting environment is not specified"))
+        }
+    }
+}
+
+impl FromRequestRef for HostEnv {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        req.extensions().try_into()
+    }
+}
+
 impl FromRequestParts for HostEnv {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        match parts.extensions.get::<HostEnv>() { 
-            Some(env) => Ok(env.clone()),
-            None => Err(Error::server_error("hosting environment is not specified"))
-        }
+        HostEnv::try_from(&parts.extensions)
     }
 }
 

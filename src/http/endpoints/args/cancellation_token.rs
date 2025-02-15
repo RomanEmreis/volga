@@ -1,7 +1,7 @@
 ﻿//! Extractors for [`CancellationToken`]
 
 use tokio_util::sync::CancellationToken as TokioCancellationToken;
-use futures_util::future::{ready, Ready};
+use futures_util::future::{ok, Ready};
 use hyper::http::{request::Parts, Extensions};
 use std::ops::{Deref, DerefMut};
 
@@ -44,15 +44,6 @@ impl TokenGuard {
     pub fn into_inner(self) -> TokioCancellationToken {
         self.0
     }
-    
-    #[inline]
-    pub(crate) fn from_extensions(extensions: &Extensions) -> Result<Self, Error> {
-        let token = extensions
-            .get::<TokioCancellationToken>()
-            .cloned()
-            .unwrap_or_else(TokioCancellationToken::new);
-        Ok(TokenGuard::new(token))
-    }
 }
 
 impl Deref for TokenGuard {
@@ -83,11 +74,29 @@ impl Clone for TokenGuard {
     }
 }
 
+impl From<&Extensions> for TokenGuard {
+    #[inline]
+    fn from(extensions: &Extensions) -> Self {
+        let token = extensions
+            .get::<TokioCancellationToken>()
+            .cloned()
+            .unwrap_or_else(TokioCancellationToken::new);
+        Self::new(token)
+    }
+}
+
+impl From<&Parts> for TokenGuard {
+    #[inline]
+    fn from(parts: &Parts) -> Self {
+        TokenGuard::from(&parts.extensions)
+    }
+}
+
 /// Extracts `CancellationToken` from request parts
 impl FromRequestParts for TokenGuard {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::from_extensions(&parts.extensions)
+        Ok(parts.into())
     }
 }
 
@@ -95,7 +104,7 @@ impl FromRequestParts for TokenGuard {
 impl FromRequestRef for TokenGuard {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::from_extensions(req.extensions())
+        Ok(req.extensions().into())
     }
 }
 
@@ -106,7 +115,7 @@ impl FromPayload for TokenGuard {
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
-        ready(Self::from_parts(parts))
+        ok(parts.into())
     }
 
     #[inline]
@@ -145,8 +154,8 @@ mod tests {
         extensions.insert(token.clone());
         
         token.cancel();
-        
-        let token = TokenGuard::from_extensions(&extensions).unwrap();
+
+        let token = TokenGuard::from(&extensions);
         
         assert!(token.is_cancelled());
     }
@@ -155,7 +164,7 @@ mod tests {
     fn it_gets_new_from_extensions_if_missing() {
         let extensions = Extensions::new();
 
-        let token = TokenGuard::from_extensions(&extensions).unwrap();
+        let token = TokenGuard::from(&extensions);
 
         assert!(!token.is_cancelled());
     }

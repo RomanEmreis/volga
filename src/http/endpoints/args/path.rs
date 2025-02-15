@@ -85,14 +85,27 @@ impl<T: DeserializeOwned> Path<T> {
             .map(Path)
             .map_err(PathError::from_serde_error)
     }
+}
+
+impl<T: DeserializeOwned + Send> TryFrom<&Extensions> for Path<T> {
+    type Error = Error;
     
-    /// Parses request extensions intro [`Path<T>`]
     #[inline]
-    pub(crate) fn from_extensions(extensions: &Extensions) -> Result<Self, Error> {
+    fn try_from(extensions: &Extensions) -> Result<Self, Error> {
         extensions
             .get::<PathArguments>()
             .ok_or_else(PathError::args_missing)
             .and_then(|params| Self::from_slice(params))
+    }
+}
+
+impl<T: DeserializeOwned + Send> TryFrom<&Parts> for Path<T> {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(parts: &Parts) -> Result<Self, Error> {
+        let ext = &parts.extensions;
+        ext.try_into()
     }
 }
 
@@ -101,7 +114,7 @@ impl<T: DeserializeOwned> Path<T> {
 impl<T: DeserializeOwned + Send> FromRequestParts for Path<T> {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::from_extensions(&parts.extensions)
+        parts.try_into()
     }
 }
 
@@ -110,7 +123,7 @@ impl<T: DeserializeOwned + Send> FromRequestParts for Path<T> {
 impl<T: DeserializeOwned + Send> FromRequestRef for Path<T> {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::from_extensions(req.extensions())
+        req.extensions().try_into()
     }
 }
 
@@ -122,7 +135,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Path<T> {
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
-        ready(Self::from_parts(parts))
+        ready(parts.try_into())
     }
 
     #[inline]
@@ -234,7 +247,7 @@ mod tests {
         let mut ext = Extensions::new();
         ext.insert(args);
 
-        let path = Path::<Params>::from_extensions(&ext).unwrap();
+        let path = Path::<Params>::try_from(&ext).unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
