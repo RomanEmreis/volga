@@ -2,10 +2,13 @@
 use crate::app::{AppInstance, scope::Scope};
 use std::sync::Arc;
 use hyper::rt::{Read, Write};
-use hyper_util::{
-    rt::TokioExecutor,
-    server::conn::auto::Builder
-};
+use hyper_util::rt::TokioExecutor;
+
+#[cfg(feature = "ws")]
+use hyper_util::server::conn::auto::Builder;
+
+#[cfg(not(feature = "ws"))]
+use hyper::server::conn::http2::Builder;
 
 /// HTTP/2 impl
 impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
@@ -31,7 +34,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         }
         #[cfg(not(feature = "ws"))]
         {
-            let connection_builder = server::conn::http2::Builder::new(TokioExecutor::new());
+            let connection_builder = Builder::new(TokioExecutor::new());
             let connection = connection_builder.serve_connection(self.io, scope);
             let connection = app_instance.graceful_shutdown.watch(connection);
 

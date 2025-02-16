@@ -1,14 +1,16 @@
 ﻿use super::Server;
 use crate::app::{AppInstance, scope::Scope};
 use std::sync::Arc;
-use hyper::{
-    //server::conn::http1, 
-    rt::{Read, Write}
-};
+use hyper::rt::{Read, Write};
+
+#[cfg(feature = "ws")]
 use hyper_util::{
     rt::TokioExecutor, 
     server::conn::auto::Builder
 };
+
+#[cfg(not(feature = "ws"))]
+use hyper::server::conn::http1::Builder;
 
 /// HTTP/1 impl
 impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
@@ -32,7 +34,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         }
         #[cfg(not(feature = "ws"))]
         {
-            let connection_builder = server::conn::http1::Builder::new();
+            let connection_builder = Builder::new();
             let connection = connection_builder.serve_connection(self.io, scope);
             let connection = app_instance.graceful_shutdown.watch(connection);
             
