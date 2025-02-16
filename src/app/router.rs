@@ -275,6 +275,35 @@ impl App {
             .map_route(Method::TRACE, pattern, handler);
         self
     }
+
+    /// Adds a request handler that matches HTTP CONNECT requests for the specified pattern.
+    /// 
+    /// # Examples
+    /// ```no_run
+    /// use volga::{App, status};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_connect("/", || async {
+    ///    status!(101)
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_connect<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    where
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequest + Send + Sync + 'static,
+    {
+        let handler = Func::new(handler);
+        self.pipeline
+            .endpoints_mut()
+            .map_route(Method::CONNECT, pattern, handler);
+        self
+    }
 }
 
 /// Represents a group of routes
@@ -315,4 +344,5 @@ define_route_group_methods! {
     map_head
     map_options
     map_trace
+    map_connect
 }

@@ -30,6 +30,7 @@ serde_urlencoded = "0.7.1"
 
 # optional
 async-compression = { version = "0.4.18", features = ["tokio"], optional = true }
+base64 = { version = "0.22.1", optional = true }
 chrono = { version = "0.4.39", optional = true }
 handlebars = { version = "6.3.1", optional = true }
 httpdate = { version = "1.0.3", optional = true }
@@ -38,6 +39,7 @@ hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-
 multer = { version = "3.1.0", optional = true }
 sha1 = { version = "0.10.6", optional = true }
 tokio-rustls = { version = "0.26.1", default-features = false, features = ["tls12", "ring"], optional = true }
+tokio-tungstenite = { version = "0.26.1", optional = true }
 tracing = { version = "0.1.41", default-features = false, optional = true }
 
 [dev-dependencies]
@@ -62,7 +64,8 @@ full = [
     "problem-details",
     "static-files",
     "compression-full", 
-    "decompression-full"
+    "decompression-full",
+    "ws"
 ]
 
 http1 = ["dep:hyper", "hyper?/http1", "dep:hyper-util", "hyper-util?/http1", "dep:httpdate"]
@@ -75,6 +78,7 @@ problem-details = []
 static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]
+ws = ["dep:sha1", "dep:base64", "dep:tokio-tungstenite"]
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "async-compression/brotli"]
@@ -220,3 +224,8 @@ required-features = ["tracing"]
 name = "static_files"
 path = "examples/static_files.rs"
 required-features = ["tracing","static-files"]
+
+[[example]]
+name = "websockets"
+path = "examples/websockets.rs"
+required-features = ["ws","tracing"]

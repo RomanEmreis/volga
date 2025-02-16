@@ -216,7 +216,7 @@ impl App {
             tracing_config: None,
             #[cfg(feature = "static-files")]
             host_env: HostEnv::default(),
-            pipeline:PipelineBuilder::new(),
+            pipeline: PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),
         }

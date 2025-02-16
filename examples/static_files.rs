@@ -16,8 +16,7 @@ async fn main() -> std::io::Result<()> {
     // - redirects from "/" -> "/index.html" if presents
     // - redirects from "/{file_name}" -> "/file-name.ext"
     // - redirects to 404.html if unspecified route is requested
-    app.map_group("/static")
-        .use_static_files();
+    app.use_static_files();
 
     app.run().await
 }

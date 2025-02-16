@@ -42,6 +42,7 @@ pub mod http;
 pub mod headers;
 pub mod json;
 pub mod error;
+pub mod fs;
 #[cfg(feature = "di")]
 pub mod di;
 #[cfg(feature = "middleware")]
@@ -50,9 +51,10 @@ pub mod middleware;
 pub mod tls;
 #[cfg(feature = "tracing")]
 pub mod tracing;
+#[cfg(feature = "ws")]
+pub mod ws;
 #[cfg(test)]
 pub mod test_utils;
-pub mod fs;
 
 pub use crate::app::App;
 pub use crate::http::{
