@@ -129,6 +129,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
     }
 }
 
+#[cfg(feature = "ws")]
 impl<T: Serialize> IntoMessage for Json<T> {
     #[inline]
     fn into_message(self) -> Message {
@@ -140,6 +141,7 @@ impl<T: Serialize> IntoMessage for Json<T> {
     }
 }
 
+#[cfg(feature = "ws")]
 impl<T: DeserializeOwned> FromMessage for Json<T> {
     #[inline]
     fn from_message(msg: Message) -> Result<Self, Error> {
