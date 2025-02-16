@@ -25,6 +25,12 @@ use crate::{
     }
 };
 
+#[cfg(feature = "ws")]
+use crate::ws::{FromMessage, IntoMessage};
+
+#[cfg(feature = "ws")]
+use tokio_tungstenite::tungstenite::Message;
+
 /// Wraps typed JSON data
 ///
 /// # Example
@@ -120,6 +126,27 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
 
     fn source() -> Source {
         Source::Body
+    }
+}
+
+impl<T: Serialize> IntoMessage for Json<T> {
+    #[inline]
+    fn into_message(self) -> Message {
+        // in case of error returns an empty Vec
+        // probably need to change to try_into_message pattern
+        let bytes = serde_json::to_vec(&self.0)
+            .unwrap_or_default();
+        Message::binary(bytes)
+    }
+}
+
+impl<T: DeserializeOwned> FromMessage for Json<T> {
+    #[inline]
+    fn from_message(msg: Message) -> Result<Self, Error> {
+        let bytes = msg.into_data();
+        serde_json::from_slice(&bytes)
+            .map(Json::<T>)
+            .map_err(JsonError::from_serde_error)
     }
 }
 
