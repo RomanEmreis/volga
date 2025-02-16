@@ -51,7 +51,7 @@ criterion = { version = "0.5.1", features = ["async_tokio"] }
 
 [features]
 # Default HTTP/1 only server
-default = ["http1","ws"]
+default = ["http1"]
 # HTTP/1 and HTTP/2 server
 full = [
     "http1", 
