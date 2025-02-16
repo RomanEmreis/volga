@@ -77,12 +77,6 @@ pub struct App {
     /// Web Server's Hosting Environment
     #[cfg(feature = "static-files")]
     pub(super) host_env: HostEnv,
-
-    /// Returns `true` is WebSocket is enabled
-    /// 
-    /// Default: `false`
-    #[cfg(feature = "ws")]
-    enable_websocket: bool,
     
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
@@ -141,10 +135,6 @@ pub(crate) struct AppInstance {
     /// Web Server's Hosting Environment
     #[cfg(feature = "static-files")]
     pub(super) host_env: HostEnv,
-
-    /// Returns `true` is WebSocket is enabled
-    #[cfg(feature = "ws")]
-    pub(super) enable_websocket: bool,
     
     /// Graceful shutdown utilities
     pub(super) graceful_shutdown: GracefulShutdown,
@@ -172,8 +162,6 @@ impl TryFrom<App> for AppInstance {
             body_limit: app.body_limit,
             pipeline: app.pipeline.build(),
             graceful_shutdown: GracefulShutdown::new(),
-            #[cfg(feature = "ws")]
-            enable_websocket: app.enable_websocket,
             #[cfg(feature = "static-files")]
             host_env: app.host_env,
             #[cfg(feature = "di")]
@@ -228,9 +216,7 @@ impl App {
             tracing_config: None,
             #[cfg(feature = "static-files")]
             host_env: HostEnv::default(),
-            #[cfg(feature = "ws")]
-            enable_websocket: false,
-            pipeline:PipelineBuilder::new(),
+            pipeline: PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),
         }
@@ -261,13 +247,6 @@ impl App {
     /// Disables a request body limit
     pub fn without_body_limit(mut self) -> Self {
         self.body_limit = RequestBodyLimit::Disabled;
-        self
-    }
-
-    /// Enables WebSockets
-    #[cfg(feature = "ws")]
-    pub fn with_websockets(mut self) -> Self {
-        self.enable_websocket = true;
         self
     }
 

@@ -12,7 +12,6 @@ async fn main() -> std::io::Result<()> {
         .init();
 
     let mut app = App::new()
-        .with_websockets()
         .with_content_root("examples/ws");
     
     app.use_static_files();
