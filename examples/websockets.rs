@@ -1,7 +1,14 @@
-use volga::{App, HttpResult, Json, di::Dc};
+use volga::{
+    App, 
+    HttpResult, 
+    Json, 
+    di::Dc, 
+    ws::{WebSocketConnection, WebSocket}
+};
+
 use std::sync::{Arc, RwLock};
 use tracing_subscriber::prelude::*;
-use volga::ws::{WebSocketConnection, WebSocket};
+use futures_util::{SinkExt, StreamExt};
 
 type Counter = Arc<RwLock<i32>>;
 
@@ -19,23 +26,51 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
     
     app.add_singleton(Counter::default());
-    app.map_ws("/ws", handle_ws);
+
+    // Complete handler WebSockets with DI
+    app.map_bi("/ws", handle_ws);
+
+    // Simplified WebSockets handler
+    app.map_ws("/ws1", |ws| async move {
+        // Split socket into sender and receiver that can be used separately
+        let (mut sender, mut receiver) = ws.split();
+
+        tokio::task::spawn(async move {
+            while let Some(Ok(msg)) = receiver.next().await {
+                tracing::info!("received: {}", msg)
+            }
+        });
+
+        tokio::task::spawn(async move {
+            let _ = sender.send("receiving completed!".into()).await;
+        });
+    });
+
+    // Simplified message handler
+    app.map_msg("/ws2", |msg: Json<Msg>| async {
+        msg
+    });
+
+    // Handle errors globally
+    app.map_err(|err| async move {
+        tracing::error!("{:?}", err);
+    });
     
     app.run().await
 }
 
 async fn handle_ws(conn: WebSocketConnection, counter: Dc<Counter>) -> HttpResult {
-    conn.on(|ws| handle(ws, counter))
+    // Here can be configured a connection and extracted something from DI or HTTP metadata
+    conn.with_protocols(["foo-ws"])
+        .on(|ws| handle(ws, counter))
 }
 
 async fn handle(mut ws: WebSocket, counter: Dc<Counter>) {
-    ws.on_msg(move |msg: Json<Msg>| handle_message(msg, counter.clone())).await;
+    ws.on_msg(move |msg: String| handle_message(msg, counter.clone())).await;
 }
 
-async fn handle_message(msg: Json<Msg>, counter: Dc<Counter>) -> Json<Msg> {
-    let Ok(mut value) = counter.write() else {
-        return Json(Msg { text: "error".into() })
-    };
+async fn handle_message(msg: String, counter: Dc<Counter>) -> String {
+    let Ok(mut value) = counter.write() else { unreachable!() };
     *value += 1;
-    Json(Msg { text: format!("Hello, {}! Number is: {}", msg.text, value) })
+    format!("received: {msg}; msg #{value}")
 }

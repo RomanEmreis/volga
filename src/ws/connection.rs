@@ -6,7 +6,7 @@ use sha1::{Digest, Sha1};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 use hyper::{
-    http::{request::Parts, Method, Uri, Version},
+    http::{request::Parts, Uri, Version},
     upgrade::OnUpgrade
 };
 
@@ -82,7 +82,7 @@ impl WebSocketConnection {
 
     /// Sets the maximum message size
     /// 
-    /// Default: 64 MB
+    /// Default: 64 MiB
     pub fn with_max_message_size(mut self, max: usize) -> Self {
         self.config.max_message_size = Some(max);
         self
@@ -90,7 +90,7 @@ impl WebSocketConnection {
 
     /// Sets the maximum frame size
     /// 
-    /// Default: 16 MB
+    /// Default: 16 MiB
     pub fn with_max_frame_size(mut self, max: usize) -> Self {
         self.config.max_frame_size = Some(max);
         self
@@ -101,6 +101,26 @@ impl WebSocketConnection {
     /// Default: `false`
     pub fn with_accept_unmasked_frames(mut self, accept: bool) -> Self {
         self.config.accept_unmasked_frames = accept;
+        self
+    }
+
+    /// Sets the protocols known by server.
+    /// 
+    /// Default: empty list
+    pub fn with_protocols<const N: usize>(mut self, known: [&'static str; N]) -> Self {
+        if let Some(sec_websocket_protocol) = self
+            .sec_websocket_protocol
+            .as_ref()
+            .and_then(|p| p.to_str().ok())
+        {
+            let mut split = sec_websocket_protocol
+                .split(',')
+                .map(str::trim);
+            self.protocol = known
+                .iter()
+                .find(|&&proto| split.any(|req_proto| req_proto == proto))
+                .map(|&protocol| HeaderValue::from_static(protocol));
+        }
         self
     }
     
@@ -134,8 +154,8 @@ impl WebSocketConnection {
             let stream = WebSocketStream::from_raw_socket(
                 upgraded,
                 Role::Server,
-                Some(config)
-            ).await;
+                Some(config))
+                .await;
 
             let socket = WebSocket::new(stream, protocol);
             func(socket).await;
@@ -179,10 +199,6 @@ impl TryFrom<&Parts> for WebSocketConnection {
     #[inline]
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
         let sec_websocket_key = if parts.version <= Version::HTTP_11 {
-            if parts.method != Method::GET {
-                return Err(WebSocketError::invalid_method(&Method::GET));  
-            }
-
             if matches!(parts.headers.get(&UPGRADE), Some(upgrade) if !upgrade.as_bytes().eq_ignore_ascii_case(super::WEBSOCKET.as_bytes())) {
                 return Err(WebSocketError::invalid_upgrade_header()); 
             }
@@ -191,21 +207,18 @@ impl TryFrom<&Parts> for WebSocketConnection {
                 return Err(WebSocketError::invalid_connection_header()); 
             }
 
+            if matches!(parts.headers.get(&SEC_WEBSOCKET_VERSION), Some(version) if version != super::VERSION) {
+                return Err(WebSocketError::invalid_version_header()); 
+            }
+
             let key = parts.headers
                 .get(&SEC_WEBSOCKET_KEY)
                 .ok_or(WebSocketError::websocket_key_missing())?
                 .clone();
             Some(key)
         } else {
-            if parts.method != Method::CONNECT {
-                return Err(WebSocketError::invalid_method(&Method::CONNECT));  
-            }
             None
         };
-
-        if matches!(parts.headers.get(&SEC_WEBSOCKET_VERSION), Some(version) if version != super::VERSION) {
-            return Err(WebSocketError::invalid_version_header()); 
-        }
         
         // use remove instead of get
         let on_upgrade = parts.extensions

@@ -25,6 +25,9 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
+pub type WsSink = SplitSink<WebSocketStream<TokioIo<Upgraded>>, Message>;
+pub type WsStream = SplitStream<WebSocketStream<TokioIo<Upgraded>>>;
+
 /// Represents a stream of WebSocket messages.
 pub struct WebSocket {
     inner: WebSocketStream<TokioIo<Upgraded>>,
@@ -52,8 +55,9 @@ impl WebSocket {
     /// Sends a message.
     #[inline]
     pub async fn send<T: IntoMessage>(&mut self, msg: T) -> Result<(), Error> {
+        let msg = msg.into_message()?;
         self.inner
-            .send(msg.into_message())
+            .send(msg)
             .await
             .map_err(Error::from)
     }
@@ -67,11 +71,7 @@ impl WebSocket {
     /// This can be useful when you want to split ownership between tasks, 
     /// or allow direct interaction between the two objects (e.g. via `Sink::send_all`).
     #[inline]
-    pub fn split(self) -> (
-        SplitSink<WebSocketStream<TokioIo<Upgraded>>, Message>,
-        SplitStream<WebSocketStream<TokioIo<Upgraded>>>
-    ) 
-    {
+    pub fn split(self) -> (WsSink, WsStream) {
         self.inner.split()
     }
 

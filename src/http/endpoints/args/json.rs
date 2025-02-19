@@ -132,12 +132,8 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
 #[cfg(feature = "ws")]
 impl<T: Serialize> IntoMessage for Json<T> {
     #[inline]
-    fn into_message(self) -> Message {
-        // in case of error returns an empty Vec
-        // probably need to change to try_into_message pattern
-        let bytes = serde_json::to_vec(&self.0)
-            .unwrap_or_default();
-        Message::binary(bytes)
+    fn into_message(self) -> Result<Message, Error> {
+        Ok(serde_json::to_vec(&self.0)?.into())
     }
 }
 
