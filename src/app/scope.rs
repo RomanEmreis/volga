@@ -81,22 +81,22 @@ impl Scope {
             ]),
             RouteOption::Ok(endpoint_context) => {
                 let (handler, params) = endpoint_context.into_parts();
+                let error_handler = pipeline.error_handler();
                 
-                #[cfg(feature = "di")]
-                let mut request = HttpRequest::new(request, shared.container.create_scope())
+                let mut request = HttpRequest::new(request)
                     .into_limited(shared.body_limit);
-                
-                #[cfg(not(feature = "di"))]
-                let mut request = HttpRequest::new(request).into_limited(shared.body_limit);
                 
                 let extensions = request.extensions_mut();
                 extensions.insert(cancellation_token);
                 extensions.insert(params);
                 extensions.insert(shared.body_limit);
+                extensions.insert(error_handler.clone());
+
+                #[cfg(feature = "di")]
+                extensions.insert(shared.container.create_scope());
                 
                 let request_method = request.method().clone();
                 let uri = request.uri().clone();
-                let error_handler = pipeline.error_handler();
                 
                 #[cfg(feature = "middleware")]
                 let response = if pipeline.has_middleware_pipeline() {

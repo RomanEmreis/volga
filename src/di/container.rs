@@ -1,5 +1,6 @@
 ﻿use super::{Inject, DiError};
 use crate::error::Error;
+use hyper::http::{Extensions, request::Parts};
 use futures_util::TryFutureExt;
 use tokio::sync::OnceCell;
 use std::{
@@ -162,10 +163,40 @@ impl Container {
     }
 }
 
+impl<'a> TryFrom<&'a Extensions> for &'a Container {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(extensions: &'a Extensions) -> Result<Self, Self::Error> {
+        extensions.get::<Container>()
+            .ok_or(DiError::container_missing())
+    }
+}
+
+impl TryFrom<&Extensions> for Container {
+    type Error = Error;
+    
+    #[inline]
+    fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
+        let res: Result<&Container, Error> = extensions.try_into();
+        res.cloned()
+    }
+}
+
+impl TryFrom<&Parts> for Container {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
+        Container::try_from(&parts.extensions)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use hyper::Request;
     use super::{Error, Container, ContainerBuilder, Inject};
 
     trait Cache: Send + Sync {
@@ -341,5 +372,22 @@ mod tests {
 
         assert_eq!(cache.inner.get("key1").unwrap(), "value 1");
         assert_eq!(cache.inner.get("key2").unwrap(), "value 2");
+    }
+    
+    #[test]
+    fn it_extracts_from_parts() {
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(InMemoryCache::default());
+
+        let container = container.build();
+        
+        let mut req = Request::get("/").body(()).unwrap();
+        req.extensions_mut().insert(container.create_scope());
+
+        let (parts, _) = req.into_parts();
+        
+        let container = Container::try_from(&parts);
+        
+        assert!(container.is_ok());
     }
 }

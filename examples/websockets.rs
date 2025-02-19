@@ -1,5 +1,21 @@
-use volga::{App, Json};
+use volga::{
+    App, 
+    HttpResult, 
+    Json, 
+    di::Dc, 
+    ws::{WebSocketConnection, WebSocket}
+};
+
+use std::sync::{Arc, RwLock};
 use tracing_subscriber::prelude::*;
+use futures_util::{SinkExt, StreamExt};
+
+type Counter = Arc<RwLock<i32>>;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Msg {
+    text: String
+}
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -8,17 +24,53 @@ async fn main() -> std::io::Result<()> {
         .init();
 
     let mut app = App::new();
+    
+    app.add_singleton(Counter::default());
 
-    app.map_message("/ws", handle_msg);
+    // Complete handler WebSockets with DI
+    app.map_bi("/ws", handle_ws);
 
+    // Simplified WebSockets handler
+    app.map_ws("/ws1", |ws| async move {
+        // Split socket into sender and receiver that can be used separately
+        let (mut sender, mut receiver) = ws.split();
+
+        tokio::task::spawn(async move {
+            while let Some(Ok(msg)) = receiver.next().await {
+                tracing::info!("received: {}", msg)
+            }
+        });
+
+        tokio::task::spawn(async move {
+            let _ = sender.send("receiving completed!".into()).await;
+        });
+    });
+
+    // Simplified message handler
+    app.map_msg("/ws2", |msg: Json<Msg>| async {
+        msg
+    });
+
+    // Handle errors globally
+    app.map_err(|err| async move {
+        tracing::error!("{:?}", err);
+    });
+    
     app.run().await
 }
 
-async fn handle_msg(msg: Json<Msg>) -> Json<Msg> {
-    Json(Msg { text: format!("Hello, {}!", msg.text) })
+async fn handle_ws(conn: WebSocketConnection, counter: Dc<Counter>) -> HttpResult {
+    // Here can be configured a connection and extracted something from DI or HTTP metadata
+    conn.with_protocols(["foo-ws"])
+        .on(|ws| handle(ws, counter))
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct Msg {  
-    text: String
+async fn handle(mut ws: WebSocket, counter: Dc<Counter>) {
+    ws.on_msg(move |msg: String| handle_message(msg, counter.clone())).await;
+}
+
+async fn handle_message(msg: String, counter: Dc<Counter>) -> String {
+    let Ok(mut value) = counter.write() else { unreachable!() };
+    *value += 1;
+    format!("received: {msg}; msg #{value}")
 }
