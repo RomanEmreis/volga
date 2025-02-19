@@ -14,9 +14,6 @@ use crate::{
     error::Error
 };
 
-#[cfg(feature = "di")]
-use crate::di::Container;
-
 pub mod path;
 pub mod query;
 pub mod json;
@@ -38,8 +35,6 @@ pub(crate) enum Payload<'a> {
     Full(&'a Parts, HttpBody),
     Parts(&'a Parts),
     Path(&'a (String, String)),
-    #[cfg(feature = "di")]
-    Dc(&'a Container)
 }
 
 /// Describes a data source for extractors to read from
@@ -50,8 +45,6 @@ pub(crate) enum Source {
     Parts,
     Path,
     Body,
-    #[cfg(feature = "di")]
-    Dc
 }
 
 /// Specifies extractors to read data from HTTP request
@@ -107,9 +100,6 @@ macro_rules! define_generic_from_request {
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
             #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
-                #[cfg(feature = "di")]
-                let (parts, body, container) = req.into_parts();
-                #[cfg(not(feature = "di"))]
                 let (parts, body) = req.into_parts();
                 
                 let params = parts.extensions.get::<PathArguments>()
@@ -123,8 +113,6 @@ macro_rules! define_generic_from_request {
                     $T::from_payload(match $T::source() {
                         Source::None => Payload::None,
                         Source::Parts => Payload::Parts(&parts),
-                        #[cfg(feature = "di")]
-                        Source::Dc => Payload::Dc(&container),
                         Source::Path => match iter.next() {
                             Some(param) => Payload::Path(&param),
                             None => Payload::None
@@ -138,13 +126,7 @@ macro_rules! define_generic_from_request {
                             None => Payload::None
                         },
                         Source::Request => match body.take() {
-                            Some(body) => {
-                                #[cfg(feature = "di")]
-                                let req = Payload::Request(HttpRequest::from_parts(parts.clone(), body, container.clone()));
-                                #[cfg(not(feature = "di"))]
-                                let req = Payload::Request(HttpRequest::from_parts(parts.clone(), body));
-                                req
-                            },
+                            Some(body) => Payload::Request(HttpRequest::from_parts(parts.clone(), body)),
                             None => Payload::None
                         },
                     }).await?,

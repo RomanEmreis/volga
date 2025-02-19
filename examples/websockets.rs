@@ -1,5 +1,14 @@
-use volga::{App, Json};
+use volga::{App, HttpResult, Json, di::Dc};
+use std::sync::{Arc, RwLock};
 use tracing_subscriber::prelude::*;
+use volga::ws::{WebSocketConnection, WebSocket};
+
+type Counter = Arc<RwLock<i32>>;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Msg {
+    text: String
+}
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -8,17 +17,25 @@ async fn main() -> std::io::Result<()> {
         .init();
 
     let mut app = App::new();
-
-    app.map_message("/ws", handle_msg);
-
+    
+    app.add_singleton(Counter::default());
+    app.map_ws("/ws", handle_ws);
+    
     app.run().await
 }
 
-async fn handle_msg(msg: Json<Msg>) -> Json<Msg> {
-    Json(Msg { text: format!("Hello, {}!", msg.text) })
+async fn handle_ws(conn: WebSocketConnection, counter: Dc<Counter>) -> HttpResult {
+    conn.on(|ws| handle(ws, counter))
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
-struct Msg {  
-    text: String
+async fn handle(mut ws: WebSocket, counter: Dc<Counter>) {
+    ws.on_msg(move |msg: Json<Msg>| handle_message(msg, counter.clone())).await;
+}
+
+async fn handle_message(msg: Json<Msg>, counter: Dc<Counter>) -> Json<Msg> {
+    let Ok(mut value) = counter.write() else {
+        return Json(Msg { text: "error".into() })
+    };
+    *value += 1;
+    Json(Msg { text: format!("Hello, {}! Number is: {}", msg.text, value) })
 }

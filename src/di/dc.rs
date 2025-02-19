@@ -109,21 +109,21 @@ impl<T: Inject + 'static> FromPayload for Dc<T> {
     type Future = ExtractDependencyFut<T>;
 
     fn from_payload(payload: Payload) -> Self::Future {
-        if let Payload::Dc(container) = payload {
-            ExtractDependencyFut { container: container.clone(), _marker: PhantomData }
-        } else {
-            unreachable!()
-        }
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        let container = Container::try_from(parts)
+            .expect("DI Container must be provided");
+        ExtractDependencyFut { container, _marker: PhantomData }
     }
 
     fn source() -> Source {
-        Source::Dc
+        Source::Parts
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
+    use hyper::Request;
     use super::Dc;
     use crate::di::ContainerBuilder;
     use crate::http::endpoints::args::{FromPayload, Payload};
@@ -137,18 +137,23 @@ mod tests {
         container.register_scoped::<Cache>();
         
         let container = container.build();
-        let scope = container.create_scope();
         
+        let scope = container.create_scope();
         let vec = scope.resolve::<Cache>().await.unwrap();
         vec.lock().unwrap().push(1);
         
-        let dc = Dc::<Cache>::from_payload(Payload::Dc(&scope)).await.unwrap();
+        let mut req = Request::get("/").body(()).unwrap();
+        req.extensions_mut().insert(scope);
+            
+        let (parts, _) = req.into_parts();
+        
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts)).await.unwrap();
         dc.lock().unwrap().push(2);
 
-        let dc = Dc::<Cache>::from_payload(Payload::Dc(&scope)).await.unwrap();
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts)).await.unwrap();
         dc.lock().unwrap().push(3);
 
-        let dc = Dc::<Cache>::from_payload(Payload::Dc(&scope)).await.unwrap();
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts)).await.unwrap();
         let dc = dc.lock().unwrap();
         
         assert_eq!(dc[0], 1);

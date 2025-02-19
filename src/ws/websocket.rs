@@ -1,15 +1,20 @@
 use crate::{error::Error, headers::HeaderValue};
+use super::{FromMessage, IntoMessage};
 
 use futures_util::{  
-    sink::SinkExt,
-    stream::{Stream, StreamExt}
+    sink::{Sink, SinkExt},
+    stream::{
+        Stream,
+        StreamExt, 
+        SplitSink, 
+        SplitStream
+    }
 };
 
 use hyper_util::rt::TokioIo;
 use hyper::upgrade::Upgraded;
 
 use std::{
-    borrow::Cow, 
     future::Future, 
     pin::Pin, 
     task::{ready, Context, Poll}
@@ -20,8 +25,6 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
-type WsStream = WebSocketStream<TokioIo<Upgraded>>;
-
 /// Represents a stream of WebSocket messages.
 pub struct WebSocket {
     inner: WebSocketStream<TokioIo<Upgraded>>,
@@ -29,16 +32,20 @@ pub struct WebSocket {
 }
 
 impl WebSocket {
-    /// Creates a new WebSocket
+    /// Creates a new [`WebSocket`]
     #[inline]
-    pub(super) fn new(inner: WsStream, protocol: Option<HeaderValue>) -> Self {
+    pub(super) fn new(
+        inner: WebSocketStream<TokioIo<Upgraded>>,
+        protocol: Option<HeaderValue>
+    ) -> Self {
         Self { inner, protocol }
     }
 
     /// Receives a message.
     #[inline]
     pub async fn recv<T: FromMessage>(&mut self) -> Option<Result<T, Error>> {
-        self.next().await
+        self.next()
+            .await
             .map(|r| r.and_then(|msg| T::from_message(msg)))
     }
 
@@ -51,12 +58,26 @@ impl WebSocket {
             .map_err(Error::from)
     }
 
-    /// Returns the selected WebSocket subprotocol, if there is any.
+    /// Returns the selected WebSocket sub-protocol, if there is any.
     pub fn protocol(&self) -> Option<&HeaderValue> {
         self.protocol.as_ref()
     }
+    
+    /// Splits this `Stream + Sink` object into separate `Sink` and `Stream` objects.
+    /// This can be useful when you want to split ownership between tasks, 
+    /// or allow direct interaction between the two objects (e.g. via `Sink::send_all`).
+    #[inline]
+    pub fn split(self) -> (
+        SplitSink<WebSocketStream<TokioIo<Upgraded>>, Message>,
+        SplitStream<WebSocketStream<TokioIo<Upgraded>>>
+    ) 
+    {
+        self.inner.split()
+    }
 
-    pub async fn on_message<F, M, R, Fut>(&mut self, handler: F)
+    /// Maps a `handler` that has to be called every time a message is received.
+    #[inline]
+    pub async fn on_msg<F, M, R, Fut>(&mut self, handler: F)
     where
         F: Fn(M) -> Fut + Send + 'static,
         M: FromMessage,
@@ -78,92 +99,48 @@ impl Stream for WebSocket {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
             match ready!(self.inner.poll_next_unpin(cx)) {
+                None => return Poll::Ready(None),
+                Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                 Some(Ok(msg)) => {
                     let Message::Frame(_) = msg else { return Poll::Ready(Some(Ok(msg))) };
-                },
-                Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
-                None => return Poll::Ready(None),
+                }
             }
         }
     }
 }
 
-pub trait IntoMessage {
-    fn into_message(self) -> Message;
-}
+impl Sink<Message> for WebSocket {
+    type Error = Error;
 
-pub trait FromMessage: Sized {
-    fn from_message(msg: Message) -> Result<Self, Error>;
-}
-
-impl IntoMessage for Message {
     #[inline]
-    fn into_message(self) -> Message {
-        self
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match ready!(Pin::new(&mut self.inner).poll_ready(cx)) {
+            Ok(()) => Poll::Ready(Ok(())),
+            Err(e) => Poll::Ready(Err(Error::server_error(e))),
+        }
     }
-}
 
-impl FromMessage for Message {
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        Ok(msg)
+    fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+        match Pin::new(&mut self.inner).start_send(item) {
+            Ok(_) => Ok(()),
+            Err(err) => Err(Error::server_error(err))
+        }
     }
-}
 
-impl IntoMessage for &'static str {
     #[inline]
-    fn into_message(self) -> Message {
-        Message::text(self)
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match ready!(Pin::new(&mut self.inner).poll_flush(cx)) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(err) => Poll::Ready(Err(Error::server_error(err))),
+        }
     }
-}
 
-impl IntoMessage for String {
     #[inline]
-    fn into_message(self) -> Message {
-        Message::text(self)
-    }
-}
-
-impl FromMessage for String {
-    #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        let utf_bytes = msg
-            .into_text()
-            .map_err(Error::from)?;
-        Ok(utf_bytes.as_str().into())
-    }
-}
-
-impl IntoMessage for Box<str> {
-    #[inline]
-    fn into_message(self) -> Message {
-        Message::text(&*self)
-    }
-}
-
-impl FromMessage for Box<str> {
-    #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        let utf_bytes = msg
-            .into_text()
-            .map_err(Error::from)?;
-        Ok(utf_bytes.as_str().into())
-    }
-}
-
-impl IntoMessage for Cow<'static, str> {
-    #[inline]
-    fn into_message(self) -> Message {
-        Message::text(self.into_owned())
-    }
-}
-
-impl FromMessage for Cow<'static, str> {
-    #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        let utf_bytes = msg
-            .into_text()
-            .map_err(Error::from)?;
-        Ok(Cow::Owned(utf_bytes.as_str().into()))
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        match ready!(Pin::new(&mut self.inner).poll_close(cx)) {
+            Ok(_) => Poll::Ready(Ok(())),
+            Err(err) => Poll::Ready(Err(Error::server_error(err)))
+        }
     }
 }

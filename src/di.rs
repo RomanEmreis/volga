@@ -4,7 +4,7 @@ use super::{App, error::Error};
 pub use self::{
     container::{Container, ContainerBuilder},
     dc::Dc,
-    inject::Inject,
+    inject::Inject
 };
 
 pub mod dc;
@@ -22,6 +22,11 @@ impl DiError {
     #[inline]
     fn resolve_error(type_name: &str) -> Error {
         Error::server_error(format!("Services Error: unable to resolve the service: {}", type_name))
+    }
+
+    #[inline]
+    fn container_missing() -> Error {
+        Error::server_error("Services Error: DI container is missing")
     }
 }
 

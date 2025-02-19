@@ -105,23 +105,6 @@ impl App {
         self
     }
 
-    #[cfg(feature = "di")]
-    fn decompress(encoding: Encoding, request: HttpRequest) -> HttpRequest {
-        let (mut parts, body, container) = request.into_parts();
-        
-        parts.headers.remove(CONTENT_LENGTH);
-        parts.headers.remove(CONTENT_ENCODING);
-        
-        let body = Self::decompress_body(encoding, body);
-        let body_limit = parts.extensions.get::<RequestBodyLimit>()
-            .cloned()
-            .unwrap_or_default();
-        
-        HttpRequest::from_parts(parts, body, container)
-            .into_limited(body_limit)
-    }
-
-    #[cfg(not(feature = "di"))]
     fn decompress(encoding: Encoding, request: HttpRequest) -> HttpRequest {
         let (mut parts, body) = request.into_parts();
         

@@ -7,16 +7,14 @@ use crate::http::endpoints::{
 };
 
 pub use self::{
-    upgrade::Upgrade,
-    websocket::{
-        WebSocket, 
-        FromMessage, 
-        IntoMessage
-    }
+    connection::WebSocketConnection,
+    websocket::WebSocket,
+    args::{FromMessage, IntoMessage}
 };
 
-pub mod upgrade;
+pub mod connection;
 pub mod websocket;
+pub mod args;
 
 const UPGRADE: &str = "upgrade"; 
 const VERSION: &str = "13";
@@ -65,7 +63,26 @@ impl WebSocketError {
 }
 
 impl App {
-    pub fn map_upgrade<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    /// Adds a `handler` that has to be called when a connection upgrade requested. 
+    /// That's usually happens when establishing a WebSocket connection.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, ws::{WebSocketConnection, WebSocket}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_ws("/ws", |conn: WebSocketConnection| async {
+    ///     conn.on(|ws: WebSocket| async move {
+    ///         // handle WebSocket connection 
+    ///     })
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_ws<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -86,29 +103,60 @@ impl App {
         self
     }
 
-    pub fn map_websocket<F, Fut>(&mut self, pattern: &str, handler: F) -> &mut Self
+    /// Adds a `handler` that has to be called when a WebSocket connection is established
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, ws::WebSocket};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_ws1("/ws", |ws: WebSocket| async {
+    ///     // handle WebSocket connection
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_ws1<F, Fut>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
         F: FnOnce(WebSocket) -> Fut + Clone + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static
     {
-        self.map_upgrade(pattern, move |upgrade: Upgrade| {
+        self.map_ws(pattern, move |upgrade: WebSocketConnection| {
             let handler = handler.clone();
             async move { upgrade.on(handler) }
         })
     }
 
-    pub fn map_message<F, M, R, Fut>(&mut self, pattern: &str, handler: F) -> &mut Self 
+    /// Adds a `handler` that has to be called when a message received 
+    /// from a client over WebSocket protocol
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, ws::WebSocket};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_msg("/ws", |msg: String| async {
+    ///     format!("received msg: {}", msg)
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_msg<F, M, R, Fut>(&mut self, pattern: &str, handler: F) -> &mut Self 
     where
         F: Fn(M) -> Fut + Clone + Send + Sync + 'static,
         M: FromMessage + Send,
         R: IntoMessage + Send,
         Fut: Future<Output = R> + Send + 'static
     {
-        self.map_websocket(pattern, move |mut websocket| {
+        self.map_ws1(pattern, move |mut ws: WebSocket| {
             let handler = handler.clone();
-            async move {
-                websocket.on_message(handler).await;
-            }
+            async move { ws.on_msg(handler).await; }
         })
     }
 }
