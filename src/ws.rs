@@ -1,15 +1,19 @@
-use std::future::Future;
-use crate::{App, error::Error};
+use crate::{App, error::Error, HttpRequest};
 use crate::http::IntoResponse;
 use crate::http::endpoints::{
-    args::FromRequest,
+    args::{FromRequest, FromPayload, Payload},
     handlers::GenericHandler
 };
 
 pub use self::{
     connection::WebSocketConnection,
     websocket::WebSocket,
-    args::{FromMessage, IntoMessage}
+    args::{
+        FromMessage, 
+        IntoMessage, 
+        MessageHandler, 
+        WebSocketHandler
+    }
 };
 
 pub mod connection;
@@ -69,7 +73,7 @@ impl App {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_bi("/ws", |conn: WebSocketConnection| async {
+    /// app.map_conn("/ws", |conn: WebSocketConnection| async {
     ///     
     ///     // extract HTTP metadata, DI, etc.
     /// 
@@ -80,7 +84,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_bi<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_conn<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -119,19 +123,26 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_ws<F, Fut>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_ws<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: FnOnce(WebSocket) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static
+        F: WebSocketHandler<Args, Output = ()>,
+        Args: FromRequest + Send + Sync + 'static,
     {
-        self.map_bi(pattern, move |upgrade: WebSocketConnection| {
+        self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
-            async move { upgrade.on(handler) }
+            async move {
+                let (parts, body) = req.into_parts();
+                let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await?;
+                let args = Args::from_request(HttpRequest::from_parts(parts, body)).await?;
+                conn.on(move |ws| handler.call(ws, args))
+            }
         })
     }
 
     /// Adds a `handler` that has to be called when a message received 
     /// from a client over WebSocket protocol
+    /// 
+    /// Note: In case of need to extract something, e.g. from DI, it must implement `Clone`.
     /// 
     /// # Example
     /// ```no_run
@@ -147,16 +158,23 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_msg<F, M, R, Fut>(&mut self, pattern: &str, handler: F) -> &mut Self 
+    pub fn map_msg<F, M, Args, R>(&mut self, pattern: &str, handler: F) -> &mut Self 
     where
-        F: Fn(M) -> Fut + Clone + Send + Sync + 'static,
+        F: MessageHandler<M, Args, Output = R> + 'static,
+        Args: FromRequest + Clone + Send + Sync + 'static,
         M: FromMessage + Send,
-        R: IntoMessage + Send,
-        Fut: Future<Output = R> + Send + 'static
+        R: IntoMessage + Send
     {
-        self.map_ws(pattern, move |mut ws: WebSocket| {
+        self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
-            async move { ws.on_msg(handler).await; }
+            async move {
+                let (parts, body) = req.into_parts();
+                let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await?;
+                let args = Args::from_request(HttpRequest::from_parts(parts, body)).await.unwrap();
+                conn.on(|mut ws| async move {
+                    ws.on_msg(move |msg: M| handler.call(msg, args.clone())).await;
+                })
+            }
         })
     }
 }
