@@ -28,27 +28,29 @@ async fn main() -> std::io::Result<()> {
     app.add_singleton(Counter::default());
 
     // Complete handler WebSockets with DI
-    app.map_bi("/ws", handle_ws);
+    app.map_conn("/ws", handle_ws);
 
-    // Simplified WebSockets handler
-    app.map_ws("/ws1", |ws| async move {
+    // Simplified WebSockets handler with DI
+    app.map_ws("/ws1", |ws: WebSocket, counter: Dc<Counter>| async move {
         // Split socket into sender and receiver that can be used separately
         let (mut sender, mut receiver) = ws.split();
 
         tokio::task::spawn(async move {
-            while let Some(Ok(msg)) = receiver.next().await {
-                tracing::info!("received: {}", msg)
-            }
+            let _ = sender.send("Hello from WebSockets server!".into()).await;
         });
-
+        
         tokio::task::spawn(async move {
-            let _ = sender.send("receiving completed!".into()).await;
+            while let Some(Ok(msg)) = receiver.next().await {
+                let value = inc(&counter).await;
+                tracing::info!("received: {msg}; msg #{value}")
+            }
         });
     });
 
-    // Simplified message handler
-    app.map_msg("/ws2", |msg: Json<Msg>| async {
-        msg
+    // Simplified JSON message handler with DI
+    app.map_msg("/ws2", |msg: Json<Msg>, counter: Dc<Counter>| async move {
+        let value = inc(&counter).await;
+        format!("received: {}; msg #{value}", msg.text)
     });
 
     // Handle errors globally
@@ -70,7 +72,12 @@ async fn handle(mut ws: WebSocket, counter: Dc<Counter>) {
 }
 
 async fn handle_message(msg: String, counter: Dc<Counter>) -> String {
+    let value = inc(&counter).await;
+    format!("received: {msg}; msg #{value}")
+}
+
+async fn inc(counter: &Counter) -> i32 {
     let Ok(mut value) = counter.write() else { unreachable!() };
     *value += 1;
-    format!("received: {msg}; msg #{value}")
+    *value
 }

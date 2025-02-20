@@ -82,7 +82,7 @@ impl WebSocket {
         F: Fn(M) -> Fut + Send + 'static,
         M: FromMessage,
         R: IntoMessage,
-        Fut: Future<Output = R> + Send + 'static
+        Fut: Future<Output = R> + Send
     {
         while let Some(msg) = self.recv::<M>().await {
             let Ok(msg) = msg else { return; };

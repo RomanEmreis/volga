@@ -3,7 +3,9 @@
 use crate::error::Error;
 use bytes::Bytes;
 use std::borrow::Cow;
+use std::future::Future;
 use tokio_tungstenite::tungstenite::Message;
+use crate::ws::WebSocket;
 
 /// A trait for types that can be returned from WebSocket handler and converted to [`Message`]
 pub trait IntoMessage {
@@ -149,6 +151,73 @@ impl IntoMessage for Bytes {
         Ok(Message::binary(self))
     }
 }
+
+/// Describes a generic WebSocket/WebTransport handler that could take a [`WebSocket`] 
+/// and 0 or N parameters of types
+pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
+    type Output;
+    type Future: Future<Output = Self::Output> + Send;
+
+    fn call(&self, ws: WebSocket, args: Args) -> Self::Future;
+}
+
+/// Describes a generic WebSocket/WebTransport message handler that could take a message 
+/// in a format that implements the[`FromMessage`] and 0 or N parameters of types
+pub trait MessageHandler<M: FromMessage, Args>: Clone + Send + Sync + 'static {
+    type Output;
+    type Future: Future<Output = Self::Output> + Send;
+
+    fn call(&self, msg: M, args: Args) -> Self::Future;
+}
+
+macro_rules! define_generic_ws_handler ({ $($param:ident)* } => {
+    impl<Func, Fut: Send, $($param,)*> WebSocketHandler<($($param,)*)> for Func
+    where
+        Func: Fn(WebSocket, $($param),*) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future,
+    {
+        type Output = Fut::Output;
+        type Future = Fut;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn call(&self, ws: WebSocket, ($($param,)*): ($($param,)*)) -> Self::Future {
+            (self)(ws, $($param,)*)
+        }
+    }
+});
+
+macro_rules! define_generic_message_handler ({ $($param:ident)* } => {
+    impl<M, Func, Fut: Send, $($param,)*> MessageHandler<M, ($($param,)*)> for Func
+    where
+        Func: Fn(M, $($param),*) -> Fut + Send + Sync + Clone + 'static,
+        M: FromMessage + Send,
+        Fut: Future + 'static,
+    {
+        type Output = Fut::Output;
+        type Future = Fut;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn call(&self, msg: M, ($($param,)*): ($($param,)*)) -> Self::Future {
+            (self)(msg, $($param,)*)
+        }
+    }
+});
+
+define_generic_ws_handler! {}
+define_generic_ws_handler! { T1 }
+define_generic_ws_handler! { T1 T2 }
+define_generic_ws_handler! { T1 T2 T3 }
+define_generic_ws_handler! { T1 T2 T3 T4 }
+define_generic_ws_handler! { T1 T2 T3 T4 T5 }
+
+define_generic_message_handler! {}
+define_generic_message_handler! { T1 }
+define_generic_message_handler! { T1 T2 }
+define_generic_message_handler! { T1 T2 T3 }
+define_generic_message_handler! { T1 T2 T3 T4 }
+define_generic_message_handler! { T1 T2 T3 T4 T5 }
 
 #[cfg(test)]
 mod tests {
