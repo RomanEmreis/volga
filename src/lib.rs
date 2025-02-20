@@ -6,13 +6,15 @@
 //! * Supports HTTP/1 and HTTP/2
 //! * Robust routing
 //! * Custom middlewares
+//! * Dependency Injection
+//! * WebSockets and WebTransport
 //! * Full [Tokio](https://tokio.rs/) compatibility
 //! * Runs on stable Rust 1.80+
 //! 
 //! ## Example
 //! ```toml
 //! [dependencies]
-//! volga = "0.5.2"
+//! volga = "0.5.3"
 //! tokio = { version = "1", features = ["full"] }
 //! ```
 //! ```no_run
