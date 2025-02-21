@@ -148,15 +148,25 @@ impl App {
     /// let app = App::new()
     ///     .with_content_root("static");
     /// ```
-    pub fn with_content_root<T: ?Sized + AsRef<OsStr>>(mut self, content_root: &T) -> Self {
-        let new_root = PathBuf::from(content_root);
-        let mut env = HostEnv::new(content_root);
+    pub fn with_content_root<T: ?Sized + AsRef<OsStr>>(mut self, root: &T) -> Self {
+        let mut env = HostEnv::new(root);
         
         env.show_directory = self.host_env.show_directory;
-        env.index_path = new_root.join(self.host_env.index_path);
-        env.fallback_path = self.host_env
+        
+        if let Some(file_name) = self
+            .host_env
+            .index_path
+            .file_name() {
+            env.index_path.set_file_name(file_name);
+        }
+        
+        if let Some(fallback_file) = self
+            .host_env
             .fallback_path
-            .map(|fallback_path| new_root.join(fallback_path));
+            .as_ref()
+            .and_then(|p| p.file_name()) { 
+            env = env.with_fallback_file(fallback_file);
+        }  
         
         self.host_env = env;
         self
@@ -173,8 +183,8 @@ impl App {
     /// let app = App::new()
     ///     .with_index_file("default.html");
     /// ```
-    pub fn with_index_file<T: AsRef<Path>>(mut self, index_file: T) -> Self {
-        self.host_env = self.host_env.with_index_file(index_file);
+    pub fn with_index_file<T: AsRef<Path>>(mut self, name: T) -> Self {
+        self.host_env = self.host_env.with_index_file(name);
         self
     }
 
@@ -189,8 +199,8 @@ impl App {
     /// let app = App::new()
     ///     .with_fallback_file("not_found.html");
     /// ```
-    pub fn with_fallback_file<T: AsRef<Path>>(mut self, fallback_file: T) -> Self {
-        self.host_env = self.host_env.with_fallback_file(fallback_file);
+    pub fn with_fallback_file<T: AsRef<Path>>(mut self, name: T) -> Self {
+        self.host_env = self.host_env.with_fallback_file(name);
         self
     }
 
