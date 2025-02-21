@@ -199,15 +199,15 @@ impl TryFrom<&Parts> for WebSocketConnection {
     #[inline]
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
         let sec_websocket_key = if parts.version <= Version::HTTP_11 {
-            if matches!(parts.headers.get(&UPGRADE), Some(upgrade) if !upgrade.as_bytes().eq_ignore_ascii_case(super::WEBSOCKET.as_bytes())) {
+            if !matches!(parts.headers.get(&UPGRADE), Some(upgrade) if upgrade.as_bytes().eq_ignore_ascii_case(super::WEBSOCKET.as_bytes())) {
                 return Err(WebSocketError::invalid_upgrade_header()); 
             }
 
-            if matches!(parts.headers.get(&CONNECTION), Some(conn) if !conn.as_bytes().eq_ignore_ascii_case(super::UPGRADE.as_bytes())) {
+            if !matches!(parts.headers.get(&CONNECTION), Some(conn) if conn.as_bytes().eq_ignore_ascii_case(super::UPGRADE.as_bytes())) {
                 return Err(WebSocketError::invalid_connection_header()); 
             }
 
-            if matches!(parts.headers.get(&SEC_WEBSOCKET_VERSION), Some(version) if version != super::VERSION) {
+            if !matches!(parts.headers.get(&SEC_WEBSOCKET_VERSION), Some(version) if version == super::VERSION) {
                 return Err(WebSocketError::invalid_version_header()); 
             }
 
@@ -259,5 +259,207 @@ impl FromPayload for WebSocketConnection {
     #[inline]
     fn source() -> Source {
         Source::Parts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use super::WebSocketConnection;
+    use crate::http::endpoints::args::{FromPayload, Payload};
+    use hyper::{Request, Version};
+    use crate::error::ErrorFunc;
+    use crate::error::handler::PipelineErrorHandler;
+
+    #[tokio::test]
+    async fn it_creates_ws_connection_from_payload() {
+        let mut req = Request::get("/ws")
+            .version(Version::HTTP_11)
+            .header("upgrade", "websocket")
+            .header("connection", "Upgrade")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", "123abc")
+            .body(())
+            .unwrap();
+        
+        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        
+        let u = hyper::upgrade::on(&mut req);
+        req.extensions_mut().insert(u);
+        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+        
+        let (parts, _) = req.into_parts();
+        
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
+            .await
+            .unwrap();
+        
+        assert_eq!(conn.uri, parts.uri);
+        assert_eq!(conn.protocol, None);
+        assert_eq!(conn.sec_websocket_key, parts.headers.get("Sec-WebSocket-Key").cloned());
+    }
+
+    #[tokio::test]
+    async fn it_tries_to_create_not_upgradable_ws_connection_from_payload() {
+        let mut req = Request::get("/ws")
+            .version(Version::HTTP_11)
+            .header("upgrade", "websocket")
+            .header("connection", "Upgrade")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", "123abc")
+            .body(())
+            .unwrap();
+
+        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+
+        let (parts, _) = req.into_parts();
+
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
+            .await;
+        
+        assert!(conn.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_tries_to_create_ws_connection_with_missing_err_handler_from_payload() {
+        let mut req = Request::get("/ws")
+            .version(Version::HTTP_11)
+            .header("upgrade", "websocket")
+            .header("connection", "Upgrade")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", "123abc")
+            .body(())
+            .unwrap();
+
+        let u = hyper::upgrade::on(&mut req);
+        req.extensions_mut().insert(u);
+
+        let (parts, _) = req.into_parts();
+
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
+            .await;
+
+        assert!(conn.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_tries_to_create_ws_connection_without_upgrade_header_from_payload() {
+        let mut req = Request::get("/ws")
+            .version(Version::HTTP_11)
+            .header("connection", "Upgrade")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", "123abc")
+            .body(())
+            .unwrap();
+
+        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+
+        let u = hyper::upgrade::on(&mut req);
+        req.extensions_mut().insert(u);
+        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+
+        let (parts, _) = req.into_parts();
+
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
+            .await;
+
+        assert!(conn.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_tries_to_create_ws_connection_without_connection_header_from_payload() {
+        let mut req = Request::get("/ws")
+            .version(Version::HTTP_11)
+            .header("upgrade", "websocket")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", "123abc")
+            .body(())
+            .unwrap();
+
+        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+
+        let u = hyper::upgrade::on(&mut req);
+        req.extensions_mut().insert(u);
+        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+
+        let (parts, _) = req.into_parts();
+
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
+            .await;
+
+        assert!(conn.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_tries_to_create_ws_connection_without_sec_websocket_version_header_from_payload() {
+        let mut req = Request::get("/ws")
+            .version(Version::HTTP_11)
+            .header("upgrade", "websocket")
+            .header("connection", "Upgrade")
+            .header("sec-websocket-key", "123abc")
+            .body(())
+            .unwrap();
+
+        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+
+        let u = hyper::upgrade::on(&mut req);
+        req.extensions_mut().insert(u);
+        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+
+        let (parts, _) = req.into_parts();
+
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
+            .await;
+
+        assert!(conn.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_tries_to_create_ws_connection_without_sec_websocket_key_header_from_payload() {
+        let mut req = Request::get("/ws")
+            .version(Version::HTTP_11)
+            .header("upgrade", "websocket")
+            .header("connection", "Upgrade")
+            .header("sec-websocket-version", "13")
+            .body(())
+            .unwrap();
+
+        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+
+        let u = hyper::upgrade::on(&mut req);
+        req.extensions_mut().insert(u);
+        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+
+        let (parts, _) = req.into_parts();
+
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
+            .await;
+
+        assert!(conn.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_creates_wt_connection_from_payload() {
+        let mut req = Request::connect("/ws")
+            .version(Version::HTTP_2)
+            .body(())
+            .unwrap();
+
+        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+
+        let u = hyper::upgrade::on(&mut req);
+        req.extensions_mut().insert(u);
+        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+
+        let (parts, _) = req.into_parts();
+
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
+            .await
+            .unwrap();
+
+        assert_eq!(conn.uri, parts.uri);
+        assert_eq!(conn.protocol, None);
+        assert_eq!(conn.sec_websocket_key, None);
     }
 }
