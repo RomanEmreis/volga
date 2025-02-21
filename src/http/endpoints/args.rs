@@ -1,6 +1,6 @@
 ﻿//! Extractors for HTTP request parts and body
 
-use std::future::Future;
+use std::{borrow::Cow, future::Future};
 use hyper::{
     body::Incoming,
     http::request::Parts,
@@ -34,7 +34,7 @@ pub(crate) enum Payload<'a> {
     Body(HttpBody),
     Full(&'a Parts, HttpBody),
     Parts(&'a Parts),
-    Path(&'a (String, String)),
+    Path(&'a (Cow<'a, str>, Cow<'a, str>)),
 }
 
 /// Describes a data source for extractors to read from
