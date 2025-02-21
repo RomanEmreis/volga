@@ -6,6 +6,7 @@ use hyper::http::{request::Parts, Extensions};
 use serde::de::DeserializeOwned;
 
 use std::{
+    borrow::Cow,
     fmt::{self, Display, Formatter},
     ops::{Deref, DerefMut},
     str::FromStr
@@ -74,7 +75,7 @@ impl<T: Display> Display for Path<T> {
 impl<T: DeserializeOwned> Path<T> {
     /// Parses the slice of tuples `(String, String)` into [`Path<T>`]
     #[inline]
-    pub(crate) fn from_slice(route_params: &[(String, String)]) -> Result<Self, Error> {
+    pub(crate) fn from_slice(route_params: &[(Cow<str>, Cow<str>)]) -> Result<Self, Error> {
         let route_str = route_params
             .iter()
             .map(|(key, value)| format!("{}={}", key, value))
@@ -186,6 +187,7 @@ impl PathError {
 mod tests {
     use hyper::{Request, http::Extensions};
     use serde::Deserialize;
+    use std::borrow::Cow;
     use crate::Path;
     use crate::http::endpoints::route::PathArguments;
     use crate::http::endpoints::args::{FromPayload, Payload};
@@ -198,7 +200,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_from_payload() {
-        let param = ("id".to_string(), "123".to_string());
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
         
         let id = i32::from_payload(Payload::Path(&param)).await.unwrap();
         
@@ -208,9 +210,9 @@ mod tests {
     #[tokio::test]
     async fn it_reads_path_from_payload() {
         let args: PathArguments = vec![
-            ("id".to_string(), "123".to_string()),
-            ("name".to_string(), "John".to_string())
-        ];
+            (Cow::Borrowed("id"), Cow::Borrowed("123")),
+            (Cow::Borrowed("name"), Cow::Borrowed("John"))
+        ].into_boxed_slice();
 
         let req = Request::get("/")
             .extension(args)
@@ -227,8 +229,8 @@ mod tests {
     #[test]
     fn it_parses_slice() {
         let slice = [
-            ("id".to_string(), "123".to_string()),
-            ("name".to_string(), "John".to_string())
+            (Cow::Borrowed("id"), Cow::Borrowed("123")),
+            (Cow::Borrowed("name"), Cow::Borrowed("John"))
         ];
         
         let path = Path::<Params>::from_slice(&slice).unwrap();
@@ -240,9 +242,9 @@ mod tests {
     #[test]
     fn it_parses_request_extensions() {
         let args: PathArguments = vec![
-            ("id".to_string(), "123".to_string()),
-            ("name".to_string(), "John".to_string())
-        ];
+            (Cow::Borrowed("id"), Cow::Borrowed("123")),
+            (Cow::Borrowed("name"), Cow::Borrowed("John"))
+        ].into_boxed_slice();
         
         let mut ext = Extensions::new();
         ext.insert(args);

@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+﻿use std::{borrow::Cow, collections::HashMap};
 use hyper::{Method, Uri};
 
 use super::endpoints::{
@@ -29,11 +29,11 @@ pub(crate) enum RouteOption {
 /// Describes a context of the executing route
 pub(crate) struct EndpointContext {
     pub(crate) handler: RouteHandler,
-    pub(crate) params: Vec<(String, String)>
+    pub(crate) params: PathArguments
 }
 
 impl EndpointContext {
-    pub(crate) fn into_parts(self) -> (RouteHandler, Vec<(String, String)>) {
+    pub(crate) fn into_parts(self) -> (RouteHandler, PathArguments) {
         (self.handler, self.params)
     }
     
@@ -92,10 +92,10 @@ impl Endpoints {
     }
 
     #[inline]
-    fn split_path(path: &str) -> Vec<String> {
+    fn split_path(path: &str) -> Vec<Cow<'static, str>> {
         path.trim_matches(PATH_SEPARATOR)
             .split(PATH_SEPARATOR)
-            .map(|s| s.to_string())
+            .map(|s| Cow::Owned(s.to_owned()))
             .collect()
     }
 }

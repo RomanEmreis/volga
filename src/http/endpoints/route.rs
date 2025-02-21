@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+﻿use std::{borrow::Cow, collections::HashMap};
 use hyper::Method;
 use crate::http::endpoints::handlers::RouteHandler;
 
@@ -6,11 +6,11 @@ const END_OF_ROUTE: &str = "";
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 
-pub(crate) type PathArguments = Vec<(String, String)>;
+pub(crate) type PathArguments = Box<[(Cow<'static, str>, Cow<'static, str>)]>;
 
 pub(crate) enum Route {
-    Static(HashMap<String, Route>),
-    Dynamic(HashMap<String, Route>),
+    Static(HashMap<Cow<'static, str>, Route>),
+    Dynamic(HashMap<Cow<'static, str>, Route>),
     Handler(HashMap<Method, RouteHandler>)
 }
 
@@ -22,7 +22,7 @@ pub(crate) struct RouteParams<'route> {
 impl Route {
     pub(crate) fn insert(
         &mut self, 
-        path_segments: &[String], 
+        path_segments: &[Cow<'static, str>], 
         method: Method, 
         handler: RouteHandler
     ) {
@@ -73,7 +73,7 @@ impl Route {
         }
     }
 
-    pub(crate) fn find(&self, path_segments: &[String]) -> Option<RouteParams> {
+    pub(crate) fn find(&self, path_segments: &[Cow<'static, str>]) -> Option<RouteParams> {
         let mut current = Some(self);
         let mut params = Vec::new();
         for (index, segment) in path_segments.iter().enumerate() {
@@ -90,7 +90,7 @@ impl Route {
                             .filter(|(key, _)| Self::is_dynamic_segment(key))
                             .map(|(key, route)| {
                                 if let Some(param_name) = key.strip_prefix(OPEN_BRACKET).and_then(|k| k.strip_suffix(CLOSE_BRACKET)) {
-                                    params.push((param_name.to_string(), segment.clone()));
+                                    params.push((Cow::Owned(param_name.to_owned()), segment.clone()));
                                 }
                                 route
                             })
@@ -118,7 +118,7 @@ impl Route {
             };
         }
 
-        current.map(|route| RouteParams { route, params })
+        current.map(|route| RouteParams { route, params: params.into_boxed_slice() })
     }
 
     #[inline]
