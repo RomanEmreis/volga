@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.5.3"
+version = "0.5.4"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -81,14 +81,14 @@ tracing = ["middleware", "dep:tracing"]
 ws = ["dep:sha1", "dep:base64", "dep:tokio-tungstenite"]
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
-compression-brotli = ["middleware", "async-compression/brotli"]
-compression-gzip = ["middleware", "async-compression/zlib", "async-compression/gzip"]
-compression-zstd = ["middleware", "async-compression/zstd"]
+compression-brotli = ["middleware", "dep:async-compression", "async-compression?/brotli"]
+compression-gzip = ["middleware", "dep:async-compression", "async-compression?/zlib", "async-compression?/gzip"]
+compression-zstd = ["middleware", "dep:async-compression", "async-compression?/zstd"]
 
 decompression-full = ["decompression-brotli", "decompression-gzip", "decompression-zstd"]
-decompression-brotli = ["middleware", "async-compression/brotli"]
-decompression-gzip = ["middleware", "async-compression/zlib", "async-compression/gzip"]
-decompression-zstd = ["middleware", "async-compression/zstd"]
+decompression-brotli = ["middleware", "dep:async-compression", "async-compression?/brotli"]
+decompression-gzip = ["middleware", "dep:async-compression", "async-compression?/zlib", "async-compression?/gzip"]
+decompression-zstd = ["middleware", "dep:async-compression", "async-compression?/zstd"]
 
 [package.metadata.docs.rs]
 all-features = true
