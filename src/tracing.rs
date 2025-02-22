@@ -143,7 +143,7 @@ impl App {
                 
                 let span = trace_span!("request", %method, %uri);
                 let span_id = span.id();
-                let error_handler = ctx.error_handler.clone();
+                let error_handler = ctx.error_handler();
                 
                 let http_result = next(ctx)
                     .or_else(|err| async { call_weak_err_handler(error_handler, &uri, err).await })

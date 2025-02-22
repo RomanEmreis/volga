@@ -20,8 +20,6 @@ use std::sync::Arc;
 pub struct HttpContext {
     /// Current HTTP request
     pub request: HttpRequest,
-    /// Global Request/Middleware error handler
-    pub(crate) error_handler: WeakErrorHandler,
     /// Current handler that mapped to handle the HTTP request
     handler: RouteHandler,
 }
@@ -31,16 +29,15 @@ impl HttpContext {
     #[inline]
     pub(crate) fn new(
         request: HttpRequest,
-        handler: RouteHandler, 
-        error_handler: WeakErrorHandler
+        handler: RouteHandler
     ) -> Self {
-        Self { request, handler, error_handler }
+        Self { request, handler }
     }
     
     #[inline]
     #[allow(dead_code)]
-    pub(super) fn into_parts(self) -> (HttpRequest, RouteHandler, WeakErrorHandler) {
-        (self.request, self.handler, self.error_handler)
+    pub(super) fn into_parts(self) -> (HttpRequest, RouteHandler) {
+        (self.request, self.handler)
     }
     
     /// Extracts a payload from request parts
@@ -90,5 +87,15 @@ impl HttpContext {
     #[inline]
     pub(crate) async fn execute(self) -> HttpResult {
         self.handler.call(self.request).await
+    }
+    
+    /// Returns a weak reference to global error handler
+    #[inline]
+    pub(crate) fn error_handler(&self) -> WeakErrorHandler {
+        self.request
+            .extensions()
+            .get::<WeakErrorHandler>()
+            .expect("error handler must be provided")
+            .clone()
     }
 }

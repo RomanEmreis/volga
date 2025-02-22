@@ -620,7 +620,7 @@ impl App {
                 
                 async move {
                     let host = ctx.extract::<Header<Host>>()?;
-                    let error_handler = ctx.error_handler.clone();
+                    let error_handler = ctx.error_handler();
                     let uri = ctx.request.uri().clone();
                     let http_result = next(ctx)
                         .or_else(|err| async { call_weak_err_handler(error_handler, &uri, err).await })
