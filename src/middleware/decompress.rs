@@ -87,9 +87,9 @@ impl App {
             if let Ok(content_encoding) = ctx.extract::<Header<ContentEncoding>>() {
                 match content_encoding.into_inner().try_into() {
                     Ok(encoding) => {
-                        let (req, handler, error_handler) = ctx.into_parts();
+                        let (req, handler) = ctx.into_parts();
                         let req = Self::decompress(encoding, req);
-                        ctx = HttpContext::new(req, handler, error_handler);
+                        ctx = HttpContext::new(req, handler);
                     }
                     Err(error) if error.is_client_error() => (),
                     Err(_) => {

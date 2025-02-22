@@ -216,7 +216,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use crate::app::env::HostEnv;
+    use crate::app::{App, env::HostEnv};
 
     #[test]
     fn it_creates_default_host_env() {
@@ -269,5 +269,39 @@ mod tests {
         assert_eq!(env.index_path, PathBuf::from("/root/index.html"));
         assert_eq!(env.fallback_path, None);
         assert!(env.show_directory);
+    }
+
+    #[test]
+    fn it_updates_content_root() {
+        let app = App::new().with_content_root("tests/resources");
+
+        assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
+        assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/index.html"));
+        assert_eq!(app.host_env.fallback_path, None);
+        assert!(!app.host_env.show_directory);
+    }
+
+    #[test]
+    fn it_updates_index_file_with_content_root() {
+        let app = App::new()
+            .with_index_file("default.html")
+            .with_content_root("tests/resources");
+
+        assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
+        assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/default.html"));
+        assert_eq!(app.host_env.fallback_path, None);
+        assert!(!app.host_env.show_directory);
+    }
+
+    #[test]
+    fn it_updates_fallback_file_with_content_root() {
+        let app = App::new()
+            .with_fallback_file("404.html")
+            .with_content_root("tests/resources");
+
+        assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
+        assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/index.html"));
+        assert_eq!(app.host_env.fallback_path, Some(PathBuf::from("tests/resources/404.html")));
+        assert!(!app.host_env.show_directory);
     }
 }

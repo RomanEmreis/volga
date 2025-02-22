@@ -100,7 +100,7 @@ impl Scope {
                 
                 #[cfg(feature = "middleware")]
                 let response = if pipeline.has_middleware_pipeline() {
-                    let ctx = HttpContext::new(request, handler, error_handler.clone());
+                    let ctx = HttpContext::new(request, handler);
                     pipeline.execute(ctx).await
                 } else {
                     handler.call(request).await

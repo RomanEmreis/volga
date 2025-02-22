@@ -18,3 +18,16 @@ impl Default for RequestBodyLimit {
         Self::Enabled(DEFAULT_BODY_SIZE)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{RequestBodyLimit, DEFAULT_BODY_SIZE};
+
+    #[test]
+    fn it_creates_default_body_limit() {
+        let limit = RequestBodyLimit::default();
+        let RequestBodyLimit::Enabled(limit) = limit else { unreachable!() };
+
+        assert_eq!(limit, DEFAULT_BODY_SIZE)
+    }
+}
