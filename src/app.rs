@@ -426,10 +426,6 @@ mod tests {
     fn it_disables_body_limit() {
         let app = App::new().without_body_limit();
 
-        if let RequestBodyLimit::Disabled = app.body_limit {
-            assert!(true)
-        } else {
-            assert!(false)
-        }
+        let RequestBodyLimit::Disabled = app.body_limit else { panic!() };
     }
 }
