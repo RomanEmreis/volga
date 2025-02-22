@@ -361,6 +361,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use std::net::SocketAddr;
+    use crate::http::request::request_body_limit::RequestBodyLimit;
     use crate::App;
     use crate::app::Connection;
 
@@ -403,5 +404,32 @@ mod tests {
         let app = App::new().bind("127.0.0.1:5001");
 
         assert_eq!(app.connection.socket, SocketAddr::from(([127, 0, 0, 1], 5001)));
+    }
+
+    #[test]
+    fn it_sets_default_body_limit() {
+        let app = App::new();
+        let RequestBodyLimit::Enabled(limit) = app.body_limit else { unreachable!() };
+
+        assert_eq!(limit, 5242880)
+    }
+
+    #[test]
+    fn it_sets_body_limit() {
+        let app = App::new().with_body_limit(10);
+        let RequestBodyLimit::Enabled(limit) = app.body_limit else { unreachable!() };
+
+        assert_eq!(limit, 10)
+    }
+
+    #[test]
+    fn it_disables_body_limit() {
+        let app = App::new().without_body_limit();
+
+        if let RequestBodyLimit::Disabled = app.body_limit {
+            assert!(true)
+        } else {
+            assert!(false)
+        }
     }
 }
