@@ -709,6 +709,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
     use std::time::Duration;
     use super::{
         TlsConfig, 
@@ -760,6 +761,130 @@ mod tests {
     }
 
     #[test]
+    fn it_creates_tls_config_from_pem() {
+        let tls_config = TlsConfig::from_pem("tls");
+
+        let path = PathBuf::from("tls");
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert!(tls_config.hsts_config.preload);
+        assert!(tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_creates_tls_config_with_hsts() {
+        let tls_config = TlsConfig::from_pem("tls")
+            .with_hsts(HstsConfig { 
+                max_age: Duration::from_secs(1),
+                preload: false, 
+                include_sub_domains: false, 
+                exclude_hosts: vec!["example.com"]
+            });
+
+        let path = PathBuf::from("tls");
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 1);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(1));
+        assert!(!tls_config.hsts_config.preload);
+        assert!(!tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_creates_tls_config_with_hsts_preload() {
+        let tls_config = TlsConfig::from_pem("tls")
+            .with_hsts_preload(false);
+
+        let path = PathBuf::from("tls");
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert!(!tls_config.hsts_config.preload);
+        assert!(tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_creates_tls_config_with_hsts_sub_domains() {
+        let tls_config = TlsConfig::from_pem("tls")
+            .with_hsts_sub_domains(false);
+
+        let path = PathBuf::from("tls");
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert!(tls_config.hsts_config.preload);
+        assert!(!tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_creates_tls_config_with_hsts_max_age() {
+        let tls_config = TlsConfig::from_pem("tls")
+            .with_hsts_max_age(Duration::from_secs(5));
+
+        let path = PathBuf::from("tls");
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(5));
+        assert!(tls_config.hsts_config.preload);
+        assert!(tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_creates_tls_config_with_hsts_exclude_hosts() {
+        let tls_config = TlsConfig::from_pem("tls")
+            .with_hsts_exclude_hosts(&["example.com"]);
+
+        let path = PathBuf::from("tls");
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 1);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert!(tls_config.hsts_config.preload);
+        assert!(tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
     fn it_creates_default_hsts_config() {
         let hsts_config = HstsConfig::default();
 
@@ -775,5 +900,14 @@ mod tests {
 
         assert!(!https_redirection_config.enabled);
         assert_eq!(https_redirection_config.http_port, DEFAULT_PORT);
+    }
+    
+    #[test]
+    fn it_displays_hsts_config() {
+        let hsts_config = HstsConfig::default();
+        
+        let hsts_string = hsts_config.to_string();
+        
+        assert_eq!(hsts_string, "max-age=2592000; includeSubDomains; preload");
     }
 }
