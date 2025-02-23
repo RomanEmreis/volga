@@ -222,3 +222,145 @@ impl App {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Error, StatusCode};
+    use std::io::{ErrorKind, Error as IoError};
+
+    #[test]
+    fn it_converts_from_not_found_io_error() {
+        let io_error = IoError::new(ErrorKind::NotFound, "not found");
+        let err = Error::from(io_error);
+        
+        assert!(err.is_client_error());
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn it_converts_from_connection_reset_io_error() {
+        let io_error = IoError::new(ErrorKind::ConnectionReset, "reset");
+        let err = Error::from(io_error);
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn it_converts_from_connection_aborted_io_error() {
+        let io_error = IoError::new(ErrorKind::ConnectionAborted, "aborted");
+        let err = Error::from(io_error);
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn it_converts_from_not_connected_io_error() {
+        let io_error = IoError::new(ErrorKind::NotConnected, "not connected");
+        let err = Error::from(io_error);
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn it_converts_from_add_in_use_io_error() {
+        let io_error = IoError::new(ErrorKind::AddrInUse, "addr in use");
+        let err = Error::from(io_error);
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn it_converts_from_addr_not_available_io_error() {
+        let io_error = IoError::new(ErrorKind::AddrNotAvailable, "addr not available");
+        let err = Error::from(io_error);
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn it_converts_from_broken_pipe_io_error() {
+        let io_error = IoError::new(ErrorKind::BrokenPipe, "broken pipe");
+        let err = Error::from(io_error);
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+    }
+
+    #[test]
+    fn it_converts_from_already_exists_io_error() {
+        let io_error = IoError::new(ErrorKind::AlreadyExists, "exists");
+        let err = Error::from(io_error);
+
+        assert!(err.is_client_error());
+        assert_eq!(err.status, StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn it_converts_from_invalid_data_io_error() {
+        let io_error = IoError::new(ErrorKind::InvalidData, "invalid data");
+        let err = Error::from(io_error);
+
+        assert!(err.is_client_error());
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn it_converts_from_timed_out_io_error() {
+        let io_error = IoError::new(ErrorKind::TimedOut, "timeout");
+        let err = Error::from(io_error);
+
+        assert!(err.is_client_error());
+        assert_eq!(err.status, StatusCode::REQUEST_TIMEOUT);
+    }
+
+    #[test]
+    fn it_converts_from_unsupported_io_error() {
+        let io_error = IoError::new(ErrorKind::Unsupported, "unsupported");
+        let err = Error::from(io_error);
+
+        assert!(err.is_client_error());
+        assert_eq!(err.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    #[test]
+    fn it_converts_from_io_error() {
+        let io_error = IoError::new(ErrorKind::Other, "some error");
+        let err = Error::from(io_error);
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    
+    #[test]
+    fn it_converts_error_to_io_error() {
+        let error = Error::client_error("some error");
+        let io_error = IoError::from(error);
+        
+        assert_eq!(io_error.kind(), ErrorKind::Other);
+    }
+    
+    #[test]
+    fn it_splits_into_parts() {
+        let error = Error::server_error("some error");
+        
+        let (status, instance, inner) = error.into_parts();
+        
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(instance.is_none());
+        assert_eq!(format!("{}", inner), "some error");
+    }
+    
+    #[test]
+    fn it_unwraps_into_inner() {
+        let error = Error::server_error("some error");
+        
+        let inner = error.into_inner();
+        
+        assert_eq!(format!("{}", inner), "some error");
+    }
+}

@@ -84,3 +84,44 @@ impl App {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::App;
+    
+    #[derive(Default)]
+    struct TestDependency;
+    
+    #[tokio::test]
+    async fn it_adds_singleton() {
+        let mut app = App::new();
+        app.add_singleton(TestDependency);
+
+        let container = app.container.build();
+        let dep = container.resolve_shared::<TestDependency>().await;
+        
+        assert!(dep.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_adds_scoped() {
+        let mut app = App::new();
+        app.add_scoped::<TestDependency>();
+
+        let container = app.container.build();
+        let dep = container.resolve_shared::<TestDependency>().await;
+
+        assert!(dep.is_ok());
+    }
+    
+    #[tokio::test]
+    async fn it_adds_transient() {
+        let mut app = App::new();
+        app.add_transient::<TestDependency>();
+
+        let container = app.container.build();
+        let dep = container.resolve_shared::<TestDependency>().await;
+
+        assert!(dep.is_ok());
+    }
+}

@@ -390,4 +390,24 @@ mod tests {
         
         assert!(container.is_ok());
     }
+    
+    #[tokio::test]
+    async fn it_returns_error_when_resolve_unregistered() {
+        let container = ContainerBuilder::new().build();
+
+        let cache = container.resolve::<CacheWrapper>().await;
+        
+        assert!(cache.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_returns_error_when_resolve_unregistered_from_scope() {
+        let container = ContainerBuilder::new()
+            .build()
+            .create_scope();
+
+        let cache = container.resolve::<CacheWrapper>().await;
+
+        assert!(cache.is_err());
+    }
 }
