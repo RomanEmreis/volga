@@ -8,7 +8,6 @@ use volga::{
 
 use std::sync::{Arc, RwLock};
 use tracing_subscriber::prelude::*;
-use futures_util::{SinkExt, StreamExt};
 
 type Counter = Arc<RwLock<i32>>;
 
@@ -36,11 +35,11 @@ async fn main() -> std::io::Result<()> {
         let (mut sender, mut receiver) = ws.split();
 
         tokio::task::spawn(async move {
-            let _ = sender.send("Hello from WebSockets server!".into()).await;
+            let _ = sender.send("Hello from WebSockets server!").await;
         });
         
         tokio::task::spawn(async move {
-            while let Some(Ok(msg)) = receiver.next().await {
+            while let Some(Ok(msg)) = receiver.recv::<String>().await {
                 let value = inc(&counter).await;
                 tracing::info!("received: {msg}; msg #{value}")
             }

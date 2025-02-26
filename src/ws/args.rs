@@ -1,154 +1,215 @@
 ﻿//! Type extractors and converters for WebSockets
 
 use crate::error::Error;
-use bytes::Bytes;
-use std::borrow::Cow;
-use std::future::Future;
-use tokio_tungstenite::tungstenite::Message;
 use crate::ws::WebSocket;
+use bytes::Bytes;
+use tokio_tungstenite::tungstenite;
+use std::{
+    borrow::Cow, 
+    fmt, 
+    future::Future, 
+    ops::{Deref, DerefMut}
+};
 
-/// A trait for types that can be returned from WebSocket handler and converted to [`Message`]
-pub trait IntoMessage {
-    fn into_message(self) -> Result<Message, Error>;
-}
+/// Represents a various forms of WebSockets message
+/// 
+/// See also [`tungstenite::Message`]
+pub struct Message(pub(super) tungstenite::Message);
 
-/// A trait for types that that can be inferred from WebSocket [`Message`]
-pub trait FromMessage: Sized {
-    fn from_message(msg: Message) -> Result<Self, Error>;
-}
-
-impl IntoMessage for Message {
+impl Message {
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(self)
+    pub fn into_inner(self) -> tungstenite::Message {
+        self.0
     }
 }
 
-impl FromMessage for Message {
+impl Deref for Message {
+    type Target = tungstenite::Message;
+    
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        Ok(msg)
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl IntoMessage for &str {
+impl DerefMut for Message {
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(self.into())
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
-impl IntoMessage for String {
+impl fmt::Display for Message {
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(self.into())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
-impl FromMessage for String {
+impl From<tungstenite::Message> for Message {
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        let utf_bytes = msg
+    fn from(msg: tungstenite::Message) -> Self {
+        Message(msg)
+    }
+}
+
+impl From<Message> for tungstenite::Message {
+    #[inline]
+    fn from(msg: Message) -> Self {
+        msg.into_inner()
+    }
+}
+
+impl TryFrom<&str> for Message {
+    type Error = Error;
+    
+    #[inline]
+    fn try_from(str: &str) -> Result<Self, Self::Error> {
+        Ok(Self(str.into()))
+    }
+}
+
+impl TryFrom<String> for Message {
+    type Error = Error;
+    
+    #[inline]
+    fn try_from(str: String) -> Result<Self, Self::Error> {
+        Ok(Self(str.into()))
+    }
+}
+
+impl TryFrom<Message> for String {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        let utf_bytes = msg.0
             .into_text()
             .map_err(Error::from)?;
         Ok(utf_bytes.as_str().into())
     }
 }
 
-impl IntoMessage for Box<str> {
+impl TryFrom<Box<str>> for Message {
+    type Error = Error;
+
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(Message::text(&*self))
+    fn try_from(str: Box<str>) -> Result<Self, Self::Error> {
+        Ok(Self(tungstenite::Message::text(&*str)))
     }
 }
 
-impl FromMessage for Box<str> {
+impl TryFrom<Message> for Box<str> {
+    type Error = Error;
+
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        String::from_message(msg)
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        String::try_from(msg)
             .map(|s| s.into_boxed_str())
     }
 }
 
-impl IntoMessage for &[u8] {
+impl TryFrom<&[u8]> for Message {
+    type Error = Error;
+
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(self.into())
+    fn try_from(slice: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Self(slice.into()))
     }
 }
 
-impl IntoMessage for Vec<u8> {
+impl TryFrom<Vec<u8>> for Message {
+    type Error = Error;
+
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(self.into())
+    fn try_from(vec: Vec<u8>) -> Result<Self, Self::Error> {
+        Ok(Self(vec.into()))
     }
 }
 
-impl FromMessage for Vec<u8> {
+impl TryFrom<Message> for Vec<u8> {
+    type Error = Error;
+
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        Ok(msg.into_data().to_vec())
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        Ok(msg.0.into_data().to_vec())
     }
 }
 
-impl IntoMessage for Box<[u8]> {
+impl TryFrom<Box<[u8]>> for Message {
+    type Error = Error;
+
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(Message::binary(self))
+    fn try_from(vec: Box<[u8]>) -> Result<Self, Self::Error> {
+        Ok(Self(tungstenite::Message::binary(vec)))
     }
 }
 
-impl FromMessage for Box<[u8]> {
+impl TryFrom<Message> for Box<[u8]> {
+    type Error = Error;
+
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        Ok(msg.into_data()
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        Ok(msg.0.into_data()
             .to_vec()
             .into_boxed_slice())
     }
 }
 
-impl IntoMessage for Cow<'_, str> {
+impl TryFrom<Cow<'_, str>> for Message {
+    type Error = Error;
+
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(Message::text(self.into_owned()))
+    fn try_from(str: Cow<'_, str>) -> Result<Self, Self::Error> {
+        Ok(Self(tungstenite::Message::text(str.into_owned())))
     }
 }
 
-impl FromMessage for Cow<'_, str> {
+impl TryFrom<Message> for Cow<'_, str> {
+    type Error = Error;
+
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        let utf_bytes = msg
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        let utf_bytes = msg.0
             .into_text()
             .map_err(Error::from)?;
         Ok(Cow::Owned(utf_bytes.as_str().into()))
     }
 }
 
-impl IntoMessage for Cow<'_, [u8]> {
+impl TryFrom<Cow<'_, [u8]>> for Message {
+    type Error = Error;
+
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(Message::binary(self.into_owned()))
+    fn try_from(str: Cow<'_, [u8]>) -> Result<Self, Self::Error> {
+        Ok(Self(tungstenite::Message::binary(str.into_owned())))
     }
 }
 
-impl FromMessage for Cow<'_, [u8]> {
+impl TryFrom<Message> for Cow<'_, [u8]> {
+    type Error = Error;
+
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        Ok(Cow::Owned(msg.into_data().into()))
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        Ok(Cow::Owned(msg.0.into_data().into()))
     }
 }
 
-impl FromMessage for Bytes {
+impl TryFrom<Bytes> for Message {
+    type Error = Error;
+
     #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        Ok(msg.into_data())
+    fn try_from(bytes: Bytes) -> Result<Self, Self::Error> {
+        Ok(Self(tungstenite::Message::binary(bytes)))
     }
 }
 
-impl IntoMessage for Bytes {
+impl TryFrom<Message> for Bytes {
+    type Error = Error;
+
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(Message::binary(self))
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        Ok(msg.0.into_data())
     }
 }
 
@@ -163,7 +224,7 @@ pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
 
 /// Describes a generic WebSocket/WebTransport message handler that could take a message 
 /// in a format that implements the[`FromMessage`] and 0 or N parameters of types
-pub trait MessageHandler<M: FromMessage, Args>: Clone + Send + Sync + 'static {
+pub trait MessageHandler<M: TryFrom<Message>, Args>: Clone + Send + Sync + 'static {
     type Output;
     type Future: Future<Output = Self::Output> + Send;
 
@@ -191,7 +252,7 @@ macro_rules! define_generic_message_handler ({ $($param:ident)* } => {
     impl<M, Func, Fut: Send, $($param,)*> MessageHandler<M, ($($param,)*)> for Func
     where
         Func: Fn(M, $($param),*) -> Fut + Send + Sync + Clone + 'static,
-        M: FromMessage + Send,
+        M: TryFrom<Message> + Send,
         Fut: Future + 'static,
     {
         type Output = Fut::Output;
@@ -221,7 +282,7 @@ define_generic_message_handler! { T1 T2 T3 T4 T5 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FromMessage, IntoMessage};
+    use super::Message;
     use bytes::Bytes;
     use std::borrow::Cow;
 
@@ -229,8 +290,8 @@ mod tests {
     fn it_handles_string_messages() {
         let expected = String::from("test");
 
-        let message = expected.clone().into_message().unwrap();
-        let string = String::from_message(message).unwrap();
+        let message: Message = expected.clone().try_into().unwrap();
+        let string = String::try_from(message).unwrap();
 
         assert_eq!(string, expected);
     }
@@ -239,8 +300,8 @@ mod tests {
     fn it_handles_boxed_string_messages() {
         let expected = String::from("test").into_boxed_str();
 
-        let message = expected.clone().into_message().unwrap();
-        let string = Box::from_message(message).unwrap();
+        let message: Message = expected.clone().try_into().unwrap();
+        let string = Box::try_from(message).unwrap();
 
         assert_eq!(string, expected);
     }
@@ -249,8 +310,8 @@ mod tests {
     fn it_handles_str_messages() {
         let expected = "test";
 
-        let message = expected.into_message().unwrap();
-        let string = String::from_message(message).unwrap();
+        let message: Message = expected.try_into().unwrap();
+        let string = String::try_from(message).unwrap();
 
         assert_eq!(string, expected);
     }
@@ -259,8 +320,8 @@ mod tests {
     fn it_handles_bytes_messages() {
         let expected = Bytes::from("test");
 
-        let message = expected.clone().into_message().unwrap();
-        let bytes = Bytes::from_message(message).unwrap();
+        let message: Message = expected.clone().try_into().unwrap();
+        let bytes = Bytes::try_from(message).unwrap();
 
         assert_eq!(bytes, expected);
     }
@@ -269,8 +330,8 @@ mod tests {
     fn it_handles_vec_messages() {
         let expected = vec![1,2,3];
 
-        let message = expected.clone().into_message().unwrap();
-        let vec = Vec::from_message(message).unwrap();
+        let message: Message = expected.clone().try_into().unwrap();
+        let vec = Vec::try_from(message).unwrap();
 
         assert_eq!(vec, expected);
     }
@@ -279,8 +340,8 @@ mod tests {
     fn it_handles_boxed_slice_messages() {
         let expected = vec![1,2,3].into_boxed_slice();
 
-        let message = expected.clone().into_message().unwrap();
-        let vec = Box::from_message(message).unwrap();
+        let message: Message = expected.clone().try_into().unwrap();
+        let vec = Box::try_from(message).unwrap();
 
         assert_eq!(vec, expected);
     }
@@ -289,8 +350,8 @@ mod tests {
     fn it_handles_slice_messages() {
         let expected = [1,2,3];
 
-        let message = expected.into_message().unwrap();
-        let string = Vec::from_message(message).unwrap();
+        let message: Message = expected.as_ref().try_into().unwrap();
+        let string = Vec::try_from(message).unwrap();
 
         assert_eq!(string, expected);
     }
@@ -300,8 +361,8 @@ mod tests {
         let str = String::from("test");
         let expected = Cow::<str>::Owned(str);
 
-        let message = expected.clone().into_message().unwrap();
-        let vec = Cow::<str>::from_message(message).unwrap();
+        let message: Message = expected.clone().try_into().unwrap();
+        let vec = Cow::<str>::try_from(message).unwrap();
 
         assert_eq!(vec, expected);
     }
@@ -311,8 +372,8 @@ mod tests {
         let vec = vec![1,2,3];
         let expected = Cow::<[u8]>::Owned(vec);
 
-        let message = expected.clone().into_message().unwrap();
-        let vec = Cow::<[u8]>::from_message(message).unwrap();
+        let message: Message = expected.clone().try_into().unwrap();
+        let vec = Cow::<[u8]>::try_from(message).unwrap();
 
         assert_eq!(vec, expected);
     }

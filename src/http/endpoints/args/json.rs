@@ -26,10 +26,7 @@ use crate::{
 };
 
 #[cfg(feature = "ws")]
-use crate::ws::{FromMessage, IntoMessage};
-
-#[cfg(feature = "ws")]
-use tokio_tungstenite::tungstenite::Message;
+use crate::ws::Message;
 
 /// Wraps typed JSON data
 ///
@@ -130,18 +127,21 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
 }
 
 #[cfg(feature = "ws")]
-impl<T: Serialize> IntoMessage for Json<T> {
+impl<T: Serialize> TryFrom<Json<T>> for Message {
+    type Error = Error;
+
     #[inline]
-    fn into_message(self) -> Result<Message, Error> {
-        Ok(serde_json::to_vec(&self.0)?.into())
+    fn try_from(json: Json<T>) -> Result<Self, Self::Error> {
+        serde_json::to_vec(&json.0)?.try_into()
     }
 }
 
 #[cfg(feature = "ws")]
-impl<T: DeserializeOwned> FromMessage for Json<T> {
-    #[inline]
-    fn from_message(msg: Message) -> Result<Self, Error> {
-        let bytes = msg.into_data();
+impl<T: DeserializeOwned> TryFrom<Message> for Json<T> {
+    type Error = Error;
+    
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
+        let bytes = msg.into_inner().into_data();
         serde_json::from_slice(&bytes)
             .map(Json::<T>)
             .map_err(JsonError::from_serde_error)
