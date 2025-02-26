@@ -31,7 +31,7 @@ serde_urlencoded = "0.7.1"
 # optional
 async-compression = { version = "0.4.18", features = ["tokio"], optional = true }
 base64 = { version = "0.22.1", optional = true }
-chrono = { version = "0.4.39", optional = true }
+chrono = { version = "0.4.40", optional = true }
 handlebars = { version = "6.3.1", optional = true }
 httpdate = { version = "1.0.3", optional = true }
 hyper = { version = "1.6.0", features = ["server"], optional = true }
@@ -47,7 +47,7 @@ hyper = { version = "1.6.0", features = ["client"] }
 reqwest = { version = "0.12.12", features = ["blocking", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
 serde = { version = "1.0.218", features = ["derive"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-uuid = { version = "1.13.2", features = ["v4"] }
+uuid = { version = "1.15.0", features = ["v4"] }
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 
 [features]

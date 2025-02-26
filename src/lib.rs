@@ -14,7 +14,7 @@
 //! ## Example
 //! ```toml
 //! [dependencies]
-//! volga = "0.5.3"
+//! volga = "0.5.4"
 //! tokio = { version = "1", features = ["full"] }
 //! ```
 //! ```no_run
@@ -26,7 +26,7 @@
 //!     let mut app = App::new();
 //! 
 //!     // Example of request handler
-//!     app.map_get("/hello/{name}", |name: String| async move {
+//!     app.map_get("/hello/{name}", async |name: String| {
 //!          ok!("Hello {name}!")
 //!     });
 //!     

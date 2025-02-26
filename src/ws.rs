@@ -9,8 +9,7 @@ pub use self::{
     connection::WebSocketConnection,
     websocket::WebSocket,
     args::{
-        FromMessage, 
-        IntoMessage, 
+        Message,
         MessageHandler, 
         WebSocketHandler
     }
@@ -162,8 +161,8 @@ impl App {
     where
         F: MessageHandler<M, Args, Output = R> + 'static,
         Args: FromRequest + Clone + Send + Sync + 'static,
-        M: FromMessage + Send,
-        R: IntoMessage + Send
+        M: TryFrom<Message, Error = Error> + Send,
+        R: TryInto<Message, Error = Error> + Send
     {
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
