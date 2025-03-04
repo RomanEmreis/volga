@@ -281,3 +281,84 @@ impl App {
         self.map_fallback(fallback)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use tokio::fs::metadata;
+    use crate::app::HostEnv;
+    use crate::headers::ResponseCaching;
+    use super::{
+        index, fallback, respond_with_folder_impl, respond_with_file_impl,
+        max_folder_depth
+    };
+    
+    #[tokio::test]
+    async fn it_returns_index() {
+        let env = HostEnv::new("tests/static");
+        
+        let index_response = index(env).await;
+        
+        assert!(index_response.is_ok());
+        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
+    }
+
+    #[tokio::test]
+    async fn it_returns_root_folder_files_listing() {
+        let env = HostEnv::new("tests/static")
+            .with_files_listing();
+
+        let index_response = index(env).await;
+
+        assert!(index_response.is_ok());
+        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_returns_fallback() {
+        let env = HostEnv::new("tests/static")
+            .with_fallback_file("index.html");
+
+        let index_response = fallback(env).await;
+
+        assert!(index_response.is_ok());
+        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
+    }
+
+    #[tokio::test]
+    async fn it_returns_no_fallback() {
+        let env = HostEnv::new("tests/static");
+
+        let index_response = fallback(env).await;
+
+        assert!(index_response.is_ok());
+        assert_eq!(index_response.unwrap().status(), 404);
+    }
+
+    #[tokio::test]
+    async fn it_responds_with_file() {
+        let path = PathBuf::from("tests/static/index.html");
+        let metadata = metadata(&path).await.unwrap();
+        let resp_caching = ResponseCaching::try_from(&metadata).unwrap();
+        let index_response = respond_with_file_impl(path, resp_caching).await;
+
+        assert!(index_response.is_ok());
+        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
+    }
+
+    #[tokio::test]
+    async fn it_responds_with_folder() {
+        let path = PathBuf::from("tests/static");
+        let index_response = respond_with_folder_impl(path, true).await;
+
+        assert!(index_response.is_ok());
+        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
+    }
+    
+    #[test]
+    fn it_calculates_max_folder_depth() {
+        let depth = max_folder_depth("tests");
+        
+        assert_eq!(depth, 2);
+    }
+}

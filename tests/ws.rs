@@ -41,7 +41,8 @@ async fn it_works_with_http2() {
     use volga::HttpBody;
 
     tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7929");
+        let mut app = App::new()
+            .bind("127.0.0.1:7929");
         app.map_msg("/ws", |msg: String| async { msg });
         app.run().await
     });
