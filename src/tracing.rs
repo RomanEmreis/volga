@@ -149,7 +149,7 @@ impl App {
                     .or_else(|err| async { call_weak_err_handler(error_handler, &uri, err).await })
                     .instrument(span)
                     .await;
-
+                
                 if tracing_config.include_header && span_id.is_some() {
                     http_result.map(|mut response| {
                         response.headers_mut().append(

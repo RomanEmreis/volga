@@ -1,4 +1,6 @@
-﻿use volga::App;
+﻿use std::time::Duration;
+use volga::App;
+use volga::headers::STRICT_TRANSPORT_SECURITY;
 use volga::tls::TlsConfig;
 use reqwest::{Certificate, Identity};
 
@@ -236,8 +238,12 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
                 "tests/tls/server.pem",
                 "tests/tls/server.key")
                 .with_https_redirection()
-                .with_http_port(7927));
-
+                .with_http_port(7927))
+            .with_hsts_preload(false)
+            .with_hsts_sub_domains(true)
+            .with_hsts_max_age(Duration::from_secs(60))
+            .with_hsts_exclude_hosts(&["example.com", "example.net"]);
+        app.use_hsts();
         app.map_get("/tls", || async {
             "Pass!"
         });
@@ -275,5 +281,6 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
             .unwrap()
     }).await.unwrap();
 
+    assert_eq!(response.headers().get(STRICT_TRANSPORT_SECURITY).unwrap(), "max-age=60; includeSubDomains");
     assert_eq!(response.text().await.unwrap(), "Pass!");
 }
