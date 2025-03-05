@@ -132,7 +132,20 @@ impl App {
     /// Defaults:
     /// - content_root: `/`
     /// - index_path: `index.html`
-    pub fn with_hosting_environment(mut self, env: HostEnv) -> Self {
+    pub fn with_host_environment<T>(mut self, config: T) -> Self
+    where
+        T: FnOnce(HostEnv) -> HostEnv
+    {
+        self.host_env = config(self.host_env);
+        self
+    }
+
+    /// Configures web server's hosting environment
+    ///
+    /// Defaults:
+    /// - content_root: `/`
+    /// - index_path: `index.html`
+    pub fn set_host_environment(mut self, env: HostEnv) -> Self {
         self.host_env = env;
         self
     }
@@ -298,6 +311,19 @@ mod tests {
         let app = App::new()
             .with_fallback_file("404.html")
             .with_content_root("tests/resources");
+
+        assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
+        assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/index.html"));
+        assert_eq!(app.host_env.fallback_path, Some(PathBuf::from("tests/resources/404.html")));
+        assert!(!app.host_env.show_directory);
+    }
+
+    #[test]
+    fn it_updates_fallback_file_with_content_root_via_with_host_environment() {
+        let app = App::new()
+            .with_content_root("tests/resources")
+            .with_host_environment(|env| env
+                .with_fallback_file("404.html"));
 
         assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
         assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/index.html"));

@@ -1,7 +1,6 @@
 ﻿use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use volga::{App, Results};
-use volga::tracing::TracingConfig;
 
 #[tokio::test]
 async fn it_adds_request_id() {
@@ -12,8 +11,7 @@ async fn it_adds_request_id() {
         
         let mut app = App::new()
             .bind("127.0.0.1:7830")
-            .with_tracing(TracingConfig::default()
-                .with_header());
+            .with_tracing(|tracing| tracing.with_header());
         app.use_tracing();
         app.map_get("/test", || async {
             Results::text("Pass!")

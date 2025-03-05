@@ -266,10 +266,7 @@ impl App {
     /// # async fn main() -> std::io::Result<()> {
     /// // Specifies a file that will be fault back to
     /// let mut app = App::new()
-    ///     .with_hosting_environment(
-    ///         HostEnv::default()
-    ///             .with_fallback_file("not_found.html")
-    ///     );
+    ///     .with_host_environment(|env| env.with_fallback_file("not_found.html"));
     ///  
     /// // Enables the special handler that will fall back
     /// // to the specified file
@@ -285,12 +282,13 @@ impl App {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
     use tokio::fs::metadata;
     use crate::app::HostEnv;
-    use crate::headers::ResponseCaching;
+    use crate::headers::{HeaderMap, HeaderValue, Headers, ResponseCaching, IF_MODIFIED_SINCE, IF_NONE_MATCH};
     use super::{
         index, fallback, respond_with_folder_impl, respond_with_file_impl,
-        max_folder_depth
+        respond_with_file_or_dir_impl, max_folder_depth
     };
     
     #[tokio::test]
@@ -353,6 +351,67 @@ mod tests {
 
         assert!(index_response.is_ok());
         assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
+    }
+    
+    #[tokio::test]
+    async fn it_responds_with_directory_listing() {
+        let path = PathBuf::from("tests/static");
+        let headers = Headers::from(HeaderMap::new());
+        let response = respond_with_file_or_dir_impl(path, headers, true).await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_responds_with_403_as_shows_files_is_false() {
+        let path = PathBuf::from("tests/static");
+        let headers = Headers::from(HeaderMap::new());
+        let response = respond_with_file_or_dir_impl(path, headers, false).await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 403);
+    }
+
+    #[tokio::test]
+    async fn it_responds_with_html_file() {
+        let path = PathBuf::from("tests/static/index.html");
+        let headers = HeaderMap::new();
+        let headers = Headers::from(headers);
+        let response = respond_with_file_or_dir_impl(path, headers, false).await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
+    }
+
+    #[tokio::test]
+    async fn it_responds_with_304_as_file_was_not_changed() {
+        let path = PathBuf::from("tests/static/index.html");
+        let now = SystemTime::now() - Duration::from_secs(10);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(IF_MODIFIED_SINCE, HeaderValue::from_str(&httpdate::fmt_http_date(now)).unwrap());
+
+        let headers = Headers::from(headers);
+        let response = respond_with_file_or_dir_impl(path, headers, false).await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 304);
+    }
+
+    #[tokio::test]
+    async fn it_responds_with_304_as_file_has_same_etag() {
+        let path = PathBuf::from("tests/static/index.html");
+        let metadata = metadata(&path).await.unwrap();
+        let caching = ResponseCaching::try_from(&metadata).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(IF_NONE_MATCH, caching.etag().try_into().unwrap());
+
+        let headers = Headers::from(headers);
+        let response = respond_with_file_or_dir_impl(path, headers, false).await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 304);
     }
     
     #[test]
