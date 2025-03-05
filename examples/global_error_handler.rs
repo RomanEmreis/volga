@@ -1,7 +1,6 @@
 ﻿use volga::{App, problem};
 use std::io::Error;
 use tracing_subscriber::prelude::*;
-use volga::tracing::TracingConfig;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -10,7 +9,7 @@ async fn main() -> std::io::Result<()> {
         .init();
     
     let mut app = App::new()
-        .with_tracing(TracingConfig::new().with_header());
+        .with_tracing(|tracing| tracing.with_header());
     
     app.use_tracing();
     

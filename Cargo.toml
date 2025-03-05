@@ -119,6 +119,10 @@ name = "tracing"
 required-features = ["tracing"]
 
 [[test]]
+name = "static_files"
+required-features = ["static-files"]
+
+[[test]]
 name = "ws"
 required-features = ["ws"]
 

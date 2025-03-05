@@ -65,13 +65,45 @@ impl App {
         self.tracing_config = Some(TracingConfig::default());
         self
     }
+
+    /// Configures web server with specific Tracing configurations.
+    ///
+    /// Defaults:
+    /// - include_header: `false`
+    /// - span_header_name: `request-id`
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// let app = App::new()
+    ///     .with_tracing(|config| config.with_header());
+    /// ```
+    /// 
+    /// If tracing was already preconfigured, it does not overwrite it
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tracing::TracingConfig;
+    ///
+    /// let app = App::new()
+    ///     .set_tracing(TracingConfig::new().with_header()) // sets include_header to true 
+    ///     .with_tracing(|config| config
+    ///         .with_header_name("x-span-id"));               // sets a specific header name, include_header remains true
+    /// ```
+    pub fn with_tracing<T>(mut self, config: T) -> Self 
+    where
+        T : FnOnce(TracingConfig) -> TracingConfig
+    {
+        self.tracing_config = Some(config(self.tracing_config.unwrap_or_default()));
+        self
+    }
     
     /// Configures web server with specific Tracing configurations
     ///
     /// Defaults:
     /// - include_header: `false`
     /// - span_header_name: `request-id`
-    pub fn with_tracing(mut self, config: TracingConfig) -> Self {
+    pub fn set_tracing(mut self, config: TracingConfig) -> Self {
         self.tracing_config = Some(config);
         self
     }
@@ -125,7 +157,7 @@ impl App {
     ///
     /// let mut app = App::new();
     /// // is equivalent to:
-    /// let mut app = App::new().with_tracing(TracingConfig::default());
+    /// let mut app = App::new().set_tracing(TracingConfig::default());
     ///
     /// // if the tracing middleware is enabled
     /// app.use_tracing(); 
