@@ -268,8 +268,10 @@ mod tests {
     use super::WebSocketConnection;
     use crate::http::endpoints::args::{FromPayload, Payload};
     use hyper::{Request, Version};
+    use hyper::http::HeaderValue;
     use crate::error::ErrorFunc;
     use crate::error::handler::PipelineErrorHandler;
+    use crate::headers::SEC_WEBSOCKET_PROTOCOL;
 
     #[tokio::test]
     async fn it_creates_ws_connection_from_payload() {
@@ -443,6 +445,7 @@ mod tests {
     async fn it_creates_wt_connection_from_payload() {
         let mut req = Request::connect("/ws")
             .version(Version::HTTP_2)
+            .header(SEC_WEBSOCKET_PROTOCOL, "foo-ws")
             .body(())
             .unwrap();
 
@@ -454,12 +457,33 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
-            .await
+        let conn = WebSocketConnection::try_from(&parts)
             .unwrap();
-
+        
+        let conn = conn.with_max_frame_size(1024)
+            .with_accept_unmasked_frames(true)
+            .with_protocols(["foo-ws"])
+            .with_max_message_size(1024)
+            .with_read_buffer_size(1024)
+            .with_max_write_buffer_size(1024)
+            .with_write_buffer_size(1024)
+            .with_max_frame_size(1024);
+        
         assert_eq!(conn.uri, parts.uri);
-        assert_eq!(conn.protocol, None);
+        assert_eq!(conn.protocol, Some(HeaderValue::from_static("foo-ws")));
         assert_eq!(conn.sec_websocket_key, None);
+        assert_eq!(conn.config.accept_unmasked_frames, true);
+        assert_eq!(conn.config.max_message_size, Some(1024usize));
+        assert_eq!(conn.config.max_write_buffer_size, 1024);
+        assert_eq!(conn.config.read_buffer_size, 1024);
+        assert_eq!(conn.config.write_buffer_size, 1024);
+        assert_eq!(conn.config.max_frame_size, Some(1024usize));
+    }
+    
+    #[test]
+    fn it_generates_websocket_accept_key() {
+        let key = WebSocketConnection::generate_websocket_accept_key(b"123");
+        
+        assert_eq!(key, "V5hz1RKy1V4JclILDswC1e3Fek0=");
     }
 }
