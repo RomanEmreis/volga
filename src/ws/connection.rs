@@ -472,7 +472,7 @@ mod tests {
         assert_eq!(conn.uri, parts.uri);
         assert_eq!(conn.protocol, Some(HeaderValue::from_static("foo-ws")));
         assert_eq!(conn.sec_websocket_key, None);
-        assert_eq!(conn.config.accept_unmasked_frames, true);
+        assert!(conn.config.accept_unmasked_frames);
         assert_eq!(conn.config.max_message_size, Some(1024usize));
         assert_eq!(conn.config.max_write_buffer_size, 1024);
         assert_eq!(conn.config.read_buffer_size, 1024);
