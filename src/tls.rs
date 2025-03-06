@@ -236,6 +236,26 @@ impl TlsConfig {
             hsts_config: HstsConfig::default(),
         }
     }
+
+    /// Sets the cert and key files with default names from specified folder
+    pub fn set_pem(mut self, path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref();
+        self.key = path.join(KEY_FILE_NAME);
+        self.cert = path.join(CERT_FILE_NAME);
+        self
+    }
+
+    /// Sets the path to a key file
+    pub fn set_key(mut self, key_path: &str) -> Self {
+        self.key = key_path.into();
+        self
+    }
+
+    /// Sets the path to a key file
+    pub fn set_cert(mut self, cert_path: &str) -> Self {
+        self.cert = cert_path.into();
+        self
+    }
     
     /// Configure the path to the certificate
     pub fn with_cert_path(mut self, path: impl AsRef<Path>) -> Self {
@@ -279,6 +299,30 @@ impl TlsConfig {
         self
     }
 
+    /// Configures HSTS header. 
+    /// If HSTS has already been preconfigured, it does not overwrite it
+    ///
+    /// Default values:
+    /// - preload: `true`
+    /// - include_sub_domains: `true`
+    /// - max-age: 30 days (2,592,000 seconds)
+    /// - exclude_hosts: empty list
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::tls::TlsConfig;
+    ///
+    /// let tls = TlsConfig::new()
+    ///     .with_hsts(|hsts| hsts.with_preload(false));
+    /// ```
+    pub fn with_hsts<T>(mut self, config: T) -> Self
+    where
+        T: FnOnce(HstsConfig) -> HstsConfig
+    {
+        self.hsts_config = config(self.hsts_config);
+        self
+    }
+
     /// Configures HSTS header
     ///
     /// Default values:
@@ -286,7 +330,7 @@ impl TlsConfig {
     /// - include_sub_domains: `true`
     /// - max-age: 30 days (2,592,000 seconds)
     /// - exclude_hosts: empty list
-    pub fn with_hsts(mut self, hsts_config: HstsConfig) -> Self {
+    pub fn set_hsts(mut self, hsts_config: HstsConfig) -> Self {
         self.hsts_config = hsts_config;
         self
     }
@@ -573,7 +617,7 @@ impl App {
     {
         self.tls_config = self
             .tls_config
-            .map(|tls| tls.with_hsts(config(HstsConfig::default())));
+            .map(|tls| tls.set_hsts(config(HstsConfig::default())));
         self
     }
 
@@ -597,7 +641,7 @@ impl App {
     pub fn set_hsts(mut self, hsts_config: HstsConfig) -> Self {
         self.tls_config = self
             .tls_config
-            .map(|config| config.with_hsts(hsts_config));
+            .map(|config| config.set_hsts(hsts_config));
         self
     }
 
@@ -872,14 +916,39 @@ mod tests {
     }
 
     #[test]
-    fn it_creates_tls_config_with_hsts() {
+    fn it_creates_tls_config_with_set_hsts() {
         let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts(HstsConfig { 
+            .set_hsts(HstsConfig { 
                 max_age: Duration::from_secs(1),
                 preload: false, 
                 include_sub_domains: false, 
                 exclude_hosts: vec!["example.com"]
             });
+
+        let path = PathBuf::from("tls");
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 1);
+        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(1));
+        assert!(!tls_config.hsts_config.preload);
+        assert!(!tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_creates_tls_config_with_hsts() {
+        let tls_config = TlsConfig::from_pem("tls")
+            .with_hsts_exclude_hosts(&["example.com"])
+            .with_hsts(|hsts| hsts
+                .with_preload(false)
+                .with_sub_domains(false)
+                .with_max_age(Duration::from_secs(1)))
+            ;
 
         let path = PathBuf::from("tls");
 
@@ -1022,5 +1091,30 @@ mod tests {
 
         assert!(tls_config.https_redirection_config.enabled);
         assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
+    fn it_sets_tls_key_and_cert() {
+        let app = App::new()
+            .with_tls(|tls| tls
+                .set_key(KEY_FILE_NAME)
+                .set_cert(CERT_FILE_NAME));
+
+        let tls_config = app.tls_config.unwrap();
+        
+        assert_eq!(tls_config.key, PathBuf::from(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, PathBuf::from(CERT_FILE_NAME));
+    }
+
+    #[test]
+    fn it_sets_tls_pem() {
+        let app = App::new()
+            .with_tls(|tls| tls.set_pem("tls"));
+
+        let path = PathBuf::from("tls");
+        let tls_config = app.tls_config.unwrap();
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
     }
 }

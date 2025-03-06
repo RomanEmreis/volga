@@ -1,14 +1,10 @@
-﻿use tracing_subscriber::layer::SubscriberExt;
+﻿use volga::{App, Results};
 use tracing_subscriber::util::SubscriberInitExt;
-use volga::{App, Results};
 
 #[tokio::test]
 async fn it_adds_request_id() {
     tokio::spawn(async {
-        tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer())
-            .init();
-        
+        tracing_subscriber::registry().init();
         let mut app = App::new()
             .bind("127.0.0.1:7830")
             .with_tracing(|tracing| tracing.with_header());
