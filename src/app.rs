@@ -363,7 +363,7 @@ mod tests {
     use std::net::SocketAddr;
     use crate::http::request::request_body_limit::RequestBodyLimit;
     use crate::App;
-    use crate::app::Connection;
+    use crate::app::{AppInstance, Connection};
 
     #[test]
     fn it_creates_connection_with_default_socket() {
@@ -380,6 +380,16 @@ mod tests {
         let connection: Connection = "127.0.0.1:5000".into();
 
         assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 5000)));
+    }
+
+    #[test]
+    fn it_creates_default_connection_from_empty_str() {
+        let connection: Connection = "".into();
+
+        #[cfg(target_os = "windows")]
+        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
     }
 
     #[test]
@@ -427,5 +437,15 @@ mod tests {
         let app = App::new().without_body_limit();
 
         let RequestBodyLimit::Disabled = app.body_limit else { panic!() };
+    }
+    
+    #[test]
+    fn it_converts_into_app_instance() {
+        let app = App::default();
+        
+        let app_instance: AppInstance = app.try_into().unwrap();
+        let RequestBodyLimit::Enabled(limit) = app_instance.body_limit else { unreachable!() };
+
+        assert_eq!(limit, 5242880);
     }
 }

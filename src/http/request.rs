@@ -158,3 +158,79 @@ impl HttpRequest {
         self.headers_mut().insert(name, value);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use http_body_util::BodyExt;
+    use crate::headers::{Header, Vary};
+    use super::*;
+    
+    #[test]
+    fn it_inserts_header() {
+        let req = Request::get("http://localhost")
+            .body(HttpBody::empty())
+            .unwrap();
+        
+        let (parts, body) = req.into_parts();
+        let mut http_req = HttpRequest::from_parts(parts, body);
+        let header = Header::<Vary>::from("foo");
+        
+        http_req.insert_header(header);
+        
+        assert_eq!(http_req.headers().get("vary").unwrap(), "foo");
+    }
+    
+    #[test]
+    fn it_extracts_from_request_ref() {
+        let req = Request::get("http://localhost/")
+            .header("vary", "foo")
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+        
+        let header = http_req.extract::<Header<Vary>>().unwrap();
+        
+        assert_eq!(*header, "foo");
+    }
+    
+    #[tokio::test]
+    async fn it_unwraps_body() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+        
+        let body = http_req
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(&body), "foo");
+    }
+
+    #[tokio::test]
+    async fn it_unwraps_inner_req() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+
+        let body = http_req
+            .into_inner()
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(&body), "foo");
+    }
+}

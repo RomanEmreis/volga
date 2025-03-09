@@ -383,4 +383,21 @@ mod tests {
         assert_eq!(name, "content-type");
         assert_eq!(value, "text/plain");
     }
+
+    #[test]
+    fn it_returns_invalid_header_error() {
+        let header = Header::<ContentType>::try_from("\\FF\x0000");
+
+        assert!(header.is_err());
+        assert_eq!(header.err().unwrap().to_string(), "Header: failed to parse header value");
+    }
+
+    #[test]
+    fn it_can_change_header_value_via_deref_mut() {
+        let mut header = Header::<ContentType>::try_from("text/plan").unwrap();
+
+        *header = HeaderValue::from_static("text/json");
+        
+        assert_eq!(*header, "text/json");
+    }
 }

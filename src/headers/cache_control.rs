@@ -179,10 +179,15 @@ mod tests {
         let cache_control = CacheControl {
             max_age: 60.into(),
             public: true,
+            must_revalidate: false,
+            proxy_revalidate: true,
+            no_store: true,
+            no_cache: false,
+            s_max_age: 60.into(),
             ..Default::default()
         };
         
-        assert_eq!("max-age=60, public", cache_control.to_string());
+        assert_eq!("no-store, max-age=60, s-maxage=60, proxy-revalidate, public", cache_control.to_string());
     }
     
     #[test]
