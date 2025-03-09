@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn it_returns_invalid_header_error() {
-        let header = Header::<ContentType>::try_from("\\FF\00");
+        let header = Header::<ContentType>::try_from("\\FF\x0000");
 
         assert!(header.is_err());
         assert_eq!(header.err().unwrap().to_string(), "Header: failed to parse header value");
