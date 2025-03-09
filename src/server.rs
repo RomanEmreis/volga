@@ -33,4 +33,3 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         }
     }
 }
-

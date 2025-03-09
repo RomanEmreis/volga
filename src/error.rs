@@ -229,6 +229,14 @@ mod tests {
     use std::io::{ErrorKind, Error as IoError};
 
     #[test]
+    fn it_creates_new_error() {
+        let err = Error::new("/api", "some error");
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    
+    #[test]
     fn it_converts_from_not_found_io_error() {
         let io_error = IoError::new(ErrorKind::NotFound, "not found");
         let err = Error::from(io_error);
@@ -325,6 +333,24 @@ mod tests {
 
         assert!(err.is_client_error());
         assert_eq!(err.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    #[test]
+    fn it_converts_from_permission_denied_io_error() {
+        let io_error = IoError::new(ErrorKind::PermissionDenied, "forbidden");
+        let err = Error::from(io_error);
+
+        assert!(err.is_client_error());
+        assert_eq!(err.status, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn it_converts_from_connection_refused_io_error() {
+        let io_error = IoError::new(ErrorKind::ConnectionRefused, "connection refused");
+        let err = Error::from(io_error);
+
+        assert!(err.is_server_error());
+        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
     }
 
     #[test]

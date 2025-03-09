@@ -77,35 +77,39 @@ impl QualityError {
 mod tests {
     use std::str::FromStr;
     use super::{super::Encoding, Quality};
-    #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
     use crate::headers::quality::Ranked;
 
     #[test]
-    #[cfg(any(feature = "compression-brotli", feature = "decompression-brotli"))]
     fn it_parses_from_str_with_value() {
-        let str = "br;q=0.8";
+        let str = "identity;q=0.8";
         
-        let quality = Quality::<Encoding>::from_str(str).unwrap();
+        let quality = Quality::<Encoding>::from_str(str);
+        
+        assert!(quality.is_ok());
 
+        let quality = quality.unwrap();
+        
         assert_eq!(quality.value, 0.8);
-        assert_eq!(quality.item, Encoding::Brotli);
+        assert_eq!(quality.item, Encoding::Identity);
     }
 
     #[test]
-    #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
     fn it_parses_from_str_with_rank_value() {
-        let str = "gzip";
+        let str = "identity";
 
-        let quality = Quality::<Encoding>::from_str(str).unwrap();
+        let quality = Quality::<Encoding>::from_str(str);
 
-        assert_eq!(quality.value, Encoding::Gzip.rank() as f32);
-        assert_eq!(quality.item, Encoding::Gzip);
+        assert!(quality.is_ok());
+        
+        let quality = quality.unwrap();
+        
+        assert_eq!(quality.value, Encoding::Identity.rank() as f32);
+        assert_eq!(quality.item, Encoding::Identity);
     }
 
     #[test]
-    #[cfg(any(feature = "compression-gzip", feature = "decompression-gzip"))]
     fn it_returns_parse_error() {
-        let str = "gzip;Q=";
+        let str = "identity;Q=";
 
         let quality = Quality::<Encoding>::from_str(str);
 

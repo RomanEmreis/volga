@@ -89,4 +89,19 @@ mod tests {
 
         assert_eq!(etag.as_ref(), "\"foo\"");
     }
+
+    #[test]
+    fn it_creates_string_from_etag() {
+        let etag = ETag::new("foo");
+
+        assert_eq!(etag.to_string(), "\"foo\"");
+    }
+
+    #[test]
+    fn it_compares_etag() {
+        let etag1 = ETag::new("foo");
+        let etag2 = ETag::new("foo");
+
+        assert_eq!(*etag1, *etag2);
+    }
 }

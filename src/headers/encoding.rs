@@ -309,4 +309,22 @@ mod tests {
         
         assert_eq!(encodings_str, "identity,gzip,deflate");
     }
+
+    #[test]
+    fn it_returns_error_from_header_value() {
+        let header = HeaderValue::from_static("abc");
+
+        let encoding = Encoding::try_from(header);
+
+        assert!(encoding.is_err());
+    }
+
+    #[test]
+    fn it_returns_error_from_empty_header_value() {
+        let header = HeaderValue::from_static("");
+
+        let encoding = Encoding::try_from(header);
+
+        assert!(encoding.is_err());
+    }
 }

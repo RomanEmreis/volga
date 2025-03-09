@@ -37,7 +37,7 @@ pub use custom_headers;
 mod test {
     use hyper::header::HeaderValue;
     use hyper::HeaderMap;
-    use crate::headers::{Header, custom_headers};
+    use crate::headers::{Header, FromHeaders, custom_headers};
 
     custom_headers! {
         (ApiKey, "x-api-key")
@@ -48,7 +48,8 @@ mod test {
         let api_key = HeaderValue::from_str("some-api-key").unwrap();
         let api_key_header = Header::<ApiKey>::new(&api_key);
         
-        assert_eq!(*api_key_header, "some-api-key")
+        assert_eq!(*api_key_header, "some-api-key");
+        assert_eq!(ApiKey::header_type(), "x-api-key");
     }
 
     #[test]
@@ -60,6 +61,7 @@ mod test {
         
         let api_key_header = Header::<ApiKey>::from_headers_map(&map).unwrap();
 
-        assert_eq!(*api_key_header, "some-api-key")
+        assert_eq!(*api_key_header, "some-api-key");
+        assert_eq!(ApiKey::header_type(), "x-api-key");
     }
 }
