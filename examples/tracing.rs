@@ -10,9 +10,9 @@ async fn main() -> std::io::Result<()> {
         .init();
     
     let mut app = App::new()
-        .with_default_tracing()
-        .with_span_header()
-        .with_span_header_name("x-span-id");
+        .with_tracing(|tracing| tracing
+            .with_header()
+            .with_header_name("x-span-id"));
 
     // this middleware won't be in the request span scope 
     // since it's defined above the tracing middleware

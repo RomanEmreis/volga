@@ -1,4 +1,4 @@
-﻿use volga::{App, File, HttpBody, ok, Multipart};
+﻿use volga::{App, File, HttpBody, ok};
 
 #[tokio::test]
 async fn it_saves_uploaded_file() {
@@ -32,6 +32,8 @@ async fn it_saves_uploaded_file() {
 #[tokio::test]
 #[cfg(feature = "multipart")]
 async fn it_saves_uploaded_multipart() {
+    use volga::Multipart;
+    
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7938");
 
