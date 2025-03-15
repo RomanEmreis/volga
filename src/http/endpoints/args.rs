@@ -38,6 +38,7 @@ pub(crate) enum Payload<'a> {
 }
 
 /// Describes a data source for extractors to read from
+#[derive(Debug, PartialEq)]
 pub(crate) enum Source {
     None,
     Request,
@@ -170,3 +171,27 @@ define_generic_from_raw_request! { T1 }
 define_generic_from_raw_request! { T1, T2 }
 define_generic_from_raw_request! { T1, T2, T3 }
 define_generic_from_raw_request! { T1, T2, T3, T4 }
+
+#[cfg(test)]
+mod tests {
+    use futures_util::future::{Ready, ok};
+    use crate::error::Error;
+    use super::{FromPayload, Payload, Source};
+    
+    struct TestNone;
+    
+    impl FromPayload for TestNone {
+        type Future = Ready<Result<TestNone, Error>>;
+
+        fn from_payload(_: Payload) -> Self::Future {
+            ok(TestNone)
+        }
+    }
+    
+    #[tokio::test]
+    async fn it_reads_none_from_payload() {
+        let extraction = TestNone::from_payload(Payload::None).await;
+        assert!(extraction.is_ok());
+        assert_eq!(TestNone::source(), Source::None);
+    }
+}
