@@ -239,16 +239,10 @@ mod tests {
     use crate::headers::CONTENT_TYPE;
     use crate::http::body::HttpBody;
     use crate::http::endpoints::args::{FromPayload, Payload};
-        
+    
     #[tokio::test]
     async fn it_reads_from_payload() {
-        let data = "--X-BOUNDARY\r\nContent-Disposition: form-data; name=\"my_text_field\"\r\n\r\nabcd\r\n--X-BOUNDARY--\r\n";
-        
-        let req = Request::get("/")
-            .header(CONTENT_TYPE, "multipart/form-data; boundary=X-BOUNDARY")
-            .body(HttpBody::boxed(HttpBody::full(data)))
-            .unwrap();
-        
+        let req = create_multipart_req();
         let (parts, body) = req.into_parts();
         let mut multipart = Multipart::from_payload(Payload::Full(&parts, body)).await.unwrap();
 
@@ -258,4 +252,23 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn it_reads_file_name() {
+        let req = create_multipart_req();
+        let (parts, body) = req.into_parts();
+        let mut multipart = Multipart::from_payload(Payload::Full(&parts, body)).await.unwrap();
+
+        while let Some(field) = multipart.next_field().await.unwrap() {
+            assert_eq!(field.try_get_file_name().unwrap(), "my_text_field");
+        }
+    }
+    
+    fn create_multipart_req() -> Request<HttpBody> {
+        let data = "--X-BOUNDARY\r\nContent-Disposition: form-data; name=\"my_text_field\"\r\n\r\nabcd\r\n--X-BOUNDARY--\r\n";
+
+        Request::get("/")
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=X-BOUNDARY")
+            .body(HttpBody::full(data))
+            .unwrap()
+    }
 }

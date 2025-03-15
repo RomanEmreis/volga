@@ -128,8 +128,9 @@ impl FromPayload for TokenGuard {
 mod tests {
     use hyper::{Request, http::Extensions};
     use tokio_util::sync::CancellationToken as TokioCancellationToken;
-    use crate::http::endpoints::args::{FromPayload, Payload};
+    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
     use crate::http::endpoints::args::cancellation_token::TokenGuard;
+    use crate::{HttpBody, HttpRequest};
 
     #[tokio::test]
     async fn it_reads_from_payload() {
@@ -167,5 +168,71 @@ mod tests {
         let token = TokenGuard::from(&extensions);
 
         assert!(!token.is_cancelled());
+    }
+    
+    #[test]
+    fn it_gets_from_request_parts() {
+        let token = TokioCancellationToken::new();
+        let req = Request::get("/")
+            .extension(token.clone())
+            .body(())
+            .unwrap();
+
+        token.cancel();
+
+        let (parts, _) = req.into_parts();
+        let token = TokenGuard::from_parts(&parts).unwrap();
+
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn it_gets_from_request_ref() {
+        let token = TokioCancellationToken::new();
+        let req = Request::get("/")
+            .extension(token.clone())
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        token.cancel();
+
+        let token = TokenGuard::from_request(&req).unwrap();
+
+        assert!(token.is_cancelled());
+    }
+    
+    #[test]
+    fn it_derefs_mut() {
+        let mut token = TokenGuard(TokioCancellationToken::new());
+        
+        token.cancel();
+        
+        *token = TokioCancellationToken::new();
+        
+        assert!(!token.is_cancelled());
+    }
+    
+    #[test]
+    fn it_clones() {
+        let token = TokenGuard(TokioCancellationToken::new());
+        token.cancel();
+        
+        let another_token = token.clone();
+        
+        assert!(another_token.is_cancelled());
+    }
+
+    #[test]
+    fn it_clones_from() {
+        let token = TokenGuard(TokioCancellationToken::new());
+        token.cancel();
+
+        let mut another_token = TokenGuard(TokioCancellationToken::new());
+        another_token.clone_from(&token);
+        
+        assert!(another_token.is_cancelled());
     }
 }

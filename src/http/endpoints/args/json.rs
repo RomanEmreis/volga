@@ -164,15 +164,24 @@ impl JsonError {
 
 #[cfg(test)]
 mod tests {
+    use http_body_util::BodyExt;
+    use std::fmt::{Display, Formatter};
+    use std::marker::PhantomData;
     use serde::{Deserialize, Serialize};
     use crate::HttpBody;
     use crate::http::endpoints::args::{FromPayload, Payload};
-    use super::Json;
+    use super::{ExtractJsonPayloadFut, Json};
     
-    #[derive(Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     struct User {
         age: i32,
         name: String,
+    }
+
+    impl Display for User {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&format!("{:?}", self))
+        }
     }
     
     #[tokio::test]
@@ -191,6 +200,74 @@ mod tests {
         let user = User { age: 33, name: "John".into() };
         let json: Json<User> = user.into();
 
+        assert_eq!(json.age, 33);
+        assert_eq!(json.name, "John");
+    }
+
+    #[test]
+    fn it_derefs_mut() {
+        let user = User { age: 33, name: "John".into() };
+        let mut json: Json<User> = user.into();
+
+        *json = User { age: 30, name: "Jack".into() };
+        
+        assert_eq!(json.age, 30);
+        assert_eq!(json.name, "Jack");
+    }
+    
+    #[test]
+    fn it_displays_json() {
+        let user = User { age: 33, name: "John".into() };
+        let json: Json<User> = user.into();
+        
+        assert_eq!(json.to_string(), "User { age: 33, name: \"John\" }");
+    }
+    
+    #[tokio::test]
+    async fn it_deserializes_json_from_fut() {
+        let user = User { age: 33, name: "John".into() };
+        let body = HttpBody::json(user);
+        
+        let fut = ExtractJsonPayloadFut::<User> { fut: body.collect(), _marker: PhantomData };
+        
+        let json = fut.await.unwrap();
+
+        assert_eq!(json.age, 33);
+        assert_eq!(json.name, "John");
+    }
+
+    #[tokio::test]
+    async fn it_deserializes_json_from_fut_with_err() {
+        let body = HttpBody::full("{\"age\":33,\"name\":\"John}");
+
+        let fut = ExtractJsonPayloadFut::<User> { fut: body.collect(), _marker: PhantomData };
+
+        let json = fut.await;
+
+        assert!(json.is_err());
+    }
+    
+    #[test]
+    #[cfg(feature = "ws")]
+    fn it_converts_into_ws_msg() {
+        use crate::ws::Message;
+        
+        let user = User { age: 33, name: "John".into() };
+        let json: Json<User> = user.into();
+        
+        let msg = Message::try_from(json).unwrap();
+        
+        assert_eq!(msg.to_string(), "{\"age\":33,\"name\":\"John\"}");
+    }
+
+    #[test]
+    #[cfg(feature = "ws")]
+    fn it_converts_from_ws_msg() {
+        use crate::ws::Message;
+
+        let msg = Message::try_from("{\"age\":33,\"name\":\"John\"}").unwrap();
+        let json: Json<User> = msg.try_into().unwrap();
+        
         assert_eq!(json.age, 33);
         assert_eq!(json.name, "John");
     }

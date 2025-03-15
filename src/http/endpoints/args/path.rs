@@ -188,9 +188,9 @@ mod tests {
     use hyper::{Request, http::Extensions};
     use serde::Deserialize;
     use std::borrow::Cow;
-    use crate::Path;
+    use crate::{HttpBody, HttpRequest, Path};
     use crate::http::endpoints::route::PathArguments;
-    use crate::http::endpoints::args::{FromPayload, Payload};
+    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
 
     #[derive(Deserialize)]
     struct Params {
@@ -250,6 +250,45 @@ mod tests {
         ext.insert(args);
 
         let path = Path::<Params>::try_from(&ext).unwrap();
+
+        assert_eq!(path.id, 123u32);
+        assert_eq!(path.name, "John")
+    }
+
+    #[tokio::test]
+    async fn it_reads_path_from_parts() {
+        let args: PathArguments = vec![
+            (Cow::Borrowed("id"), Cow::Borrowed("123")),
+            (Cow::Borrowed("name"), Cow::Borrowed("John"))
+        ].into_boxed_slice();
+
+        let req = Request::get("/")
+            .extension(args)
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+        let path = Path::<Params>::from_parts(&parts).unwrap();
+
+        assert_eq!(path.id, 123u32);
+        assert_eq!(path.name, "John")
+    }
+
+    #[tokio::test]
+    async fn it_reads_path_from_request_ref() {
+        let args: PathArguments = vec![
+            (Cow::Borrowed("id"), Cow::Borrowed("123")),
+            (Cow::Borrowed("name"), Cow::Borrowed("John"))
+        ].into_boxed_slice();
+
+        let req = Request::get("/")
+            .extension(args)
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+        let path = Path::<Params>::from_request(&req).unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")

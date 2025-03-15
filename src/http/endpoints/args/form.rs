@@ -202,9 +202,20 @@ mod tests {
     #[test]
     fn it_converts_to_form() {
         let user = User { age: 33, name: "John".into() };
-        let json: Form<User> = user.into();
+        let form: Form<User> = user.into();
 
-        assert_eq!(json.age, 33);
-        assert_eq!(json.name, "John");
+        assert_eq!(form.age, 33);
+        assert_eq!(form.name, "John");
+    }
+
+    #[test]
+    fn it_derefs_mut() {
+        let user = User { age: 33, name: "John".into() };
+        let mut form: Form<User> = user.into();
+
+        *form = User { age: 30, name: "Jack".into() };
+        
+        assert_eq!(form.age, 30);
+        assert_eq!(form.name, "Jack");
     }
 }
