@@ -38,9 +38,9 @@ async fn it_adds_access_control_allow_origin_header() {
 async fn it_adds_access_control_headers() {
     tokio::spawn(async {
         let mut app = App::new()
-            .bind("127.0.0.1:7939")
+            .bind("127.0.0.1:7940")
             .with_cors(|cors| cors
-                .with_origins(["http://127.0.0.1:7939"])
+                .with_origins(["http://127.0.0.1:7940"])
                 .with_methods([Method::PUT])
                 .with_any_header());
         app.use_cors();
@@ -54,8 +54,8 @@ async fn it_adds_access_control_headers() {
         } else {
             reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
         };
-        client.request(Method::OPTIONS, "http://127.0.0.1:7939/test")
-            .header(ORIGIN, "http://127.0.0.1:7939")
+        client.request(Method::OPTIONS, "http://127.0.0.1:7940/test")
+            .header(ORIGIN, "http://127.0.0.1:7940")
             .send()
             .await
     }).await.unwrap().unwrap();
@@ -63,7 +63,7 @@ async fn it_adds_access_control_headers() {
     assert!(response.status().is_success());
     
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    assert_eq!(response.headers().get(&ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "http://127.0.0.1:7939");
+    assert_eq!(response.headers().get(&ACCESS_CONTROL_ALLOW_ORIGIN).unwrap(), "http://127.0.0.1:7940");
     assert_eq!(response.headers().get(&ACCESS_CONTROL_ALLOW_HEADERS).unwrap(), "*");
     assert_eq!(response.headers().get(&ACCESS_CONTROL_ALLOW_METHODS).unwrap(), "PUT");
 }
