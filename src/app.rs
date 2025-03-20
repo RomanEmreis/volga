@@ -36,6 +36,9 @@ use crate::tls::TlsConfig;
 #[cfg(feature = "tracing")]
 use crate::tracing::TracingConfig;
 
+#[cfg(feature = "middleware")]
+use crate::http::CorsConfig;
+
 #[cfg(feature = "static-files")]
 pub use self::env::HostEnv;
 
@@ -73,6 +76,10 @@ pub struct App {
     /// Tracing configuration options
     #[cfg(feature = "tracing")]
     pub(super) tracing_config: Option<TracingConfig>,
+
+    /// CORS configuration options
+    #[cfg(feature = "middleware")]
+    pub(super) cors_config: Option<CorsConfig>,
     
     /// Web Server's Hosting Environment
     #[cfg(feature = "static-files")]
@@ -214,6 +221,8 @@ impl App {
             tls_config: None,
             #[cfg(feature = "tracing")]
             tracing_config: None,
+            #[cfg(feature = "middleware")]
+            cors_config: None,
             #[cfg(feature = "static-files")]
             host_env: HostEnv::default(),
             pipeline: PipelineBuilder::new(),

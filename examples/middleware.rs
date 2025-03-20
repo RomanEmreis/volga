@@ -1,4 +1,10 @@
-﻿use volga::{App, CancellationToken, ok, status};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example middleware --features middleware
+//! ```
+
+use volga::{App, CancellationToken, ok, status};
 use volga::headers::{Header, Accept};
 
 #[tokio::main]

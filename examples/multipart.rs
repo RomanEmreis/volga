@@ -1,4 +1,10 @@
-﻿use std::path::Path;
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example multipart --features multipart
+//! ```
+
+use std::path::Path;
 use volga::{App, Multipart, ok};
 
 #[tokio::main]

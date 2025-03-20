@@ -266,7 +266,7 @@ impl App {
     /// # async fn main() -> std::io::Result<()> {
     /// // Specifies a file that will be fault back to
     /// let mut app = App::new()
-    ///     .with_host_environment(|env| env.with_fallback_file("not_found.html"));
+    ///     .with_host_env(|env| env.with_fallback_file("not_found.html"));
     ///  
     /// // Enables the special handler that will fall back
     /// // to the specified file

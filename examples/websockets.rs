@@ -1,3 +1,9 @@
+//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example websockets --features di,ws,tracing
+//! ```
+
 use volga::{
     App, 
     HttpResult, 

@@ -1,4 +1,10 @@
-﻿use volga::{App, problem};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example global_error_handler --features tracing,problem-details
+//! ```
+
+use volga::{App, problem};
 use std::io::Error;
 use tracing_subscriber::prelude::*;
 

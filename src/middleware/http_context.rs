@@ -4,11 +4,14 @@
 };
 
 use crate::{
-    error::{Error, handler::WeakErrorHandler},
+    error::Error,
     headers::{Header, FromHeaders},
     HttpRequest, 
     HttpResult
 };
+
+#[cfg(any(feature = "tls", feature = "tracing"))]
+use crate::error::handler::WeakErrorHandler;
 
 #[cfg(feature = "di")]
 use crate::di::Inject;
@@ -91,6 +94,7 @@ impl HttpContext {
     
     /// Returns a weak reference to global error handler
     #[inline]
+    #[cfg(any(feature = "tls", feature = "tracing"))]
     pub(crate) fn error_handler(&self) -> WeakErrorHandler {
         self.request
             .extensions()

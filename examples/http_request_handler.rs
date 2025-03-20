@@ -1,4 +1,10 @@
-﻿use volga::{App, HttpRequest, ok};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example http_request_handler
+//! ```
+
+use volga::{App, HttpRequest, ok};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {

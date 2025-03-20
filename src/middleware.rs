@@ -26,6 +26,7 @@ pub mod compress;
 ))]
 pub mod decompress;
 pub mod http_context;
+pub mod cors;
 
 /// Points to the next middleware or request handler
 pub type Next = Arc<

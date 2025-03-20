@@ -22,7 +22,12 @@ pub use response::{
     Results
 };
 
+#[cfg(feature = "middleware")]
+pub use cors::CorsConfig;
+
 pub mod body;
 pub mod request;
 pub mod response;
 pub mod endpoints;
+#[cfg(feature = "middleware")]
+pub mod cors;

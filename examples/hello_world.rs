@@ -1,4 +1,10 @@
-﻿use volga::App;
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example hello_world
+//! ```
+
+use volga::App;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {

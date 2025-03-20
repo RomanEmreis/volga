@@ -1,4 +1,10 @@
-﻿use tokio::fs::File;
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example file_download
+//! ```
+
+use tokio::fs::File;
 use volga::{App, file};
 
 #[tokio::main]

@@ -44,7 +44,7 @@ tracing = { version = "0.1.41", default-features = false, optional = true }
 
 [dev-dependencies]
 hyper = { version = "1.6.0", features = ["client"] }
-reqwest = { version = "0.12.14", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
+reqwest = { version = "0.12.15", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
 serde = { version = "1.0.219", features = ["derive"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 uuid = { version = "1.16.0", features = ["v4"] }
@@ -125,6 +125,10 @@ required-features = ["static-files"]
 [[test]]
 name = "ws"
 required-features = ["ws"]
+
+[[test]]
+name = "cors"
+required-features = ["middleware"]
 
 [[example]]
 name = "hello_world"
@@ -242,3 +246,8 @@ required-features = ["tracing","static-files"]
 name = "websockets"
 path = "examples/websockets.rs"
 required-features = ["di","ws","tracing"]
+
+[[example]]
+name = "cors"
+path = "examples/cors.rs"
+required-features = ["middleware","static-files","tracing"]

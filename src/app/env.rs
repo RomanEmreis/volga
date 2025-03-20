@@ -48,6 +48,36 @@ impl HostEnv {
             index_path,
         }
     }
+
+    /// Specifies a root folder for static content
+    ///
+    /// Default: `/`
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use volga::app::HostEnv;
+    ///
+    /// let app = HostEnv::default()
+    ///     .with_content_root("static");
+    /// ```
+    pub fn with_content_root<T: ?Sized + AsRef<OsStr>>(mut self, root: &T) -> Self {
+        self.content_root = PathBuf::from(root);
+
+        if let Some(file_name) = self
+            .index_path
+            .file_name() {
+            self.index_path = self.content_root.join(file_name);
+        }
+
+        if let Some(fallback_file) = self
+            .fallback_path
+            .as_ref()
+            .and_then(|p| p.file_name()) {
+            self.fallback_path = Some(self.content_root.join(fallback_file));
+        }
+
+        self
+    }
     
     /// Updates the default index file name with the custom one
     ///
@@ -132,7 +162,7 @@ impl App {
     /// Defaults:
     /// - content_root: `/`
     /// - index_path: `index.html`
-    pub fn with_host_environment<T>(mut self, config: T) -> Self
+    pub fn with_host_env<T>(mut self, config: T) -> Self
     where
         T: FnOnce(HostEnv) -> HostEnv
     {
@@ -145,83 +175,8 @@ impl App {
     /// Defaults:
     /// - content_root: `/`
     /// - index_path: `index.html`
-    pub fn set_host_environment(mut self, env: HostEnv) -> Self {
+    pub fn set_host_env(mut self, env: HostEnv) -> Self {
         self.host_env = env;
-        self
-    }
-    
-    /// Specifies a root folder for static content
-    /// 
-    /// Default: `/`
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use volga::App;
-    ///
-    /// let app = App::new()
-    ///     .with_content_root("static");
-    /// ```
-    pub fn with_content_root<T: ?Sized + AsRef<OsStr>>(mut self, root: &T) -> Self {
-        let mut env = HostEnv::new(root);
-        
-        env.show_directory = self.host_env.show_directory;
-        
-        if let Some(file_name) = self
-            .host_env
-            .index_path
-            .file_name() {
-            env.index_path.set_file_name(file_name);
-        }
-        
-        if let Some(fallback_file) = self
-            .host_env
-            .fallback_path
-            .as_ref()
-            .and_then(|p| p.file_name()) { 
-            env = env.with_fallback_file(fallback_file);
-        }  
-        
-        self.host_env = env;
-        self
-    }
-
-    /// Updates the default index file name with the custom one
-    ///
-    /// Default: `index.html`
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use volga::App;
-    ///
-    /// let app = App::new()
-    ///     .with_index_file("default.html");
-    /// ```
-    pub fn with_index_file<T: AsRef<Path>>(mut self, name: T) -> Self {
-        self.host_env = self.host_env.with_index_file(name);
-        self
-    }
-
-    /// Updates the fallback file name with the custom one
-    ///
-    /// Default: `None`
-    ///
-    /// # Example
-    /// ```no_run
-    /// # use volga::App;
-    ///
-    /// let app = App::new()
-    ///     .with_fallback_file("not_found.html");
-    /// ```
-    pub fn with_fallback_file<T: AsRef<Path>>(mut self, name: T) -> Self {
-        self.host_env = self.host_env.with_fallback_file(name);
-        self
-    }
-
-    /// Enables showing a list of files when root "/" is requested
-    ///
-    /// Default: `false`
-    pub fn with_files_listing(mut self) -> Self {
-        self.host_env = self.host_env.with_files_listing();
         self
     }
 }
@@ -244,6 +199,17 @@ mod tests {
     #[test]
     fn it_creates_host_env() {
         let env = HostEnv::new("/root");
+
+        assert_eq!(env.content_root, PathBuf::from("/root"));
+        assert_eq!(env.index_path, PathBuf::from("/root/index.html"));
+        assert_eq!(env.fallback_path, None);
+        assert!(!env.show_directory);
+    }
+
+    #[test]
+    fn it_creates_host_env_with_content_root() {
+        let env = HostEnv::default()
+            .with_content_root("/root");
 
         assert_eq!(env.content_root, PathBuf::from("/root"));
         assert_eq!(env.index_path, PathBuf::from("/root/index.html"));
@@ -286,7 +252,8 @@ mod tests {
 
     #[test]
     fn it_updates_content_root() {
-        let app = App::new().with_content_root("tests/resources");
+        let app = App::new()
+            .with_host_env(|env| env.with_content_root("tests/resources"));
 
         assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
         assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/index.html"));
@@ -297,8 +264,9 @@ mod tests {
     #[test]
     fn it_updates_index_file_with_content_root() {
         let app = App::new()
-            .with_index_file("default.html")
-            .with_content_root("tests/resources");
+            .with_host_env(|env| env
+                .with_content_root("tests/resources")
+                .with_index_file("default.html"));
 
         assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
         assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/default.html"));
@@ -309,21 +277,9 @@ mod tests {
     #[test]
     fn it_updates_fallback_file_with_content_root() {
         let app = App::new()
-            .with_fallback_file("404.html")
-            .with_content_root("tests/resources");
-
-        assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
-        assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/index.html"));
-        assert_eq!(app.host_env.fallback_path, Some(PathBuf::from("tests/resources/404.html")));
-        assert!(!app.host_env.show_directory);
-    }
-
-    #[test]
-    fn it_updates_fallback_file_with_content_root_via_with_host_environment() {
-        let app = App::new()
-            .with_content_root("tests/resources")
-            .with_host_environment(|env| env
-                .with_fallback_file("404.html"));
+            .with_host_env(|env| env
+                .with_fallback_file("404.html")
+                .with_content_root("tests/resources"));
 
         assert_eq!(app.host_env.content_root, PathBuf::from("tests/resources"));
         assert_eq!(app.host_env.index_path, PathBuf::from("tests/resources/index.html"));

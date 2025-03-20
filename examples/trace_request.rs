@@ -1,4 +1,10 @@
-﻿use volga::{App, HttpRequest, stream};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example trace_request --features tracing
+//! ```
+
+use volga::{App, HttpRequest, stream};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]

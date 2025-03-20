@@ -95,10 +95,10 @@ async fn it_works_with_tls_with_required_auth_unauthenticated() {
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7923")
-            .set_tls(TlsConfig::from_pem_files(
-                "tests/tls/server.pem",
-                "tests/tls/server.key"))
-            .with_required_client_auth("tests/tls/ca.pem");
+            .with_tls(|tls| tls
+                .set_key("tests/tls/server.key")
+                .set_pem("tests/tls/server.pem")
+                .with_required_client_auth("tests/tls/ca.pem"));
         
         app.map_get("/tls", || async {
             "Pass!"
@@ -141,8 +141,8 @@ async fn it_works_with_tls_with_optional_auth_authenticated() {
             .bind("127.0.0.1:7924")
             .set_tls(TlsConfig::from_pem_files(
                 "tests/tls/server.pem",
-                "tests/tls/server.key"))
-            .with_optional_client_auth("tests/tls/ca.pem");
+                "tests/tls/server.key")
+                .with_optional_client_auth("tests/tls/ca.pem"));
         
         app.map_get("/tls", || async {
             "Pass!"
@@ -237,12 +237,14 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
             .set_tls(TlsConfig::from_pem_files(
                 "tests/tls/server.pem",
                 "tests/tls/server.key"))
-            .with_https_redirection()
-            .with_http_port(7927)
-            .with_hsts_preload(false)
-            .with_hsts_sub_domains(true)
-            .with_hsts_max_age(Duration::from_secs(60))
-            .with_hsts_exclude_hosts(&["example.com", "example.net"]);
+            .with_tls(|tls| tls
+                .with_https_redirection()
+                .with_http_port(7927))
+            .with_hsts(|hsts| hsts            
+                .with_preload(false)
+                .with_sub_domains(true)
+                .with_max_age(Duration::from_secs(60))
+                .with_exclude_hosts(&["example.com", "example.net"]));
         app.use_hsts();
         app.map_get("/tls", || async {
             "Pass!"

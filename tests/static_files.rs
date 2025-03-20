@@ -1,11 +1,12 @@
 ﻿use volga::App;
+use volga::app::HostEnv;
 
 #[tokio::test]
 async fn it_responds_with_index_file() {
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7831")
-            .with_content_root("tests/static");
+            .set_host_env(HostEnv::new("tests/static"));
         app.use_static_files();
         app.run().await
     });
@@ -28,8 +29,9 @@ async fn it_responds_with_fallback_file() {
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7832")
-            .with_content_root("tests/static")
-            .with_fallback_file("index.html");
+            .with_host_env(|env| env
+                .with_content_root("tests/static")
+                .with_fallback_file("index.html"));
         app.map_group("/static").use_static_files();
         app.run().await
     });
@@ -52,8 +54,9 @@ async fn it_responds_with_files_listing() {
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7833")
-            .with_content_root("tests/static")
-            .with_files_listing();
+            .with_host_env(|env| env
+                .with_content_root("tests/static")
+                .with_files_listing());
         app.use_static_files();
         app.run().await
     });

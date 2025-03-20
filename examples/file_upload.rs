@@ -1,4 +1,10 @@
-﻿use volga::{App, File};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example file_upload
+//! ```
+
+use volga::{App, File};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {

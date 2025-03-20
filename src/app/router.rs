@@ -3,7 +3,7 @@ use crate::App;
 use crate::http::IntoResponse;
 use crate::http::endpoints::{
     args::FromRequest,
-    handlers::{Func, GenericHandler}
+    handlers::{Func, GenericHandler},
 };
 
 /// Routes mapping 
@@ -69,6 +69,9 @@ impl App {
         if !endpoints.contains(&head, pattern) { 
             endpoints.map_route(head, pattern, handler.clone());
         }
+
+        self.map_preflight_handler(pattern);
+        
         self
     }
 
@@ -99,6 +102,9 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::POST, pattern, handler);
+
+        self.map_preflight_handler(pattern);
+        
         self
     }
 
@@ -128,6 +134,9 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::PUT, pattern, handler);
+
+        self.map_preflight_handler(pattern);
+        
         self
     }
 
@@ -157,6 +166,9 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::PATCH, pattern, handler);
+
+        self.map_preflight_handler(pattern);
+        
         self
     }
 
@@ -186,6 +198,9 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::DELETE, pattern, handler);
+
+        self.map_preflight_handler(pattern);
+        
         self
     }
 
@@ -215,6 +230,9 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::HEAD, pattern, handler);
+
+        self.map_preflight_handler(pattern);
+        
         self
     }
 
@@ -273,6 +291,9 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::TRACE, pattern, handler);
+
+        self.map_preflight_handler(pattern);
+        
         self
     }
 
@@ -302,7 +323,21 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::CONNECT, pattern, handler);
+        
+        self.map_preflight_handler(pattern);
+        
         self
+    }
+
+    #[inline]
+    fn map_preflight_handler(&mut self, pattern: &str) {
+        if self.cors_config.is_some() {
+            let endpoints = self.pipeline.endpoints_mut();
+            let options = Method::OPTIONS;
+            if !endpoints.contains(&options, pattern) {
+                endpoints.map_route(options, pattern, Func::new(|| async {}));
+            }
+        }
     }
 }
 

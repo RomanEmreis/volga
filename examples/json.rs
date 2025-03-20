@@ -1,4 +1,10 @@
-﻿use serde::{Deserialize, Serialize};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example json
+//! ```
+
+use serde::{Deserialize, Serialize};
 use volga::{App, ok, Json};
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -1,4 +1,10 @@
-﻿use uuid::Uuid;
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example dependency_injection --features middleware,di
+//! ```
+
+use uuid::Uuid;
 use volga::{
     App, HttpResult, Json,
     di::{Inject, Container, Dc},
