@@ -70,6 +70,7 @@ impl App {
             endpoints.map_route(head, pattern, handler.clone());
         }
 
+        #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
         self
@@ -103,6 +104,7 @@ impl App {
             .endpoints_mut()
             .map_route(Method::POST, pattern, handler);
 
+        #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
         self
@@ -135,6 +137,7 @@ impl App {
             .endpoints_mut()
             .map_route(Method::PUT, pattern, handler);
 
+        #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
         self
@@ -167,6 +170,7 @@ impl App {
             .endpoints_mut()
             .map_route(Method::PATCH, pattern, handler);
 
+        #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
         self
@@ -199,6 +203,7 @@ impl App {
             .endpoints_mut()
             .map_route(Method::DELETE, pattern, handler);
 
+        #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
         self
@@ -231,6 +236,7 @@ impl App {
             .endpoints_mut()
             .map_route(Method::HEAD, pattern, handler);
 
+        #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
         self
@@ -292,6 +298,7 @@ impl App {
             .endpoints_mut()
             .map_route(Method::TRACE, pattern, handler);
 
+        #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
         self
@@ -323,13 +330,15 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::CONNECT, pattern, handler);
-        
+
+        #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
         self
     }
 
     #[inline]
+    #[cfg(feature = "middleware")]
     fn map_preflight_handler(&mut self, pattern: &str) {
         if self.cors_config.is_some() {
             let endpoints = self.pipeline.endpoints_mut();
