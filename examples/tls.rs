@@ -1,4 +1,10 @@
-﻿use std::time::Duration;
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example tls --features tls
+//! ```
+
+use std::time::Duration;
 use volga::{App, Json, ok};
 
 #[tokio::main]

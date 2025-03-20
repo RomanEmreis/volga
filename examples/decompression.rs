@@ -1,4 +1,10 @@
-﻿use volga::{App, ok, Json};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example decompression --features decompression-full
+//! ```
+
+use volga::{App, ok, Json};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct User {

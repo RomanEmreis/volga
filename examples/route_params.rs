@@ -1,4 +1,10 @@
-﻿use std::collections::HashMap;
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example route_params
+//! ```
+
+use std::collections::HashMap;
 use serde::Deserialize;
 use volga::{App, Path, ok};
 

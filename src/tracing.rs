@@ -107,47 +107,6 @@ impl App {
         self.tracing_config = Some(config);
         self
     }
-
-    /// If a [`TracingConfig`] has been specified or set as default,
-    /// it configures tracing to include the span id as an HTTP header
-    ///
-    /// Default: `false`
-    /// 
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    /// 
-    /// let app = App::new()
-    ///     .with_default_tracing()
-    ///     .with_span_header();
-    /// ```
-    pub fn with_span_header(mut self) -> Self {
-        self.tracing_config = self
-            .tracing_config
-            .map(|config| config.with_header());
-        self
-    }
-
-    /// If a [`TracingConfig`] has been specified or set as default, 
-    /// it configures tracing to use a specific HTTP header name if the `include_header` is set to `true`
-    ///
-    /// Default: `request-id`
-    /// 
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    ///
-    /// let app = App::new()
-    ///     .with_default_tracing()
-    ///     .with_span_header()
-    ///     .with_span_header();
-    /// ```
-    pub fn with_span_header_name(mut self, name: &'static str) -> Self {
-        self.tracing_config = self
-            .tracing_config
-            .map(|config| config.with_header_name(name));
-        self
-    }
     
     /// Adds middleware for wrapping each request into unique [`tracing::Span`]
     /// 
@@ -248,8 +207,7 @@ mod tests {
     #[test]
     fn it_creates_app_with_span_header() {
         let app = App::new()
-            .with_default_tracing()
-            .with_span_header();
+            .set_tracing(TracingConfig::new().with_header());
         
         let tracing_config = app.tracing_config.unwrap();
 
@@ -260,9 +218,9 @@ mod tests {
     #[test]
     fn it_creates_app_with_span_header_name() {
         let app = App::new()
-            .with_default_tracing()
-            .with_span_header()
-            .with_span_header_name("correlation-id");
+            .with_tracing(|tracing| tracing
+                .with_header()
+                .with_header_name("correlation-id"));
 
         let tracing_config = app.tracing_config.unwrap();
 

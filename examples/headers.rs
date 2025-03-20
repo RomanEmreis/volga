@@ -1,4 +1,10 @@
-﻿use volga::{App, ResponseContext, headers, ok};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example headers
+//! ```
+
+use volga::{App, ResponseContext, headers, ok};
 use volga::headers::{
     Header, 
     Headers, 

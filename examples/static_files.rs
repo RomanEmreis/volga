@@ -1,4 +1,10 @@
-﻿use volga::App;
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example static_files --features static-files,tracing
+//! ```
+
+use volga::App;
 use tracing_subscriber::prelude::*;
 
 #[tokio::main]
@@ -8,9 +14,10 @@ async fn main() -> std::io::Result<()> {
         .init();
     
     let mut app = App::new()
-        .with_content_root("examples/static")
-        .with_fallback_file("404.html")
-        .with_files_listing();
+        .with_host_env(|env| env
+            .with_content_root("examples/static")
+            .with_fallback_file("404.html")
+            .with_files_listing());
 
     // Configures static web server 
     // - redirects from "/" -> "/index.html" if presents

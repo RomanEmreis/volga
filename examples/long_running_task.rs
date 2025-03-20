@@ -1,4 +1,10 @@
-﻿use tokio::time::{interval, Duration};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example long_running_task
+//! ```
+
+use tokio::time::{interval, Duration};
 use volga::{App, CancellationToken};
 
 async fn long_running_task() {

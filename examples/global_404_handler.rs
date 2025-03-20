@@ -1,4 +1,10 @@
-﻿use volga::{App, http::{Method, Uri}, html};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example global_404_handler --features tracing
+//! ```
+
+use volga::{App, http::{Method, Uri}, html};
 use tracing_subscriber::prelude::*;
 
 #[tokio::main]

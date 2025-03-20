@@ -1,4 +1,10 @@
-﻿use volga::{
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example custom_request_headers --features middleware
+//! ```
+
+use volga::{
     headers::{Header, custom_headers},
     App, 
     ok

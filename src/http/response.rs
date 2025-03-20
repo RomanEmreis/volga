@@ -67,7 +67,6 @@ pub struct ResponseContext<T: Serialize> {
 }
 
 pub type HttpResponse = Response<HttpBody>;
-//pub type HttpResult = io::Result<HttpResponse>;
 pub type HttpResult = Result<HttpResponse, Error>;
 pub struct HttpResultWrapper(io::Result<HttpResponse>);
 pub type HttpHeaders = HashMap<String, String>;

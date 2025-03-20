@@ -1,4 +1,10 @@
-﻿use volga::{App, ok};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example compression --features compression-full
+//! ```
+
+use volga::{App, ok};
 
 #[derive(serde::Serialize)]
 struct User {

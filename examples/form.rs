@@ -1,4 +1,10 @@
-﻿use serde::{Deserialize, Serialize};
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example form
+//! ```
+
+use serde::{Deserialize, Serialize};
 use volga::{App, Form, form};
 
 #[derive(Debug, Serialize, Deserialize)]

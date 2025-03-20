@@ -14,7 +14,7 @@
 //! ## Example
 //! ```toml
 //! [dependencies]
-//! volga = "0.5.4"
+//! volga = "0.5.5"
 //! tokio = { version = "1", features = ["full"] }
 //! ```
 //! ```no_run

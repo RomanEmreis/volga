@@ -1,4 +1,10 @@
-﻿use volga::App;
+﻿//! Run with:
+//!
+//! ```no_rust
+//! cargo run --example tracing --features tracing
+//! ```
+
+use volga::App;
 use tracing::trace;
 use tracing_subscriber::prelude::*;
 
