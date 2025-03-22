@@ -251,6 +251,7 @@ mod tests {
     }
     
     #[test]
+    #[cfg(feature = "di")]
     #[should_panic]
     fn it_panic_if_there_is_no_di_container() {
         let req = Request::get("http://localhost/")
