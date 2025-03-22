@@ -49,4 +49,4 @@ jobs:
         run: cargo install cargo-tarpaulin
       - name: Code coverage check
         run: |
-          cargo tarpaulin --verbose --workspace --fail-under 80
+          cargo tarpaulin --all-features --verbose --workspace --fail-under 80

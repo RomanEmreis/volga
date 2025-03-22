@@ -175,6 +175,7 @@ mod tests {
     use crate::di::ContainerBuilder;
 
     #[cfg(feature = "di")]
+    #[allow(dead_code)]
     #[derive(Clone, Default)]
     struct InMemoryCache {
         inner: Arc<Mutex<HashMap<String, String>>>
