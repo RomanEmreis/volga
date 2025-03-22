@@ -36,6 +36,21 @@ macro_rules! html {
     };
 }
 
+/// Produces `OK 200` response with HTML file body
+/// 
+/// # Examples
+/// ## Default usage
+///```no_run
+/// # use volga::HttpRequest;
+/// use volga::html_file;
+/// use tokio::fs::File;
+///
+/// # async fn dox(request: HttpRequest) -> std::io::Result<()> {
+/// let index_name = "index.html";
+/// let index_file = File::open(index_name).await?;
+/// html_file!(index_name, index_file);
+/// # Ok(())
+/// # }
 #[macro_export]
 macro_rules! html_file {
     ($file_name:expr, $body:expr) => {

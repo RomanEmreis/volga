@@ -1,4 +1,6 @@
-﻿use crate::App;
+﻿//! Application Host Environment configuration
+
+use crate::App;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 

@@ -1,3 +1,5 @@
+//! WebSockets and WebTransport protocol implementation and tools
+
 use crate::{App, error::Error, HttpRequest};
 use crate::http::IntoResponse;
 use crate::http::endpoints::{

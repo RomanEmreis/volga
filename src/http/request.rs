@@ -1,4 +1,6 @@
-﻿use std::ops::{Deref, DerefMut};
+﻿//! HTTP request utilities
+
+use std::ops::{Deref, DerefMut};
 use hyper::{
     body::Incoming,
     http::request::Parts,
@@ -165,6 +167,19 @@ mod tests {
     use crate::headers::{Header, Vary};
     use super::*;
     
+    #[cfg(feature = "di")]
+    use std::collections::HashMap;
+    #[cfg(feature = "di")]
+    use std::sync::Mutex;
+    #[cfg(feature = "di")]
+    use crate::di::ContainerBuilder;
+
+    #[cfg(feature = "di")]
+    #[derive(Clone, Default)]
+    struct InMemoryCache {
+        inner: Arc<Mutex<HashMap<String, String>>>
+    }
+    
     #[test]
     fn it_inserts_header() {
         let req = Request::get("http://localhost")
@@ -232,5 +247,56 @@ mod tests {
             .to_bytes();
 
         assert_eq!(String::from_utf8_lossy(&body), "foo");
+    }
+    
+    #[test]
+    #[should_panic]
+    fn it_panic_if_there_is_no_di_container() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+        
+        _ = http_req.container();
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "di")]
+    async fn it_resolves_from_di_container() {
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(InMemoryCache::default());
+        
+        let req = Request::get("http://localhost/")
+            .extension(container.build())
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+
+        let cache = http_req.resolve::<InMemoryCache>().await;
+        
+        assert!(cache.is_ok());
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "di")]
+    async fn it_resolves_shared_from_di_container() {
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(InMemoryCache::default());
+
+        let req = Request::get("http://localhost/")
+            .extension(container.build())
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+
+        let cache = http_req.resolve_shared::<InMemoryCache>().await;
+
+        assert!(cache.is_ok());
     }
 }

@@ -1,4 +1,6 @@
-﻿use futures_util::TryFutureExt;
+﻿//! HTTPS/TLS protocol implementations and middlewares
+
+use futures_util::TryFutureExt;
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 use crate::{
     App, 

@@ -1,4 +1,6 @@
-﻿use crate::http::endpoints::{
+﻿//! Utilities for managing HTTP request scope
+
+use crate::http::endpoints::{
     handlers::RouteHandler,
     args::FromRequestRef
 };

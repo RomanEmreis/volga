@@ -1,4 +1,6 @@
-﻿use super::{Inject, DiError};
+﻿//! Dependency Injection container and tools
+
+use super::{Inject, DiError};
 use crate::error::Error;
 use hyper::http::{Extensions, request::Parts};
 use futures_util::TryFutureExt;

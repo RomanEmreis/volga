@@ -1,4 +1,6 @@
-﻿use bytes::{Bytes};
+﻿//! HTTP Body utilities
+
+use bytes::{Bytes};
 use futures_util::TryStreamExt;
 use hyper::body::{Body, Frame, Incoming, SizeHint};
 use http_body_util::{BodyExt, Empty, Full, StreamBody, Limited};
@@ -223,8 +225,20 @@ impl From<Cow<'static, str>> for HttpBody {
 #[cfg(test)]
 mod tests {
     use http_body_util::BodyExt;
+    use serde::{Serialize, Serializer};
     use crate::HttpBody;
-
+    
+    struct FailStruct;
+    
+    impl Serialize for FailStruct {
+        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Err(serde::ser::Error::custom("oops..."))
+        }
+    }
+    
     #[tokio::test]
     async fn it_returns_err_if_body_limit_exceeded() {
         let body = HttpBody::full("Hello, World!");
@@ -243,6 +257,28 @@ mod tests {
         let collected = body.collect().await;
 
         assert!(collected.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_returns_error_body_if_unable_to_serialize_json() {
+        let content =  FailStruct;
+        let body = HttpBody::json(content);
+
+        let collected = body.collect().await;
+
+        assert!(collected.is_ok());
+        assert_eq!(String::from_utf8_lossy(&collected.unwrap().to_bytes()), "JSON serialization error: oops...")
+    }
+
+    #[tokio::test]
+    async fn it_returns_error_body_if_unable_to_serialize_form() {
+        let content =  FailStruct;
+        let body = HttpBody::form(content);
+
+        let collected = body.collect().await;
+
+        assert!(collected.is_ok());
+        assert_eq!(String::from_utf8_lossy(&collected.unwrap().to_bytes()), "Form Data serialization error: oops...")
     }
 }
 

@@ -1,4 +1,6 @@
-﻿use super::{
+﻿//! Utilities for encoding formats
+
+use super::{
     Error,
     HeaderValue,
     quality::Ranked

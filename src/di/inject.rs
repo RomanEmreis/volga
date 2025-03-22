@@ -1,4 +1,6 @@
-﻿use super::Container;
+﻿//! Utilities to inject and resolve dependencies
+
+use super::Container;
 use crate::error::Error;
 use futures_util::future::ok;
 use std::future::Future;

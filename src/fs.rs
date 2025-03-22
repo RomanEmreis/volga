@@ -1,4 +1,6 @@
-﻿use mime::Mime;
+﻿//! File System tools and abstractions
+
+use mime::Mime;
 use std::path::Path;
 
 #[cfg(feature = "static-files")]

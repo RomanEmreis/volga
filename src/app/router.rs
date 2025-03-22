@@ -1,4 +1,6 @@
-﻿use hyper::Method;
+﻿//! Route mapping helpers
+
+use hyper::Method;
 use crate::App;
 use crate::http::IntoResponse;
 use crate::http::endpoints::{

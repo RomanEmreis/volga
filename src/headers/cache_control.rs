@@ -1,4 +1,6 @@
-﻿use std::{fmt, time::SystemTime};
+﻿//! Utilities for Cache-Control header
+
+use std::{fmt, time::SystemTime};
 use crate::headers::ETag;
 
 #[cfg(feature = "static-files")]

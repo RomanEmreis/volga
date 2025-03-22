@@ -1,4 +1,6 @@
-﻿use super::Error;
+﻿//! Q-factor tools and helpers
+
+use super::Error;
 use std::{
     num::ParseFloatError, 
     str::FromStr
