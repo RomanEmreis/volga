@@ -1,4 +1,6 @@
-﻿use super::FromHeaders;
+﻿//! Extractors for default HTTP headers
+
+use super::FromHeaders;
 
 use hyper::HeaderMap;
 use hyper::header::{

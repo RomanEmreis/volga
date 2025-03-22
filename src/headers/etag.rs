@@ -1,4 +1,6 @@
-﻿use std::{
+﻿//! Utilities for ETAG header
+
+use std::{
     borrow::Cow,
     fmt::Display,
     ops::Deref

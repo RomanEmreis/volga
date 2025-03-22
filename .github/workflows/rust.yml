@@ -40,3 +40,14 @@ jobs:
       run: cargo test --features http1 --verbose
     - name: Run tests - http2
       run: cargo test --features http2 --verbose
+
+  coverage:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Code coverage check
+        run: |
+          cargo tarpaulin --all-features --verbose --workspace --fail-under 80

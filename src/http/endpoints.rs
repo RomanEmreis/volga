@@ -1,4 +1,6 @@
-﻿use std::{borrow::Cow, collections::HashMap};
+﻿//! Endpoints mapping utilities
+
+use std::{borrow::Cow, collections::HashMap};
 use hyper::{Method, Uri};
 
 use super::endpoints::{

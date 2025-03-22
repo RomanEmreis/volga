@@ -1,4 +1,6 @@
-﻿use crate::{builder, response, RESPONSE_ERROR};
+﻿//! HTTP response utilities
+ 
+use crate::{builder, response, RESPONSE_ERROR};
 use crate::error::Error;
 use crate::http::body::{BoxBody, HttpBody};
 

@@ -1,4 +1,6 @@
-﻿use crate::{App, error::handler::call_weak_err_handler};
+﻿//! Tools for tracing, logging and observability
+
+use crate::{App, error::handler::call_weak_err_handler};
 use futures_util::TryFutureExt;
 use tracing::{Instrument, trace_span};
 
