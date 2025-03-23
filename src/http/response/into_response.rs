@@ -129,6 +129,29 @@ impl<T: Serialize> IntoResponse for ResponseContext<T> {
     }
 }
 
+macro_rules! impl_into_response {
+    { $($type:ident),* $(,)? } => {
+        $(impl IntoResponse for $type {
+            #[inline]
+            fn into_response(self) -> HttpResult {
+                ok!(self)
+            }
+        })*
+    };
+}
+
+impl_into_response! {
+    bool,
+    i8, u8,
+    i16, u16,
+    i32, u32,
+    f32,
+    i64, u64,
+    f64,
+    i128, u128,
+    isize, usize
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

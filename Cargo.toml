@@ -80,6 +80,7 @@ static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]
 ws = ["dep:sha1", "dep:base64", "dep:tokio-tungstenite"]
+mcp = []
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "dep:async-compression", "async-compression?/brotli"]
@@ -251,3 +252,8 @@ required-features = ["di","ws","tracing"]
 name = "cors"
 path = "examples/cors.rs"
 required-features = ["middleware","static-files","tracing"]
+
+[[example]]
+name = "mcp"
+path = "examples/mcp.rs"
+required-features = ["mcp","tracing"]
