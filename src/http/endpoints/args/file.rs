@@ -177,7 +177,7 @@ mod tests {
         let file = tokio::fs::File::open(path).await.unwrap();
         let req = Request::get("/")
             .header(CONTENT_DISPOSITION, "attachment; filename=test_file.txt")
-            .body(HttpBody::wrap_stream(file))
+            .body(HttpBody::file(file))
             .unwrap();
         
         let (parts, body) = req.into_parts();
@@ -203,7 +203,7 @@ mod tests {
         let path = Path::new("tests/resources/test_file.txt");
 
         let file = tokio::fs::File::open(path).await.unwrap();
-        let body = HttpBody::wrap_stream(file);
+        let body = HttpBody::file(file);
 
         let file_stream = FileStream::new(None, body);
 

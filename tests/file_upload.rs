@@ -20,7 +20,7 @@ async fn it_saves_uploaded_file() {
             reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
         };
         let file = tokio::fs::File::open("tests/resources/test_file.txt").await.unwrap();
-        let body = HttpBody::wrap_stream(file);
+        let body = HttpBody::file(file);
         
         client.post("http://127.0.0.1:7899/upload").body(reqwest::Body::wrap(body)).send().await.unwrap()
     }).await.unwrap();

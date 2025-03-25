@@ -1,14 +1,28 @@
 ﻿//! HTTP Body utilities
 
-use bytes::{Bytes};
-use futures_util::TryStreamExt;
-use hyper::body::{Body, Frame, Incoming, SizeHint};
-use http_body_util::{BodyExt, Empty, Full, StreamBody, Limited};
+use bytes::Bytes;
 use pin_project_lite::pin_project;
 use serde::Serialize;
 use tokio_util::io::ReaderStream;
 use tokio::fs::File;
-use crate::error::Error;
+use crate::error::{BoxError, Error};
+use futures_util::{TryStream, TryStreamExt};
+
+use hyper::body::{
+    Body, 
+    Frame, 
+    Incoming, 
+    SizeHint
+};
+
+use http_body_util::{
+    BodyExt,
+    Empty, 
+    Full, 
+    StreamBody, 
+    Limited, 
+    BodyDataStream
+};
 
 use std::{
     borrow::Cow,
@@ -143,6 +157,12 @@ impl HttpBody {
         }
     }
 
+    /// Consumes this [`HttpBody`] into [`BodyDataStream`]
+    #[inline]
+    pub fn into_data_stream(self) -> BodyDataStream<HttpBody> {
+        BodyExt::into_data_stream(self)
+    }
+
     /// Consumes the [`HttpBody`] and returns the body as boxed trait object that is !Sync
     #[inline]
     pub fn into_boxed_unsync(self) -> UnsyncBoxBody {
@@ -203,9 +223,19 @@ impl HttpBody {
 
     /// Creates a new [`HttpBody`] from [`File`] stream
     #[inline]
-    pub fn wrap_stream(content: File) -> HttpBody {
+    pub fn file(content: File) -> HttpBody {
         let reader_stream = ReaderStream::new(content);
-        let stream_body = StreamBody::new(reader_stream
+        Self::stream(reader_stream)
+    }
+
+    /// Creates a new [`HttpBody`] from stream
+    #[inline]
+    pub fn stream<S>(stream: S) -> HttpBody
+    where 
+        S: TryStream<Ok = Bytes> + Send + Sync + 'static,
+        S::Error: Into<BoxError>
+    {
+        let stream_body = StreamBody::new(stream
             .map_err(Error::client_error)
             .map_ok(Frame::data));
         Self { inner: InnerBody::Boxed { inner: stream_body.boxed() } }

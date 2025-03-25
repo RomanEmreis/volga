@@ -4,7 +4,6 @@ use bytes::Bytes;
 use crate::error::Error;
 use crate::headers::{HeaderMap, CONTENT_TYPE};
 use futures_util::future::{ready, Ready};
-use http_body_util::BodyExt;
 use tokio::io::{AsyncWriteExt, BufWriter};
 
 use std::{

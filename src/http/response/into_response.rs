@@ -4,13 +4,13 @@ use crate::error::Error;
 use crate::http::StatusCode;
 use crate::headers::CONTENT_TYPE;
 use mime::TEXT_PLAIN_UTF_8;
+use serde::Serialize;
 
 use std::{
     io::Error as IoError,
     convert::Infallible,
     borrow::Cow
 };
-use serde::Serialize;
 
 /// Trait for types that can be returned from request handlers
 pub trait IntoResponse {
@@ -134,7 +134,11 @@ macro_rules! impl_into_response {
         $(impl IntoResponse for $type {
             #[inline]
             fn into_response(self) -> HttpResult {
-                ok!(self)
+                response!(
+                    $crate::http::StatusCode::OK,
+                    HttpBody::full(self.to_string()),
+                    [($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8")]
+                )
             }
         })*
     };
@@ -155,10 +159,11 @@ impl_into_response! {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
-    use std::io::{Error, ErrorKind};
+    use std::io::{Error as IoError, ErrorKind};
     use http_body_util::BodyExt;
     use serde::Serialize;
     use crate::ResponseContext;
+    use crate::error::Error;
     use super::IntoResponse;
 
     #[derive(Serialize)]
@@ -207,7 +212,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_converts_err_into_response() {
-        let response = Error::new(ErrorKind::InvalidInput, "some error").into_response();
+        let response = IoError::new(ErrorKind::InvalidInput, "some error").into_response();
 
         assert!(response.is_err());
     }
@@ -227,7 +232,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_converts_err_result_into_response() {
-        let response = Result::<&str, Error>::Err(Error::new(ErrorKind::InvalidInput, "some error")).into_response();
+        let response = Result::<&str, IoError>::Err(IoError::new(ErrorKind::InvalidInput, "some error")).into_response();
 
         assert!(response.is_err());
     }
@@ -318,6 +323,78 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(body), "\"test\"");
         assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_converts_box_str_into_response() {
+        let response = String::from("test").into_boxed_str().into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "test");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(response.status(), 200);
+    }
+
+    #[test]
+    fn it_converts_error_into_response() {
+        let response = Error::server_error("some error").into_response();
+
+        assert!(response.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_converts_int_into_response() {
+        let response = (-7878i32).into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "-7878");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_converts_float_into_response() {
+        let response = 1.25f32.into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "1.25");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_converts_uint_into_response() {
+        let response = 7878u32.into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "7878");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_converts_bool_into_response() {
+        let response = true.into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "true");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
         assert_eq!(response.status(), 200);
     }
 }

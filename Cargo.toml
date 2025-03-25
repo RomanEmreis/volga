@@ -46,6 +46,7 @@ tracing = { version = "0.1.41", default-features = false, optional = true }
 hyper = { version = "1.6.0", features = ["client"] }
 reqwest = { version = "0.12.15", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
 serde = { version = "1.0.219", features = ["derive"] }
+tokio-stream = "0.1.17"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 uuid = { version = "1.16.0", features = ["v4"] }
 criterion = { version = "0.5.1", features = ["async_tokio"] }
@@ -252,6 +253,10 @@ required-features = ["di","ws","tracing"]
 name = "cors"
 path = "examples/cors.rs"
 required-features = ["middleware","static-files","tracing"]
+
+[[example]]
+name = "sse"
+path = "examples/sse.rs"
 
 [[example]]
 name = "mcp"

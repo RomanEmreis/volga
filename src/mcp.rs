@@ -43,10 +43,3 @@ impl App {
         self
     }
 }
-
-macro_rules! method_name {
-    () => {{
-        let name = std::any::type_name::<fn()>();
-        name.split("::").last().unwrap()
-    }};
-}
