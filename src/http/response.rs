@@ -29,8 +29,9 @@ pub mod file;
 pub mod stream;
 pub mod status;
 pub mod into_response;
-mod redirect;
+pub mod redirect;
 pub mod html;
+pub mod sse;
 
 /// A customized response context with custom response `headers` and `content_type`
 /// > NOTE: This is not suitable for file response use the `file!` or `Results::file()` instead
@@ -133,7 +134,7 @@ impl Results {
     /// Produces an `OK 200` response with the file body.
     #[inline]
     pub fn file(file_name: &str, content: File) -> HttpResult {
-        let boxed_body = HttpBody::wrap_stream(content);
+        let boxed_body = HttpBody::file(content);
         let file_name = format!("attachment; filename=\"{}\"", file_name);
         response!(
             StatusCode::OK, 
@@ -324,7 +325,7 @@ mod tests {
     async fn it_creates_stream_response() {
         let path = Path::new("tests/resources/test_file.txt");
         let file = File::open(path).await.unwrap();
-        let body = HttpBody::wrap_stream(file);
+        let body = HttpBody::file(file);
         
         let mut response = Results::stream(body.into_boxed()).unwrap();
 
@@ -354,7 +355,7 @@ mod tests {
         let file = File::open(path).await.unwrap();
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::wrap_stream(file),
+            HttpBody::file(file),
             [
                 ("x-api-key", "some api key"),
                 ("Content-Type", "application/octet-stream")

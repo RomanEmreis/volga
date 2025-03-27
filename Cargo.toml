@@ -29,10 +29,10 @@ serde_json = "1.0.140"
 serde_urlencoded = "0.7.1"
 
 # optional
-async-compression = { version = "0.4.21", features = ["tokio"], optional = true }
+async-compression = { version = "0.4.22", features = ["tokio"], optional = true }
 base64 = { version = "0.22.1", optional = true }
 chrono = { version = "0.4.40", optional = true }
-handlebars = { version = "6.3.1", optional = true }
+handlebars = { version = "6.3.2", optional = true }
 httpdate = { version = "1.0.3", optional = true }
 hyper = { version = "1.6.0", features = ["server"], optional = true }
 hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
@@ -46,6 +46,7 @@ tracing = { version = "0.1.41", default-features = false, optional = true }
 hyper = { version = "1.6.0", features = ["client"] }
 reqwest = { version = "0.12.15", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
 serde = { version = "1.0.219", features = ["derive"] }
+tokio-stream = "0.1.17"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 uuid = { version = "1.16.0", features = ["v4"] }
 criterion = { version = "0.5.1", features = ["async_tokio"] }
@@ -129,6 +130,9 @@ required-features = ["ws"]
 [[test]]
 name = "cors"
 required-features = ["middleware"]
+
+[[test]]
+name = "sse"
 
 [[example]]
 name = "hello_world"
@@ -251,3 +255,7 @@ required-features = ["di","ws","tracing"]
 name = "cors"
 path = "examples/cors.rs"
 required-features = ["middleware","static-files","tracing"]
+
+[[example]]
+name = "sse"
+path = "examples/sse.rs"

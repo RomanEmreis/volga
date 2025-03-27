@@ -12,7 +12,7 @@ use async_compression::tokio::bufread::{ZlibDecoder, GzipDecoder};
 use async_compression::tokio::bufread::ZstdDecoder;
 
 use futures_util::TryStreamExt;
-use http_body_util::{BodyExt, StreamBody};
+use http_body_util::StreamBody;
 use hyper::body::Frame;
 use tokio_util::io::{
     ReaderStream,
@@ -138,6 +138,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use http_body_util::BodyExt;
     use bytes::Bytes;
     use tokio::io::AsyncWriteExt;
     use crate::HttpBody;

@@ -39,7 +39,7 @@ macro_rules! file {
         let mime = $crate::fs::get_mime_or_octet_stream($file_name);
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::wrap_stream($body),
+            $crate::HttpBody::file($body),
             [
                 ($crate::headers::CONTENT_TYPE, mime.as_ref()),
                 ($crate::headers::TRANSFER_ENCODING, "chunked"),

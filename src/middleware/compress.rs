@@ -19,7 +19,7 @@ use async_compression::tokio::bufread::ZstdEncoder;
 
 use async_compression::Level;
 use futures_util::TryStreamExt;
-use http_body_util::{BodyExt, StreamBody};
+use http_body_util::StreamBody;
 use hyper::body::Frame;
 use hyper::http::response::Parts;
 use tokio_util::io::{
@@ -207,6 +207,7 @@ impl App {
 mod tests {
     use serde_json::json;
     use tokio::io::AsyncWriteExt;
+    use http_body_util::BodyExt;
     use super::*;
     use crate::HttpBody;
     

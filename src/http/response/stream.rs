@@ -6,8 +6,8 @@
 /// use volga::{HttpRequest, stream};
 ///
 /// # async fn dox(request: HttpRequest) -> std::io::Result<()> {
-/// let boxed_body = request.into_boxed_body();
-/// stream!(boxed_body);
+/// let body_stream = request.into_body_stream();
+/// stream!(body_stream);
 /// # Ok(())
 /// # }
 /// ```
@@ -16,8 +16,8 @@
 /// use volga::{HttpRequest, stream};
 ///
 /// # async fn dox(request: HttpRequest) -> std::io::Result<()> {
-/// let boxed_body = request.into_boxed_body();
-/// stream!(boxed_body, [
+/// let body_stream = request.into_body_stream();
+/// stream!(body_stream, [
 ///    ("Content-Type", "message/http")
 /// ]);
 /// # Ok(())
@@ -26,15 +26,12 @@
 #[macro_export]
 macro_rules! stream {
     ($body:expr) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::new($body)
-        )
+        $crate::stream!($body, [])
     };
     ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::new($body),
+            $crate::HttpBody::stream($body),
             [ $( ($key, $value) ),* ]
         )
     };
@@ -51,9 +48,9 @@ mod tests {
     async fn it_creates_stream_response() {
         let path = Path::new("tests/resources/test_file.txt");
         let file = File::open(path).await.unwrap();
-        let body = HttpBody::wrap_stream(file);
+        let body = HttpBody::file(file);
 
-        let response = stream!(body.into_boxed());
+        let response = stream!(body.into_data_stream());
 
         assert!(response.is_ok());
 
@@ -68,9 +65,9 @@ mod tests {
     async fn it_creates_stream_response_with_custom_headers() {
         let path = Path::new("tests/resources/test_file.txt");
         let file = File::open(path).await.unwrap();
-        let body = HttpBody::wrap_stream(file);
+        let body = HttpBody::file(file);
 
-        let response = stream!(body.into_boxed(), [
+        let response = stream!(body.into_data_stream(), [
             ("x-api-key", "some api key")
         ]);
 

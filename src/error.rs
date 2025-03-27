@@ -30,7 +30,7 @@ pub mod fallback;
 #[cfg(feature = "problem-details")]
 pub mod problem;
 
-type BoxError = Box<
+pub(crate) type BoxError = Box<
     dyn StdError 
     + Send 
     + Sync

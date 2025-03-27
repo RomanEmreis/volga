@@ -1,6 +1,7 @@
 ﻿//! HTTP request utilities
 
 use std::ops::{Deref, DerefMut};
+use http_body_util::BodyDataStream;
 use hyper::{
     body::Incoming,
     http::request::Parts,
@@ -82,6 +83,14 @@ impl HttpRequest {
         self.inner
             .into_body()
             .into_boxed()
+    }
+
+    /// Consumes the request body into [`BodyDataStream`]
+    #[inline]
+    pub fn into_body_stream(self) -> BodyDataStream<HttpBody> {
+        self.inner
+            .into_body()
+            .into_data_stream()
     }
 
     /// Consumes the request and returns the body as boxed trait object that is !Sync
