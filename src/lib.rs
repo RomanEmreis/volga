@@ -55,8 +55,6 @@ pub mod tls;
 pub mod tracing;
 #[cfg(feature = "ws")]
 pub mod ws;
-#[cfg(feature = "mcp")]
-pub mod mcp;
 #[cfg(test)]
 pub mod test_utils;
 
