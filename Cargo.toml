@@ -29,10 +29,10 @@ serde_json = "1.0.140"
 serde_urlencoded = "0.7.1"
 
 # optional
-async-compression = { version = "0.4.21", features = ["tokio"], optional = true }
+async-compression = { version = "0.4.22", features = ["tokio"], optional = true }
 base64 = { version = "0.22.1", optional = true }
 chrono = { version = "0.4.40", optional = true }
-handlebars = { version = "6.3.1", optional = true }
+handlebars = { version = "6.3.2", optional = true }
 httpdate = { version = "1.0.3", optional = true }
 hyper = { version = "1.6.0", features = ["server"], optional = true }
 hyper-util = { version = "0.1.10", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
@@ -81,7 +81,6 @@ static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]
 ws = ["dep:sha1", "dep:base64", "dep:tokio-tungstenite"]
-mcp = []
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "dep:async-compression", "async-compression?/brotli"]
@@ -131,6 +130,9 @@ required-features = ["ws"]
 [[test]]
 name = "cors"
 required-features = ["middleware"]
+
+[[test]]
+name = "sse"
 
 [[example]]
 name = "hello_world"
@@ -257,8 +259,3 @@ required-features = ["middleware","static-files","tracing"]
 [[example]]
 name = "sse"
 path = "examples/sse.rs"
-
-[[example]]
-name = "mcp"
-path = "examples/mcp.rs"
-required-features = ["mcp","tracing"]
