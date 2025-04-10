@@ -2,14 +2,14 @@
 
 // Re-exporting HTTP status codes, Response and some headers from hyper/http
 pub use hyper::{
-    http::{Uri, Method, Extensions},
-    Response, 
+    http::{Extensions, Method, Uri},
+    Response,
     StatusCode,
 };
 
-pub use body::{BoxBody, UnsyncBoxBody, HttpBody};
+pub use body::{BoxBody, HttpBody, UnsyncBoxBody};
 pub use endpoints::{
-    args::{FromRawRequest, FromRequestRef, FromRequest, FromRequestParts},
+    args::{FromRawRequest, FromRequest, FromRequestParts, FromRequestRef, sse},
     handlers::GenericHandler
 };
 pub use request::HttpRequest;

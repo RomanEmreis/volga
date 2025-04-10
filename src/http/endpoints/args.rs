@@ -8,10 +8,10 @@ use hyper::{
 };
 
 use crate::{
+    error::Error,
     http::endpoints::route::PathArguments,
-    HttpBody, 
-    HttpRequest, 
-    error::Error
+    HttpBody,
+    HttpRequest
 };
 
 pub mod path;
@@ -21,6 +21,7 @@ pub mod file;
 pub mod cancellation_token;
 pub mod request;
 pub mod form;
+pub mod sse;
 
 #[cfg(feature = "multipart")]
 pub mod multipart;
@@ -174,7 +175,7 @@ define_generic_from_raw_request! { T1, T2, T3, T4 }
 
 #[cfg(test)]
 mod tests {
-    use futures_util::future::{Ready, ok};
+    use futures_util::future::{ok, Ready};
     use crate::error::Error;
     use super::{FromPayload, Payload, Source};
     

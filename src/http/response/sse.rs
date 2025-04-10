@@ -29,10 +29,11 @@ mod tests {
     use http_body_util::BodyExt;
     use futures_util::stream::{repeat_with};
     use tokio_stream::StreamExt;
+    use crate::http::sse::Event;
 
     #[tokio::test]
     async fn it_creates_sse_response() {
-        let stream = repeat_with(|| "data: hi!\n\n".into())
+        let stream = repeat_with(|| Event::new("data", "hi!").into())
             .map(Ok::<_, Error>)
             .take(1);
         
