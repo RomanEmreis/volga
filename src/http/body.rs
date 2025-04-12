@@ -232,12 +232,13 @@ impl HttpBody {
     #[inline]
     pub fn stream<S>(stream: S) -> HttpBody
     where 
-        S: TryStream<Ok = Bytes> + Send + Sync + 'static,
+        S: TryStream + Send + Sync + 'static,
+        S::Ok: Into<Bytes>,
         S::Error: Into<BoxError>
     {
         let stream_body = StreamBody::new(stream
             .map_err(Error::client_error)
-            .map_ok(Frame::data));
+            .map_ok(|msg| Frame::data(msg.into())));
         Self { inner: InnerBody::Boxed { inner: stream_body.boxed() } }
     }
 }

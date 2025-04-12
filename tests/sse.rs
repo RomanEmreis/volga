@@ -9,8 +9,8 @@ async fn it_adds_access_control_allow_origin_header() {
         let mut app = App::new()
             .bind("127.0.0.1:7944");
         app.map_get("/events", || async {
-            let stream = repeat_with(|| "data: Pass!\n\n".into())
-                .map(Ok::<_, Error>)
+            let stream = repeat_with(|| "data: Pass!\n\n")
+                .map(Ok::<&str, Error>)
                 .take(2);
             sse!(stream)
         });

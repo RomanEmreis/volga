@@ -4,8 +4,7 @@
 //! cargo run --example sse
 //! ```
 
-use volga::{App, http::sse::Event, sse};
-use volga::error::Error;
+use volga::{App, error::Error, http::sse::Message, sse};
 use futures_util::stream::{repeat_with};
 use std::time::Duration;
 use serde::Serialize;
@@ -23,7 +22,11 @@ async fn main() -> std::io::Result<()> {
     app.map_get("/events", || async {
         let repeater = || {
             let resp = SseResponse { data: "Hello, world!".into() };
-            Event::from(resp).into()
+            Message::new()
+                .comment("A greeting message")
+                .event("greet")
+                .json(resp)
+                .retry(Duration::from_secs(3))
         };
         let stream = repeat_with(repeater)
             .map(Ok::<_, Error>)

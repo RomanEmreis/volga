@@ -29,11 +29,11 @@ mod tests {
     use http_body_util::BodyExt;
     use futures_util::stream::{repeat_with};
     use tokio_stream::StreamExt;
-    use crate::http::sse::Event;
+    use crate::http::sse::Message;
 
     #[tokio::test]
     async fn it_creates_sse_response() {
-        let stream = repeat_with(|| Event::new("data", "hi!").into())
+        let stream = repeat_with(|| Message::new().data("hi!"))
             .map(Ok::<_, Error>)
             .take(1);
         
@@ -48,8 +48,8 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_sse_response_with_headers() {
-        let stream = repeat_with(|| "data: hi!\n\n".into())
-            .map(Ok::<_, Error>)
+        let stream = repeat_with(|| "data: hi!\n\n")
+            .map(Ok::<&str, Error>)
             .take(1);
 
         let mut response = sse!(stream, [

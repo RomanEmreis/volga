@@ -12,11 +12,6 @@
 //! * Runs on stable Rust 1.80+
 //! 
 //! ## Example
-//! ```toml
-//! [dependencies]
-//! volga = "0.5.6"
-//! tokio = { version = "1", features = ["full"] }
-//! ```
 //! ```no_run
 //! use volga::*;
 //! 
@@ -38,6 +33,7 @@
 #![deny(unreachable_pub)]
 
 mod server;
+pub(crate) mod utils;
 
 pub mod app;
 pub mod http;
