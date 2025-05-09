@@ -568,7 +568,6 @@ impl App {
             };
             
             self.use_middleware(move |ctx, next| {
-                let hsts_header = STRICT_TRANSPORT_SECURITY.clone();
                 let hsts_header_value = hsts_header_value.clone();
                 let is_excluded = is_excluded.clone();
                 
@@ -584,7 +583,7 @@ impl App {
                         http_result.map(|mut response| {
                             response
                                 .headers_mut()
-                                .append(hsts_header, hsts_header_value.parse().unwrap());
+                                .append(STRICT_TRANSPORT_SECURITY, hsts_header_value.parse().unwrap());
                             response
                         })
                     } else { 

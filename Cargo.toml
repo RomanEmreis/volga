@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.5.7"
+version = "0.5.8"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -24,16 +24,17 @@ memchr = "2.7.4"
 mime = "0.3.17"
 mime_guess = "2.0.5"
 pin-project-lite = "0.2.16"
-tokio = { version = "1.44.2", features = ["full"] }
-tokio-util = "0.7.14"
+tokio = { version = "1.45.0", features = ["full"] }
+tokio-util = "0.7.15"
 serde = "1.0.219"
 serde_json = "1.0.140"
 serde_urlencoded = "0.7.1"
 
 # optional
-async-compression = { version = "0.4.22", features = ["tokio"], optional = true }
+async-compression = { version = "0.4.23", features = ["tokio"], optional = true }
 base64 = { version = "0.22.1", optional = true }
-chrono = { version = "0.4.40", optional = true }
+chrono = { version = "0.4.41", optional = true }
+cookie = { version = "0.18.1", features = ["percent-encode"], optional = true } 
 handlebars = { version = "6.3.2", optional = true }
 httpdate = { version = "1.0.3", optional = true }
 hyper = { version = "1.6.0", features = ["server"], optional = true }
@@ -63,6 +64,7 @@ full = [
     "middleware", 
     "di",
     "tls",
+    "cookie",
     "tracing",
     "multipart",
     "problem-details",
@@ -77,6 +79,7 @@ http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2", "de
 
 di = []
 middleware = []
+cookie = ["dep:cookie"]
 multipart = ["dep:multer"]
 problem-details = []
 static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
@@ -261,3 +264,8 @@ required-features = ["middleware","static-files","tracing"]
 [[example]]
 name = "sse"
 path = "examples/sse.rs"
+
+[[example]]
+name = "cookies"
+path = "examples/cookies.rs"
+required-features = ["cookie"]

@@ -5,7 +5,7 @@ use crate::error::Error;
 use crate::http::body::{BoxBody, HttpBody};
 
 use std::collections::HashMap;
-use tokio::{fs::File, io};
+use tokio::fs::File;
 use serde::Serialize;
 
 use hyper::{header::{HeaderName, HeaderValue}, http::response::Builder, Response, StatusCode};
@@ -71,16 +71,8 @@ pub struct ResponseContext<T: Serialize> {
 
 pub type HttpResponse = Response<HttpBody>;
 pub type HttpResult = Result<HttpResponse, Error>;
-pub struct HttpResultWrapper(io::Result<HttpResponse>);
 pub type HttpHeaders = HashMap<String, String>;
-
 pub struct Results;
-
-impl From<HttpResultWrapper> for io::Result<HttpResponse> {
-    fn from(result: HttpResultWrapper) -> Self {
-        result.0
-    }
-}
 
 impl Results {
     /// Produces a customized `OK 200` response

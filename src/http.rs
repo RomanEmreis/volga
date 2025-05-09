@@ -25,9 +25,14 @@ pub use response::{
 #[cfg(feature = "middleware")]
 pub use cors::CorsConfig;
 
+#[cfg(feature = "cookie")]
+pub use cookie::Cookies;
+
 pub mod body;
 pub mod request;
 pub mod response;
 pub mod endpoints;
+#[cfg(feature = "cookie")]
+pub mod cookie;
 #[cfg(feature = "middleware")]
 pub mod cors;
