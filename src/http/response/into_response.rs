@@ -2,9 +2,12 @@
 use crate::{Json, Form, ok, status, form, response};
 use crate::error::Error;
 use crate::http::StatusCode;
-use crate::headers::CONTENT_TYPE;
+use crate::headers::{HeaderMap, CONTENT_TYPE};
 use mime::TEXT_PLAIN_UTF_8;
 use serde::Serialize;
+
+#[cfg(feature = "cookie")]
+use crate::http::Cookies;
 
 use std::{
     io::Error as IoError,
@@ -129,6 +132,51 @@ impl<T: Serialize> IntoResponse for ResponseContext<T> {
     }
 }
 
+impl IntoResponse for StatusCode {
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        response!(
+            self,
+            HttpBody::empty()
+        )
+    }
+}
+
+impl<R> IntoResponse for (R, HeaderMap)
+where 
+    R: IntoResponse
+{
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        let (resp, headers) = self;
+        match resp.into_response() {
+            Err(err) => Err(err),
+            Ok(mut resp) => { 
+                resp.headers_mut().extend(headers);
+                Ok(resp)
+            },
+        }
+    }
+}
+
+#[cfg(feature = "cookie")]
+impl<R> IntoResponse for (R, Cookies)
+where 
+    R: IntoResponse
+{
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        let (resp, cookies) = self;
+        match resp.into_response() {
+            Err(err) => Err(err),
+            Ok(mut resp) => { 
+                cookies.set_cookies(resp.headers_mut());
+                Ok(resp)
+            },
+        }
+    }    
+}
+
 macro_rules! impl_into_response {
     { $($type:ident),* $(,)? } => {
         $(impl IntoResponse for $type {
@@ -161,10 +209,14 @@ mod tests {
     use std::collections::HashMap;
     use std::io::{Error as IoError, ErrorKind};
     use http_body_util::BodyExt;
+    use hyper::StatusCode;
     use serde::Serialize;
     use crate::ResponseContext;
     use crate::error::Error;
+    use crate::headers::HeaderMap;
     use super::IntoResponse;
+    #[cfg(feature = "cookie")]
+    use crate::http::Cookies;
 
     #[derive(Serialize)]
     struct TestPayload {
@@ -396,5 +448,64 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(body), "true");
         assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
         assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_converts_status_response() {
+        let response = StatusCode::SEE_OTHER.into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(body.len(), 0);
+        assert_eq!(response.status(), 303);
+    }
+
+    #[tokio::test]
+    async fn it_converts_tuple_of_status_and_headers_into_response() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", "some api key".parse().unwrap());
+        headers.insert("x-api-secret", "some api secret".parse().unwrap());
+        
+        let response = (
+            StatusCode::NO_CONTENT,
+            headers
+        ).into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(body.len(), 0);
+        assert_eq!(response.status(), 204);
+        assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
+        assert_eq!(response.headers().get("x-api-secret").unwrap(), "some api secret");
+    }
+    
+    #[tokio::test]
+    #[cfg(feature = "cookie")]
+    async fn it_converts_tuple_of_redirect_status_and_cookies_into_redirect_response() {
+        let mut cookies = Cookies::new();
+        cookies.add(("key-1", "value-1"));
+        cookies.add(("key-2", "value-2"));
+        
+        let response = (
+            crate::found!("https://www.rust-lang.org/"), 
+            cookies
+        ).into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(body.len(), 0);
+        assert_eq!(response.headers().get("location").unwrap(), "https://www.rust-lang.org/");
+        assert_eq!(response.status(), 302);
+        
+        let mut cookies = response.headers().get_all("set-cookie").iter(); 
+        
+        assert_eq!(cookies.next().unwrap(), "key-1=value-1");
+        assert_eq!(cookies.next().unwrap(), "key-2=value-2");
     }
 }

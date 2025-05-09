@@ -22,9 +22,10 @@ pub use hyper::{
         TRANSFER_ENCODING,
         VARY,
         UPGRADE,
-        CONNECTION
+        CONNECTION,
+        COOKIE, SET_COOKIE
     },
-    http::HeaderValue,
+    http::{HeaderName, HeaderValue},
     HeaderMap
 };
 
