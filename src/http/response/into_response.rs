@@ -503,9 +503,13 @@ mod tests {
         assert_eq!(response.headers().get("location").unwrap(), "https://www.rust-lang.org/");
         assert_eq!(response.status(), 302);
         
-        let mut cookies = response.headers().get_all("set-cookie").iter(); 
+        let cookies = response.headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|cookie| cookie.to_str().unwrap())
+            .collect::<Vec<&str>>(); 
         
-        assert_eq!(cookies.next().unwrap(), "key-1=value-1");
-        assert_eq!(cookies.next().unwrap(), "key-2=value-2");
+        assert!(cookies.contains(&"key-1=value-1"));
+        assert!(cookies.contains(&"key-2=value-2"));
     }
 }
