@@ -20,7 +20,7 @@
 //!     // Start the server
 //!     let mut app = App::new();
 //! 
-//!     // Example of request handler
+//!     // Example of a request handler
 //!     app.map_get("/hello/{name}", async |name: String| {
 //!          ok!("Hello {name}!")
 //!     });
