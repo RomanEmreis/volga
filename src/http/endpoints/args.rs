@@ -69,7 +69,7 @@ pub trait FromRequestParts: Sized {
     fn from_parts(parts: &Parts) -> Result<Self, Error>;
 }
 
-/// Specifies extractor to read data from HTTP request
+/// Specifies extractor to read data from an HTTP request 
 /// depending on payload's [`Source`]
 pub(crate) trait FromPayload: Send + Sized {
     type Future: Future<Output = Result<Self, Error>> + Send;
@@ -77,7 +77,7 @@ pub(crate) trait FromPayload: Send + Sized {
     /// Extracts data from give [`Payload`]
     fn from_payload(payload: Payload) -> Self::Future;
 
-    /// Returns a [`Source`] where payload should be extracted from
+    /// Returns a [`Source`] where the payload should be extracted from
     fn source() -> Source {
         Source::None
     }

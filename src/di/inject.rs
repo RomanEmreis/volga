@@ -2,12 +2,10 @@
 
 use super::Container;
 use crate::error::Error;
-use futures_util::future::ok;
-use std::future::Future;
 
 /// A trait that adds the ability to inject dependencies when resolving a type from the DI container
 ///
-/// If there is no need to inject other dependencies the `struct` must implement the `Default` trait
+/// If there is no need to inject other dependencies, the `struct` must implement the `Default` trait
 ///
 /// # Example
 /// ```no_run
@@ -45,10 +43,9 @@ use std::future::Future;
 /// }
 ///
 /// impl Inject for TransientService {
-///     async fn inject(container: &Container) -> Result<Self, Error> {
+///     fn inject(container: &Container) -> Result<Self, Error> {
 ///         let scoped_service = container
-///             .resolve::<ScopedService>()
-///             .await?;
+///             .resolve::<ScopedService>()?;
 ///         Ok(Self { service: scoped_service })
 ///     }
 /// }
@@ -64,12 +61,12 @@ use std::future::Future;
 /// });
 /// ```
 pub trait Inject: Sized + Send + Sync {
-    fn inject(container: &Container) -> impl Future<Output = Result<Self, Error>> + Send;
+    fn inject(container: &Container) -> Result<Self, Error>;
 }
 
 impl<T: Default + Send + Sync> Inject for T {
     #[inline]
-    fn inject(_: &Container) -> impl Future<Output = Result<Self, Error>> + Send {
-        ok(Self::default())
+    fn inject(_: &Container) -> Result<Self, Error> {
+        Ok(Self::default())
     }
 }

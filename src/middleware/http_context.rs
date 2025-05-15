@@ -71,15 +71,15 @@ impl HttpContext {
     /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
-        self.request.resolve::<T>().await
+    pub fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
+        self.request.resolve::<T>()
     }
 
     /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
-        self.request.resolve_shared::<T>().await
+    pub fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
+        self.request.resolve_shared::<T>()
     }
     
     /// Inserts the [`Header<T>`] to HTTP request headers

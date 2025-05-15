@@ -7,7 +7,11 @@ use mime::TEXT_PLAIN_UTF_8;
 use serde::Serialize;
 
 #[cfg(feature = "cookie")]
-use crate::http::Cookies;
+use crate::http::{Cookies, cookie::set_cookies};
+#[cfg(feature = "signed-cookie")]
+use crate::http::SignedCookies;
+#[cfg(feature = "private-cookie")]
+use crate::http::PrivateCookies;
 
 use std::{
     io::Error as IoError,
@@ -159,8 +163,8 @@ where
     }
 }
 
-#[cfg(feature = "cookie")]
-impl<R> IntoResponse for (R, Cookies)
+#[cfg(feature = "signed-cookie")]
+impl<R> IntoResponse for (R, SignedCookies)
 where 
     R: IntoResponse
 {
@@ -169,12 +173,50 @@ where
         let (resp, cookies) = self;
         match resp.into_response() {
             Err(err) => Err(err),
-            Ok(mut resp) => { 
-                cookies.set_cookies(resp.headers_mut());
+            Ok(mut resp) => {
+                let (_, jar) = cookies.into_parts();
+                set_cookies(jar, resp.headers_mut());
                 Ok(resp)
             },
         }
     }    
+}
+
+#[cfg(feature = "private-cookie")]
+impl<R> IntoResponse for (R, PrivateCookies)
+where
+    R: IntoResponse
+{
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        let (resp, cookies) = self;
+        match resp.into_response() {
+            Err(err) => Err(err),
+            Ok(mut resp) => {
+                let (_, jar) = cookies.into_parts();
+                set_cookies(jar, resp.headers_mut());
+                Ok(resp)
+            },
+        }
+    }
+}
+
+#[cfg(feature = "cookie")]
+impl<R> IntoResponse for (R, Cookies)
+where
+    R: IntoResponse
+{
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        let (resp, cookies) = self;
+        match resp.into_response() {
+            Err(err) => Err(err),
+            Ok(mut resp) => {
+                set_cookies(cookies.into_inner(), resp.headers_mut());
+                Ok(resp)
+            },
+        }
+    }
 }
 
 macro_rules! impl_into_response {
@@ -487,8 +529,9 @@ mod tests {
     #[cfg(feature = "cookie")]
     async fn it_converts_tuple_of_redirect_status_and_cookies_into_redirect_response() {
         let mut cookies = Cookies::new();
-        cookies.add(("key-1", "value-1"));
-        cookies.add(("key-2", "value-2"));
+        cookies = cookies
+            .add(("key-1", "value-1"))
+            .add(("key-2", "value-2"));
         
         let response = (
             crate::found!("https://www.rust-lang.org/"), 
@@ -502,14 +545,78 @@ mod tests {
         assert_eq!(body.len(), 0);
         assert_eq!(response.headers().get("location").unwrap(), "https://www.rust-lang.org/");
         assert_eq!(response.status(), 302);
-        
-        let cookies = response.headers()
-            .get_all("set-cookie")
-            .iter()
-            .map(|cookie| cookie.to_str().unwrap())
-            .collect::<Vec<&str>>(); 
+
+        let cookies = get_cookies(response.headers()); 
         
         assert!(cookies.contains(&"key-1=value-1"));
         assert!(cookies.contains(&"key-2=value-2"));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "signed-cookie")]
+    async fn it_converts_tuple_of_redirect_status_and_signed_cookies_into_redirect_response() {
+        use crate::http::{SignedKey, SignedCookies};
+        
+        let key = SignedKey::generate();
+        let mut cookies = SignedCookies::new(key);
+        cookies = cookies
+            .add(("key-1", "value-1"))
+            .add(("key-2", "value-2"));
+
+        let response = (
+            crate::see_other!("https://www.rust-lang.org/"),
+            cookies
+        ).into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(body.len(), 0);
+        assert_eq!(response.headers().get("location").unwrap(), "https://www.rust-lang.org/");
+        assert_eq!(response.status(), 303);
+
+        let cookies = get_cookies(response.headers());
+
+        assert_eq!(cookies.iter().filter(|c| c.contains("key-1")).count(), 1);
+        assert_eq!(cookies.iter().filter(|c| c.contains("key-2")).count(), 1);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "private-cookie")]
+    async fn it_converts_tuple_of_redirect_status_and_private_cookies_into_redirect_response() {
+        use crate::http::{PrivateKey, PrivateCookies};
+
+        let key = PrivateKey::generate();
+        let mut cookies = PrivateCookies::new(key);
+        cookies = cookies
+            .add(("key-1", "value-1"))
+            .add(("key-2", "value-2"));
+
+        let response = (
+            crate::see_other!("https://www.rust-lang.org/"),
+            cookies
+        ).into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(body.len(), 0);
+        assert_eq!(response.headers().get("location").unwrap(), "https://www.rust-lang.org/");
+        assert_eq!(response.status(), 303);
+
+        let cookies = get_cookies(response.headers());
+
+        assert_eq!(cookies.iter().filter(|c| c.contains("key-1")).count(), 1);
+        assert_eq!(cookies.iter().filter(|c| c.contains("key-2")).count(), 1);
+    }
+    
+    fn get_cookies(headers: &HeaderMap) -> Vec<&str> {
+        headers
+            .get_all("set-cookie")
+            .iter()
+            .map(|cookie| cookie.to_str().unwrap())
+            .collect::<Vec<&str>>()
     }
 }

@@ -1,6 +1,5 @@
 ﻿//! Set of utils to work with Cookies
 
-use std::ops::{Deref, DerefMut};
 use cookie::CookieJar;
 use futures_util::future::{ready, Ready};
 use crate::{
@@ -9,37 +8,20 @@ use crate::{
     http::{endpoints::args::{FromPayload, Payload, Source}},
 };
 
+#[cfg(feature = "signed-cookie")]
+pub mod signed;
+#[cfg(feature = "private-cookie")]
+pub mod private;
+
 /// Represents HTTP cookies
 #[derive(Debug, Default, Clone)]
 pub struct Cookies(CookieJar);
-
-impl Deref for Cookies {
-    type Target = CookieJar;
-    
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Cookies {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
 
 impl From<&HeaderMap> for Cookies {
     #[inline]
     fn from(headers: &HeaderMap) -> Self {
         let mut jar = CookieJar::new();
-        let cookies = headers
-            .get_all(COOKIE)
-            .into_iter()
-            .filter_map(|value| value.to_str().ok())
-            .flat_map(|value| value.split(';'))
-            .filter_map(|cookie| cookie::Cookie::parse_encoded(cookie.to_owned()).ok());
-
-        for cookie in cookies {
+        for cookie in get_cookies(headers) {
             jar.add_original(cookie);
         }
         
@@ -51,7 +33,7 @@ impl From<Cookies> for HeaderMap {
     #[inline]
     fn from(cookies: Cookies) -> Self {
         let mut headers = Self::new();
-        cookies.set_cookies(&mut headers);
+        set_cookies(cookies.0, &mut headers);
         headers
     }
 }
@@ -63,13 +45,57 @@ impl Cookies {
         Self::default()
     }
     
-    /// Sets cookies to the HTTP headers
+    /// Unwraps the inner jar
     #[inline]
-    pub(crate) fn set_cookies(self, headers: &mut HeaderMap) {
-        for cookie in self.delta() {
-            if let Ok(header_value) = cookie.encoded().to_string().parse() {
-                headers.append(SET_COOKIE, header_value);
-            }
+    pub fn into_inner(self) -> CookieJar {
+        self.0
+    }
+
+    /// Returns a reference to the cookie inside the jar by `name`
+    /// If the cookie cannot be found, `None` is returned.
+    pub fn get(&self, name: &str) -> Option<&cookie::Cookie<'static>> {
+        self.0.get(name)
+    }
+
+    /// Adds a cookie. If a cookie with the same name already exists, it is replaced with this cookie.
+    #[allow(clippy::should_implement_trait)]
+    pub fn add<C: Into<cookie::Cookie<'static>>>(mut self, cookie: C) -> Self {
+        self.0.add(cookie);
+        self
+    }
+
+    /// Removes cookie from this jar. If an original cookie with the same name as the cookie is present in the jar,
+    /// a removal cookie will be present in the delta computation.
+    ///
+    /// To properly generate the removal cookie, this cookie must contain the same path and domain as the cookie that was initially set.
+    pub fn remove<C: Into<cookie::Cookie<'static>>>(mut self, cookie: C) -> Self {
+        self.0.remove(cookie);
+        self
+    }
+
+    /// Returns an iterator over all the cookies present in this jar.
+    pub fn iter(&self) -> impl Iterator<Item = &cookie::Cookie<'static>> + '_ {
+        self.0.iter()
+    }
+}
+
+/// Gets cookies from HTTP request's [`HeaderMap`]
+#[inline]
+fn get_cookies(headers: &HeaderMap) -> impl Iterator<Item = cookie::Cookie<'static>> + '_ {
+    headers
+        .get_all(COOKIE)
+        .into_iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(';'))
+        .filter_map(|cookie| cookie::Cookie::parse_encoded(cookie.to_owned()).ok())
+}
+
+/// Sets cookies to the HTTP headers
+#[inline]
+pub(crate) fn set_cookies(jar: CookieJar, headers: &mut HeaderMap) {
+    for cookie in jar.delta() {
+        if let Ok(header_value) = cookie.encoded().to_string().parse() {
+            headers.append(SET_COOKIE, header_value);
         }
     }
 }
@@ -133,21 +159,21 @@ mod tests {
         let mut cookies = Cookies::default();
 
         // Add a new cookie
-        cookies.add(cookie::Cookie::new("test", "value"));
+        cookies = cookies.add(cookie::Cookie::new("test", "value"));
         assert_eq!(cookies.get("test").unwrap().value(), "value");
 
         // Remove a cookie
-        cookies.remove(cookie::Cookie::new("test", ""));
+        cookies = cookies.remove(cookie::Cookie::new("test", ""));
         assert!(cookies.get("test").is_none());
     }
 
     #[test]
     fn it_sets_cookies_to_headers() {
         let mut cookies = Cookies::default();
-        cookies.add(cookie::Cookie::new("session", "xyz789"));
+        cookies = cookies.add(cookie::Cookie::new("session", "xyz789"));
 
         let mut headers = HeaderMap::new();
-        cookies.set_cookies(&mut headers);
+        set_cookies(cookies.0, &mut headers);
 
         let cookie_header = headers.get(SET_COOKIE).expect("Cookie header should be set");
         assert!(cookie_header.to_str().unwrap().contains("session=xyz789"));
@@ -171,20 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn test_source() {
+    fn it_returns_parts_source() {
         assert_eq!(Cookies::source(), Source::Parts);
-    }
-
-    #[test]
-    fn test_deref_and_deref_mut() {
-        let mut cookies = Cookies::default();
-
-        // Test Deref
-        cookies.add(cookie::Cookie::new("test", "value"));
-        assert_eq!(cookies.deref().get("test").unwrap().value(), "value");
-
-        // Test DerefMut
-        cookies.deref_mut().add(cookie::Cookie::new("test2", "value2"));
-        assert_eq!(cookies.get("test2").unwrap().value(), "value2");
     }
 }
