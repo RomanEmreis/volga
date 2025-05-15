@@ -24,9 +24,12 @@ pub use response::{
 
 #[cfg(feature = "middleware")]
 pub use cors::CorsConfig;
-
 #[cfg(feature = "cookie")]
 pub use cookie::Cookies;
+#[cfg(feature = "signed-cookie")]
+pub use cookie::signed::{SignedKey, SignedCookies};
+#[cfg(feature = "private-cookie")]
+pub use cookie::private::{PrivateKey, PrivateCookies};
 
 pub mod body;
 pub mod request;

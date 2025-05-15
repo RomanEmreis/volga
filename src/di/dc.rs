@@ -1,8 +1,7 @@
 ﻿//! Extractors for Dependency Injection
 
 use super::{Container, Inject};
-use futures_util::{pin_mut, ready};
-use pin_project_lite::pin_project;
+use futures_util::future::{ready, Ready};
 
 use crate::{
     error::Error, 
@@ -11,10 +10,6 @@ use crate::{
 
 use std::{
     ops::{Deref, DerefMut},
-    task::{Context, Poll},
-    marker::PhantomData,
-    future::Future,
-    pin::Pin,
     sync::Arc
 };
 
@@ -83,36 +78,18 @@ impl<T: Inject + Clone> Dc<T> {
     }
 }
 
-pin_project! {
-    /// A future that resolves a dependency from DI container.
-    pub struct ExtractDependencyFut<T> {
-        #[pin]
-        container: Container,
-        _marker: PhantomData<T>
-    }
-}
-
-impl<T: Inject + 'static> Future for ExtractDependencyFut<T> {
-    type Output = Result<Dc<T>, Error>;
-    
-    #[inline]
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        let fut = this.container.resolve_shared::<T>();
-        pin_mut!(fut);
-        let result = ready!(fut.poll(cx));
-        Poll::Ready(result.map(Dc))
-    }
-}
-
 impl<T: Inject + 'static> FromPayload for Dc<T> {
-    type Future = ExtractDependencyFut<T>;
+    type Future = Ready<Result<Self, Error>>;
 
+    #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         let container = Container::try_from(parts)
             .expect("DI Container must be provided");
-        ExtractDependencyFut { container, _marker: PhantomData }
+        
+        ready(container
+            .resolve_shared::<T>()
+            .map(Dc))
     }
 
     fn source() -> Source {
@@ -139,7 +116,7 @@ mod tests {
         let container = container.build();
         
         let scope = container.create_scope();
-        let vec = scope.resolve::<Cache>().await.unwrap();
+        let vec = scope.resolve::<Cache>().unwrap();
         vec.lock().unwrap().push(1);
         
         let mut req = Request::get("/").body(()).unwrap();

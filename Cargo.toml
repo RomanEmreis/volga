@@ -64,7 +64,7 @@ full = [
     "middleware", 
     "di",
     "tls",
-    "cookie",
+    "cookie-full",
     "tracing",
     "multipart",
     "problem-details",
@@ -79,13 +79,17 @@ http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2", "de
 
 di = []
 middleware = []
-cookie = ["dep:cookie"]
 multipart = ["dep:multer"]
 problem-details = []
 static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]
 ws = ["dep:sha1", "dep:base64", "dep:tokio-tungstenite"]
+
+cookie-full = ["cookie", "private-cookie", "signed-cookie"]
+cookie = ["dep:cookie"]
+private-cookie = ["di", "dep:cookie", "cookie?/private"]
+signed-cookie = ["di", "dep:cookie", "cookie?/signed"]
 
 compression-full = ["compression-brotli", "compression-gzip", "compression-zstd"]
 compression-brotli = ["middleware", "dep:async-compression", "async-compression?/brotli"]
@@ -269,3 +273,13 @@ path = "examples/sse.rs"
 name = "cookies"
 path = "examples/cookies.rs"
 required-features = ["cookie"]
+
+[[example]]
+name = "signed_cookies"
+path = "examples/signed_cookies.rs"
+required-features = ["cookie","signed-cookie","di"]
+
+[[example]]
+name = "private_cookies"
+path = "examples/private_cookies.rs"
+required-features = ["cookie","private-cookie","di"]

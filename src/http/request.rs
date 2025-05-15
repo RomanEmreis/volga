@@ -124,19 +124,15 @@ impl HttpRequest {
     /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
-        self.container()
-            .resolve::<T>()
-            .await
+    pub fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
+        self.container().resolve::<T>()
     }
 
     /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
-    pub async fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
-        self.container()
-            .resolve_shared::<T>()
-            .await
+    pub fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
+        self.container().resolve_shared::<T>()
     }
     
     /// Extracts a payload from request parts
@@ -273,9 +269,9 @@ mod tests {
         _ = http_req.container();
     }
 
-    #[tokio::test]
+    #[test]
     #[cfg(feature = "di")]
-    async fn it_resolves_from_di_container() {
+    fn it_resolves_from_di_container() {
         let mut container = ContainerBuilder::new();
         container.register_singleton(InMemoryCache::default());
         
@@ -287,14 +283,14 @@ mod tests {
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
 
-        let cache = http_req.resolve::<InMemoryCache>().await;
+        let cache = http_req.resolve::<InMemoryCache>();
         
         assert!(cache.is_ok());
     }
 
-    #[tokio::test]
+    #[test]
     #[cfg(feature = "di")]
-    async fn it_resolves_shared_from_di_container() {
+    fn it_resolves_shared_from_di_container() {
         let mut container = ContainerBuilder::new();
         container.register_singleton(InMemoryCache::default());
 
@@ -306,7 +302,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
 
-        let cache = http_req.resolve_shared::<InMemoryCache>().await;
+        let cache = http_req.resolve_shared::<InMemoryCache>();
 
         assert!(cache.is_ok());
     }

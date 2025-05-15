@@ -3,8 +3,7 @@
 use super::{Inject, DiError};
 use crate::error::Error;
 use hyper::http::{Extensions, request::Parts};
-use futures_util::TryFutureExt;
-use tokio::sync::OnceCell;
+use std::sync::OnceLock;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -20,7 +19,7 @@ type ArcService = Arc<
 
 pub(crate) enum ServiceEntry {
     Singleton(ArcService),
-    Scoped(OnceCell<ArcService>),
+    Scoped(OnceLock<Result<ArcService, Error>>),
     Transient,
 }
 
@@ -29,7 +28,7 @@ impl ServiceEntry {
     fn as_scope(&self) -> Self {
         match self {
             ServiceEntry::Singleton(service) => ServiceEntry::Singleton(service.clone()),
-            ServiceEntry::Scoped(_) => ServiceEntry::Scoped(OnceCell::new()),
+            ServiceEntry::Scoped(_) => ServiceEntry::Scoped(OnceLock::new()),
             ServiceEntry::Transient => ServiceEntry::Transient,
         }
     }
@@ -88,7 +87,7 @@ impl ContainerBuilder {
 
     /// Register a scoped service
     pub fn register_scoped<T: Inject + 'static>(&mut self) {
-        let entry = ServiceEntry::Scoped(OnceCell::new());
+        let entry = ServiceEntry::Scoped(OnceLock::new());
         self.services.insert(TypeId::of::<T>(), entry);
     }
 
@@ -119,18 +118,17 @@ impl Container {
     /// `T` must implement [`Clone`] otherwise use [`resolve_shared`] method 
     /// that returns a shared pointer
     #[inline]
-    pub async fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
+    pub fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
         self.resolve_shared::<T>()
-            .map_ok(|s| s.as_ref().clone())
-            .await
+            .map(|s| s.as_ref().clone())
     }
 
     /// Resolves a service and returns a shared pointer
     #[inline]
-    pub async fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
+    pub fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
         match self.get_service_entry::<T>()? {
-            ServiceEntry::Transient => T::inject(self).map_ok(Arc::new).await,
-            ServiceEntry::Scoped(cell) => self.resolve_scoped(cell).await,
+            ServiceEntry::Transient => T::inject(self).map(Arc::new),
+            ServiceEntry::Scoped(cell) => self.resolve_scoped(cell),
             ServiceEntry::Singleton(instance) => Self::resolve_internal(instance)
         }
     }
@@ -145,15 +143,14 @@ impl Container {
     }
 
     #[inline]
-    async fn resolve_scoped<T: Inject + 'static>(&self, cell: &OnceCell<ArcService>) -> Result<Arc<T>, Error> {
-        let instance = cell
-            .get_or_try_init(|| async {
-                T::inject(self)
-                    .map_ok(|scoped| Arc::new(scoped) as ArcService)
-                    .await
-            })
-            .await?;
-        Self::resolve_internal(instance)
+    fn resolve_scoped<T: Inject + 'static>(&self, cell: &OnceLock<Result<ArcService, Error>>) -> Result<Arc<T>, Error> {
+        let instance = cell.get_or_init(|| 
+            T::inject(self).map(|scoped| Arc::new(scoped) as ArcService)
+        );
+        instance
+            .as_ref()
+            .map_err(|err| Error::server_error(err.to_string()))
+            .and_then(Self::resolve_internal)
     }
 
     #[inline]
@@ -234,71 +231,71 @@ mod tests {
     }
 
     impl Inject for CacheWrapper {
-        async fn inject(container: &Container) -> Result<Self, Error> {
-            let inner = container.resolve::<InMemoryCache>().await?;
+        fn inject(container: &Container) -> Result<Self, Error> {
+            let inner = container.resolve::<InMemoryCache>()?;
             Ok(Self { inner })
         }
     }
 
-    #[tokio::test]
-    async fn it_registers_singleton() {
+    #[test]
+    fn it_registers_singleton() {
         let mut container = ContainerBuilder::new();
         container.register_singleton(InMemoryCache::default());
 
         let container = container.build();
 
-        let cache = container.resolve::<InMemoryCache>().await.unwrap();
+        let cache = container.resolve::<InMemoryCache>().unwrap();
         cache.set("key", "value");
 
-        let cache = container.resolve::<InMemoryCache>().await.unwrap();
+        let cache = container.resolve::<InMemoryCache>().unwrap();
         let key = cache.get("key").unwrap();
 
         assert_eq!(key, "value");
     }
 
-    #[tokio::test]
-    async fn it_registers_transient() {
+    #[test]
+    fn it_registers_transient() {
         let mut container = ContainerBuilder::new();
         container.register_transient::<InMemoryCache>();
 
         let container = container.build();
 
-        let cache = container.resolve::<InMemoryCache>().await.unwrap();
+        let cache = container.resolve::<InMemoryCache>().unwrap();
         cache.set("key", "value");
 
-        let cache = container.resolve::<InMemoryCache>().await.unwrap();
+        let cache = container.resolve::<InMemoryCache>().unwrap();
         let key = cache.get("key");
 
         assert!(key.is_none());
     }
 
-    #[tokio::test]
-    async fn it_registers_scoped() {
+    #[test]
+    fn it_registers_scoped() {
         let mut container = ContainerBuilder::new();
         container.register_scoped::<InMemoryCache>();
 
         let container = container.build();
 
         // working in the initial scope
-        let cache = container.resolve::<InMemoryCache>().await.unwrap();
+        let cache = container.resolve::<InMemoryCache>().unwrap();
         cache.set("key", "value 1");
 
-        // create a new scope so new instance of InMemoryCache will be created
+        // create a new scope so a new instance of InMemoryCache will be created
         {
             let scope = container.create_scope();
-            let cache = scope.resolve::<InMemoryCache>().await.unwrap();
+            let cache = scope.resolve::<InMemoryCache>().unwrap();
             cache.set("key", "value 2");
 
-            let cache = scope.resolve::<InMemoryCache>().await.unwrap();
+            let cache = scope.resolve::<InMemoryCache>().unwrap();
             let key = cache.get("key").unwrap();
 
             assert_eq!(key, "value 2");
         }
 
-        // create a new scope so new instance of InMemoryCache will be created
+        // create a new scope so a new instance of InMemoryCache will be created
         {
             let scope = container.create_scope();
-            let cache = scope.resolve::<InMemoryCache>().await.unwrap();
+            let cache = scope.resolve::<InMemoryCache>().unwrap();
             let key = cache.get("key");
 
             assert!(key.is_none());
@@ -309,8 +306,8 @@ mod tests {
         assert_eq!(key, "value 1");
     }
 
-    #[tokio::test]
-    async fn it_resolves_inner_dependencies() {
+    #[test]
+    fn it_resolves_inner_dependencies() {
         let mut container = ContainerBuilder::new();
 
         container.register_singleton(InMemoryCache::default());
@@ -320,18 +317,18 @@ mod tests {
 
         {
             let scope = container.create_scope();
-            let cache = scope.resolve::<CacheWrapper>().await.unwrap();
+            let cache = scope.resolve::<CacheWrapper>().unwrap();
             cache.inner.set("key", "value 1");
         }
 
-        let cache = container.resolve::<InMemoryCache>().await.unwrap();
+        let cache = container.resolve::<InMemoryCache>().unwrap();
         let key = cache.get("key").unwrap();
 
         assert_eq!(key, "value 1");
     }
 
-    #[tokio::test]
-    async fn inner_scope_does_not_affect_outer() {
+    #[test]
+    fn inner_scope_does_not_affect_outer() {
         let mut container = ContainerBuilder::new();
 
         container.register_scoped::<InMemoryCache>();
@@ -341,21 +338,21 @@ mod tests {
 
         {
             let scope = container.create_scope();
-            let cache = scope.resolve::<CacheWrapper>().await.unwrap();
+            let cache = scope.resolve::<CacheWrapper>().unwrap();
             cache.inner.set("key", "value 1");
 
-            let cache = scope.resolve::<CacheWrapper>().await.unwrap();
+            let cache = scope.resolve::<CacheWrapper>().unwrap();
             cache.inner.set("key", "value 2");
         }
 
-        let cache = container.resolve::<InMemoryCache>().await.unwrap();
+        let cache = container.resolve::<InMemoryCache>().unwrap();
         let key = cache.get("key");
 
         assert!(key.is_none())
     }
 
-    #[tokio::test]
-    async fn it_resolves_inner_scoped_dependencies() {
+    #[test]
+    fn it_resolves_inner_scoped_dependencies() {
         let mut container = ContainerBuilder::new();
 
         container.register_scoped::<InMemoryCache>();
@@ -364,13 +361,13 @@ mod tests {
         let container = container.build();
 
         let scope = container.create_scope();
-        let cache = scope.resolve::<CacheWrapper>().await.unwrap();
+        let cache = scope.resolve::<CacheWrapper>().unwrap();
         cache.inner.set("key1", "value 1");
 
-        let cache = scope.resolve::<CacheWrapper>().await.unwrap();
+        let cache = scope.resolve::<CacheWrapper>().unwrap();
         cache.inner.set("key2", "value 2");
 
-        let cache = scope.resolve::<CacheWrapper>().await.unwrap();
+        let cache = scope.resolve::<CacheWrapper>().unwrap();
 
         assert_eq!(cache.inner.get("key1").unwrap(), "value 1");
         assert_eq!(cache.inner.get("key2").unwrap(), "value 2");
@@ -393,22 +390,22 @@ mod tests {
         assert!(container.is_ok());
     }
     
-    #[tokio::test]
-    async fn it_returns_error_when_resolve_unregistered() {
+    #[test]
+    fn it_returns_error_when_resolve_unregistered() {
         let container = ContainerBuilder::new().build();
 
-        let cache = container.resolve::<CacheWrapper>().await;
+        let cache = container.resolve::<CacheWrapper>();
         
         assert!(cache.is_err());
     }
 
-    #[tokio::test]
-    async fn it_returns_error_when_resolve_unregistered_from_scope() {
+    #[test]
+    fn it_returns_error_when_resolve_unregistered_from_scope() {
         let container = ContainerBuilder::new()
             .build()
             .create_scope();
 
-        let cache = container.resolve::<CacheWrapper>().await;
+        let cache = container.resolve::<CacheWrapper>();
 
         assert!(cache.is_err());
     }
