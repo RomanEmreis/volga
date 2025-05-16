@@ -1,5 +1,6 @@
 ﻿//! Utilities for signed cookies
 
+use std::{io::Read, fs::File, path::Path};
 use cookie::{CookieJar, SignedJar, Key};
 use futures_util::future::{ready, Ready};
 use crate::{
@@ -33,6 +34,22 @@ impl SignedKey {
     #[inline]
     pub fn from(bytes: &[u8]) -> Self {
         Self(Key::from(bytes))
+    }
+
+    /// Creates a new [`SignedKey`] from a file with 512-bit cryptographically random string.
+    ///
+    /// > **Note:** It reads the first 64 bytes of the file.
+    /// 
+    /// See also [`Key::from`]
+    #[inline]
+    pub fn from_file(path: impl AsRef<Path>) -> Self {
+        let mut file = File::open(path)
+            .expect("File must exists");
+        let mut buffer = [0u8; 64];
+        file.read_exact(&mut buffer)
+            .expect("File must be readable");
+        
+        Self(Key::from(&buffer))
     }
     
     /// Generates signing/encryption keys from a secure, random source. 
@@ -247,6 +264,11 @@ mod tests {
     #[test]
     fn if_return_parts_source() {
         assert_eq!(SignedCookies::source(), Source::Parts);
+    }
+    
+    #[test]
+    fn it_reads_signed_key_from_bytes() {
+        let _ = SignedKey::from_file("tests/resources/key");
     }
 
     fn set_cookies_for_request(jar: CookieJar, headers: &mut HeaderMap) {

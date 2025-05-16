@@ -611,7 +611,8 @@ mod tests {
         assert_eq!(cookies.iter().filter(|c| c.contains("key-1")).count(), 1);
         assert_eq!(cookies.iter().filter(|c| c.contains("key-2")).count(), 1);
     }
-    
+
+    #[cfg(any(feature = "private-cookie", feature = "signed-cookie", feature = "cookie"))]
     fn get_cookies(headers: &HeaderMap) -> Vec<&str> {
         headers
             .get_all("set-cookie")

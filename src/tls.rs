@@ -60,7 +60,7 @@ const KEY_FILE_NAME: &str = "key.pem";
 const DEFAULT_PORT: u16 = 7879;
 const DEFAULT_MAX_AGE: u64 = 30 * 24 * 60 * 60; // 30 days = 2,592,000 seconds
 
-/// Represents a TLS (Transport Layer Security) configuration options
+/// Represents TLS (Transport Layer Security) configuration options
 pub struct TlsConfig {
     /// Path to a certificate
     pub cert: PathBuf,
@@ -78,7 +78,7 @@ pub struct TlsConfig {
     client_auth: ClientAuth,
 }
 
-/// Represents an HTTPS redirection configuration options
+/// Represents HTTPS redirection configuration options
 #[derive(Clone)]
 pub struct RedirectionConfig {
     /// Specifies whether HTTPS redirection is enabled
@@ -92,14 +92,14 @@ pub struct RedirectionConfig {
     pub http_port: u16,
 } 
 
-/// Represents a HSTS (HTTP Strict Transport Security Protocol) configuration options
+/// Represents HSTS (HTTP Strict Transport Security Protocol) configuration options
 pub struct HstsConfig {
     /// Specifies whether include a `preload` to HSTS header
     /// 
     /// Default: `true`
     preload: bool,
     
-    /// Specifies whether include a `includeSubDomains` to HSTS header
+    /// Specifies whether include an ` includeSubDomains ` to HSTS header
     /// 
     /// Default: `true`
     include_sub_domains: bool,
@@ -113,7 +113,7 @@ pub struct HstsConfig {
     exclude_hosts: Vec<&'static str>
 }
 
-/// Represents a types of Client Auth
+/// Represents a type of Client Auth
 #[derive(Debug, PartialEq)]
 enum ClientAuth {
     None,
@@ -183,7 +183,7 @@ impl HstsConfig {
         self
     }
 
-    /// Configures whether to set `includeSubDomains` in HSTS header
+    /// Configures whether to set `includeSubDomains` in the HSTS header
     ///
     /// Default: `true`
     pub fn with_sub_domains(mut self, include: bool) -> Self {
@@ -214,7 +214,7 @@ impl TlsConfig {
         Self::default()
     }
     
-    /// Creates a configuration by loading cert and key files with default names from specified folder
+    /// Creates a configuration by loading cert and key files with default names from a specified folder
     pub fn from_pem(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref();
         let cert = path.join(CERT_FILE_NAME);
@@ -228,7 +228,7 @@ impl TlsConfig {
         }
     }
 
-    /// Creates a configuration by specifying path to cert and key files specifically
+    /// Creates a configuration by specifying a path to cert and key files specifically
     pub fn from_pem_files(cert_file_path: &str, key_file_path: &str) -> Self {
         Self { 
             key: key_file_path.into(), 
@@ -239,7 +239,7 @@ impl TlsConfig {
         }
     }
 
-    /// Sets the cert and key files with default names from specified folder
+    /// Sets the cert and key files with default names from the specified folder
     pub fn set_pem(mut self, path: impl AsRef<Path>) -> Self {
         let path = path.as_ref();
         self.key = path.join(KEY_FILE_NAME);
@@ -345,7 +345,7 @@ impl TlsConfig {
         self
     }
 
-    /// Configures whether to set `includeSubDomains` in HSTS header
+    /// Configures whether to set `includeSubDomains` in the HSTS header
     /// 
     /// Default: `true`
     pub fn with_hsts_sub_domains(mut self, include: bool) -> Self {
@@ -479,7 +479,7 @@ impl App {
     ///
     /// let app = App::new()
     ///     .set_tls(TlsConfig::new().with_https_redirection()) // enables HTTP -> HTTPS redirection
-    ///     .with_tls(|tls| tls.with_http_port(5001));           // sets a specific HTTP port, redirections remains enabled
+    ///     .with_tls(|tls| tls.with_http_port(5001));           // sets a specific HTTP port, redirections remain enabled
     /// ```
     pub fn with_tls<T>(mut self, config: T) -> Self
     where
