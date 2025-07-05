@@ -288,3 +288,8 @@ required-features = ["cookie","private-cookie","di"]
 name = "request_validation"
 path = "examples/request_validation.rs"
 required-features = ["middleware"]
+
+[[example]]
+name = "response_handler"
+path = "examples/response_handler.rs"
+required-features = ["middleware"]

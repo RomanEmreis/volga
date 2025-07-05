@@ -20,8 +20,10 @@ const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const DEFAULT_CAPACITY: usize = 8;
 
+/// Route path arguments
 pub(crate) type PathArguments = Box<[(Cow<'static, str>, Cow<'static, str>)]>;
 
+/// A layer of middleware or a route handler
 #[derive(Clone)]
 pub(crate) enum Layer {
     Handler(RouteHandler),
@@ -66,6 +68,7 @@ impl From<Layer> for MiddlewareFn {
     }
 }
 
+/// Route's middleware pipeline
 #[derive(Clone)]
 pub(crate) enum RoutePipeline {
     #[cfg(feature = "middleware")]
@@ -87,6 +90,7 @@ impl From<Layer> for RoutePipeline {
 }
 
 impl RoutePipeline {
+    /// Creates s new middleware pipeline
     pub(super) fn new() -> Self {
         #[cfg(feature = "middleware")]
         let pipeline = Self::Builder(Middlewares::new());
@@ -95,6 +99,7 @@ impl RoutePipeline {
         pipeline
     }
     
+    /// Inserts a layer into the pipeline
     pub(super) fn insert(&mut self, layer: Layer) {
         match self {
             #[cfg(feature = "middleware")]
@@ -106,6 +111,7 @@ impl RoutePipeline {
         }
     }
 
+    /// Calls the pipeline chain
     #[cfg(feature = "middleware")]
     pub(crate) async fn call(self, ctx: HttpContext) -> HttpResult {
         match self {
@@ -117,6 +123,7 @@ impl RoutePipeline {
         }
     }
     
+    /// Calls the request handler
     #[cfg(not(feature = "middleware"))]
     pub(crate) async fn call(self, req: HttpRequest) -> HttpResult {
         match self { 
@@ -125,6 +132,7 @@ impl RoutePipeline {
         }
     }
 
+    /// Builds a middleware pipeline
     #[cfg(feature = "middleware")]
     pub(super) fn compose(&mut self) {
         let next = match self {
@@ -141,12 +149,15 @@ impl RoutePipeline {
     }
 }
 
+/// A node in the route tree
+#[derive(Clone)]
 pub(crate) enum RouteNode {
     Static(HashMap<Cow<'static, str>, RouteNode>),
     Dynamic(HashMap<Cow<'static, str>, RouteNode>),
     Handler(HashMap<Method, RoutePipeline>),
 }
 
+/// Parameters of a route
 pub(crate) struct RouteParams<'route> {
     pub(crate) route: &'route RouteNode,
     pub(crate) params: PathArguments

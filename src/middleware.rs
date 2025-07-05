@@ -2,22 +2,16 @@
 
 use futures_util::future::BoxFuture;
 use std::{future::Future, sync::Arc};
-use crate::{
-    http::{
-        endpoints::handlers::RouteHandler,
-        IntoResponse,
-        FromRequest,
-        GenericHandler,
-        FilterResult,
-    }, 
-    App, 
-    app::router::{Route, RouteGroup}, 
-    HttpResult, 
-    HttpRequest, 
-    not_found
-};
+use crate::{http::{
+    endpoints::handlers::RouteHandler,
+    IntoResponse,
+    FromRequest,
+    GenericHandler,
+    FilterResult,
+}, App, app::router::{Route, RouteGroup}, HttpResult, HttpRequest, not_found, HttpResponse};
 
 pub use http_context::HttpContext;
+use crate::error::Error;
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -52,6 +46,7 @@ pub(super) type MiddlewareFn = Arc<
     + Sync
 >;
 
+/// Wraps a [`RouteHandler`] into [`MiddlewareFn`]
 pub(super) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
     let handler = Arc::new(handler);
     Arc::new(move |ctx: HttpContext, _| {
@@ -60,6 +55,7 @@ pub(super) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
     })
 }
 
+/// Wraps a closure into [`MiddlewareFn`]
 #[inline]
 pub(crate) fn make_fn<F, Fut>(middleware: F) -> MiddlewareFn
 where
@@ -73,6 +69,7 @@ where
     })
 }
 
+/// Wraps a closure for the route filter into [`MiddlewareFn`]
 #[inline]
 pub(crate) fn make_filter_fn<F, R, Args>(filter: F) -> MiddlewareFn
 where
@@ -103,6 +100,66 @@ where
     make_fn(middleware_fn)
 }
 
+/// Wraps a closure for the response mapping into [`MiddlewareFn`]
+#[inline]
+pub(crate) fn make_map_ok_fn<F, R, Fut>(map: F) -> MiddlewareFn
+where
+    F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = R> + Send,
+    R: IntoResponse + 'static,
+{
+    let middleware_fn = move |ctx: HttpContext, next: Next| {
+        let map = map.clone();
+        async move {
+            match next(ctx).await { 
+                Ok(resp) => map(resp).await.into_response(),
+                Err(err) => err.into_response()
+            }
+        }
+    };
+    make_fn(middleware_fn)
+}
+
+/// Wraps a closure for the error mapping into [`MiddlewareFn`]
+#[inline]
+pub(crate) fn make_map_err_fn<F, R, Fut>(map: F) -> MiddlewareFn
+where
+    F: Fn(Error) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = R> + Send,
+    R: IntoResponse + 'static,
+{
+    let middleware_fn = move |ctx: HttpContext, next: Next| {
+        let map = map.clone();
+        async move {
+            match next(ctx).await {
+                Ok(resp) => Ok(resp),
+                Err(err) => map(err).await.into_response()
+            }
+        }
+    };
+    make_fn(middleware_fn)
+}
+
+/// Wraps a closure for the request mapping into [`MiddlewareFn`]
+#[inline]
+pub(crate) fn make_map_request_fn<F, Fut>(map: F) -> MiddlewareFn
+where
+    F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = HttpRequest> + Send,
+{
+    let middleware_fn = move |ctx: HttpContext, next: Next| {
+        let map = map.clone();
+        async move {
+            let (req, pipeline) = ctx.into_parts();
+            let req = map(req).await;
+            let ctx = HttpContext::new(req, pipeline);
+            next(ctx).await
+        }
+    };
+    make_fn(middleware_fn)
+}
+
+/// Middleware pipeline
 #[derive(Clone)]
 pub(super) struct Middlewares {
     pub(super) pipeline: Vec<MiddlewareFn>
@@ -173,7 +230,7 @@ impl App {
     /// 
     /// # Examples
     /// ```no_run
-    /// use volga::{App, Results};
+    /// use volga::App;
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -196,6 +253,71 @@ impl App {
         self
     }
 
+    /// Adds a middleware called when [`HttpResult`] is [`Ok`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_ok(|mut resp: HttpResponse| async move { 
+    ///     resp.headers_mut()
+    ///         .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///     resp
+    /// });
+    /// 
+    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_ok<F, R, Fut>(&mut self, map: F) -> &mut Self
+    where
+        F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = R> + Send,
+        R: IntoResponse + 'static,
+    {
+        self.pipeline
+            .middlewares_mut()
+            .add(make_map_ok_fn(map));
+        self
+    }
+
+    /// Adds a middleware that handles the [`HttpRequest`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_request(|mut req: HttpRequest| async move { 
+    ///     req.headers_mut()
+    ///         .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///     req
+    /// });
+    /// 
+    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_request<F, Fut>(&mut self, map: F) -> &mut Self
+    where
+        F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = HttpRequest> + Send,
+    {
+        self.pipeline
+            .middlewares_mut()
+            .add(make_map_request_fn(map));
+        self
+    }
+
     /// Registers default middleware
     pub(super) fn use_endpoints(&mut self) {
         if self.pipeline.has_middleware_pipeline() {
@@ -211,7 +333,7 @@ impl<'a> Route<'a> {
     /// 
     /// # Examples
     /// ```no_run
-    /// use volga::{App, Results};
+    /// use volga::App;
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -240,7 +362,7 @@ impl<'a> Route<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, Results};
+    /// use volga::App;
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -263,6 +385,97 @@ impl<'a> Route<'a> {
         self.map_middleware(filter_fn)
     }
     
+    /// Adds a middleware called for this route when [`HttpResult`] is [`Ok`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app
+    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_ok(|mut resp: HttpResponse| async move { 
+    ///         resp.headers_mut()
+    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         resp
+    ///     });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_ok<F, R, Fut>(self, map: F) -> Self
+    where
+        F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = R> + Send,
+        R: IntoResponse + 'static,
+    {
+        let map_ok_fn = make_map_ok_fn(map);
+        self.map_middleware(map_ok_fn)
+    }
+
+    /// Adds a middleware that called for this route when [`HttpResult`] is [`Err`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, error::Error};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app
+    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_err(|err: Error| async move { 
+    ///         println!("{err:?}");
+    ///         err
+    ///     });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_err<F, R, Fut>(self, map: F) -> Self
+    where
+        F: Fn(Error) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = R> + Send,
+        R: IntoResponse + 'static,
+    {
+        let map_err_fn = make_map_err_fn(map);
+        self.map_middleware(map_err_fn)
+    }
+
+    /// Adds a middleware that handles the [`HttpRequest`] for this route
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app
+    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_request(|mut req: HttpRequest| async move { 
+    ///         req.headers_mut()
+    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         req
+    ///     });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_request<F, Fut>(self, map: F) -> Self
+    where
+        F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = HttpRequest> + Send,
+    {
+        let map_err_fn = make_map_request_fn(map);
+        self.map_middleware(map_err_fn)
+    }
+    
     #[inline]
     pub(crate) fn map_middleware(self, mw: MiddlewareFn) -> Self {
         self.app
@@ -278,7 +491,7 @@ impl<'a> RouteGroup<'a> {
     /// 
     /// # Examples
     /// ```no_run
-    /// use volga::{App, Results};
+    /// use volga::App;
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -308,7 +521,7 @@ impl<'a> RouteGroup<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, Results};
+    /// use volga::App;
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -330,6 +543,106 @@ impl<'a> RouteGroup<'a> {
     {
         let filter_fn = make_filter_fn(filter);
         self.middleware.push(filter_fn);
+        self
+    }
+
+    /// Adds a middleware called for this group of routes when [`HttpResult`] is [`Ok`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_group("/positive")
+    ///     .map_ok(|mut resp: HttpResponse| async move { 
+    ///         resp.headers_mut()
+    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         resp
+    ///     })
+    ///     .map_get("/sum", |x: i32, y: i32| async move { 
+    ///         x + y
+    ///     });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_ok<F, R, Fut>(mut self, map: F) -> Self
+    where
+        F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = R> + Send,
+        R: IntoResponse + 'static,
+    {
+        let map_ok_fn = make_map_ok_fn(map);
+        self.middleware.push(map_ok_fn);
+        self
+    }
+
+    /// Adds a middleware that called for this group of routes when [`HttpResult`] is [`Err`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, error::Error};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_group("/positive")
+    ///     .map_err(|err: Error| async move { 
+    ///         println!("{err:?}");
+    ///         err
+    ///     })
+    ///     .map_get("/sum", |x: i32, y: i32| async move { 
+    ///         x + y
+    ///      });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_err<F, R, Fut>(mut self, map: F) -> Self
+    where
+        F: Fn(Error) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = R> + Send,
+        R: IntoResponse + 'static,
+    {
+        let map_err_fn = make_map_err_fn(map);
+        self.middleware.push(map_err_fn);
+        self
+    }
+
+    /// Adds a middleware that handles the [`HttpRequest`] for this group of routes
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_group("/positive")
+    ///     .map_request(|mut req: HttpRequest| async move { 
+    ///         req.headers_mut()
+    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         req
+    ///     })
+    ///     .map_get("/sum", |x: i32, y: i32| async move { 
+    ///         x + y
+    ///      });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_request<F, Fut>(mut self, map: F) -> Self
+    where
+        F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = HttpRequest> + Send,
+    {
+        let map_err_fn = make_map_request_fn(map);
+        self.middleware.push(map_err_fn);
         self
     }
 }

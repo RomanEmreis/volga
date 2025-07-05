@@ -1,7 +1,7 @@
 ﻿//! Run with:
 //!
 //! ```no_rust
-//! cargo run --example request_validation
+//! cargo run --example request_validation --features middleware
 //! ```
 
 use volga::App;
