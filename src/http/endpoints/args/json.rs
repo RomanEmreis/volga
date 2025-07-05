@@ -110,7 +110,7 @@ impl<T: DeserializeOwned + Send> Future for ExtractJsonPayloadFut<T> {
     }
 }
 
-/// Extracts JSON data from request body into `Json<T>`
+/// Extracts JSON data from the request body into `Json<T>`
 /// where T is deserializable `struct`
 impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
     type Future = ExtractJsonPayloadFut<T>;
@@ -153,12 +153,12 @@ struct JsonError;
 impl JsonError {
     #[inline]
     fn from_serde_error(err: serde_json::Error) -> Error {
-        Error::client_error(format!("JSON parsing error: {}", err))
+        Error::client_error(format!("JSON parsing error: {err}"))
     }
 
     #[inline]
     fn collect_error(err: Error) -> Error {
-        Error::client_error(format!("JSON parsing error: {}", err))
+        Error::client_error(format!("JSON parsing error: {err}"))
     }
 }
 
@@ -180,7 +180,7 @@ mod tests {
 
     impl Display for User {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-            f.write_str(&format!("{:?}", self))
+            f.write_str(&format!("{self:?}"))
         }
     }
     

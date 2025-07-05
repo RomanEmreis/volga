@@ -64,7 +64,7 @@ pub(crate) type WeakErrorHandler = Weak<
 /// Default error handler that creates a [`HttpResult`] from error
 #[inline]
 pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
-    status!(err.status.as_u16(), "{:?}", err)
+    status!(err.status.as_u16(), "{}", err.to_string())
 }
 
 #[inline]
@@ -103,7 +103,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
         
         assert_eq!(response.status(), 500);
-        assert_eq!(String::from_utf8_lossy(body), "\"Error { status: 500, instance: None, inner: \\\"Some error\\\" }\"");
+        assert_eq!(String::from_utf8_lossy(body), "\"Some error\"");
     }
 
     #[tokio::test]
@@ -116,7 +116,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(response.status(), 400);
-        assert_eq!(String::from_utf8_lossy(body), "\"Error { status: 400, instance: None, inner: \\\"Some error\\\" }\"");
+        assert_eq!(String::from_utf8_lossy(body), "\"Some error\"");
     }
 
     #[tokio::test]

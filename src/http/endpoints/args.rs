@@ -31,10 +31,10 @@ pub mod host_env;
 /// Holds the payload for extractors
 pub(crate) enum Payload<'a> {
     None,
-    Request(HttpRequest),
-    Body(HttpBody),
+    Request(Box<HttpRequest>),
     Full(&'a Parts, HttpBody),
     Parts(&'a Parts),
+    Body(HttpBody),
     Path(&'a (Cow<'a, str>, Cow<'a, str>)),
 }
 
@@ -128,7 +128,7 @@ macro_rules! define_generic_from_request {
                             None => Payload::None
                         },
                         Source::Request => match body.take() {
-                            Some(body) => Payload::Request(HttpRequest::from_parts(parts.clone(), body)),
+                            Some(body) => Payload::Request(Box::new(HttpRequest::from_parts(parts.clone(), body))),
                             None => Payload::None
                         },
                     }).await?,

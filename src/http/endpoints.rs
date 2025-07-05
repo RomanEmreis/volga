@@ -2,15 +2,16 @@
 
 use std::{borrow::Cow, collections::HashMap};
 use hyper::{Method, Uri};
-
 use super::endpoints::{
-    route::Route,
-    handlers::RouteHandler,
-    route::PathArguments
+    route::{RouteNode, RoutePipeline, PathArguments},
+    handlers::RouteHandler
 };
 
+#[cfg(feature = "middleware")]
+use super::endpoints::route::Layer;
+
 pub(crate) mod handlers;
-pub(super) mod route;
+pub(crate) mod route;
 pub mod args;
 
 const ALLOW_METHOD_SEPARATOR : &str = ",";
@@ -18,7 +19,7 @@ const PATH_SEPARATOR : char = '/';
 
 /// Describes a mapping between HTTP Verbs, routes and request handlers
 pub(crate) struct Endpoints {
-    routes: Route
+    routes: RouteNode
 }
 
 /// Specifies statuses that could be returned after route matching
@@ -28,25 +29,25 @@ pub(crate) enum RouteOption {
     Ok(EndpointContext)
 }
 
-/// Describes a context of the executing route
+/// Describes the context of the executing route
 pub(crate) struct EndpointContext {
-    pub(crate) handler: RouteHandler,
+    pub(crate) pipeline: RoutePipeline,
     pub(crate) params: PathArguments
 }
 
 impl EndpointContext {
-    pub(crate) fn into_parts(self) -> (RouteHandler, PathArguments) {
-        (self.handler, self.params)
+    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArguments) {
+        (self.pipeline, self.params)
     }
-    
-    fn new(handler: RouteHandler, params: PathArguments) -> Self {
-        Self { handler, params }
+
+    fn new(pipeline: RoutePipeline, params: PathArguments) -> Self {
+        Self { pipeline, params }
     }
 }
 
 impl Endpoints {
     pub(crate) fn new() -> Self {
-        Self { routes: Route::Static(HashMap::new()) }
+        Self { routes: RouteNode::Static(HashMap::new()) }
     }
 
     /// Gets a context of the executing route by its `HttpRequest`
@@ -58,7 +59,7 @@ impl Endpoints {
             None => return RouteOption::RouteNotFound,
         };
 
-        if let Route::Handler(handlers) = &route_params.route {
+        if let RouteNode::Handler(handlers) = &route_params.route {
             return handlers.get(method).map_or_else(
                 || {
                     let allowed_methods = handlers
@@ -68,8 +69,8 @@ impl Endpoints {
                         .join(ALLOW_METHOD_SEPARATOR);
                     RouteOption::MethodNotFound(allowed_methods)
                 },
-                |handler| RouteOption::Ok(
-                    EndpointContext::new(handler.clone(), route_params.params)
+                |handlers| RouteOption::Ok(
+                    EndpointContext::new(handlers.clone(), route_params.params)
                 ),
             );
         }
@@ -81,6 +82,14 @@ impl Endpoints {
     #[inline]
     pub(crate) fn map_route(&mut self, method: Method, pattern: &str, handler: RouteHandler) {
         let path_segments = Self::split_path(pattern);
+        self.routes.insert(&path_segments, method, handler.into());
+    }
+
+    /// Maps the request layer to the current HTTP Verb and route pattern
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn map_layer(&mut self, method: Method, pattern: &str, handler: Layer) {
+        let path_segments = Self::split_path(pattern);
         self.routes.insert(&path_segments, method, handler);
     }
     
@@ -88,9 +97,14 @@ impl Endpoints {
     pub(crate) fn contains(&mut self, method: &Method, pattern: &str) -> bool {
         let path_segments = Self::split_path(pattern);
         self.routes.find(&path_segments).and_then(|params| match &params.route {
-            Route::Handler(handlers) => Some(handlers.contains_key(method)),
+            RouteNode::Handler(handlers) => Some(handlers.contains_key(method)),
             _ => None,
         }).unwrap_or(false)
+    }
+    
+    #[cfg(feature = "middleware")]
+    pub(crate) fn compose(&mut self) {
+        self.routes.compose();
     }
 
     #[inline]

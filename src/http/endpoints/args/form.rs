@@ -121,12 +121,12 @@ struct FormError;
 impl FormError {
     #[inline]
     fn from_serde_error(err: serde::de::value::Error) -> Error {
-        Error::client_error(format!("Form Data parsing error: {}", err))
+        Error::client_error(format!("Form Data parsing error: {err}"))
     }
 
     #[inline]
     fn collect_error(err: Error) -> Error {
-        Error::client_error(format!("Form Data parsing error: {}", err))
+        Error::client_error(format!("Form Data parsing error: {err}"))
     }
 }
 

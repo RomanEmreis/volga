@@ -433,20 +433,20 @@ impl TlsConfig {
 impl From<tokio_rustls::rustls::Error> for Error {
     #[inline]
     fn from(err: tokio_rustls::rustls::Error) -> Self {
-        Self::server_error(format!("TLS config error: {}", err))
+        Self::server_error(format!("TLS config error: {err}"))
     }
 }
 
 impl From<tokio_rustls::rustls::pki_types::pem::Error> for Error {
     fn from(err: tokio_rustls::rustls::pki_types::pem::Error) -> Self {
-        Self::server_error(format!("TLS config error: {}", err))
+        Self::server_error(format!("TLS config error: {err}"))
     }
 }
 
 impl From<tokio_rustls::rustls::server::VerifierBuilderError> for Error {
     #[inline]
     fn from(err: tokio_rustls::rustls::server::VerifierBuilderError) -> Self {
-        Self::server_error(format!("TLS config error: {}", err))
+        Self::server_error(format!("TLS config error: {err}"))
     }
 }
 

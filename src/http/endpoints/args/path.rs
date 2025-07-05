@@ -78,7 +78,7 @@ impl<T: DeserializeOwned> Path<T> {
     pub(crate) fn from_slice(route_params: &[(Cow<str>, Cow<str>)]) -> Result<Self, Error> {
         let route_str = route_params
             .iter()
-            .map(|(key, value)| format!("{}={}", key, value))
+            .map(|(key, value)| format!("{key}={value}"))
             .collect::<Vec<String>>()
             .join("&");
         
@@ -169,7 +169,7 @@ struct PathError;
 impl PathError {
     #[inline]
     fn from_serde_error(err: serde::de::value::Error) -> Error {
-        Error::client_error(format!("Path parsing error: {}", err))
+        Error::client_error(format!("Path parsing error: {err}"))
     }
 
     #[inline]

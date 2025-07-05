@@ -23,6 +23,9 @@ pub use response::{
 };
 
 #[cfg(feature = "middleware")]
+pub use response::filter_result::FilterResult;
+
+#[cfg(feature = "middleware")]
 pub use cors::CorsConfig;
 #[cfg(feature = "cookie")]
 pub use cookie::Cookies;

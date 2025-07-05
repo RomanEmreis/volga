@@ -1,15 +1,14 @@
 ﻿//! Utilities for managing HTTP request scope
 
 use crate::http::endpoints::{
-    handlers::RouteHandler,
+    route::RoutePipeline,
     args::FromRequestRef
 };
-
 use crate::{
-    error::Error,
+    error::Error, 
     headers::{Header, FromHeaders},
-    HttpRequest, 
-    HttpResult
+    HttpRequest, HttpResult,
+    status
 };
 
 #[cfg(any(feature = "tls", feature = "tracing"))]
@@ -21,12 +20,12 @@ use crate::di::Inject;
 use std::sync::Arc;
 
 /// Describes current HTTP context which consists of the current HTTP request data 
-/// and the reference to the method handler fot this request
+/// and the reference to the method handler for this request
 pub struct HttpContext {
     /// Current HTTP request
     pub request: HttpRequest,
-    /// Current handler that mapped to handle the HTTP request
-    handler: RouteHandler,
+    /// Current route middleware pipeline or handler that mapped to handle the HTTP request
+    pipeline: Option<RoutePipeline>
 }
 
 impl HttpContext {
@@ -34,15 +33,30 @@ impl HttpContext {
     #[inline]
     pub(crate) fn new(
         request: HttpRequest,
-        handler: RouteHandler
+        pipeline: Option<RoutePipeline>
     ) -> Self {
-        Self { request, handler }
+        Self { request, pipeline }
+    }
+
+    /// Creates a new [`HttpContext`] with the route pipeline
+    #[inline]
+    pub(crate) fn with_pipeline(
+        request: HttpRequest,
+        pipeline: RoutePipeline
+    ) -> Self {
+        Self { request, pipeline: Some(pipeline) }
+    }
+    
+    /// Creates a slim [`HttpContext`] that holds only the request information
+    #[inline]
+    pub(crate) fn slim(request: HttpRequest) -> Self {
+        Self { request, pipeline: None }
     }
     
     #[inline]
     #[allow(dead_code)]
-    pub(super) fn into_parts(self) -> (HttpRequest, RouteHandler) {
-        (self.request, self.handler)
+    pub(super) fn into_parts(self) -> (HttpRequest, Option<RoutePipeline>) {
+        (self.request, self.pipeline)
     }
     
     /// Extracts a payload from request parts
@@ -88,10 +102,15 @@ impl HttpContext {
         self.request.insert_header(header)
     }
 
-    /// Executes the request handler for current HTTP request
+    /// Executes the request handler for the current HTTP request
     #[inline]
     pub(crate) async fn execute(self) -> HttpResult {
-        self.handler.call(self.request).await
+        let (req, pipeline) = self.into_parts();
+        if let Some(pipeline) = pipeline {
+            pipeline.call(Self::slim(req)).await
+        } else { 
+            status!(405)
+        }
     }
     
     /// Returns a weak reference to global error handler

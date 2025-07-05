@@ -143,7 +143,7 @@ impl App {
     /// Adds a `handler` that has to be called when a message received 
     /// from a client over WebSocket protocol
     /// 
-    /// Note: In case of need to extract something, e.g. from DI, it must implement `Clone`.
+    /// Note: In case of a need to extract something, e.g., from DI, it must implement `Clone`.
     /// 
     /// # Example
     /// ```no_run

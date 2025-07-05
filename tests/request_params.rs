@@ -14,7 +14,7 @@ async fn it_reads_route_params() {
         let mut app = App::new().bind("127.0.0.1:7887");
 
         app.map_get("/test/{name}/{age}", |name: String, age: u32| async move {
-            let response = format!("My name is: {}, I'm {} years old", name, age);
+            let response = format!("My name is: {name}, I'm {age} years old");
 
             Results::text(&response)
         });
@@ -70,7 +70,7 @@ async fn it_reads_query_as_hash_map_params() {
         app.map_get("/test", |query: Query<HashMap<String, String>>| async move {
             let name = query.get("name").unwrap();
             let age = query.get("age").unwrap();
-            let response = format!("My name is: {}, I'm {} years old", name, age);
+            let response = format!("My name is: {name}, I'm {age} years old");
 
             Results::text(&response)
         });

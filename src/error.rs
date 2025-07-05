@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn it_converts_from_io_error() {
-        let io_error = IoError::new(ErrorKind::Other, "some error");
+        let io_error = IoError::other("some error");
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
@@ -378,7 +378,7 @@ mod tests {
         
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(instance.is_none());
-        assert_eq!(format!("{}", inner), "some error");
+        assert_eq!(format!("{inner}"), "some error");
     }
     
     #[test]
@@ -387,6 +387,6 @@ mod tests {
         
         let inner = error.into_inner();
         
-        assert_eq!(format!("{}", inner), "some error");
+        assert_eq!(format!("{inner}"), "some error");
     }
 }

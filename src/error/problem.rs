@@ -111,7 +111,7 @@ impl Problem {
             421 => "https://tools.ietf.org/html/rfc9110#section-15.5.20".into(),
             422 => "https://tools.ietf.org/html/rfc9110#section-15.5.21".into(),
             426 => "https://tools.ietf.org/html/rfc9110#section-15.5.22".into(),
-            _ => format!("https://tools.ietf.org/html/rfc9110#section-15.{}.{}", minor, suffix),
+            _ => format!("https://tools.ietf.org/html/rfc9110#section-15.{minor}.{suffix}"),
         }
     }
 }
