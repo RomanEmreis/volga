@@ -5,11 +5,11 @@ use crate::{status, HttpResult};
 
 #[cfg(feature = "middleware")]
 use crate::middleware::{
+    from_handler,
     HttpContext,
     Middlewares,
     MiddlewareFn,
-    Next, 
-    from_handler
+    Next,
 };
 
 #[cfg(not(feature = "middleware"))]

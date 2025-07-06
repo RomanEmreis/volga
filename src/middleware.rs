@@ -2,16 +2,25 @@
 
 use futures_util::future::BoxFuture;
 use std::{future::Future, sync::Arc};
-use crate::{http::{
-    endpoints::handlers::RouteHandler,
-    IntoResponse,
-    FromRequest,
-    GenericHandler,
-    FilterResult,
-}, App, app::router::{Route, RouteGroup}, HttpResult, HttpRequest, not_found, HttpResponse};
+use make_fn::*;
+use crate::{
+    http::{
+        IntoResponse,
+        FromRequest,
+        GenericHandler,
+        FilterResult,
+    }, 
+    app::router::{Route, RouteGroup},
+    error::Error,
+    App,
+    HttpResult, 
+    HttpRequest,
+    HttpResponse,
+    not_found, 
+};
 
 pub use http_context::HttpContext;
-use crate::error::Error;
+pub(crate) use make_fn::from_handler;
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -29,6 +38,7 @@ pub mod compress;
 pub mod decompress;
 pub mod http_context;
 pub mod cors;
+pub(super) mod make_fn;
 
 const DEFAULT_MW_CAPACITY: usize = 8;
 
@@ -45,119 +55,6 @@ pub(super) type MiddlewareFn = Arc<
     + Send
     + Sync
 >;
-
-/// Wraps a [`RouteHandler`] into [`MiddlewareFn`]
-pub(super) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
-    let handler = Arc::new(handler);
-    Arc::new(move |ctx: HttpContext, _| {
-        let handler = handler.clone();
-        Box::pin(async move { handler.call(ctx.request).await })
-    })
-}
-
-/// Wraps a closure into [`MiddlewareFn`]
-#[inline]
-pub(crate) fn make_fn<F, Fut>(middleware: F) -> MiddlewareFn
-where
-    F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = HttpResult> + Send
-{
-    let middleware = Arc::new(middleware);
-    Arc::new(move |ctx: HttpContext, next: Next| {
-        let middleware = middleware.clone();
-        Box::pin(async move { middleware(ctx, next).await })
-    })
-}
-
-/// Wraps a closure for the route filter into [`MiddlewareFn`]
-#[inline]
-pub(crate) fn make_filter_fn<F, R, Args>(filter: F) -> MiddlewareFn
-where
-    F: GenericHandler<Args, Output = R>,
-    R: Into<FilterResult> + 'static,
-    Args: FromRequest + Send + Sync + 'static
-{
-    let middleware_fn = move |ctx: HttpContext, next: Next| {
-        let filter = filter.clone();
-        async move {
-            let (req, pipeline) = ctx.into_parts();
-            let (parts, body) = req.into_parts();
-
-            let args = Args::from_request(HttpRequest::slim(&parts)).await.unwrap();
-            let result = filter
-                .call(args)
-                .await
-                .into();
-
-            let req = HttpRequest::from_parts(parts, body);
-            let ctx = HttpContext::new(req, pipeline);
-            match result.into_inner() {
-                Ok(_) => next(ctx).await,
-                Err(err) => err.into_response()
-            }
-        }
-    };
-    make_fn(middleware_fn)
-}
-
-/// Wraps a closure for the response mapping into [`MiddlewareFn`]
-#[inline]
-pub(crate) fn make_map_ok_fn<F, R, Fut>(map: F) -> MiddlewareFn
-where
-    F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = R> + Send,
-    R: IntoResponse + 'static,
-{
-    let middleware_fn = move |ctx: HttpContext, next: Next| {
-        let map = map.clone();
-        async move {
-            match next(ctx).await { 
-                Ok(resp) => map(resp).await.into_response(),
-                Err(err) => err.into_response()
-            }
-        }
-    };
-    make_fn(middleware_fn)
-}
-
-/// Wraps a closure for the error mapping into [`MiddlewareFn`]
-#[inline]
-pub(crate) fn make_map_err_fn<F, R, Fut>(map: F) -> MiddlewareFn
-where
-    F: Fn(Error) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = R> + Send,
-    R: IntoResponse + 'static,
-{
-    let middleware_fn = move |ctx: HttpContext, next: Next| {
-        let map = map.clone();
-        async move {
-            match next(ctx).await {
-                Ok(resp) => Ok(resp),
-                Err(err) => map(err).await.into_response()
-            }
-        }
-    };
-    make_fn(middleware_fn)
-}
-
-/// Wraps a closure for the request mapping into [`MiddlewareFn`]
-#[inline]
-pub(crate) fn make_map_request_fn<F, Fut>(map: F) -> MiddlewareFn
-where
-    F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = HttpRequest> + Send,
-{
-    let middleware_fn = move |ctx: HttpContext, next: Next| {
-        let map = map.clone();
-        async move {
-            let (req, pipeline) = ctx.into_parts();
-            let req = map(req).await;
-            let ctx = HttpContext::new(req, pipeline);
-            next(ctx).await
-        }
-    };
-    make_fn(middleware_fn)
-}
 
 /// Middleware pipeline
 #[derive(Clone)]
@@ -203,9 +100,7 @@ impl Middlewares {
         let mut next: Next = Arc::new(move |ctx| {
             let handler = request_handler.clone();
             // Call the last middleware, ignoring its `next` argument with an empty placeholder
-            Box::pin(async move {
-                handler(ctx, Arc::new(|_| Box::pin(async { not_found!() }))).await
-            })
+            handler(ctx, Arc::new(|_| Box::pin(async { not_found!() })))
         });
 
         for mw in self.pipeline.iter().rev().skip(1) {
@@ -215,9 +110,7 @@ impl Middlewares {
             next = Arc::new(move |ctx| {
                 let current_mw = current_mw.clone();
                 let prev_next = prev_next.clone();
-                Box::pin(async move {
-                    current_mw(ctx, prev_next).await
-                })
+                current_mw(ctx, prev_next)
             });
         }
         Some(next)
@@ -245,7 +138,7 @@ impl App {
     pub fn use_middleware<F, Fut>(&mut self, middleware: F) -> &mut Self
     where
         F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = HttpResult> + Send,
+        Fut: Future<Output = HttpResult> + Send + 'static,
     {
         self.pipeline
             .middlewares_mut()
@@ -351,7 +244,7 @@ impl<'a> Route<'a> {
     pub fn use_middleware<F, Fut>(self, middleware: F) -> Self
     where
         F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = HttpResult> + Send,
+        Fut: Future<Output = HttpResult> + Send +'static,
     {
         self.map_middleware(make_fn(middleware))
     }
@@ -509,7 +402,7 @@ impl<'a> RouteGroup<'a> {
     pub fn use_middleware<F, Fut>(mut self, middleware: F) -> Self
     where
         F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = HttpResult> + Send,
+        Fut: Future<Output = HttpResult> + Send + 'static,
     {
         self.middleware.push(make_fn(middleware));
         self
