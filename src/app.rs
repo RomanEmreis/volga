@@ -336,8 +336,7 @@ impl App {
             };
             if let Err(_err) = stream.set_nodelay(no_delay) {
                 #[cfg(feature = "tracing")]
-                tracing::warn!("failed to set TCP_NODELAY on the incoming connection: {_err:#}");
-                continue;
+                tracing::warn!("failed to set TCP_NODELAY on incoming connection: {_err:#}");
             }
             let instance = Arc::downgrade(&app_instance);
             tokio::spawn(Self::handle_connection(stream, instance));
