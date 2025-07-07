@@ -3,13 +3,14 @@
 #[cfg(feature = "di")]
 use volga::di::Dc;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
+use criterion::{criterion_group, criterion_main, Criterion};
 use futures_util::future::join_all;
 use reqwest::Client;
 use tokio::{runtime::Runtime, time::Instant};
 
 use std::{
-    io::{Error, ErrorKind},
+    io::Error,
     time::Duration
 };
 
@@ -22,7 +23,7 @@ async fn routing(iters: u64, url: &str) -> Duration {
     #[cfg(feature = "http2")]
     let client = Client::builder().http2_prior_knowledge().build().unwrap();
 
-    let url = format!("http://localhost:7878{}", url);
+    let url = format!("http://localhost:7878{url}");
     
     let start = Instant::now();
     
@@ -42,7 +43,9 @@ fn benchmark(c: &mut Criterion) {
     let rt = Runtime::new().unwrap();
     rt.block_on(async {
         tokio::spawn(async {
-            let mut app = App::new().without_body_limit();
+            let mut app = App::new()
+                .with_no_delay()
+                .without_body_limit();
             
             #[cfg(feature = "di")]
             let mut app = {
@@ -55,8 +58,15 @@ fn benchmark(c: &mut Criterion) {
                 app
             };
             
+            #[cfg(feature = "middleware")]
+            let mut app = {
+                app.map_get("/valid", || async {}).filter(|| async { true });
+                app.map_get("/invalid", || async {}).filter(|| async { false });
+                app
+            };
+            
             app.map_get("/", || async { "Hello, World!" });
-            app.map_get("/err", || async { Error::new(ErrorKind::Other, "error") });
+            app.map_get("/err", || async { Error::other("error") });
             app.map_err(|err| async move { status!(500, err.to_string()) });
             app.map_fallback(|| async { status!(404) });
             _ = app.run().await;
@@ -83,6 +93,16 @@ fn benchmark(c: &mut Criterion) {
         ));
         c.bench_function("transient", |b| b.iter_custom(
             |iters| rt.block_on(routing(iters, black_box("/transient")))
+        ));
+    }
+    
+    #[cfg(feature = "middleware")]
+    {
+        c.bench_function("valid filter", |b| b.iter_custom(
+            |iters| rt.block_on(routing(iters, black_box("/valid")))
+        ));
+        c.bench_function("invalid filter", |b| b.iter_custom(
+            |iters| rt.block_on(routing(iters, black_box("/invalid")))
         ));
     }
 }

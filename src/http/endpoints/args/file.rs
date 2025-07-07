@@ -145,12 +145,12 @@ struct FileStreamError;
 impl FileStreamError {
     #[inline]
     fn read_error(error: Error) -> Error {
-        Error::client_error(format!("File Stream error: {}", error))
+        Error::client_error(format!("File Stream error: {error}"))
     }
 
     #[inline]
     fn flush_error(error: std::io::Error) -> Error {
-        Error::client_error(format!("File Stream error: {}", error))
+        Error::client_error(format!("File Stream error: {error}"))
     }
 
     #[inline]

@@ -111,6 +111,12 @@ impl HttpRequest {
         let request = Request::from_parts(parts, body);
         Self { inner: request }
     }
+
+    /// Creates a new `HttpRequest` with the given head and empty body
+    pub fn slim(parts: &Parts) -> Self {
+        let request = Request::from_parts(parts.clone(), HttpBody::empty());
+        Self { inner: request }
+    }
     
     /// Returns a reference to the DI container of the request scope
     #[inline]

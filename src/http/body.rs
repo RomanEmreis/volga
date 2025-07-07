@@ -177,7 +177,7 @@ impl HttpBody {
                 .map_err(Error::from)
                 .boxed(),
             Err(e) => {
-                let error_message = format!("JSON serialization error: {}", e);
+                let error_message = format!("JSON serialization error: {e}");
                 Full::from(error_message)
                     .map_err(Error::from)
                     .boxed()
@@ -194,7 +194,7 @@ impl HttpBody {
                 .map_err(Error::from)
                 .boxed(),
             Err(e) => {
-                let error_message = format!("Form Data serialization error: {}", e);
+                let error_message = format!("Form Data serialization error: {e}");
                 Full::from(error_message)
                     .map_err(Error::from)
                     .boxed()
@@ -203,7 +203,7 @@ impl HttpBody {
         Self { inner: InnerBody::Boxed { inner } }
     }
 
-    /// Creates a new [`HttpBody`] from object that is convertable to byte array
+    /// Creates a new [`HttpBody`] from an object that is convertable to a byte array
     #[inline]
     pub fn full<T: Into<Bytes>>(chunk: T) -> HttpBody {
         let inner = Full::new(chunk.into())

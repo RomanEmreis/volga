@@ -75,10 +75,10 @@ impl fmt::Display for CacheControl {
             directives.push("no-store".to_string());
         }
         if let Some(max_age) = self.max_age {
-            directives.push(format!("max-age={}", max_age));
+            directives.push(format!("max-age={max_age}"));
         }
         if let Some(s_max_age) = self.s_max_age {
-            directives.push(format!("s-maxage={}", s_max_age));
+            directives.push(format!("s-maxage={s_max_age}"));
         }
         if self.must_revalidate {
             directives.push("must-revalidate".to_string());

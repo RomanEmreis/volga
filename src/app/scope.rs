@@ -80,7 +80,7 @@ impl Scope {
                 (ALLOW, allowed)
             ]),
             RouteOption::Ok(endpoint_context) => {
-                let (handler, params) = endpoint_context.into_parts();
+                let (route_pipeline, params) = endpoint_context.into_parts();
                 let error_handler = pipeline.error_handler();
                 
                 let mut request = HttpRequest::new(request)
@@ -100,13 +100,13 @@ impl Scope {
                 
                 #[cfg(feature = "middleware")]
                 let response = if pipeline.has_middleware_pipeline() {
-                    let ctx = HttpContext::new(request, handler);
+                    let ctx = HttpContext::with_pipeline(request, route_pipeline);
                     pipeline.execute(ctx).await
                 } else {
-                    handler.call(request).await
+                    route_pipeline.call(HttpContext::slim(request)).await
                 };
                 #[cfg(not(feature = "middleware"))]
-                let response = handler.call(request).await;
+                let response = route_pipeline.call(request).await;
                 
                 match response {
                     Err(err) => call_weak_err_handler(error_handler, &uri, err).await,

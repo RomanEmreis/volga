@@ -94,7 +94,12 @@ pub struct App {
     /// Request body limit
     /// 
     /// Default: 5 MB
-    body_limit: RequestBodyLimit
+    body_limit: RequestBodyLimit,
+    
+    /// `TCP_NODELAY` flag
+    /// 
+    /// Default: `false`
+    no_delay: bool,
 }
 
 /// Wraps a socket
@@ -228,6 +233,7 @@ impl App {
             pipeline: PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),
+            no_delay: false,
         }
     }
 
@@ -258,6 +264,18 @@ impl App {
         self.body_limit = RequestBodyLimit::Disabled;
         self
     }
+    
+    ///Sets the value of the `TCP_NODELAY` option on this socket.
+    /// 
+    /// If set, this option disables the Nagle algorithm. 
+    /// This means that segments are always sent as soon as possible, 
+    /// even if there is only a small amount of data.
+    /// When not set, data is buffered until there is a sufficient amount to send out, 
+    /// thereby avoiding the frequent sending of small packets.
+    pub fn with_no_delay(mut self) -> Self {
+        self.no_delay = true;
+        self
+    }
 
     /// Runs the `App`
     #[cfg(feature = "middleware")]
@@ -275,7 +293,9 @@ impl App {
     #[inline]
     async fn run_internal(self) -> io::Result<()> {
         let socket = self.connection.socket;
+        let no_delay = self.no_delay;
         let tcp_listener = TcpListener::bind(socket).await?;
+        
         #[cfg(feature = "tracing")]
         {
             #[cfg(feature = "tls")]
@@ -314,7 +334,10 @@ impl App {
                 Ok(connection) = tcp_listener.accept() => connection,
                 _ = shutdown_tx.closed() => break,
             };
-            
+            if let Err(_err) = stream.set_nodelay(no_delay) {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("failed to set TCP_NODELAY on incoming connection: {_err:#}");
+            }
             let instance = Arc::downgrade(&app_instance);
             tokio::spawn(Self::handle_connection(stream, instance));
         }

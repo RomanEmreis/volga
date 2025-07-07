@@ -32,6 +32,8 @@ pub mod into_response;
 pub mod redirect;
 pub mod html;
 pub mod sse;
+#[cfg(feature = "middleware")]
+pub mod filter_result;
 
 /// A customized response context with custom response `headers` and `content_type`
 /// > NOTE: This is not suitable for file response use the `file!` or `Results::file()` instead
@@ -127,7 +129,7 @@ impl Results {
     #[inline]
     pub fn file(file_name: &str, content: File) -> HttpResult {
         let boxed_body = HttpBody::file(content);
-        let file_name = format!("attachment; filename=\"{}\"", file_name);
+        let file_name = format!("attachment; filename=\"{file_name}\"");
         response!(
             StatusCode::OK, 
             boxed_body,

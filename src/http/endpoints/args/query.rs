@@ -136,7 +136,7 @@ struct QueryError;
 impl QueryError {
     #[inline]
     fn from(err: serde::de::value::Error) -> Error {
-        Error::client_error(format!("Query parsing error: {}", err))
+        Error::client_error(format!("Query parsing error: {err}"))
     }
 }
 

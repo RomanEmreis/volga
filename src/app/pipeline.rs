@@ -52,8 +52,9 @@ impl PipelineBuilder {
     }
 
     #[cfg(feature = "middleware")]
-    pub(super) fn build(self) -> Pipeline {
+    pub(super) fn build(mut self) -> Pipeline {
         let start = self.middlewares.compose();
+        self.endpoints.compose();
         Pipeline {
             endpoints: self.endpoints,
             error_handler: self.error_handler,
@@ -81,7 +82,7 @@ impl PipelineBuilder {
         &mut self.middlewares
     }
 
-    pub(super) fn endpoints_mut(&mut self) -> &mut Endpoints {
+    pub(crate) fn endpoints_mut(&mut self) -> &mut Endpoints {
         &mut self.endpoints
     }
     

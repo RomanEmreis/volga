@@ -1,7 +1,7 @@
 # Volga
 Fast, Easy, and very flexible Web Framework for Rust based on [Tokio](https://tokio.rs/) runtime and [hyper](https://hyper.rs/) for fun and painless microservices crafting.
 
-[![latest](https://img.shields.io/badge/latest-0.5.8-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.5.9-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.80+-964B00)](https://crates.io/crates/volga)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
@@ -23,7 +23,7 @@ Fast, Easy, and very flexible Web Framework for Rust based on [Tokio](https://to
 ### Dependencies
 ```toml
 [dependencies]
-volga = "0.5.8"
+volga = "0.5.9"
 tokio = { version = "1", features = ["full"] }
 ```
 ### Simple request handler
@@ -44,7 +44,7 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 ## Performance
-Tested a single instance on a laptop using 1 thread and 200 connections and under configuration:
+Tested a single instance on a laptop using 4 threads and 500 connections and under configuration:
 ```
 OS: Arch Linux
 CPU: Intel i7-8665U (8) @ 4.800GHz
@@ -53,12 +53,12 @@ RAM: 31686MiB
 ### Results
 ```
 Running 10s test @ http://127.0.0.1:7878/hello
-  1 threads and 200 connections
+  4 threads and 500 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   578.90us  206.77us   5.77ms   79.81%
-    Req/Sec   184.72k     9.54k  200.74k    77.00%
-  1837693 requests in 10.08s, 206.80MB read
-Requests/sec: 182380.80
-Transfer/sec:     20.52MB
+    Latency     1.39ms    1.05ms  18.45ms   81.47%
+    Req/Sec     89.69k    18.07k  126.91k   57.50%
+  3575551 requests in 10.07s, 395.55MB read
+Requests/sec: 355053.82
+Transfer/sec: 39.28MB
 ```
 

@@ -3,7 +3,6 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf}
 };
-
 use crate::{
     App,
     Path as RoutePath,
@@ -59,8 +58,7 @@ async fn respond_with_file(
     headers: Headers, 
     env: HostEnv
 ) -> HttpResult {
-    let path = path.iter()
-        .map(|(_, v)| v)
+    let path = path.values()
         .fold(PathBuf::new(), |mut acc, v| {
             acc.push(v);
             acc
@@ -136,7 +134,7 @@ fn max_folder_depth<P: AsRef<Path>>(path: P) -> u32 {
 }
 
 impl RouteGroup<'_> {
-    /// Configures a static assets
+    /// Configures a static asset
     ///
     /// All the `GET`/`HEAD` requests to root `/` will be redirected to `/index.html`
     /// as well as all the `GET`/`HEAD` requests to `/{file_name}` 
@@ -156,13 +154,13 @@ impl RouteGroup<'_> {
     /// # app.run().await
     /// # }
     /// ```
-    pub fn map_static_assets(&mut self) -> &mut Self {
+    pub fn map_static_assets(mut self) -> Self {
         // Configure routes depending on root folder depth
         let folder_depth = max_folder_depth(self.app.host_env.content_root());
         let mut segment = String::new();
         for i in 0..folder_depth {
-            segment.push_str(&format!("/{{path_{}}}", i));
-            self.map_get(&segment, respond_with_file);
+            segment.push_str(&format!("/{{path_{i}}}"));
+            self = self.map_get(&segment, respond_with_file);
         }
         self.map_get("/", index)
     }
@@ -187,12 +185,11 @@ impl RouteGroup<'_> {
     /// # app.run().await
     /// # }
     /// ```
-    pub fn use_static_files(&mut self) -> &mut Self {
+    pub fn use_static_files(self) -> Self {
         // Enable fallback to file if it's provided
         if self.app.host_env.fallback_path().is_some() {
             self.app.map_fallback_to_file();
         }
-
         self.map_static_assets()
     }
 }
@@ -225,7 +222,7 @@ impl App {
         self.map_static_assets()
     }
 
-    /// Configures a static assets
+    /// Configures a static asset
     ///
     /// All the `GET`/`HEAD` requests to root `/` will be redirected to `/index.html`
     /// as well as all the `GET`/`HEAD` requests to `/{file_name}` 
@@ -249,13 +246,13 @@ impl App {
         let folder_depth = max_folder_depth(self.host_env.content_root());
         let mut segment = String::new();
         for i in 0..folder_depth {
-            segment.push_str(&format!("/{{path_{}}}", i));
+            segment.push_str(&format!("/{{path_{i}}}"));
             self.map_get(&segment, respond_with_file);  
         }
-        self.map_get("/", index)
+        self.map_get("/", index).app
     }
 
-    /// Adds a special fallback handler that redirects to specified file
+    /// Adds a special fallback handler that redirects to a specified file
     /// when unregistered resource is requested
     ///
     /// # Example

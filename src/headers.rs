@@ -71,11 +71,11 @@ impl HeaderError {
 
     #[inline]
     fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
-        Error::client_error(format!("Header: {}", error))
+        Error::client_error(format!("Header: {error}"))
     }
 
     #[inline]
     fn from_to_str_error(error: ToStrError) -> Error {
-        Error::client_error(format!("Header: {}", error))
+        Error::client_error(format!("Header: {error}"))
     }
 }

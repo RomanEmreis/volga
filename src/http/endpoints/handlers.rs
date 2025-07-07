@@ -1,6 +1,5 @@
 ﻿use std::{sync::Arc, future::Future};
 use futures_util::future::BoxFuture;
-
 use crate::{HttpResult, HttpRequest};
 use crate::http::{
     endpoints::args::FromRequest,
@@ -37,9 +36,15 @@ where
     Args: FromRequest
 {
     /// Creates a new [`Func`] wrapped into [`Arc`]
+    #[inline]
     pub(crate) fn new(func: F) -> Arc<Self> {
-        let func = Self { func, _marker: std::marker::PhantomData };
-        Arc::new(func)
+        Arc::new(Self::new_local(func))
+    }
+
+    /// Creates a new [`Func`]
+    #[inline]
+    pub(crate) fn new_local(func: F) -> Self {
+        Self { func, _marker: std::marker::PhantomData }
     }
 }
 

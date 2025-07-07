@@ -1,5 +1,6 @@
 ﻿//! Route mapping helpers
 
+use std::ops::{Deref, DerefMut};
 use hyper::Method;
 use crate::App;
 use crate::http::IntoResponse;
@@ -7,6 +8,9 @@ use crate::http::endpoints::{
     args::FromRequest,
     handlers::{Func, GenericHandler},
 };
+
+#[cfg(feature = "middleware")]
+use crate::middleware::MiddlewareFn;
 
 /// Routes mapping 
 impl App {
@@ -57,7 +61,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_get<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_get<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -75,7 +79,13 @@ impl App {
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
-        self
+        Route { 
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::GET,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     /// Adds a request handler that matches HTTP POST requests for the specified pattern.
@@ -95,7 +105,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_post<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_post<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -108,8 +118,14 @@ impl App {
 
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
-        
-        self
+
+        Route {
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::POST,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     /// Adds a request handler that matches HTTP PUT requests for the specified pattern.
@@ -128,7 +144,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_put<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_put<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -141,8 +157,14 @@ impl App {
 
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
-        
-        self
+
+        Route {
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::PUT,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     /// Adds a request handler that matches HTTP PATCH requests for the specified pattern.
@@ -161,7 +183,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_patch<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_patch<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -174,8 +196,14 @@ impl App {
 
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
-        
-        self
+
+        Route {
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::PATCH,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     /// Adds a request handler that matches HTTP DELETE requests for the specified pattern.
@@ -194,7 +222,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_delete<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_delete<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -207,8 +235,14 @@ impl App {
 
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
-        
-        self
+
+        Route {
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::DELETE,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     /// Adds a request handler that matches HTTP HEAD requests for the specified pattern.
@@ -227,7 +261,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_head<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_head<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -240,8 +274,14 @@ impl App {
 
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
-        
-        self
+
+        Route {
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::HEAD,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     /// Adds a request handler that matches HTTP OPTIONS requests for the specified pattern.
@@ -260,7 +300,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_options<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_options<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -270,7 +310,13 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::OPTIONS, pattern, handler);
-        self
+        Route {
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::OPTIONS,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     /// Adds a request handler that matches HTTP TRACE requests for the specified pattern.
@@ -289,7 +335,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_trace<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_trace<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -302,8 +348,14 @@ impl App {
 
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
-        
-        self
+
+        Route {
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::TRACE,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     /// Adds a request handler that matches HTTP CONNECT requests for the specified pattern.
@@ -322,7 +374,7 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_connect<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_connect<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -335,8 +387,13 @@ impl App {
 
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
-        
-        self
+        Route {
+            app: self,
+            #[cfg(feature = "middleware")]
+            method: Method::CONNECT,
+            #[cfg(feature = "middleware")]
+            pattern
+        }
     }
 
     #[inline]
@@ -352,30 +409,73 @@ impl App {
     }
 }
 
+/// Represents a route reference
+pub struct Route<'a> {
+    pub(crate) app: &'a mut App,
+    #[cfg(feature = "middleware")]
+    pub(crate) method: Method,
+    #[cfg(feature = "middleware")]
+    pub(crate) pattern: &'a str,
+}
+
 /// Represents a group of routes
 pub struct RouteGroup<'a> {
     pub(crate) app: &'a mut App,
     pub(crate) prefix: &'a str,
+    #[cfg(feature = "middleware")]
+    pub(crate) middleware: Vec<MiddlewareFn>,
+}
+
+impl<'a> Deref for Route<'a> {
+    type Target = App;
+    
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.app
+    }
+}
+
+impl<'a> DerefMut for Route<'a> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.app
+    }
 }
 
 macro_rules! define_route_group_methods({$($method:ident)*} => {
     impl <'a> RouteGroup<'a> {
         /// Creates a new route group
         fn new(app: &'a mut App, prefix: &'a str) -> Self {
-            RouteGroup { app, prefix }
+            RouteGroup { 
+                app, 
+                prefix,
+                #[cfg(feature = "middleware")]
+                middleware: Vec::with_capacity(4),
+            }
         }
             
         $(
         #[doc = concat!("See [`App::", stringify!($method), "`] for more details.")]
-        pub fn $method<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+        pub fn $method<F, R, Args>(self, pattern: &str, handler: F) -> Self
         where
             F: GenericHandler<Args, Output = R>,
             R: IntoResponse + 'static,
             Args: FromRequest + Send + Sync + 'static
         {
             let pattern = [self.prefix, pattern].concat();
-            self.app.$method(&pattern, handler);
-            self
+            #[cfg(feature = "middleware")]
+            {
+                let mut route = self.app.$method(&pattern, handler);
+                for filter in self.middleware.iter() {
+                    route = route.map_middleware(filter.clone());
+                }
+                self
+            }
+            #[cfg(not(feature = "middleware"))]
+            {
+                self.app.$method(&pattern, handler);
+                self
+            }
         }
         )*
         }

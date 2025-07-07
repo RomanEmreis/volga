@@ -58,7 +58,7 @@ impl FromPayload for HttpRequest {
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
         let Payload::Request(req) = payload else { unreachable!() };
-        ok(req)
+        ok(*req)
     }
 
     fn source() -> Source {
@@ -155,7 +155,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let req = HttpRequest::from_payload(Payload::Request(req)).await;
+        let req = HttpRequest::from_payload(Payload::Request(Box::new(req))).await;
 
         assert!(req.is_ok());
 
