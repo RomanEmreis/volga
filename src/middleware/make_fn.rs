@@ -109,7 +109,7 @@ where
 
 /// Wraps a closure for the request mapping into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_map_request_fn<F, Fut>(map: F) -> MiddlewareFn
+pub(super) fn make_tap_req_fn<F, Fut>(map: F) -> MiddlewareFn
 where
     F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = HttpRequest> + Send,
@@ -124,4 +124,130 @@ where
         }
     };
     make_fn(middleware_fn)
+}
+
+#[cfg(test)]
+mod tests {
+    use hyper::Request;
+    use super::*;
+    use crate::{bad_request, ok, HttpBody};
+    use crate::http::endpoints::handlers::Func;
+    use crate::http::StatusCode;
+
+    fn create_request() -> HttpRequest {
+        let req = Request::get("http://localhost")
+            .body(HttpBody::empty())
+            .unwrap();
+        let (parts, body) = req.into_parts();
+        HttpRequest::from_parts(parts, body)
+    }
+    
+    #[tokio::test]
+    async fn it_tests_from_handler() {
+        let handler = || async { ok!() };
+        let route_handler = Func::new(handler);
+        let middleware = from_handler(route_handler);
+        
+        let req = create_request();
+        let ctx = HttpContext::slim(req);
+        let next: Next = Arc::new(|_| Box::pin(async { ok!() }));
+
+        let result = middleware(ctx, next).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_tests_make_fn() {
+        let middleware_logic = |ctx: HttpContext, next: Next| async move {
+            // Simple pass-through middleware
+            next(ctx).await
+        };
+
+        let middleware = make_fn(middleware_logic);
+
+        let req = create_request();
+        let ctx = HttpContext::slim(req);
+        let next: Next = Arc::new(|_| Box::pin(async { ok!() }));
+
+        let result = middleware(ctx, next).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_tests_make_filter_fn() {
+        let filter = || async { true };
+        let middleware = make_filter_fn(filter);
+
+        let req = create_request();
+        let ctx = HttpContext::slim(req);
+        let next: Next = Arc::new(|_| Box::pin(async { ok!() }));
+
+        let result = middleware(ctx, next).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_tests_make_map_ok_fn() {
+        // Create a response mapper that adds a header
+        let map = |mut resp: HttpResponse| async move {
+            resp.headers_mut().insert("X-Test", "value".parse().unwrap());
+            resp
+        };
+
+        let middleware = make_map_ok_fn(map);
+
+        let req = create_request();
+        let ctx = HttpContext::slim(req);
+        let next: Next = Arc::new(|_| Box::pin(async { ok!() }));
+
+        let result = middleware(ctx, next).await;
+        assert!(result.is_ok());
+        if let Ok(response) = result {
+            assert_eq!(response.headers().get("X-Test").unwrap(), "value");
+        }
+    }
+
+    #[tokio::test]
+    async fn it_tests_make_map_err_fn() {
+        // Create an error mapper that converts errors to 400 Bad Request
+        let map = |_err: Error| async {
+            bad_request!()
+        };
+
+        let middleware = make_map_err_fn(map);
+
+        let req = create_request();
+        let ctx = HttpContext::slim(req);
+        // Create a next function that returns an error
+        let next: Next = Arc::new(|_| Box::pin(async {
+            Err(Error::client_error("test error"))
+        }));
+
+        let result = middleware(ctx, next).await;
+        assert!(result.is_ok());
+        if let Ok(response) = result {
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        }
+    }
+
+    #[tokio::test]
+    async fn it_test_make_map_request_fn() {
+        // Create a request mapper that adds a header
+        let map = |mut req: HttpRequest| async move {
+            req.headers_mut().insert("X-Test", "value".parse().unwrap());
+            req
+        };
+
+        let middleware = make_tap_req_fn(map);
+
+        let req = create_request();
+        let ctx = HttpContext::slim(req);
+        let next: Next = Arc::new(|ctx: HttpContext| Box::pin(async move {
+            assert_eq!(ctx.request.headers().get("X-Test").unwrap(), "value");
+            ok!()
+        }));
+
+        let result = middleware(ctx, next).await;
+        assert!(result.is_ok());
+    }
 }

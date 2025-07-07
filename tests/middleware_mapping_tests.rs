@@ -71,7 +71,7 @@ async fn it_adds_map_req_middleware() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7943");
 
-        app.map_request(|mut req| async move {
+        app.tap_req(|mut req| async move {
             req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
             req
         });
@@ -136,7 +136,7 @@ async fn it_adds_map_req_middleware_for_route() {
                 let val = headers.get("X-Test").unwrap().to_str().unwrap();
                 Results::text(val)
             })
-            .map_request(|mut req| async move {
+            .tap_req(|mut req| async move {
                 req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
                 req
             });
@@ -194,7 +194,7 @@ async fn it_adds_map_req_middleware_for_group() {
         let mut app = App::new().bind("127.0.0.1:7947");
 
         app.map_group("/tests")
-            .map_request(|mut req| async move {
+            .tap_req(|mut req| async move {
                 req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
                 req
             })

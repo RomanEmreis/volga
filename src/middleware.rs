@@ -179,7 +179,7 @@ impl App {
         self
     }
 
-    /// Adds a middleware that handles the [`HttpRequest`]
+    /// Adds a middleware that handles incoming [`HttpRequest`]
     /// 
     /// # Example
     /// ```no_run
@@ -189,7 +189,7 @@ impl App {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_request(|mut req: HttpRequest| async move { 
+    /// app.tap_req(|mut req: HttpRequest| async move { 
     ///     req.headers_mut()
     ///         .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
     ///     req
@@ -200,14 +200,14 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_request<F, Fut>(&mut self, map: F) -> &mut Self
+    pub fn tap_req<F, Fut>(&mut self, map: F) -> &mut Self
     where
         F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
         Fut: Future<Output = HttpRequest> + Send,
     {
         self.pipeline
             .middlewares_mut()
-            .add(make_map_request_fn(map));
+            .add(make_tap_req_fn(map));
         self
     }
 
@@ -339,7 +339,7 @@ impl<'a> Route<'a> {
         self.map_middleware(map_err_fn)
     }
 
-    /// Adds a middleware that handles the [`HttpRequest`] for this route
+    /// Adds a middleware that handles icoming [`HttpRequest`] for this route
     /// 
     /// # Example
     /// ```no_run
@@ -351,7 +351,7 @@ impl<'a> Route<'a> {
     /// 
     /// app
     ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
-    ///     .map_request(|mut req: HttpRequest| async move { 
+    ///     .tap_req(|mut req: HttpRequest| async move { 
     ///         req.headers_mut()
     ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
     ///         req
@@ -360,12 +360,12 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_request<F, Fut>(self, map: F) -> Self
+    pub fn tap_req<F, Fut>(self, map: F) -> Self
     where
         F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
         Fut: Future<Output = HttpRequest> + Send,
     {
-        let map_err_fn = make_map_request_fn(map);
+        let map_err_fn = make_tap_req_fn(map);
         self.map_middleware(map_err_fn)
     }
     
@@ -506,7 +506,7 @@ impl<'a> RouteGroup<'a> {
         self
     }
 
-    /// Adds a middleware that handles the [`HttpRequest`] for this group of routes
+    /// Adds a middleware that handles incoming [`HttpRequest`] for this group of routes
     /// 
     /// # Example
     /// ```no_run
@@ -517,7 +517,7 @@ impl<'a> RouteGroup<'a> {
     /// let mut app = App::new();
     /// 
     /// app.map_group("/positive")
-    ///     .map_request(|mut req: HttpRequest| async move { 
+    ///     .tap_req(|mut req: HttpRequest| async move { 
     ///         req.headers_mut()
     ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
     ///         req
@@ -529,12 +529,12 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_request<F, Fut>(mut self, map: F) -> Self
+    pub fn tap_req<F, Fut>(mut self, map: F) -> Self
     where
         F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
         Fut: Future<Output = HttpRequest> + Send,
     {
-        let map_err_fn = make_map_request_fn(map);
+        let map_err_fn = make_tap_req_fn(map);
         self.middleware.push(map_err_fn);
         self
     }
