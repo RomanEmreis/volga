@@ -44,7 +44,7 @@ async fn main() -> std::io::Result<()> {
 }
 ```
 ## Performance
-Tested a single instance on a laptop using 1 thread and 200 connections and under configuration:
+Tested a single instance on a laptop using 4 threads and 500 connections and under configuration:
 ```
 OS: Arch Linux
 CPU: Intel i7-8665U (8) @ 4.800GHz
