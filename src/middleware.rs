@@ -339,7 +339,7 @@ impl<'a> Route<'a> {
         self.map_middleware(map_err_fn)
     }
 
-    /// Adds a middleware that handles icoming [`HttpRequest`] for this route
+    /// Adds a middleware that handles incoming [`HttpRequest`] for this route
     /// 
     /// # Example
     /// ```no_run
