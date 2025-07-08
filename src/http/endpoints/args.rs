@@ -59,7 +59,7 @@ pub trait FromRawRequest: Sized {
     fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
-/// Specifies extractors to read data from borrowed HTTP request
+/// Specifies extractors to read data from a borrowed HTTP request
 pub trait FromRequestRef: Sized {
     fn from_request(req: &HttpRequest) -> Result<Self, Error>;
 }
@@ -86,6 +86,20 @@ pub(crate) trait FromPayload: Send + Sized {
 impl FromRequest for () {
     #[inline]
     async fn from_request(_: HttpRequest) -> Result<Self, Error> {
+        Ok(())
+    }
+}
+
+impl FromRequestRef for () {
+    #[inline]
+    fn from_request(_: &HttpRequest) -> Result<Self, Error> {
+        Ok(())
+    }
+}
+
+impl FromRequestParts for () {
+    #[inline]
+    fn from_parts(_: &Parts) -> Result<Self, Error> {
         Ok(())
     }
 }
@@ -157,6 +171,38 @@ macro_rules! define_generic_from_raw_request {
     }
 }
 
+macro_rules! define_generic_from_request_ref {
+    ($($T: ident),*) => {
+        impl<$($T: FromRequestRef),+> FromRequestRef for ($($T,)+) {
+            #[inline]
+            fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+                let tuple = (
+                    $(
+                    $T::from_request(req)?,
+                    )*    
+                );
+                Ok(tuple)
+            }
+        }
+    }
+}
+
+macro_rules! define_generic_from_request_parts {
+    ($($T: ident),*) => {
+        impl<$($T: FromRequestParts),+> FromRequestParts for ($($T,)+) {
+            #[inline]
+            fn from_parts(parts: &Parts) -> Result<Self, Error> {
+                let tuple = (
+                    $(
+                    $T::from_parts(parts)?,
+                    )*    
+                );
+                Ok(tuple)
+            }
+        }
+    }
+}
+
 define_generic_from_request! { T1 }
 define_generic_from_request! { T1, T2 }
 define_generic_from_request! { T1, T2, T3 }
@@ -172,6 +218,16 @@ define_generic_from_raw_request! { T1 }
 define_generic_from_raw_request! { T1, T2 }
 define_generic_from_raw_request! { T1, T2, T3 }
 define_generic_from_raw_request! { T1, T2, T3, T4 }
+
+define_generic_from_request_ref! { T1 }
+define_generic_from_request_ref! { T1, T2 }
+define_generic_from_request_ref! { T1, T2, T3 }
+define_generic_from_request_ref! { T1, T2, T3, T4 }
+
+define_generic_from_request_parts! { T1 }
+define_generic_from_request_parts! { T1, T2 }
+define_generic_from_request_parts! { T1, T2, T3 }
+define_generic_from_request_parts! { T1, T2, T3, T4 }
 
 #[cfg(test)]
 mod tests {

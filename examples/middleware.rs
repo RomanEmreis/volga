@@ -14,13 +14,10 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     // Example of middleware
-    app.use_middleware(|ctx, next| async move {
-        let cancellation_token: CancellationToken = ctx.extract()?;
-        let user_agent: Header<Accept> = ctx.extract()?;
-        
-        if !cancellation_token.is_cancelled() && *user_agent == "*/*" {
-            next(ctx).await
-        } else { 
+    app.with(|user_agent: Header<Accept>, token: CancellationToken, next| async move {
+        if !token.is_cancelled() && *user_agent == "*/*" {
+            next.await
+        } else {
             status!(406)
         }
     });

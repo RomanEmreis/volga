@@ -567,7 +567,7 @@ impl App {
                 false
             };
             
-            self.use_middleware(move |ctx, next| {
+            self.wrap(move |ctx, next| {
                 let hsts_header_value = hsts_header_value.clone();
                 let is_excluded = is_excluded.clone();
                 

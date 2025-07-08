@@ -52,7 +52,7 @@ impl App {
         validate_cors_config(&self.cors_config);
 
         let cors_config = self.cors_config.clone().unwrap();
-        self.use_middleware(move |ctx, next| {
+        self.wrap(move |ctx, next| {
             let cors_config = cors_config.clone();
             async move {
                 let origin = ctx.request.headers().get(&ORIGIN);

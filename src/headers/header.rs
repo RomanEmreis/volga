@@ -25,7 +25,7 @@ use std::{
     ops::{Deref, DerefMut}
 };
 
-/// Wraps the [`HeaderMap`] extracted from request
+/// Wraps the [`HeaderMap`] extracted from the request
 ///
 /// # Example
 /// ```no_run

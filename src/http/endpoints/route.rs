@@ -9,7 +9,7 @@ use crate::middleware::{
     HttpContext,
     Middlewares,
     MiddlewareFn,
-    Next,
+    NextFn,
 };
 
 #[cfg(not(feature = "middleware"))]
@@ -74,7 +74,7 @@ pub(crate) enum RoutePipeline {
     #[cfg(feature = "middleware")]
     Builder(Middlewares),
     #[cfg(feature = "middleware")]
-    Middleware(Option<Next>),
+    Middleware(Option<NextFn>),
     #[cfg(not(feature = "middleware"))]
     Handler(Option<RouteHandler>)
 }

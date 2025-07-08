@@ -11,7 +11,7 @@ use std::{
     ops::{Deref, DerefMut}
 };
 
-/// Represents a various forms of WebSockets message
+/// Represents various forms of WebSockets message
 /// 
 /// See also [`tungstenite::Message`]
 pub struct Message(pub(super) tungstenite::Message);

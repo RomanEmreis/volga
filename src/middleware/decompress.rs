@@ -83,7 +83,7 @@ impl_decompressor!(zstd, ZstdDecoder, false);
 impl App {
     /// Registers a middleware that applies a default decompression algorithm
     pub fn use_decompression(&mut self) -> &mut Self {
-        self.use_middleware(|mut ctx, next| async move {
+        self.wrap(|mut ctx, next| async move {
             if let Ok(content_encoding) = ctx.extract::<Header<ContentEncoding>>() {
                 match content_encoding.into_inner().try_into() {
                     Ok(encoding) => {

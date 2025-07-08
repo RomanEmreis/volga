@@ -7,6 +7,7 @@ use crate::{
     http::{
         IntoResponse,
         FromRequest,
+        FromRequestRef,
         GenericHandler,
         FilterResult,
     }, 
@@ -15,11 +16,11 @@ use crate::{
     App,
     HttpResult, 
     HttpRequest,
-    HttpResponse,
     not_found, 
 };
 
 pub use http_context::HttpContext;
+pub use handler::{Next, MiddlewareHandler, TapReqHandler, MapOkHandler};
 pub(crate) use make_fn::from_handler;
 
 #[cfg(any(
@@ -38,12 +39,13 @@ pub mod compress;
 pub mod decompress;
 pub mod http_context;
 pub mod cors;
+pub mod handler;
 pub(super) mod make_fn;
 
 const DEFAULT_MW_CAPACITY: usize = 8;
 
 /// Points to the next middleware or request handler
-pub type Next = Arc<
+pub type NextFn = Arc<
     dyn Fn(HttpContext) -> BoxFuture<'static, HttpResult>
     + Send
     + Sync
@@ -51,7 +53,7 @@ pub type Next = Arc<
 
 /// Point to a middleware function
 pub(super) type MiddlewareFn = Arc<
-    dyn Fn(HttpContext, Next) -> BoxFuture<'static, HttpResult>
+    dyn Fn(HttpContext, NextFn) -> BoxFuture<'static, HttpResult>
     + Send
     + Sync
 >;
@@ -90,14 +92,14 @@ impl Middlewares {
     }
 
     /// Composes middlewares into a "Linked List" and returns head
-    pub(super) fn compose(&self) -> Option<Next> {
+    pub(super) fn compose(&self) -> Option<NextFn> {
         if self.pipeline.is_empty() {
             return None;
         }
 
         // Fetching the last middleware which is the request handler to be the initial `next`.
         let request_handler = self.pipeline.last().unwrap().clone();
-        let mut next: Next = Arc::new(move |ctx| {
+        let mut next: NextFn = Arc::new(move |ctx| {
             let handler = request_handler.clone();
             // Call the last middleware, ignoring its `next` argument with an empty placeholder
             handler(ctx, Arc::new(|_| Box::pin(async { not_found!() })))
@@ -105,7 +107,7 @@ impl Middlewares {
 
         for mw in self.pipeline.iter().rev().skip(1) {
             let current_mw: MiddlewareFn = mw.clone();
-            let prev_next: Next = next.clone();
+            let prev_next: NextFn = next.clone();
 
             next = Arc::new(move |ctx| {
                 let current_mw = current_mw.clone();
@@ -129,15 +131,15 @@ impl App {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.use_middleware(|ctx, next| async move {
+    /// app.wrap(|ctx, next| async move {
     ///     next(ctx).await
     /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn use_middleware<F, Fut>(&mut self, middleware: F) -> &mut Self
+    pub fn wrap<F, Fut>(&mut self, middleware: F) -> &mut Self
     where
-        F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
+        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
     {
         self.pipeline
@@ -167,11 +169,11 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_ok<F, R, Fut>(&mut self, map: F) -> &mut Self
+    pub fn map_ok<F, R, Args>(&mut self, map: F) -> &mut Self
     where
-        F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = R> + Send,
+        F: MapOkHandler<Args, Output = R>,
         R: IntoResponse + 'static,
+        Args: FromRequestRef + Send + Sync + 'static,
     {
         self.pipeline
             .middlewares_mut()
@@ -200,21 +202,55 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn tap_req<F, Fut>(&mut self, map: F) -> &mut Self
+    pub fn tap_req<F, Args>(&mut self, map: F) -> &mut Self
     where
-        F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = HttpRequest> + Send,
+        F: TapReqHandler<Args, Output = HttpRequest>,
+        Args: FromRequestRef + Send + Sync + 'static,
     {
         self.pipeline
             .middlewares_mut()
             .add(make_tap_req_fn(map));
         self
     }
+    
+    /// Adds a middleware that can take any parameters that implement [`FromRequestRef`]
+    /// and the reference to the [`Next`] future; awaiting this `next` calls 
+    /// the next middleware in the pipeline
+    /// 
+    /// Unlike the [`wrap`], this method doesn't provide direct access to the [`HttpRequest`] and [`HttpBody`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, headers::Headers};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.with(|headers: Headers, next| async move {
+    ///     // do something with headers
+    ///     // ...
+    ///     next.await
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
+    where 
+        F: MiddlewareHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequestRef + Send + Sync + 'static,
+    {
+        self.pipeline
+            .middlewares_mut()
+            .add(make_with_fn(middleware));
+        self
+    }
 
     /// Registers default middleware
     pub(super) fn use_endpoints(&mut self) {
         if self.pipeline.has_middleware_pipeline() {
-            self.use_middleware(|ctx, _| async move {
+            self.wrap(|ctx, _| async move {
                 ctx.execute().await
             });
         }
@@ -234,16 +270,16 @@ impl<'a> Route<'a> {
     /// 
     /// app
     ///     .map_get("/hello", || async { "Hello, World!" })
-    ///     .use_middleware(|ctx, next| async move {
+    ///     .wrap(|ctx, next| async move {
     ///         next(ctx).await
     ///     });
     /// 
     ///# app.run().await
     ///# }
     /// ```
-    pub fn use_middleware<F, Fut>(self, middleware: F) -> Self
+    pub fn wrap<F, Fut>(self, middleware: F) -> Self
     where
-        F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
+        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send +'static,
     {
         self.map_middleware(make_fn(middleware))
@@ -299,11 +335,11 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_ok<F, R, Fut>(self, map: F) -> Self
+    pub fn map_ok<F, R, Args>(self, map: F) -> Self
     where
-        F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = R> + Send,
+        F: MapOkHandler<Args, Output = R>,
         R: IntoResponse + 'static,
+        Args: FromRequestRef + Send + Sync + 'static,
     {
         let map_ok_fn = make_map_ok_fn(map);
         self.map_middleware(map_ok_fn)
@@ -360,13 +396,45 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn tap_req<F, Fut>(self, map: F) -> Self
+    pub fn tap_req<F, Args>(self, map: F) -> Self
     where
-        F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = HttpRequest> + Send,
+        F: TapReqHandler<Args, Output = HttpRequest>,
+        Args: FromRequestRef + Send + Sync + 'static,
     {
         let map_err_fn = make_tap_req_fn(map);
         self.map_middleware(map_err_fn)
+    }
+
+    /// Adds a middleware for this route that can take any parameters that implement [`FromRequestRef`]
+    /// and the reference to the [`Next`] future; awaiting this `next` calls 
+    /// the next middleware in the pipeline
+    /// 
+    /// Unlike the [`wrap`], this method doesn't provide direct access to the [`HttpRequest`] and [`HttpBody`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, headers::Headers};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.with(|headers: Headers, next| async move {
+    ///     // do something with headers
+    ///     // ...
+    ///     next.await
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn with<F, R, Args>(self, middleware: F) -> Self
+    where
+        F: MiddlewareHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequestRef + Send + Sync + 'static,
+    {
+        let with_fn = make_with_fn(middleware);
+        self.map_middleware(with_fn)
     }
     
     #[inline]
@@ -391,7 +459,7 @@ impl<'a> RouteGroup<'a> {
     /// let mut app = App::new();
     /// 
     /// app.map_group("/hello")
-    ///     .use_middleware(|ctx, next| async move {
+    ///     .wrap(|ctx, next| async move {
     ///         next(ctx).await
     ///     })
     ///     .map_get("/world", || async { "Hello, World!" });
@@ -399,9 +467,9 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn use_middleware<F, Fut>(mut self, middleware: F) -> Self
+    pub fn wrap<F, Fut>(mut self, middleware: F) -> Self
     where
-        F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
+        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
     {
         self.middleware.push(make_fn(middleware));
@@ -462,11 +530,11 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_ok<F, R, Fut>(mut self, map: F) -> Self
+    pub fn map_ok<F, R, Args>(mut self, map: F) -> Self
     where
-        F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = R> + Send,
+        F: MapOkHandler<Args, Output = R>,
         R: IntoResponse + 'static,
+        Args: FromRequestRef + Send + Sync + 'static,
     {
         let map_ok_fn = make_map_ok_fn(map);
         self.middleware.push(map_ok_fn);
@@ -529,13 +597,46 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn tap_req<F, Fut>(mut self, map: F) -> Self
+    pub fn tap_req<F, Args>(mut self, map: F) -> Self
     where
-        F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = HttpRequest> + Send,
+        F: TapReqHandler<Args, Output = HttpRequest>,
+        Args: FromRequestRef + Send + Sync + 'static,
     {
         let map_err_fn = make_tap_req_fn(map);
         self.middleware.push(map_err_fn);
+        self
+    }
+
+    /// Adds middleware for this group of routes that can take any parameters that implement [`FromRequestRef`]
+    /// and the reference to the [`Next`] future; awaiting this `next` calls 
+    /// the next middleware in the pipeline
+    /// 
+    /// Unlike the [`wrap`], this method doesn't provide direct access to the [`HttpRequest`] and [`HttpBody`]
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, headers::Headers};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.with(|headers: Headers, next| async move {
+    ///     // do something with headers
+    ///     // ...
+    ///     next.await
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn with<F, R, Args>(mut self, middleware: F) -> Self
+    where
+        F: MiddlewareHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequestRef + Send + Sync + 'static,
+    {
+        let with_fn = make_with_fn(middleware);
+        self.middleware.push(with_fn);
         self
     }
 }

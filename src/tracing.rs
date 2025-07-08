@@ -128,7 +128,7 @@ impl App {
             .take()
             .unwrap_or_default();
         
-        self.use_middleware(move |ctx, next| {
+        self.wrap(move |ctx, next| {
             let tracing_config = tracing_config.clone();
             async move {
                 let method = ctx.request.method();

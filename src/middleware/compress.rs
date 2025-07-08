@@ -86,7 +86,7 @@ impl_compressor!(zstd, ZstdEncoder, Level::Default);
 impl App {
     /// Registers a middleware that applies a default compression algorithm
     pub fn use_compression(&mut self) -> &mut Self {
-        self.use_middleware(|ctx, next| async move {
+        self.wrap(|ctx, next| async move {
             let accept_encoding = ctx.extract::<Header<AcceptEncoding>>();
             let http_result = next(ctx).await;
             
