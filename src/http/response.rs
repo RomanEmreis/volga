@@ -41,11 +41,12 @@ pub mod filter_result;
 /// ```no_run
 /// use volga::{Results, ResponseContext};
 /// use std::collections::HashMap;
+/// use std::result;
 ///
 /// let mut headers = HashMap::new();
 /// headers.insert(String::from("x-api-key"), String::from("some api key"));
 ///
-/// Results::from(ResponseContext {
+/// let result = Results::from(ResponseContext {
 ///     content: "Hello World!",
 ///     status: 200,
 ///     headers
@@ -59,7 +60,7 @@ pub mod filter_result;
 /// let mut headers = HashMap::new();
 /// headers.insert(String::from("x-api-key"), String::from("some api key"));
 ///
-/// HttpResult::from(ResponseContext {
+/// let result = HttpResult::from(ResponseContext {
 ///     content: "Hello World!",
 ///     status: 200,
 ///     headers
@@ -68,12 +69,11 @@ pub mod filter_result;
 pub struct ResponseContext<T: Serialize> {
     pub content: T,
     pub status: u16,
-    pub headers: HttpHeaders
+    pub headers: HashMap<String, String>
 }
 
 pub type HttpResponse = Response<HttpBody>;
 pub type HttpResult = Result<HttpResponse, Error>;
-pub type HttpHeaders = HashMap<String, String>;
 pub struct Results;
 
 impl Results {
@@ -153,7 +153,7 @@ impl Results {
         )
     }
 
-    /// Produces an `CLIENT CLOSED REQUEST 499` response.
+    /// Produces a ` CLIENT CLOSED REQUEST 499 ` response.
     #[inline]
     pub fn client_closed_request() -> HttpResult {
         response!(
@@ -163,7 +163,7 @@ impl Results {
     }
 
     #[inline]
-    fn create_custom_builder(status: StatusCode, headers: HttpHeaders) -> Builder {
+    fn create_custom_builder(status: StatusCode, headers: HashMap<String, String>) -> Builder {
         let mut builder = builder!(status);
         if let Some(headers_ref) = builder.headers_mut() {
             for (name, value) in &headers {

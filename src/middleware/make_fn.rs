@@ -6,21 +6,26 @@ use crate::{
         endpoints::handlers::RouteHandler, 
         FromRequest,
         FromRequestRef,
-        GenericHandler, 
+        GenericHandler,
+        MapErrHandler,
         IntoResponse,
         FilterResult
     },
-    error::Error,
     HttpRequest, 
     HttpResult,
 };
-use super::{MiddlewareFn, NextFn, HttpContext};
-use crate::middleware::handler::{
-    MiddlewareHandler,
-    MapOkHandler,
-    TapReqHandler,
-    Next
+use super::{
+    handler::{
+        MiddlewareHandler,
+        MapOkHandler,
+        TapReqHandler,
+        Next
+    },
+    MiddlewareFn, 
+    HttpContext,
+    NextFn, 
 };
+
 
 /// Wraps a [`RouteHandler`] into [`MiddlewareFn`]
 pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
@@ -100,18 +105,21 @@ where
 
 /// Wraps a closure for the error mapping into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_map_err_fn<F, R, Fut>(map: F) -> MiddlewareFn
+pub(super) fn make_map_err_fn<F, R, Args>(map: F) -> MiddlewareFn
 where
-    F: Fn(Error) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = R> + Send,
+    F: MapErrHandler<Args, Output = R>,
     R: IntoResponse + 'static,
+    Args: FromRequestRef + Send + Sync + 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            match next(ctx).await {
-                Ok(resp) => Ok(resp),
-                Err(err) => map(err).await.into_response()
+            match Args::from_request(&ctx.request) { 
+                Err(err) => err.into_response(),
+                Ok(args) => match next(ctx).await {
+                    Err(err) => map.call(err, args).await.into_response(),
+                    Ok(resp) => Ok(resp),
+                }
             }
         }
     };
@@ -172,6 +180,7 @@ mod tests {
     use crate::{bad_request, ok, HttpResponse, HttpBody};
     use crate::http::endpoints::handlers::Func;
     use crate::http::StatusCode;
+    use crate::error::Error;
 
     fn create_request() -> HttpRequest {
         let req = Request::get("http://localhost")

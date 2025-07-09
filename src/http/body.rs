@@ -105,13 +105,13 @@ impl HttpBody {
         Self { inner: InnerBody::Boxed { inner } }
     }
 
-    /// Create a new [`HttpBody`] from incoming request stream
+    /// Create a new [`HttpBody`] from the incoming request stream
     #[inline]
     pub(crate) fn incoming(inner: Incoming) -> Self {
         Self { inner: InnerBody::Incoming { inner } }
     }
 
-    /// Create a new limited [`HttpBody`] from incoming request stream
+    /// Create a new limited [`HttpBody`] from the incoming request stream
     #[inline]
     pub(crate) fn limited(inner: HttpBody, limit: usize) -> Self {
         match inner.inner {
@@ -140,7 +140,7 @@ impl HttpBody {
         Self { inner: InnerBody::Boxed { inner } }
     }
 
-    /// Consumes the [`HttpBody`] and returns the body as boxed trait object
+    /// Consumes the [`HttpBody`] and returns the body as a boxed trait object
     #[inline]
     pub fn into_boxed(self) -> BoxBody {
         match self.inner {
@@ -163,7 +163,7 @@ impl HttpBody {
         BodyExt::into_data_stream(self)
     }
 
-    /// Consumes the [`HttpBody`] and returns the body as boxed trait object that is !Sync
+    /// Consumes the [`HttpBody`] and returns the body as a boxed trait object that is !Sync
     #[inline]
     pub fn into_boxed_unsync(self) -> UnsyncBoxBody {
         self.boxed_unsync()
@@ -186,7 +186,7 @@ impl HttpBody {
         Self { inner: InnerBody::Boxed { inner } }
     }
 
-    /// Creates a new [`HttpBody`] from Form Data object
+    /// Creates a new [`HttpBody`] from a Form Data object
     #[inline]
     pub fn form<T: Serialize>(content: T) -> HttpBody {
         let inner = match serde_urlencoded::to_string(&content) {

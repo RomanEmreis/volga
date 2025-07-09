@@ -1,7 +1,7 @@
 ﻿use hyper::StatusCode;
 use volga::{App, HttpRequest, HttpResponse, Results};
 use volga::error::Error;
-use volga::headers::Headers;
+use volga::headers::HttpHeaders;
 
 #[tokio::test]
 async fn it_adds_middleware_request() {
@@ -76,7 +76,7 @@ async fn it_adds_map_req_middleware() {
             req
         });
 
-        app.map_get("/test", |headers: Headers| async move {
+        app.map_get("/test", |headers: HttpHeaders| async move {
             let val = headers.get("X-Test").unwrap().to_str().unwrap();
             Results::text(val)
         });
@@ -132,7 +132,7 @@ async fn it_adds_map_req_middleware_for_route() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7945");
 
-        app.map_get("/test", |headers: Headers| async move {
+        app.map_get("/test", |headers: HttpHeaders| async move {
                 let val = headers.get("X-Test").unwrap().to_str().unwrap();
                 Results::text(val)
             })
@@ -198,7 +198,7 @@ async fn it_adds_map_req_middleware_for_group() {
                 req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
                 req
             })
-            .map_get("/test", |headers: Headers| async move {
+            .map_get("/test", |headers: HttpHeaders| async move {
                 let val = headers.get("X-Test").unwrap().to_str().unwrap();
                 Results::text(val)
             });
@@ -227,7 +227,7 @@ async fn it_adds_map_err_middleware_for_route() {
         app.map_get("/test", || async {
                 Err::<String, Error>(Error::server_error("Some Error"))
             })
-            .map_err(|err| async move {
+            .map_err(|err: Error| async move {
                 let mut err_str = err.to_string();
                 err_str.push_str(" occurred!");
                 Error::server_error(err_str)
@@ -255,7 +255,7 @@ async fn it_adds_map_err_middleware_for_group() {
         let mut app = App::new().bind("127.0.0.1:7949");
 
         app.map_group("/tests")
-            .map_err(|err| async move {
+            .map_err(|err: Error| async move {
                 let mut err_str = err.to_string();
                 err_str.push_str(" occurred!");
                 Error::server_error(err_str)

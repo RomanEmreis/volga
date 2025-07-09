@@ -30,19 +30,19 @@ use std::{
 /// # Example
 /// ```no_run
 /// use volga::{HttpResult, ok};
-/// use volga::headers::Headers;
+/// use volga::headers::HttpHeaders;
 ///
-/// async fn handle(headers: Headers) -> HttpResult {
+/// async fn handle(headers: HttpHeaders) -> HttpResult {
 ///     let content_length = headers.get("content-length").unwrap().to_str().unwrap();
 ///     ok!("Content-Length: {content_length}")
 /// }
 /// ```
 #[derive(Debug)]
-pub struct Headers {
+pub struct HttpHeaders {
     inner: HeaderMap<HeaderValue>
 }
 
-impl Deref for Headers {
+impl Deref for HttpHeaders {
     type Target = HeaderMap<HeaderValue>;
 
     #[inline]
@@ -51,35 +51,35 @@ impl Deref for Headers {
     }
 }
 
-impl DerefMut for Headers {
+impl DerefMut for HttpHeaders {
     #[inline]
     fn deref_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
         &mut self.inner
     }
 }
 
-impl Headers {
+impl HttpHeaders {
     pub fn into_inner(self) -> HeaderMap<HeaderValue> {
         self.inner
     }
 }
 
-impl From<HeaderMap<HeaderValue>> for Headers {
+impl From<HeaderMap<HeaderValue>> for HttpHeaders {
     #[inline]
     fn from(inner: HeaderMap<HeaderValue>) -> Self {
         Self { inner }
     }
 }
 
-impl From<&Parts> for Headers {
+impl From<&Parts> for HttpHeaders {
     #[inline]
     fn from(parts: &Parts) -> Self {
         parts.headers.clone().into()
     }
 }
 
-/// Extracts `HeadersMap` from request parts into [`Headers`]
-impl FromRequestParts for Headers {
+/// Extracts `HeadersMap` from request parts into [`HttpHeaders`]
+impl FromRequestParts for HttpHeaders {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         Ok(parts.into())
@@ -88,7 +88,7 @@ impl FromRequestParts for Headers {
 
 /// Extracts `HeaderValue` from request into `Header<T>``
 /// where T implements [`FromHeaders`] `struct`
-impl FromRequestRef for Headers {
+impl FromRequestRef for HttpHeaders {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         Ok(req.headers().clone().into())
@@ -96,7 +96,7 @@ impl FromRequestRef for Headers {
 }
 
 /// Extracts `HeaderMap` from request into `Headers`
-impl FromPayload for Headers {
+impl FromPayload for HttpHeaders {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
@@ -288,7 +288,7 @@ mod tests {
     use std::ops::Deref;
     use hyper::{HeaderMap, Request};
     use hyper::http::HeaderValue;
-    use crate::headers::{ContentType, Header, Headers};
+    use crate::headers::{ContentType, Header, HttpHeaders};
     use crate::http::endpoints::args::{FromPayload, Payload};
 
     #[tokio::test]
@@ -300,7 +300,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let headers = Headers::from_payload(Payload::Parts(&parts)).await.unwrap();
+        let headers = HttpHeaders::from_payload(Payload::Parts(&parts)).await.unwrap();
 
         assert_eq!(headers.get("content-type").unwrap(), "text/plain");
     }

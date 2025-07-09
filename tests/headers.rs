@@ -1,12 +1,12 @@
 ﻿use volga::{App, ok};
-use volga::headers::{Header, Headers, ContentType};
+use volga::headers::{Header, HttpHeaders, ContentType};
 
 #[tokio::test]
 async fn it_reads_headers() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7900");
 
-        app.map_get("/test", |headers: Headers| async move {
+        app.map_get("/test", |headers: HttpHeaders| async move {
             ok!("{}", headers.get("x-api-key").unwrap().to_str().unwrap())
         });
 

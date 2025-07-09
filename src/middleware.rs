@@ -9,10 +9,10 @@ use crate::{
         FromRequest,
         FromRequestRef,
         GenericHandler,
+        MapErrHandler,
         FilterResult,
     }, 
     app::router::{Route, RouteGroup},
-    error::Error,
     App,
     HttpResult, 
     HttpRequest,
@@ -221,13 +221,13 @@ impl App {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, headers::Headers};
+    /// use volga::{App, headers::HttpHeaders};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.with(|headers: Headers, next| async move {
+    /// app.with(|headers: HttpHeaders, next| async move {
     ///     // do something with headers
     ///     // ...
     ///     next.await
@@ -365,11 +365,11 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_err<F, R, Fut>(self, map: F) -> Self
+    pub fn map_err<F, R, Args>(self, map: F) -> Self
     where
-        F: Fn(Error) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = R> + Send,
+        F: MapErrHandler<Args, Output = R>,
         R: IntoResponse + 'static,
+        Args: FromRequestRef + Send + Sync + 'static,
     {
         let map_err_fn = make_map_err_fn(map);
         self.map_middleware(map_err_fn)
@@ -413,13 +413,13 @@ impl<'a> Route<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, headers::Headers};
+    /// use volga::{App, headers::HttpHeaders};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.with(|headers: Headers, next| async move {
+    /// app.with(|headers: HttpHeaders, next| async move {
     ///     // do something with headers
     ///     // ...
     ///     next.await
@@ -563,11 +563,11 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_err<F, R, Fut>(mut self, map: F) -> Self
+    pub fn map_err<F, R, Args>(mut self, map: F) -> Self
     where
-        F: Fn(Error) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = R> + Send,
+        F: MapErrHandler<Args, Output = R>,
         R: IntoResponse + 'static,
+        Args: FromRequestRef + Send + Sync + 'static,
     {
         let map_err_fn = make_map_err_fn(map);
         self.middleware.push(map_err_fn);
@@ -615,13 +615,13 @@ impl<'a> RouteGroup<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, headers::Headers};
+    /// use volga::{App, headers::HttpHeaders};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.with(|headers: Headers, next| async move {
+    /// app.with(|headers: HttpHeaders, next| async move {
     ///     // do something with headers
     ///     // ...
     ///     next.await

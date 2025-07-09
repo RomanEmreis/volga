@@ -35,7 +35,7 @@ pub use self::{
     cache_control::{CacheControl, ResponseCaching},
     encoding::Encoding,
     extract::*,
-    header::{Header, Headers},
+    header::{Header, HttpHeaders},
     quality::Quality,
     macros::custom_headers
 };

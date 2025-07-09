@@ -10,12 +10,11 @@ pub use hyper::{
 pub use body::{BoxBody, HttpBody, UnsyncBoxBody};
 pub use endpoints::{
     args::{FromRawRequest, FromRequest, FromRequestParts, FromRequestRef, sse},
-    handlers::GenericHandler
+    handlers::{GenericHandler, MapErrHandler}
 };
 pub use request::HttpRequest;
 pub use response::{
     into_response::IntoResponse,
-    HttpHeaders,
     HttpResponse,
     HttpResult,
     ResponseContext,

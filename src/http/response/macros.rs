@@ -97,7 +97,7 @@ macro_rules! bad_request {
 #[macro_export]
 macro_rules! headers {
     ( $( ($key:expr, $value:expr) ),* $(,)? ) => {{
-        let mut headers = $crate::HttpHeaders::new();
+        let mut headers = std::collections::HashMap::new();
         $(
             headers.insert($key.to_string(), $value.to_string());
         )*

@@ -1,6 +1,7 @@
 ﻿use std::{sync::Arc, future::Future};
 use futures_util::future::BoxFuture;
 use crate::{HttpResult, HttpRequest};
+use crate::error::Error;
 use crate::http::{
     endpoints::args::FromRequest,
     IntoResponse
@@ -75,6 +76,14 @@ pub trait GenericHandler<Args>: Clone + Send + Sync + 'static {
     fn call(&self, args: Args) -> Self::Future;
 }
 
+/// Describes a generic [`map_err`] middleware handler that could take 0 or N parameters and [`Error`]
+pub trait MapErrHandler<Args>: Clone + Send + Sync + 'static {
+    type Output;
+    type Future: Future<Output = Self::Output> + Send;
+
+    fn call(&self, err: Error, args: Args) -> Self::Future;
+}
+
 macro_rules! define_generic_handler ({ $($param:ident)* } => {
     impl<Func, Fut: Send, $($param,)*> GenericHandler<($($param,)*)> for Func
     where
@@ -88,6 +97,20 @@ macro_rules! define_generic_handler ({ $($param:ident)* } => {
         #[allow(non_snake_case)]
         fn call(&self, ($($param,)*): ($($param,)*)) -> Self::Future {
             (self)($($param,)*)
+        }
+    }
+    impl<Func, Fut: Send, $($param,)*> MapErrHandler<($($param,)*)> for Func
+    where
+        Func: Fn($($param,)* Error) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future,
+    {
+        type Output = Fut::Output;
+        type Future = Fut;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn call(&self, err: Error, ($($param,)*): ($($param,)*)) -> Self::Future {
+            (self)($($param,)* err)
         }
     }
 });

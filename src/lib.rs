@@ -71,7 +71,6 @@ pub use crate::http::{
     HttpRequest,
     HttpResponse,
     HttpResult,
-    HttpHeaders,
     ResponseContext,
     Results
 };

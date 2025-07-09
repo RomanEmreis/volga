@@ -113,6 +113,40 @@ impl FromRawRequest for () {
 
 macro_rules! define_generic_from_request {
     ($($T: ident),*) => {
+        impl<$($T: FromRequestParts),+> FromRawRequest for ($($T,)+) {
+            #[inline]
+            async fn from_request(req: Request<Incoming>) -> Result<Self, Error> {
+                let (parts, _) = req.into_parts();
+                let tuple = (
+                    $(
+                    $T::from_parts(&parts)?,
+                    )*    
+                );
+                Ok(tuple)
+            }
+        }
+        impl<$($T: FromRequestRef),+> FromRequestRef for ($($T,)+) {
+            #[inline]
+            fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+                let tuple = (
+                    $(
+                    $T::from_request(req)?,
+                    )*    
+                );
+                Ok(tuple)
+            }
+        }
+        impl<$($T: FromRequestParts),+> FromRequestParts for ($($T,)+) {
+            #[inline]
+            fn from_parts(parts: &Parts) -> Result<Self, Error> {
+                let tuple = (
+                    $(
+                    $T::from_parts(parts)?,
+                    )*    
+                );
+                Ok(tuple)
+            }
+        }
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
             #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
@@ -154,55 +188,6 @@ macro_rules! define_generic_from_request {
     }
 }
 
-macro_rules! define_generic_from_raw_request {
-    ($($T: ident),*) => {
-        impl<$($T: FromRequestParts),+> FromRawRequest for ($($T,)+) {
-            #[inline]
-            async fn from_request(req: Request<Incoming>) -> Result<Self, Error> {
-                let (parts, _) = req.into_parts();
-                let tuple = (
-                    $(
-                    $T::from_parts(&parts)?,
-                    )*    
-                );
-                Ok(tuple)
-            }
-        }
-    }
-}
-
-macro_rules! define_generic_from_request_ref {
-    ($($T: ident),*) => {
-        impl<$($T: FromRequestRef),+> FromRequestRef for ($($T,)+) {
-            #[inline]
-            fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-                let tuple = (
-                    $(
-                    $T::from_request(req)?,
-                    )*    
-                );
-                Ok(tuple)
-            }
-        }
-    }
-}
-
-macro_rules! define_generic_from_request_parts {
-    ($($T: ident),*) => {
-        impl<$($T: FromRequestParts),+> FromRequestParts for ($($T,)+) {
-            #[inline]
-            fn from_parts(parts: &Parts) -> Result<Self, Error> {
-                let tuple = (
-                    $(
-                    $T::from_parts(parts)?,
-                    )*    
-                );
-                Ok(tuple)
-            }
-        }
-    }
-}
-
 define_generic_from_request! { T1 }
 define_generic_from_request! { T1, T2 }
 define_generic_from_request! { T1, T2, T3 }
@@ -213,21 +198,6 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
-
-define_generic_from_raw_request! { T1 }
-define_generic_from_raw_request! { T1, T2 }
-define_generic_from_raw_request! { T1, T2, T3 }
-define_generic_from_raw_request! { T1, T2, T3, T4 }
-
-define_generic_from_request_ref! { T1 }
-define_generic_from_request_ref! { T1, T2 }
-define_generic_from_request_ref! { T1, T2, T3 }
-define_generic_from_request_ref! { T1, T2, T3, T4 }
-
-define_generic_from_request_parts! { T1 }
-define_generic_from_request_parts! { T1, T2 }
-define_generic_from_request_parts! { T1, T2, T3 }
-define_generic_from_request_parts! { T1, T2, T3, T4 }
 
 #[cfg(test)]
 mod tests {
