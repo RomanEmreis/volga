@@ -17,7 +17,7 @@ use crate::{
 
 use crate::headers::{
     ResponseCaching,
-    Headers,
+    HttpHeaders,
     helpers::{validate_etag, validate_last_modified},
     CACHE_CONTROL, LAST_MODIFIED, ETAG
 };
@@ -55,7 +55,7 @@ async fn fallback(env: HostEnv) -> HttpResult {
 #[inline]
 async fn respond_with_file(
     path: RoutePath<HashMap<String, String>>,
-    headers: Headers, 
+    headers: HttpHeaders,
     env: HostEnv
 ) -> HttpResult {
     let path = path.values()
@@ -74,7 +74,7 @@ async fn respond_with_file(
 #[inline]
 async fn respond_with_file_or_dir_impl(
     path: PathBuf,
-    headers: Headers,
+    headers: HttpHeaders,
     show_files_listing: bool
 ) -> HttpResult {
     let metadata = metadata(&path).await?;
@@ -282,7 +282,7 @@ mod tests {
     use std::time::{Duration, SystemTime};
     use tokio::fs::metadata;
     use crate::app::HostEnv;
-    use crate::headers::{HeaderMap, HeaderValue, Headers, ResponseCaching, IF_MODIFIED_SINCE, IF_NONE_MATCH};
+    use crate::headers::{HeaderMap, HeaderValue, HttpHeaders, ResponseCaching, IF_MODIFIED_SINCE, IF_NONE_MATCH};
     use super::{
         index, fallback, respond_with_folder_impl, respond_with_file_impl,
         respond_with_file_or_dir_impl, max_folder_depth
@@ -353,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn it_responds_with_directory_listing() {
         let path = PathBuf::from("tests/static");
-        let headers = Headers::from(HeaderMap::new());
+        let headers = HttpHeaders::from(HeaderMap::new());
         let response = respond_with_file_or_dir_impl(path, headers, true).await;
 
         assert!(response.is_ok());
@@ -363,7 +363,7 @@ mod tests {
     #[tokio::test]
     async fn it_responds_with_403_as_shows_files_is_false() {
         let path = PathBuf::from("tests/static");
-        let headers = Headers::from(HeaderMap::new());
+        let headers = HttpHeaders::from(HeaderMap::new());
         let response = respond_with_file_or_dir_impl(path, headers, false).await;
 
         assert!(response.is_ok());
@@ -374,7 +374,7 @@ mod tests {
     async fn it_responds_with_html_file() {
         let path = PathBuf::from("tests/static/index.html");
         let headers = HeaderMap::new();
-        let headers = Headers::from(headers);
+        let headers = HttpHeaders::from(headers);
         let response = respond_with_file_or_dir_impl(path, headers, false).await;
 
         assert!(response.is_ok());
@@ -389,7 +389,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(IF_MODIFIED_SINCE, HeaderValue::from_str(&httpdate::fmt_http_date(now)).unwrap());
 
-        let headers = Headers::from(headers);
+        let headers = HttpHeaders::from(headers);
         let response = respond_with_file_or_dir_impl(path, headers, false).await;
 
         assert!(response.is_ok());
@@ -404,7 +404,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(IF_NONE_MATCH, caching.etag().try_into().unwrap());
 
-        let headers = Headers::from(headers);
+        let headers = HttpHeaders::from(headers);
         let response = respond_with_file_or_dir_impl(path, headers, false).await;
 
         assert!(response.is_ok());

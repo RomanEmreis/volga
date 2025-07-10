@@ -1,17 +1,17 @@
 ﻿use hyper::StatusCode;
-use volga::{App, Results};
+use volga::{App, HttpRequest, HttpResponse, Results};
 use volga::error::Error;
-use volga::headers::Headers;
+use volga::headers::HttpHeaders;
 
 #[tokio::test]
 async fn it_adds_middleware_request() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7884");
 
-        app.use_middleware(|context, next| async move {
+        app.wrap(|context, next| async move {
             next(context).await
         });
-        app.use_middleware(|_, _| async move {
+        app.wrap(|_, _| async move {
             Results::text("Pass!")
         });
 
@@ -40,7 +40,7 @@ async fn it_adds_map_ok_middleware() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7942");
 
-        app.map_ok(|mut resp| async move {
+        app.map_ok(|mut resp: HttpResponse| async move {
             resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
             resp
         });
@@ -71,12 +71,12 @@ async fn it_adds_map_req_middleware() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7943");
 
-        app.tap_req(|mut req| async move {
+        app.tap_req(|mut req: HttpRequest| async move {
             req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
             req
         });
 
-        app.map_get("/test", |headers: Headers| async move {
+        app.map_get("/test", |headers: HttpHeaders| async move {
             let val = headers.get("X-Test").unwrap().to_str().unwrap();
             Results::text(val)
         });
@@ -105,7 +105,7 @@ async fn it_adds_map_ok_middleware_for_route() {
         app.map_get("/test", || async {
                 Results::text("Pass!")
             })
-            .map_ok(|mut resp| async move {
+            .map_ok(|mut resp: HttpResponse| async move {
                 resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
                 resp
             });
@@ -132,11 +132,11 @@ async fn it_adds_map_req_middleware_for_route() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7945");
 
-        app.map_get("/test", |headers: Headers| async move {
+        app.map_get("/test", |headers: HttpHeaders| async move {
                 let val = headers.get("X-Test").unwrap().to_str().unwrap();
                 Results::text(val)
             })
-            .tap_req(|mut req| async move {
+            .tap_req(|mut req: HttpRequest| async move {
                 req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
                 req
             });
@@ -163,7 +163,7 @@ async fn it_adds_map_ok_middleware_for_group() {
         let mut app = App::new().bind("127.0.0.1:7946");
 
         app.map_group("/tests")
-            .map_ok(|mut resp| async move {
+            .map_ok(|mut resp: HttpResponse| async move {
                 resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
                 resp
             })
@@ -194,11 +194,11 @@ async fn it_adds_map_req_middleware_for_group() {
         let mut app = App::new().bind("127.0.0.1:7947");
 
         app.map_group("/tests")
-            .tap_req(|mut req| async move {
+            .tap_req(|mut req: HttpRequest| async move {
                 req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
                 req
             })
-            .map_get("/test", |headers: Headers| async move {
+            .map_get("/test", |headers: HttpHeaders| async move {
                 let val = headers.get("X-Test").unwrap().to_str().unwrap();
                 Results::text(val)
             });
@@ -227,7 +227,7 @@ async fn it_adds_map_err_middleware_for_route() {
         app.map_get("/test", || async {
                 Err::<String, Error>(Error::server_error("Some Error"))
             })
-            .map_err(|err| async move {
+            .map_err(|err: Error| async move {
                 let mut err_str = err.to_string();
                 err_str.push_str(" occurred!");
                 Error::server_error(err_str)
@@ -255,7 +255,7 @@ async fn it_adds_map_err_middleware_for_group() {
         let mut app = App::new().bind("127.0.0.1:7949");
 
         app.map_group("/tests")
-            .map_err(|err| async move {
+            .map_err(|err: Error| async move {
                 let mut err_str = err.to_string();
                 err_str.push_str(" occurred!");
                 Error::server_error(err_str)
@@ -378,4 +378,161 @@ async fn it_adds_valid_filter_middleware_for_group() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
+}
+
+#[tokio::test]
+async fn it_adds_with_middleware() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7954");
+
+        app
+            .wrap(|ctx, next| async move { next(ctx).await })
+            .with(|next| next)
+            .map_get("/test", || async { "Pass!" });
+
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+        client.get("http://127.0.0.1:7954/test").send().await
+    }).await.unwrap().unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "Pass!");
+}
+
+#[tokio::test]
+async fn it_adds_shortcut_with_middleware() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7955");
+
+        app
+            .wrap(|ctx, next| async move { next(ctx).await })
+            .with(|_| async move { volga::bad_request!("Error!") })
+            .with(|next| next)
+            .map_get("/test", || async { "Pass!" });
+
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+        client.get("http://127.0.0.1:7955/test").send().await
+    }).await.unwrap().unwrap();
+
+    assert!(!response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "\"Error!\"");
+}
+
+#[tokio::test]
+async fn it_adds_with_middleware_for_route() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7956");
+
+        app.map_get("/test", || async { "Pass!" })
+            .wrap(|ctx, next| async move { next(ctx).await })
+            .with(|next| next);
+
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+        client.get("http://127.0.0.1:7956/test").send().await
+    }).await.unwrap().unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "Pass!");
+}
+
+#[tokio::test]
+async fn it_adds_shortcut_with_middleware_for_route() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7957");
+
+        app.map_get("/test", || async { "Pass!" })
+            .wrap(|ctx, next| async move { next(ctx).await })
+            .with(|_| async move { volga::bad_request!("Error!") })
+            .with(|next| next);
+
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+        client.get("http://127.0.0.1:7957/test").send().await
+    }).await.unwrap().unwrap();
+
+    assert!(!response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "\"Error!\"");
+}
+
+#[tokio::test]
+async fn it_adds_with_middleware_for_group() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7958");
+
+        app.map_group("/tests")
+            .map_get("/test", || async { "Pass!" })
+            .wrap(|ctx, next| async move { next(ctx).await })
+            .with(|next| next);
+
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+        client.get("http://127.0.0.1:7958/tests/test").send().await
+    }).await.unwrap().unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "Pass!");
+}
+
+#[tokio::test]
+async fn it_adds_shortcut_with_middleware_for_group() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7959");
+
+        app.map_group("/tests")
+            .wrap(|ctx, next| async move { next(ctx).await })
+            .with(|_| async move { volga::bad_request!("Error!") })
+            .with(|next| next)
+            .map_get("/test", || async { "Pass!" });
+
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+        client.get("http://127.0.0.1:7959/tests/test").send().await
+    }).await.unwrap().unwrap();
+
+    assert!(!response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "\"Error!\"");
 }

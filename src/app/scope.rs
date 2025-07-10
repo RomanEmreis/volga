@@ -22,6 +22,9 @@ use crate::{
 #[cfg(feature = "middleware")]
 use crate::middleware::HttpContext;
 
+#[cfg(any(feature = "tls", feature = "tracing"))]
+use std::sync::Arc;
+
 /// Represents the execution scope of the current connection
 #[derive(Clone)]
 pub(crate) struct Scope {
@@ -82,21 +85,31 @@ impl Scope {
             RouteOption::Ok(endpoint_context) => {
                 let (route_pipeline, params) = endpoint_context.into_parts();
                 let error_handler = pipeline.error_handler();
-                
-                let mut request = HttpRequest::new(request)
+
+                let (mut parts, body) = request.into_parts();
+                {
+                    let extensions = &mut parts.extensions;
+                    extensions.insert(cancellation_token);
+                    extensions.insert(shared.body_limit);
+                    
+                    #[cfg(feature = "di")]
+                    extensions.insert(shared.container.create_scope());
+                }
+
+                let mut request = HttpRequest::new(Request::from_parts(parts.clone(), body))
                     .into_limited(shared.body_limit);
                 
-                let extensions = request.extensions_mut();
-                extensions.insert(cancellation_token);
-                extensions.insert(params);
-                extensions.insert(shared.body_limit);
-                extensions.insert(error_handler.clone());
+                #[cfg(any(feature = "tls", feature = "tracing"))]
+                let parts = Arc::new(parts);
 
-                #[cfg(feature = "di")]
-                extensions.insert(shared.container.create_scope());
-                
-                let request_method = request.method().clone();
-                let uri = request.uri().clone();
+                {
+                    let extensions = request.extensions_mut();
+                    extensions.insert(params);
+                    extensions.insert(error_handler.clone());
+
+                    #[cfg(any(feature = "tls", feature = "tracing"))]
+                    extensions.insert(parts.clone());
+                }
                 
                 #[cfg(feature = "middleware")]
                 let response = if pipeline.has_middleware_pipeline() {
@@ -109,8 +122,8 @@ impl Scope {
                 let response = route_pipeline.call(request).await;
                 
                 match response {
-                    Err(err) => call_weak_err_handler(error_handler, &uri, err).await,
-                    Ok(response) if request_method != Method::HEAD => Ok(response),
+                    Err(err) => call_weak_err_handler(error_handler, &parts, err).await,
+                    Ok(response) if parts.method != Method::HEAD => Ok(response),
                     Ok(mut response) => {
                         Self::keep_content_length(response.size_hint(), response.headers_mut());
                         *response.body_mut() = HttpBody::empty();

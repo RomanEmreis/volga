@@ -1,20 +1,30 @@
-//! Utilities cor middleware functions
+//! Utilities for middleware functions
 
 use std::{future::Future, sync::Arc};
 use crate::{
     http::{
         endpoints::handlers::RouteHandler, 
-        FromRequest, 
-        GenericHandler, 
+        FromRequest,
+        FromRequestRef,
+        GenericHandler,
+        MapErrHandler,
         IntoResponse,
         FilterResult
     },
-    error::Error,
     HttpRequest, 
-    HttpResponse,
     HttpResult,
 };
-use super::{MiddlewareFn, Next, HttpContext};
+use super::{
+    handler::{
+        MiddlewareHandler,
+        MapOkHandler,
+        TapReqHandler,
+        Next
+    },
+    MiddlewareFn, 
+    HttpContext,
+    NextFn, 
+};
 
 /// Wraps a [`RouteHandler`] into [`MiddlewareFn`]
 pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
@@ -28,10 +38,10 @@ pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
 #[inline]
 pub(super) fn make_fn<F, Fut>(middleware: F) -> MiddlewareFn
 where
-    F: Fn(HttpContext, Next) -> Fut + Send + Sync + 'static,
+    F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = HttpResult> + Send + 'static,
 {
-    Arc::new(move |ctx: HttpContext, next: Next| {
+    Arc::new(move |ctx: HttpContext, next: NextFn| {
         Box::pin(middleware(ctx, next))
     })
 }
@@ -44,7 +54,7 @@ where
     R: Into<FilterResult> + 'static,
     Args: FromRequest + Send + Sync + 'static
 {
-    let middleware_fn = move |ctx: HttpContext, next: Next| {
+    let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let filter = filter.clone();
         async move {
             let (req, pipeline) = ctx.into_parts();
@@ -69,18 +79,23 @@ where
 
 /// Wraps a closure for the response mapping into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_map_ok_fn<F, R, Fut>(map: F) -> MiddlewareFn
+pub(super) fn make_map_ok_fn<F, R, Args>(map: F) -> MiddlewareFn
 where
-    F: Fn(HttpResponse) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = R> + Send,
+    F: MapOkHandler<Args, Output = R>,
     R: IntoResponse + 'static,
+    Args: FromRequestRef + Send + Sync + 'static,
 {
-    let middleware_fn = move |ctx: HttpContext, next: Next| {
+    let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            match next(ctx).await {
-                Ok(resp) => map(resp).await.into_response(),
-                Err(err) => err.into_response()
+            match Args::from_request(&ctx.request) {
+                Err(err) => err.into_response(),
+                Ok(args) => {
+                    match next(ctx).await {
+                        Ok(resp) => map.call(resp, args).await.into_response(),
+                        Err(err) => err.into_response()
+                    }       
+                }
             }
         }
     };
@@ -89,18 +104,21 @@ where
 
 /// Wraps a closure for the error mapping into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_map_err_fn<F, R, Fut>(map: F) -> MiddlewareFn
+pub(super) fn make_map_err_fn<F, R, Args>(map: F) -> MiddlewareFn
 where
-    F: Fn(Error) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = R> + Send,
+    F: MapErrHandler<Args, Output = R>,
     R: IntoResponse + 'static,
+    Args: FromRequestRef + Send + Sync + 'static,
 {
-    let middleware_fn = move |ctx: HttpContext, next: Next| {
+    let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            match next(ctx).await {
-                Ok(resp) => Ok(resp),
-                Err(err) => map(err).await.into_response()
+            match Args::from_request(&ctx.request) { 
+                Err(err) => err.into_response(),
+                Ok(args) => match next(ctx).await {
+                    Err(err) => map.call(err, args).await.into_response(),
+                    Ok(resp) => Ok(resp),
+                }
             }
         }
     };
@@ -109,18 +127,46 @@ where
 
 /// Wraps a closure for the request mapping into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_tap_req_fn<F, Fut>(map: F) -> MiddlewareFn
+pub(super) fn make_tap_req_fn<F, Args>(map: F) -> MiddlewareFn
 where
-    F: Fn(HttpRequest) -> Fut + Clone + Send + Sync + 'static,
-    Fut: Future<Output = HttpRequest> + Send,
+    F: TapReqHandler<Args, Output = HttpRequest>,
+    Args: FromRequestRef + Send + Sync + 'static,
 {
-    let middleware_fn = move |ctx: HttpContext, next: Next| {
+    let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
             let (req, pipeline) = ctx.into_parts();
-            let req = map(req).await;
-            let ctx = HttpContext::new(req, pipeline);
-            next(ctx).await
+            match Args::from_request(&req) {
+                Err(err) => err.into_response(),
+                Ok(args) => {
+                    let req = map.call(req, args).await;
+                    let ctx = HttpContext::new(req, pipeline);
+                    next(ctx).await
+                },
+            }
+        }
+    };
+    make_fn(middleware_fn)
+}
+
+/// Wraps a closure for the `with()` middleware into [`MiddlewareFn`]
+#[inline]
+pub(super) fn make_with_fn<F, R, Args>(middleware: F) -> MiddlewareFn
+where
+    F: MiddlewareHandler<Args, Output = R>,
+    R: IntoResponse + 'static,
+    Args: FromRequestRef + Send + Sync + 'static,
+{
+    let middleware_fn = move |ctx: HttpContext, next: NextFn| {
+        let middleware = middleware.clone();
+        async move {
+            match Args::from_request(&ctx.request) { 
+                Err(err) => err.into_response(),
+                Ok(args) => {
+                    let next = Next::new(ctx, next);
+                    middleware.call(args, next).await.into_response()
+                }
+            }
         }
     };
     make_fn(middleware_fn)
@@ -130,9 +176,10 @@ where
 mod tests {
     use hyper::Request;
     use super::*;
-    use crate::{bad_request, ok, HttpBody};
+    use crate::{bad_request, ok, HttpResponse, HttpBody};
     use crate::http::endpoints::handlers::Func;
     use crate::http::StatusCode;
+    use crate::error::Error;
 
     fn create_request() -> HttpRequest {
         let req = Request::get("http://localhost")
@@ -150,7 +197,7 @@ mod tests {
         
         let req = create_request();
         let ctx = HttpContext::slim(req);
-        let next: Next = Arc::new(|_| Box::pin(async { ok!() }));
+        let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
         assert!(result.is_ok());
@@ -158,7 +205,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_tests_make_fn() {
-        let middleware_logic = |ctx: HttpContext, next: Next| async move {
+        let middleware_logic = |ctx: HttpContext, next: NextFn| async move {
             // Simple pass-through middleware
             next(ctx).await
         };
@@ -167,7 +214,7 @@ mod tests {
 
         let req = create_request();
         let ctx = HttpContext::slim(req);
-        let next: Next = Arc::new(|_| Box::pin(async { ok!() }));
+        let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
         assert!(result.is_ok());
@@ -180,7 +227,7 @@ mod tests {
 
         let req = create_request();
         let ctx = HttpContext::slim(req);
-        let next: Next = Arc::new(|_| Box::pin(async { ok!() }));
+        let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
         assert!(result.is_ok());
@@ -198,7 +245,7 @@ mod tests {
 
         let req = create_request();
         let ctx = HttpContext::slim(req);
-        let next: Next = Arc::new(|_| Box::pin(async { ok!() }));
+        let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
         assert!(result.is_ok());
@@ -219,7 +266,7 @@ mod tests {
         let req = create_request();
         let ctx = HttpContext::slim(req);
         // Create a next function that returns an error
-        let next: Next = Arc::new(|_| Box::pin(async {
+        let next: NextFn = Arc::new(|_| Box::pin(async {
             Err(Error::client_error("test error"))
         }));
 
@@ -242,7 +289,7 @@ mod tests {
 
         let req = create_request();
         let ctx = HttpContext::slim(req);
-        let next: Next = Arc::new(|ctx: HttpContext| Box::pin(async move {
+        let next: NextFn = Arc::new(|ctx: HttpContext| Box::pin(async move {
             assert_eq!(ctx.request.headers().get("X-Test").unwrap(), "value");
             ok!()
         }));

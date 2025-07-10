@@ -6,8 +6,8 @@
 
 use volga::{App, ResponseContext, headers, ok};
 use volga::headers::{
-    Header, 
-    Headers, 
+    Header,
+    HttpHeaders,
     Accept
 };
 
@@ -16,7 +16,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     // Read request headers with Headers
-    app.map_get("/api-key", |headers: Headers| async move { 
+    app.map_get("/api-key", |headers: HttpHeaders| async move { 
         let api_key = headers.get("x-api-key")
             .unwrap()
             .to_str()

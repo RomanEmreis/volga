@@ -9,7 +9,7 @@ const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
 /// Represents a tracing configuration
 #[derive(Clone)]
 pub struct TracingConfig {
-    /// Specifies whether include a span id HTTP header
+    /// Specifies whether to include a span id HTTP header
     /// 
     /// Default: `false`
     include_header: bool,
@@ -40,7 +40,7 @@ impl TracingConfig {
         Self::default()
     }
     
-    /// Configures tracing to include the span id as HTTP header
+    /// Configures tracing to include the span id as an HTTP header
     /// 
     /// Default: `false`
     pub fn with_header(mut self) -> Self {
@@ -128,18 +128,19 @@ impl App {
             .take()
             .unwrap_or_default();
         
-        self.use_middleware(move |ctx, next| {
+        self.wrap(move |ctx, next| {
             let tracing_config = tracing_config.clone();
             async move {
                 let method = ctx.request.method();
-                let uri = ctx.request.uri().clone();
+                let uri = ctx.request.uri();
                 
                 let span = trace_span!("request", %method, %uri);
                 let span_id = span.id();
+                let parts = ctx.request_parts_snapshot();
                 let error_handler = ctx.error_handler();
                 
                 let http_result = next(ctx)
-                    .or_else(|err| async { call_weak_err_handler(error_handler, &uri, err).await })
+                    .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
                     .instrument(span)
                     .await;
                 

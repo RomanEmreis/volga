@@ -6,7 +6,7 @@ use sha1::{Digest, Sha1};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 use hyper::{
-    http::{request::Parts, Uri, Version},
+    http::{request::Parts, Version},
     upgrade::OnUpgrade
 };
 
@@ -32,7 +32,8 @@ use tokio_tungstenite::{
 
 /// Represents the extractor for establishing WebSockets connections
 pub struct WebSocketConnection {
-    uri: Uri,
+    //uri: Uri,
+    parts: Parts,
     config: WebSocketConfig,
     error_handler: WeakErrorHandler,
     on_upgrade: OnUpgrade,
@@ -70,7 +71,7 @@ impl WebSocketConnection {
     /// Default: not set/unlimited
     ///
     /// Note: The write buffer only builds up past [`write_buffer_size`](Self::write_buffer_size)
-    /// when writes to the underlying stream are failing. So the **write buffer can not
+    /// when writes to the underlying stream are failing. So the **write buffer cannot
     /// fill up if you are not observing write errors even if not flushing**.
     ///
     /// Note: Should always be at least [`write_buffer_size + 1 message`](Self::write_buffer_size)
@@ -104,7 +105,7 @@ impl WebSocketConnection {
         self
     }
 
-    /// Sets the protocols known by server.
+    /// Sets the protocols known by the server.
     /// 
     /// Default: empty list
     pub fn with_protocols<const N: usize>(mut self, known: [&'static str; N]) -> Self {
@@ -131,7 +132,8 @@ impl WebSocketConnection {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let WebSocketConnection {
-            uri,
+            //uri,
+            parts,
             config,
             protocol,
             on_upgrade,
@@ -145,7 +147,7 @@ impl WebSocketConnection {
                 Ok(upgraded) => TokioIo::new(upgraded),
                 Err(err) => {
                     _ = call_weak_err_handler(
-                        error_handler, &uri,
+                        error_handler, &parts,
                         Error::server_error(err)).await;
                     return;
                 }
@@ -196,7 +198,6 @@ impl WebSocketConnection {
 impl TryFrom<&Parts> for WebSocketConnection {
     type Error = Error;
 
-    #[inline]
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
         let sec_websocket_key = if parts.version <= Version::HTTP_11 {
             if !matches!(parts.headers.get(&UPGRADE), Some(upgrade) if upgrade.as_bytes().eq_ignore_ascii_case(super::WEBSOCKET.as_bytes())) {
@@ -236,7 +237,7 @@ impl TryFrom<&Parts> for WebSocketConnection {
             .cloned();
 
         Ok(Self {
-            uri: parts.uri.clone(),
+            parts: parts.clone(),
             config: Default::default(),
             protocol: None,
             on_upgrade,
@@ -284,7 +285,7 @@ mod tests {
             .body(())
             .unwrap();
         
-        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
         
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
@@ -296,7 +297,8 @@ mod tests {
             .await
             .unwrap();
         
-        assert_eq!(conn.uri, parts.uri);
+        //assert_eq!(conn.uri, parts.uri);
+        assert_eq!(conn.parts.uri, parts.uri);
         assert_eq!(conn.protocol, None);
         assert_eq!(conn.sec_websocket_key, parts.headers.get("Sec-WebSocket-Key").cloned());
     }
@@ -312,7 +314,7 @@ mod tests {
             .body(())
             .unwrap();
 
-        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
         req.extensions_mut().insert(Arc::downgrade(&error_handler));
 
         let (parts, _) = req.into_parts();
@@ -355,7 +357,7 @@ mod tests {
             .body(())
             .unwrap();
 
-        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
@@ -379,7 +381,7 @@ mod tests {
             .body(())
             .unwrap();
 
-        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
@@ -403,7 +405,7 @@ mod tests {
             .body(())
             .unwrap();
 
-        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
@@ -427,7 +429,7 @@ mod tests {
             .body(())
             .unwrap();
 
-        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
@@ -449,7 +451,7 @@ mod tests {
             .body(())
             .unwrap();
 
-        let error_handler = PipelineErrorHandler::from(ErrorFunc(|_| async move {}));
+        let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
@@ -469,7 +471,8 @@ mod tests {
             .with_write_buffer_size(1024)
             .with_max_frame_size(1024);
         
-        assert_eq!(conn.uri, parts.uri);
+        //assert_eq!(conn.uri, parts.uri);
+        assert_eq!(conn.parts.uri, parts.uri);
         assert_eq!(conn.protocol, Some(HeaderValue::from_static("foo-ws")));
         assert_eq!(conn.sec_websocket_key, None);
         assert!(conn.config.accept_unmasked_frames);

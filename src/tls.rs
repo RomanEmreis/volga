@@ -2,11 +2,7 @@
 
 use futures_util::TryFutureExt;
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
-use crate::{
-    App, 
-    app::AppInstance, 
-    error::{Error, handler::call_weak_err_handler}
-};
+use crate::{App, app::AppInstance, error::{Error, handler::call_weak_err_handler}};
 
 use std::{
     fmt, 
@@ -567,16 +563,16 @@ impl App {
                 false
             };
             
-            self.use_middleware(move |ctx, next| {
+            self.wrap(move |ctx, next| {
                 let hsts_header_value = hsts_header_value.clone();
                 let is_excluded = is_excluded.clone();
                 
                 async move {
                     let host = ctx.extract::<Header<Host>>()?;
                     let error_handler = ctx.error_handler();
-                    let uri = ctx.request.uri().clone();
+                    let parts = ctx.request_parts_snapshot();
                     let http_result = next(ctx)
-                        .or_else(|err| async { call_weak_err_handler(error_handler, &uri, err).await })
+                        .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
                         .await;
 
                     if !is_excluded(host.to_str().ok()) {

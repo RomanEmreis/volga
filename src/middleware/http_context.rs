@@ -12,12 +12,16 @@ use crate::{
 };
 
 #[cfg(any(feature = "tls", feature = "tracing"))]
-use crate::error::handler::WeakErrorHandler;
+use {
+    crate::error::handler::WeakErrorHandler,
+    hyper::http::request::Parts
+};
+
+#[cfg(any(feature = "tls", feature = "tracing", feature = "di"))]
+use std::sync::Arc;
 
 #[cfg(feature = "di")]
 use crate::di::Inject;
-#[cfg(feature = "di")]
-use std::sync::Arc;
 
 /// Describes current HTTP context which consists of the current HTTP request data 
 /// and the reference to the method handler for this request
@@ -55,7 +59,7 @@ impl HttpContext {
     
     #[inline]
     #[allow(dead_code)]
-    pub(super) fn into_parts(self) -> (HttpRequest, Option<RoutePipeline>) {
+    pub(crate) fn into_parts(self) -> (HttpRequest, Option<RoutePipeline>) {
         (self.request, self.pipeline)
     }
     
@@ -121,6 +125,17 @@ impl HttpContext {
             .extensions()
             .get::<WeakErrorHandler>()
             .expect("error handler must be provided")
+            .clone()
+    }
+
+    /// Returns HTTP request parts snapshot
+    #[inline]
+    #[cfg(any(feature = "tls", feature = "tracing"))]
+    pub(crate) fn request_parts_snapshot(&self) -> Arc<Parts> {
+        self.request
+            .extensions()
+            .get::<Arc<Parts>>()
+            .expect("http request parts snapshot must be provided")
             .clone()
     }
 }

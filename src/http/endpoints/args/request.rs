@@ -12,6 +12,7 @@ use hyper::{
 use crate::headers::{HeaderMap, HeaderValue};
 use crate::http::endpoints::args::{
     FromRequestParts,
+    FromRequestRef,
     FromPayload,
     Payload,
     Source
@@ -31,10 +32,24 @@ impl FromRequestParts for Uri {
     }
 }
 
+impl FromRequestRef for Uri {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Ok(req.uri().clone())
+    }
+}
+
 impl FromRequestParts for Method {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         Ok(parts.method.clone())
+    }
+}
+
+impl FromRequestRef for Method {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Ok(req.method().clone())
     }
 }
 
@@ -45,10 +60,24 @@ impl FromRequestParts for Extensions {
     }
 }
 
+impl FromRequestRef for Extensions {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Ok(req.extensions().clone())
+    }
+}
+
 impl FromRequestParts for HeaderMap<HeaderValue> {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         Ok(parts.headers.clone())
+    }
+}
+
+impl FromRequestRef for HeaderMap<HeaderValue> {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Ok(req.headers().clone())
     }
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.5.9"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -24,7 +24,7 @@ memchr = "2.7.5"
 mime = "0.3.17"
 mime_guess = "2.0.5"
 pin-project-lite = "0.2.16"
-tokio = { version = "1.46.0", features = ["full"] }
+tokio = { version = "1.46.1", features = ["full"] }
 tokio-util = "0.7.15"
 serde = "1.0.219"
 serde_json = "1.0.140"
@@ -38,7 +38,7 @@ cookie = { version = "0.18.1", features = ["percent-encode"], optional = true }
 handlebars = { version = "6.3.2", optional = true }
 httpdate = { version = "1.0.3", optional = true }
 hyper = { version = "1.6.0", features = ["server"], optional = true }
-hyper-util = { version = "0.1.14", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
+hyper-util = { version = "0.1.15", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
 multer = { version = "3.1.0", optional = true }
 sha1 = { version = "0.10.6", optional = true }
 tokio-rustls = { version = "0.26.2", default-features = false, features = ["tls12", "ring"], optional = true }

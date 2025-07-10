@@ -13,7 +13,7 @@ use crate::{
 };
 
 #[cfg(feature = "middleware")]
-use crate::{middleware::{Middlewares, HttpContext, Next}};
+use crate::{middleware::{Middlewares, HttpContext, NextFn}};
 
 pub(crate) struct PipelineBuilder {
     #[cfg(feature = "middleware")]
@@ -25,7 +25,7 @@ pub(crate) struct PipelineBuilder {
 
 pub(crate) struct Pipeline {
     #[cfg(feature = "middleware")]
-    start: Option<Next>,
+    start: Option<NextFn>,
     endpoints: Endpoints,
     error_handler: PipelineErrorHandler,
     fallback_handler: PipelineFallbackHandler
@@ -37,7 +37,7 @@ impl PipelineBuilder {
         Self {
             middlewares: Middlewares::new(),
             endpoints: Endpoints::new(),
-            error_handler: ErrorFunc(default_error_handler).into(),
+            error_handler: ErrorFunc::new(default_error_handler).into(),
             fallback_handler: FallbackFunc::new(default_fallback_handler).into()
         }
     }
@@ -46,7 +46,7 @@ impl PipelineBuilder {
     pub(super) fn new() -> Self {
         Self { 
             endpoints: Endpoints::new(),
-            error_handler: ErrorFunc(default_error_handler).into(),
+            error_handler: ErrorFunc::new(default_error_handler).into(),
             fallback_handler: FallbackFunc::new(default_fallback_handler).into()
         }
     }
@@ -120,7 +120,7 @@ impl Pipeline {
     pub(crate) async fn execute(&self, ctx: HttpContext) -> HttpResult {
         let next = &self.start;
         if let Some(next) = next {
-            let next: Next = next.clone();
+            let next: NextFn = next.clone();
             next(ctx).await
         } else {
             ctx.execute().await
