@@ -102,7 +102,7 @@ async fn set_value<T: Cache + Inject>(Json(item): Json<Item>, cache: Dc<T>) {
 }
 
 async fn error_handler(log: Dc<RequestLog>, error: Error) -> HttpResult {
-    log.append(&format!("An Error occurred: {}", error));
+    log.append(&format!("An Error occurred: {error:#}"));
     status!(500, "Internal Server Error", [
         ("x-req-id", &log.request_id)
     ])
