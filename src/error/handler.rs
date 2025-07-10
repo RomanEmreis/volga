@@ -1,48 +1,77 @@
 ﻿//! Error Handler
 
 use futures_util::future::BoxFuture;
-use hyper::Uri;
-use crate::{http::IntoResponse, HttpResult, status};
+use hyper::http::request::Parts;
+use crate::{http::{IntoResponse, MapErrHandler, FromRequestParts}, HttpResult, status};
 use super::Error;
 
-use std::{
-    future::Future,
-    sync::{Arc, Weak}
-};
+use std::sync::{Arc, Weak};
 
 /// Trait for types that represents an error handler
 pub trait ErrorHandler {
-    fn call(&self, err: Error) -> BoxFuture<HttpResult>;
+    fn call(&self, parts: &Parts, err: Error) -> BoxFuture<HttpResult>;
 }
 
 /// Owns a closure that handles an error
-pub struct ErrorFunc<F>(pub(crate) F);
-
-impl<F, R, Fut> ErrorHandler for ErrorFunc<F>
+pub struct ErrorFunc<F, R, Args>
 where
-    F: Fn(Error) -> Fut + Send + Sync,
+    F: MapErrHandler<Args, Output = R>,
     R: IntoResponse,
-    Fut: Future<Output = R> + Send,
+    Args: FromRequestParts + Send + Sync
+{
+    func: F,
+    _marker: std::marker::PhantomData<Args>,
+}
+
+impl<F, R, Args> ErrorFunc<F, R, Args>
+where
+    F: MapErrHandler<Args, Output = R>,
+    R: IntoResponse,
+    Args: FromRequestParts + Send + Sync
+{
+    pub(crate) fn new(func: F) -> Self {
+        Self {
+            func,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<F, R, Args> ErrorHandler for ErrorFunc<F, R, Args>
+where
+    F: MapErrHandler<Args, Output = R>,
+    R: IntoResponse + 'static,
+    Args: FromRequestParts + Send + Sync + 'static,
 {
     #[inline]
-    fn call(&self, err: Error) -> BoxFuture<HttpResult> {
+    fn call(&self, parts: &Parts, err: Error) -> BoxFuture<HttpResult> {
+        let Ok(args) = Args::from_parts(parts) else { 
+            return Box::pin(async move { Err(err) });
+        };
         Box::pin(async move {
-            match self.0(err).await.into_response() {
+            match self.func.call(err, args).await.into_response() {
                 Ok(resp) => Ok(resp),
                 Err(err) => default_error_handler(err).await,
             }
+            //match Args::from_parts(&parts) { 
+            //    Err(err) => err.into_response(),
+            //    Ok(args) => match self.func.call(err, args).await.into_response() {
+            //        Ok(resp) => Ok(resp),
+            //        Err(err) => default_error_handler(err).await,
+            //    }
+            //}
         })
     }
 }
 
-impl<F, R, Fut> From<ErrorFunc<F>> for PipelineErrorHandler
+impl<F, R, Args> From<ErrorFunc<F, R, Args>> for PipelineErrorHandler
 where
-    F: Fn(Error) -> Fut + Send + Sync + 'static,
-    R: IntoResponse,
-    Fut: Future<Output = R> + Send
+    F: MapErrHandler<Args, Output = R>,
+    R: IntoResponse + 'static,
+    Args: FromRequestParts + Send + Sync + 'static,
 {
     #[inline]
-    fn from(func: ErrorFunc<F>) -> Self {
+    fn from(func: ErrorFunc<F, R, Args>) -> Self {
         Arc::new(func)
     }
 }
@@ -68,14 +97,14 @@ pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
 }
 
 #[inline]
-pub(crate) async fn call_weak_err_handler(error_handler: WeakErrorHandler, uri: &Uri, mut err: Error) -> HttpResult {
+pub(crate) async fn call_weak_err_handler(error_handler: WeakErrorHandler, parts: &Parts, mut err: Error) -> HttpResult {
     if err.instance.is_none() {
-        err.instance = Some(uri.to_string());
+        err.instance = Some(parts.uri.to_string());
     }
     error_handler
         .upgrade()
         .ok_or(Error::server_error("Server Error: error handler could not be upgraded"))?
-        .call(err)
+        .call(parts, err)
         .await
 }
 
@@ -83,7 +112,8 @@ pub(crate) async fn call_weak_err_handler(error_handler: WeakErrorHandler, uri: 
 mod tests {
     use std::sync::Arc;
     use http_body_util::BodyExt;
-    use crate::{http::Uri, status};
+    use hyper::Request;
+    use crate::{error::ErrorHandler, status};
     use super::{
         Error,
         ErrorFunc,
@@ -122,10 +152,14 @@ mod tests {
     #[tokio::test]
     async fn it_create_new_error_handler() {
         let fallback = |_: Error| async { status!(403) };
-        let handler = ErrorFunc(fallback);
+        let handler = ErrorFunc::new(fallback);
 
         let error = Error::server_error("Some error");
-        let response = handler.0(error).await;
+
+        let req = Request::get("/foo/bar?baz").body(()).unwrap();
+        let (parts, _) = req.into_parts();
+        let response = handler.call(&parts, error).await;
+        
         assert!(response.is_ok());
 
         let mut response = response.unwrap();
@@ -138,13 +172,15 @@ mod tests {
     #[tokio::test]
     async fn it_call_weak_error_handler() {
         let fallback = |_: Error| async { status!(403) };
-        let handler = ErrorFunc(fallback);
+        let handler = ErrorFunc::new(fallback);
         let handler = PipelineErrorHandler::from(handler);
         let weak_handler: WeakErrorHandler = Arc::downgrade(&handler);
 
         let error = Error::server_error("Some error");
-        let uri = "/foo/bar?baz".parse::<Uri>().unwrap();
-        let response = call_weak_err_handler(weak_handler, &uri, error).await;
+
+        let req = Request::get("/foo/bar?baz").body(()).unwrap();
+        let (parts, _) = req.into_parts();
+        let response = call_weak_err_handler(weak_handler, &parts, error).await;
         assert!(response.is_ok());
 
         let mut response = response.unwrap();

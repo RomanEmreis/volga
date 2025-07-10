@@ -2,11 +2,7 @@
 
 use futures_util::TryFutureExt;
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
-use crate::{
-    App, 
-    app::AppInstance, 
-    error::{Error, handler::call_weak_err_handler}
-};
+use crate::{App, app::AppInstance, error::{Error, handler::call_weak_err_handler}};
 
 use std::{
     fmt, 
@@ -574,9 +570,9 @@ impl App {
                 async move {
                     let host = ctx.extract::<Header<Host>>()?;
                     let error_handler = ctx.error_handler();
-                    let uri = ctx.request.uri().clone();
+                    let parts = ctx.request_parts_snapshot();
                     let http_result = next(ctx)
-                        .or_else(|err| async { call_weak_err_handler(error_handler, &uri, err).await })
+                        .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
                         .await;
 
                     if !is_excluded(host.to_str().ok()) {

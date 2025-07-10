@@ -79,7 +79,7 @@ pub use crate::http::{
 pub use crate::http::endpoints::args::multipart::Multipart;
 
 pub mod routing {
-    pub use crate::app::router::RouteGroup;
+    pub use crate::app::router::{RouteGroup, Route};
 }
 
 

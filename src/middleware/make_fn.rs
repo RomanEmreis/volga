@@ -26,7 +26,6 @@ use super::{
     NextFn, 
 };
 
-
 /// Wraps a [`RouteHandler`] into [`MiddlewareFn`]
 pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
     Arc::new(move |ctx: HttpContext, _| {

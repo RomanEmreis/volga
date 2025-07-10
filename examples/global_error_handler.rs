@@ -25,7 +25,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     // Enabling global error handler
-    app.map_err(|error| async move {
+    app.map_err(|error: volga::error::Error| async move {
         tracing::error!("{:?}", error);
         let (status, instance, err) = error.into_parts();
         problem! {

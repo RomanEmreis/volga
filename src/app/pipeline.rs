@@ -37,7 +37,7 @@ impl PipelineBuilder {
         Self {
             middlewares: Middlewares::new(),
             endpoints: Endpoints::new(),
-            error_handler: ErrorFunc(default_error_handler).into(),
+            error_handler: ErrorFunc::new(default_error_handler).into(),
             fallback_handler: FallbackFunc::new(default_fallback_handler).into()
         }
     }
@@ -46,7 +46,7 @@ impl PipelineBuilder {
     pub(super) fn new() -> Self {
         Self { 
             endpoints: Endpoints::new(),
-            error_handler: ErrorFunc(default_error_handler).into(),
+            error_handler: ErrorFunc::new(default_error_handler).into(),
             fallback_handler: FallbackFunc::new(default_fallback_handler).into()
         }
     }

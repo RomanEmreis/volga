@@ -10,10 +10,13 @@ use volga::{
     Json, 
     di::{Inject, Container, Dc}, 
     error::Error, 
-    headers::HeaderValue,
+    headers::HeaderValue, 
     HttpRequest, 
-    HttpResponse
+    HttpResponse, 
+    HttpResult,
+    status
 };
+
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex}
@@ -54,6 +57,8 @@ struct Item {
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut app = App::new();
+
+    app.map_err(error_handler);
     
     let global_cache = InMemoryCache::default();
     app
@@ -94,6 +99,13 @@ async fn get_value<T: Cache + Inject>(id: String, cache: Dc<T>) -> Option<String
 
 async fn set_value<T: Cache + Inject>(Json(item): Json<Item>, cache: Dc<T>) {
     cache.set(item.id, item.value);
+}
+
+async fn error_handler(log: Dc<RequestLog>, error: Error) -> HttpResult {
+    log.append(&format!("An Error occurred: {}", error));
+    status!(500, "Internal Server Error", [
+        ("x-req-id", &log.request_id)
+    ])
 }
 
 impl Cache for InMemoryCache {

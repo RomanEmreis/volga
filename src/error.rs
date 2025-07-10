@@ -3,7 +3,6 @@
 use std::{
     convert::Infallible,
     fmt,
-    future::Future, 
     io::{ErrorKind, Error as IoError},
     error::Error as StdError
 };
@@ -11,6 +10,8 @@ use super::{
     App, 
     http::{
         GenericHandler,
+        MapErrHandler,
+        FromRequestParts,
         FromRawRequest,
         StatusCode,
         IntoResponse
@@ -184,14 +185,14 @@ impl App {
     /// # app.run().await
     /// # }
     /// ```
-    pub fn map_err<F, R, Fut>(&mut self, handler: F) -> &mut Self
+    pub fn map_err<F, R, Args>(&mut self, handler: F) -> &mut Self
     where
-        F: Fn(Error) -> Fut + Send + Sync + 'static,
-        R: IntoResponse,
-        Fut: Future<Output = R> + Send
+        F: MapErrHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequestParts + Send + Sync + 'static,
     {
         self.pipeline
-            .set_error_handler(ErrorFunc(handler).into());
+            .set_error_handler(ErrorFunc::new(handler).into());
         self
     }
 

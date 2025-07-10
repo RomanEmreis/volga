@@ -67,7 +67,7 @@ fn benchmark(c: &mut Criterion) {
             
             app.map_get("/", || async { "Hello, World!" });
             app.map_get("/err", || async { Error::other("error") });
-            app.map_err(|err| async move { status!(500, err.to_string()) });
+            app.map_err(|err: volga::error::Error| async move { status!(500, err.to_string()) });
             app.map_fallback(|| async { status!(404) });
             _ = app.run().await;
         });

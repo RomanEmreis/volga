@@ -53,7 +53,7 @@ impl HttpRequest {
         Self { inner: request.map(HttpBody::incoming) }
     }
     
-    /// Turns [`HttpRequest's`] body into limited body if it's specified
+    /// Turns [`HttpRequest's`] body into a limited body if it's specified
     pub fn into_limited(self, body_limit: RequestBodyLimit) -> Self {
         match body_limit {
             RequestBodyLimit::Disabled => self,
@@ -77,7 +77,7 @@ impl HttpRequest {
         self.inner.into_body()
     }
 
-    /// Consumes the request and returns the body as boxed trait object
+    /// Consumes the request and returns the body as a boxed trait object
     #[inline]
     pub fn into_boxed_body(self) -> BoxBody {
         self.inner
@@ -93,14 +93,14 @@ impl HttpRequest {
             .into_data_stream()
     }
 
-    /// Consumes the request and returns the body as boxed trait object that is !Sync
+    /// Consumes the request and returns the body as a boxed trait object that is !Sync
     #[inline]
     pub fn into_boxed_unsync_body(self) -> UnsyncBoxBody {
         self.inner
             .into_body()
             .into_boxed_unsync()
     }
-
+    
     /// Consumes the request and returns request head and body
     pub fn into_parts(self) -> (Parts, HttpBody) {
         self.inner.into_parts()
