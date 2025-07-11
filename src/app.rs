@@ -134,7 +134,7 @@ impl<I: Into<IpAddr>> From<(I, u16)> for Connection {
     }
 }
 
-/// Contains a shared resources of running Web Server
+/// Contains a shared resource of running Web Server
 pub(crate) struct AppInstance {
     /// Incoming TLS connection acceptor
     #[cfg(feature = "tls")]
