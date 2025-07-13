@@ -22,7 +22,7 @@ async fn main() -> std::io::Result<()> {
     // Configures static web server 
     // - redirects from "/" -> "/index.html" if presents
     // - redirects from "/{file_name}" -> "/file-name.ext"
-    // - redirects to 404.html if unspecified route is requested
+    // - redirects to 404.html if an unspecified route is requested
     app.use_static_files();
 
     app.run().await

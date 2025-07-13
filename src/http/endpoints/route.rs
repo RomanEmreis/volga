@@ -278,6 +278,48 @@ impl RouteNode {
         }
     }
 
+    /// Traverses the route tree and collects all available routes
+    /// Returns a vector of tuples containing (HTTP method, route path)
+    #[cfg(debug_assertions)]
+    pub(crate) fn collect(&self) -> super::meta::RoutesInfo {
+        let mut routes = Vec::new();
+        self.traverse_routes(&mut routes, String::new());
+        super::meta::RoutesInfo(routes)
+    }
+
+    #[cfg(debug_assertions)]
+    fn traverse_routes(&self, routes: &mut Vec<super::meta::RouteInfo>, current_path: String) {
+        match self {
+            RouteNode::Static(map) | RouteNode::Dynamic(map) => {
+                for (segment, node) in map {
+                    if segment == END_OF_ROUTE {
+                        // This is a handler node at the end of a route
+                        node.traverse_routes(routes, current_path.clone());
+                    } else {
+                        // Build the path for this segment
+                        let new_path = if current_path.is_empty() {
+                            format!("/{segment}", )
+                        } else {
+                            format!("{current_path}/{segment}")
+                        };
+                        node.traverse_routes(routes, new_path);
+                    }
+                }
+            }
+            RouteNode::Handler(methods) => {
+                // We've reached a handler node - collect all HTTP methods for this route
+                for method in methods.keys() {
+                    let route_path = if current_path.is_empty() {
+                        "/".to_string()
+                    } else {
+                        current_path.clone()
+                    };
+                    routes.push(super::meta::RouteInfo::new(method.clone(), &route_path));
+                }
+            }
+        }
+    }
+
     #[inline]
     fn is_dynamic_segment(segment: &str) -> bool {
         segment.starts_with(OPEN_BRACKET) && 
@@ -289,11 +331,11 @@ impl RouteNode {
 mod tests {
     use std::collections::HashMap;
     use hyper::Method;
-    
     use crate::ok;
     use crate::http::endpoints::handlers::{Func, RouteHandler};
     use crate::http::endpoints::route::RouteNode;
-
+    use super::super::meta::RouteInfo;
+    
     #[test]
     fn it_inserts_and_finds_route() {
         let handler = || async { ok!() };
@@ -327,4 +369,195 @@ mod tests {
         
         assert_eq!(val, "some");
     }
+
+    #[test]
+    fn it_collects_single_static_route() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let path = ["users".into()];
+
+        let mut route = RouteNode::Static(HashMap::new());
+        route.insert(&path, Method::GET, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0], (Method::GET, "/users"));
+    }
+
+    #[test]
+    fn it_collects_multiple_methods_same_route() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let path = ["users".into()];
+
+        let mut route = RouteNode::Static(HashMap::new());
+        route.insert(&path, Method::GET, handler.clone().into());
+        route.insert(&path, Method::POST, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 2);
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users")));
+        assert!(routes.contains(&RouteInfo::new(Method::POST, "/users")));
+    }
+
+    #[test]
+    fn it_collects_nested_static_routes() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let path1 = ["users".into()];
+        let path2 = ["users".into(), "profile".into()];
+
+        let mut route = RouteNode::Static(HashMap::new());
+        route.insert(&path1, Method::GET, handler.clone().into());
+        route.insert(&path2, Method::GET, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 2);
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users/profile")));
+    }
+
+    #[test]
+    fn it_collects_dynamic_routes() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let path = ["users".into(), "{id}".into()];
+
+        let mut route = RouteNode::Static(HashMap::new());
+        route.insert(&path, Method::GET, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0], (Method::GET, "/users/{id}"));
+    }
+
+    #[test]
+    fn it_collects_mixed_static_and_dynamic_routes() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let path1 = ["users".into()];
+        let path2 = ["users".into(), "{id}".into()];
+        let path3 = ["users".into(), "{id}".into(), "posts".into()];
+
+        let mut route = RouteNode::Static(HashMap::new());
+        route.insert(&path1, Method::GET, handler.clone().into());
+        route.insert(&path2, Method::GET, handler.clone().into());
+        route.insert(&path3, Method::GET, handler.into());
+
+        let routes = route.collect();
+        
+        assert_eq!(routes.len(), 3);
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users/{id}")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users/{id}/posts")));
+    }
+
+    #[test]
+    fn it_collects_root_route() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let path = ["".into()];
+
+        let mut route = RouteNode::Static(HashMap::new());
+        route.insert(&path, Method::GET, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0], (Method::GET, "/"));
+    }
+
+    #[test]
+    fn it_collects_complex_route_tree() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let mut route = RouteNode::Static(HashMap::new());
+
+        // Add various routes
+        route.insert(&["api".into(), "v1".into(), "users".into()], Method::GET, handler.clone().into());
+        route.insert(&["api".into(), "v1".into(), "users".into()], Method::POST, handler.clone().into());
+        route.insert(&["api".into(), "v1".into(), "users".into(), "{id}".into()], Method::GET, handler.clone().into());
+        route.insert(&["api".into(), "v1".into(), "users".into(), "{id}".into()], Method::PUT, handler.clone().into());
+        route.insert(&["api".into(), "v1".into(), "users".into(), "{id}".into()], Method::DELETE, handler.clone().into());
+        route.insert(&["api".into(), "v1".into(), "posts".into()], Method::GET, handler.clone().into());
+        route.insert(&["api".into(), "v2".into(), "users".into()], Method::GET, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 7);
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/api/v1/users")));
+        assert!(routes.contains(&RouteInfo::new(Method::POST, "/api/v1/users")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/api/v1/users/{id}")));
+        assert!(routes.contains(&RouteInfo::new(Method::PUT, "/api/v1/users/{id}")));
+        assert!(routes.contains(&RouteInfo::new(Method::DELETE, "/api/v1/users/{id}")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/api/v1/posts")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/api/v2/users")));
+    }
+
+    #[test]
+    fn it_handles_empty_route_tree() {
+        let route = RouteNode::Static(HashMap::new());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 0);
+    }
+
+    #[test]
+    fn it_collects_routes_with_multiple_dynamic_segments() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let path = ["users".into(), "{userId}".into(), "posts".into(), "{postId}".into(), "comments".into()];
+
+        let mut route = RouteNode::Static(HashMap::new());
+        route.insert(&path, Method::GET, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0], (Method::GET, "/users/{userId}/posts/{postId}/comments"));
+    }
+
+    #[test]
+    fn it_collects_routes_with_different_http_methods() {
+        let handler = || async { ok!() };
+        let handler: RouteHandler = Func::new(handler);
+
+        let path = ["resource".into()];
+
+        let mut route = RouteNode::Static(HashMap::new());
+        route.insert(&path, Method::GET, handler.clone().into());
+        route.insert(&path, Method::POST, handler.clone().into());
+        route.insert(&path, Method::PUT, handler.clone().into());
+        route.insert(&path, Method::DELETE, handler.clone().into());
+        route.insert(&path, Method::PATCH, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 5);
+        let methods: Vec<Method> = routes.iter().map(|r| r.method.clone()).collect();
+        assert!(methods.contains(&Method::GET));
+        assert!(methods.contains(&Method::POST));
+        assert!(methods.contains(&Method::PUT));
+        assert!(methods.contains(&Method::DELETE));
+        assert!(methods.contains(&Method::PATCH));
+
+        // All should have the same route
+        for route in routes.iter() {
+            assert_eq!(route.path, "/resource");
+        }
+    }
+
 }

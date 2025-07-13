@@ -85,6 +85,11 @@ impl PipelineBuilder {
     pub(crate) fn endpoints_mut(&mut self) -> &mut Endpoints {
         &mut self.endpoints
     }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn endpoints(&self) -> &Endpoints {
+        &self.endpoints
+    }
     
     pub(crate) fn set_error_handler(&mut self, handler: PipelineErrorHandler) {
         self.error_handler = handler;
