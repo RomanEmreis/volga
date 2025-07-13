@@ -134,7 +134,7 @@ impl<I: Into<IpAddr>> From<(I, u16)> for Connection {
     }
 }
 
-/// Contains a shared resources of running Web Server
+/// Contains a shared resource of running Web Server
 pub(crate) struct AppInstance {
     /// Incoming TLS connection acceptor
     #[cfg(feature = "tls")]
@@ -295,6 +295,9 @@ impl App {
         let socket = self.connection.socket;
         let no_delay = self.no_delay;
         let tcp_listener = TcpListener::bind(socket).await?;
+
+        #[cfg(debug_assertions)]
+        self.print_welcome();
         
         #[cfg(feature = "tracing")]
         {
@@ -387,6 +390,31 @@ impl App {
             let io = TokioIo::new(stream);
             Server::new(io).serve(app_instance).await;
         };
+    }
+
+    #[cfg(debug_assertions)]
+    fn print_welcome(&self) {
+        let version = env!("CARGO_PKG_VERSION");
+        println!();
+        println!("\x1b[1;34m╭──────────────────────────────────────────╮");
+        println!("│       🚀 Welcome to Volga v{version:<8}      │");
+        println!("╰──────────────────────────────────────────╯\x1b[0m");
+        println!();
+
+        let addr = self.connection.socket;
+        #[cfg(not(feature = "tls"))]
+        println!("\x1b[1;32m🔗 Listening on: http://{addr}\x1b[0m");
+        #[cfg(feature = "tls")]
+        if self.tls_config.is_some() {
+            println!("\x1b[1;32m🔗 Listening on: https://{addr}\x1b[0m");
+        } else {
+            println!("\x1b[1;32m🔗 Listening on: http://{addr}\x1b[0m");
+        };
+        
+        let routes = self.pipeline
+            .endpoints()
+            .collect();
+        println!("{routes}");
     }
 }
 

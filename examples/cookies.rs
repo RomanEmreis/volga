@@ -18,17 +18,18 @@ async fn login(cookies: Cookies, auth: Header<Authorization>) -> Result<(HttpRes
 }
 
 async fn me(cookies: Cookies) -> HttpResult {
-    if let Some(_session_id) = cookies.get("session-id") { 
-        ok!("Success")
-    } else { 
-        status!(401, "Unauthorized")
-    }
+    cookies
+        .get("session-id")
+        .map_or_else(
+            || status!(401, "Unauthorized"),
+            |_session_id| ok!("Success"))
+    
 }
 
 fn authorize(_auth: Header<Authorization>) -> Result<String, Error> {
-    Ok(Uuid::new_v4().to_string())
-    
     // authorize the user and create a session
+    
+    Ok(Uuid::new_v4().to_string())
 }
 
 #[tokio::main]

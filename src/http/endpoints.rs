@@ -10,6 +10,8 @@ use super::endpoints::{
 #[cfg(feature = "middleware")]
 use super::endpoints::route::Layer;
 
+#[cfg(debug_assertions)]
+pub(crate) mod meta;
 pub(crate) mod handlers;
 pub(crate) mod route;
 pub mod args;
@@ -100,6 +102,13 @@ impl Endpoints {
             RouteNode::Handler(handlers) => Some(handlers.contains_key(method)),
             _ => None,
         }).unwrap_or(false)
+    }
+
+    /// Traverses the route tree and collects all available routes.
+    /// Returns a vector of tuples containing (HTTP method, route path)
+    #[cfg(debug_assertions)]
+    pub(crate) fn collect(&self) -> meta::RoutesInfo {
+        self.routes.collect()
     }
     
     #[cfg(feature = "middleware")]
