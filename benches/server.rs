@@ -45,7 +45,8 @@ fn benchmark(c: &mut Criterion) {
         tokio::spawn(async {
             let mut app = App::new()
                 .with_no_delay()
-                .without_body_limit();
+                .without_body_limit()
+                .without_greeter();
             
             #[cfg(feature = "di")]
             let mut app = {

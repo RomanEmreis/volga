@@ -294,7 +294,54 @@ impl App {
         self
     }
 
-    /// Runs the `App`
+    /// Starts the [`App`] with its own Tokio runtime.
+    ///
+    /// This method is intended for simple use cases where you don't already have a Tokio runtime setup.
+    /// Internally, it creates and runs a multi-threaded Tokio runtime to execute the application.
+    ///
+    /// **Note:** This method **must not** be called from within an existing Tokio runtime
+    /// (e.g., inside an `#[tokio::main]` async function), or it will panic.
+    /// If you are already using Tokio in your application, use [`App::run`] instead.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// fn main() {
+    ///     let app = App::new().bind("127.0.0.1:7878");
+    ///     app.start();
+    /// }
+    /// ```
+    pub fn start(self) {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            panic!("`App::start()` cannot be called inside an existing Tokio runtime. Use `run().await` instead.");
+        }
+
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(err) => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("failed to start the runtime: {err:#}");
+                #[cfg(not(feature = "tracing"))]
+                eprintln!("failed to start the runtime: {err:#}");
+                return;
+            }
+        };
+
+        runtime.block_on(async {
+            if let Err(err) = self.run().await {
+                #[cfg(feature = "tracing")]
+                tracing::error!("failed to run the server: {err:#}");
+                #[cfg(not(feature = "tracing"))]
+                eprintln!("failed to run the server: {err:#}");
+            }
+        });
+    }
+
+    /// Runs the [`App`]
     #[cfg(feature = "middleware")]
     pub fn run(mut self) -> impl Future<Output = io::Result<()>> {
         self.use_endpoints();
@@ -376,7 +423,7 @@ impl App {
             match signal::ctrl_c().await {
                 Ok(_) => (),
                 #[cfg(feature = "tracing")]
-                Err(err) => tracing::error!("unable to listen for shutdown signal: {}", err),
+                Err(err) => tracing::error!("unable to listen for shutdown signal: {err:#}"),
                 #[cfg(not(feature = "tracing"))]
                 Err(_) => ()
             }
