@@ -100,6 +100,11 @@ pub struct App {
     /// 
     /// Default: `false`
     no_delay: bool,
+    
+    /// Determines whether to show a welcome screen
+    /// 
+    /// Default: `true`
+    show_greeter: bool,
 }
 
 /// Wraps a socket
@@ -234,6 +239,10 @@ impl App {
             connection: Default::default(),
             body_limit: Default::default(),
             no_delay: false,
+            #[cfg(debug_assertions)]
+            show_greeter: true,
+            #[cfg(not(debug_assertions))]
+            show_greeter: false,
         }
     }
 
@@ -274,6 +283,14 @@ impl App {
     /// thereby avoiding the frequent sending of small packets.
     pub fn with_no_delay(mut self) -> Self {
         self.no_delay = true;
+        self
+    }
+    
+    /// Disables a welcome message on start
+    /// 
+    /// Default: *enabled*
+    pub fn without_greeter(mut self) -> Self {
+        self.show_greeter = false;
         self
     }
 
@@ -394,6 +411,10 @@ impl App {
 
     #[cfg(debug_assertions)]
     fn print_welcome(&self) {
+        if !self.show_greeter {
+            return;
+        }
+        
         let version = env!("CARGO_PKG_VERSION");
         println!();
         println!("\x1b[1;34m╭──────────────────────────────────────────╮");
