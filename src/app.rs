@@ -51,19 +51,36 @@ pub(crate) mod scope;
 pub(super) const GRACEFUL_SHUTDOWN_TIMEOUT: u64 = 10;
 const DEFAULT_PORT: u16 = 7878;
 
-/// The web application used to configure the HTTP pipeline, and routes.
+/// The main entry point for building and running a Volga application.
 ///
-/// # Examples
+/// `App` is used to configure the HTTP server, define middleware, and register routes.
+///
+/// Once configured, the application can be started either asynchronously using [`App::run`],
+/// or in a blocking context using [`App::run_blocking`].
+///
+/// **Note:** A _blocking context_ means that the current thread (typically `main`)
+/// will wait until the application finishes running. Internally, however,
+/// the application still runs asynchronously on the Tokio runtime.
+/// 
+/// # Async Example
 /// ```no_run
-///use volga::App;
+/// use volga::App;
 ///
-///#[tokio::main]
-///async fn main() -> std::io::Result<()> {
-///    let mut app = App::new().bind("127.0.0.1:8080");
-///    
-///    app.run().await
-///}
+/// #[tokio::main]
+/// async fn main() -> std::io::Result<()> {
+///     let app = App::new().bind("127.0.0.1:8080");
+///     app.run().await
+/// }
 /// ```
+///
+/// # Blocking Example
+/// ```no_run
+/// use volga::App;
+///
+/// let app = App::new().bind("127.0.0.1:8080");
+/// app.run_blocking();
+/// ```
+
 pub struct App {
     /// Dependency Injection container builder
     #[cfg(feature = "di")]
@@ -215,7 +232,7 @@ impl Default for App {
 
 /// General impl
 impl App {
-    /// Initializes a new instance of the `App` which will be bound to the 127.0.0.1:7878 socket by default.
+    /// Initializes a new instance of the [`App`] which will be bound to the 127.0.0.1:7878 socket by default.
     /// 
     ///# Examples
     /// ```no_run
@@ -307,14 +324,12 @@ impl App {
     /// ```no_run
     /// use volga::App;
     ///
-    /// fn main() {
-    ///     let app = App::new().bind("127.0.0.1:7878");
-    ///     app.start();
-    /// }
+    ///  let app = App::new().bind("127.0.0.1:7878");
+    ///  app.run_blocking();
     /// ```
-    pub fn start(self) {
+    pub fn run_blocking(self) {
         if tokio::runtime::Handle::try_current().is_ok() {
-            panic!("`App::start()` cannot be called inside an existing Tokio runtime. Use `run().await` instead.");
+            panic!("`App::run_blocking()` cannot be called inside an existing Tokio runtime. Use `run().await` instead.");
         }
 
         let runtime = match tokio::runtime::Builder::new_multi_thread()
@@ -341,7 +356,28 @@ impl App {
         });
     }
 
-    /// Runs the [`App`]
+    /// Runs the [`App`] using the current asynchronous runtime.
+    ///
+    /// This method must be called inside an existing asynchronous context,
+    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
+    ///
+    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
+    /// It gives you full control over runtime configuration, task execution, and integration
+    /// with other async components.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let app = App::new().bind("127.0.0.1:7878");
+    ///     app.run().await
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(feature = "middleware")]
     pub fn run(mut self) -> impl Future<Output = io::Result<()>> {
         self.use_endpoints();
