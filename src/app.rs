@@ -384,7 +384,28 @@ impl App {
         self.run_internal()
     }
 
-    /// Runs the `App`
+    /// Runs the [`App`] using the current asynchronous runtime.
+    ///
+    /// This method must be called inside an existing asynchronous context,
+    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
+    ///
+    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
+    /// It gives you full control over runtime configuration, task execution, and integration
+    /// with other async components.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let app = App::new().bind("127.0.0.1:7878");
+    ///     app.run().await
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(not(feature = "middleware"))]
     pub fn run(self) -> impl Future<Output = io::Result<()>> {
         self.run_internal()
@@ -497,23 +518,24 @@ impl App {
         if !self.show_greeter {
             return;
         }
-        
-        let version = env!("CARGO_PKG_VERSION");
-        println!();
-        println!("\x1b[1;34m╭──────────────────────────────────────────╮");
-        println!("│       🚀 Welcome to Volga v{version:<8}      │");
-        println!("╰──────────────────────────────────────────╯\x1b[0m");
-        println!();
 
+        let version = env!("CARGO_PKG_VERSION");
         let addr = self.connection.socket;
+
         #[cfg(not(feature = "tls"))]
-        println!("\x1b[1;32m🔗 Listening on: http://{addr}\x1b[0m");
+        let url = format!("http://{addr}");
         #[cfg(feature = "tls")]
-        if self.tls_config.is_some() {
-            println!("\x1b[1;32m🔗 Listening on: https://{addr}\x1b[0m");
+        let url = if self.tls_config.is_some() {
+            format!("https://{addr}")
         } else {
-            println!("\x1b[1;32m🔗 Listening on: http://{addr}\x1b[0m");
+            format!("http://{addr}")
         };
+
+        println!();
+        println!("\x1b[1;34m╭───────────────────────────────────────────────╮");
+        println!("│          🚀 Welcome to Volga v{version:<5}           │");
+        println!("│     Listening on: {url:<28}│");
+        println!("╰───────────────────────────────────────────────╯\x1b[0m");
         
         let routes = self.pipeline
             .endpoints()
