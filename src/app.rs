@@ -80,7 +80,6 @@ const DEFAULT_PORT: u16 = 7878;
 /// let app = App::new().bind("127.0.0.1:8080");
 /// app.run_blocking();
 /// ```
-
 pub struct App {
     /// Dependency Injection container builder
     #[cfg(feature = "di")]
