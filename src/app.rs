@@ -68,7 +68,7 @@ const DEFAULT_PORT: u16 = 7878;
 ///
 /// #[tokio::main]
 /// async fn main() -> std::io::Result<()> {
-///     let app = App::new().bind("127.0.0.1:8080");
+///     let app = App::new().bind("127.0.0.1:7878");
 ///     app.run().await
 /// }
 /// ```
@@ -77,7 +77,7 @@ const DEFAULT_PORT: u16 = 7878;
 /// ```no_run
 /// use volga::App;
 ///
-/// let app = App::new().bind("127.0.0.1:8080");
+/// let app = App::new().bind("127.0.0.1:7878");
 /// app.run_blocking();
 /// ```
 pub struct App {
