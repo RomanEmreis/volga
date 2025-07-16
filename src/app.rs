@@ -51,18 +51,34 @@ pub(crate) mod scope;
 pub(super) const GRACEFUL_SHUTDOWN_TIMEOUT: u64 = 10;
 const DEFAULT_PORT: u16 = 7878;
 
-/// The web application used to configure the HTTP pipeline, and routes.
+/// The main entry point for building and running a Volga application.
 ///
-/// # Examples
+/// `App` is used to configure the HTTP server, define middleware, and register routes.
+///
+/// Once configured, the application can be started either asynchronously using [`App::run`],
+/// or in a blocking context using [`App::run_blocking`].
+///
+/// **Note:** A _blocking context_ means that the current thread (typically `main`)
+/// will wait until the application finishes running. Internally, however,
+/// the application still runs asynchronously on the Tokio runtime.
+/// 
+/// # Async Example
 /// ```no_run
-///use volga::App;
+/// use volga::App;
 ///
-///#[tokio::main]
-///async fn main() -> std::io::Result<()> {
-///    let mut app = App::new().bind("127.0.0.1:8080");
-///    
-///    app.run().await
-///}
+/// #[tokio::main]
+/// async fn main() -> std::io::Result<()> {
+///     let app = App::new().bind("127.0.0.1:7878");
+///     app.run().await
+/// }
+/// ```
+///
+/// # Blocking Example
+/// ```no_run
+/// use volga::App;
+///
+/// let app = App::new().bind("127.0.0.1:7878");
+/// app.run_blocking();
 /// ```
 pub struct App {
     /// Dependency Injection container builder
@@ -100,6 +116,11 @@ pub struct App {
     /// 
     /// Default: `false`
     no_delay: bool,
+    
+    /// Determines whether to show a welcome screen
+    /// 
+    /// Default: `true`
+    show_greeter: bool,
 }
 
 /// Wraps a socket
@@ -210,7 +231,7 @@ impl Default for App {
 
 /// General impl
 impl App {
-    /// Initializes a new instance of the `App` which will be bound to the 127.0.0.1:7878 socket by default.
+    /// Initializes a new instance of the [`App`] which will be bound to the 127.0.0.1:7878 socket by default.
     /// 
     ///# Examples
     /// ```no_run
@@ -234,6 +255,10 @@ impl App {
             connection: Default::default(),
             body_limit: Default::default(),
             no_delay: false,
+            #[cfg(debug_assertions)]
+            show_greeter: true,
+            #[cfg(not(debug_assertions))]
+            show_greeter: false,
         }
     }
 
@@ -276,15 +301,110 @@ impl App {
         self.no_delay = true;
         self
     }
+    
+    /// Disables a welcome message on start
+    /// 
+    /// Default: *enabled*
+    pub fn without_greeter(mut self) -> Self {
+        self.show_greeter = false;
+        self
+    }
 
-    /// Runs the `App`
+    /// Starts the [`App`] with its own Tokio runtime.
+    ///
+    /// This method is intended for simple use cases where you don't already have a Tokio runtime setup.
+    /// Internally, it creates and runs a multi-threaded Tokio runtime to execute the application.
+    ///
+    /// **Note:** This method **must not** be called from within an existing Tokio runtime
+    /// (e.g., inside an `#[tokio::main]` async function), or it will panic.
+    /// If you are already using Tokio in your application, use [`App::run`] instead.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    ///  let app = App::new().bind("127.0.0.1:7878");
+    ///  app.run_blocking();
+    /// ```
+    pub fn run_blocking(self) {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            panic!("`App::run_blocking()` cannot be called inside an existing Tokio runtime. Use `run().await` instead.");
+        }
+
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(err) => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("failed to start the runtime: {err:#}");
+                #[cfg(not(feature = "tracing"))]
+                eprintln!("failed to start the runtime: {err:#}");
+                return;
+            }
+        };
+
+        runtime.block_on(async {
+            if let Err(err) = self.run().await {
+                #[cfg(feature = "tracing")]
+                tracing::error!("failed to run the server: {err:#}");
+                #[cfg(not(feature = "tracing"))]
+                eprintln!("failed to run the server: {err:#}");
+            }
+        });
+    }
+
+    /// Runs the [`App`] using the current asynchronous runtime.
+    ///
+    /// This method must be called inside an existing asynchronous context,
+    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
+    ///
+    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
+    /// It gives you full control over runtime configuration, task execution, and integration
+    /// with other async components.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let app = App::new().bind("127.0.0.1:7878");
+    ///     app.run().await
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(feature = "middleware")]
     pub fn run(mut self) -> impl Future<Output = io::Result<()>> {
         self.use_endpoints();
         self.run_internal()
     }
 
-    /// Runs the `App`
+    /// Runs the [`App`] using the current asynchronous runtime.
+    ///
+    /// This method must be called inside an existing asynchronous context,
+    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
+    ///
+    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
+    /// It gives you full control over runtime configuration, task execution, and integration
+    /// with other async components.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let app = App::new().bind("127.0.0.1:7878");
+    ///     app.run().await
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(not(feature = "middleware"))]
     pub fn run(self) -> impl Future<Output = io::Result<()>> {
         self.run_internal()
@@ -359,7 +479,7 @@ impl App {
             match signal::ctrl_c().await {
                 Ok(_) => (),
                 #[cfg(feature = "tracing")]
-                Err(err) => tracing::error!("unable to listen for shutdown signal: {}", err),
+                Err(err) => tracing::error!("unable to listen for shutdown signal: {err:#}"),
                 #[cfg(not(feature = "tracing"))]
                 Err(_) => ()
             }
@@ -394,22 +514,27 @@ impl App {
 
     #[cfg(debug_assertions)]
     fn print_welcome(&self) {
-        let version = env!("CARGO_PKG_VERSION");
-        println!();
-        println!("\x1b[1;34m╭──────────────────────────────────────────╮");
-        println!("│       🚀 Welcome to Volga v{version:<8}      │");
-        println!("╰──────────────────────────────────────────╯\x1b[0m");
-        println!();
+        if !self.show_greeter {
+            return;
+        }
 
+        let version = env!("CARGO_PKG_VERSION");
         let addr = self.connection.socket;
+
         #[cfg(not(feature = "tls"))]
-        println!("\x1b[1;32m🔗 Listening on: http://{addr}\x1b[0m");
+        let url = format!("http://{addr}");
         #[cfg(feature = "tls")]
-        if self.tls_config.is_some() {
-            println!("\x1b[1;32m🔗 Listening on: https://{addr}\x1b[0m");
+        let url = if self.tls_config.is_some() {
+            format!("https://{addr}")
         } else {
-            println!("\x1b[1;32m🔗 Listening on: http://{addr}\x1b[0m");
+            format!("http://{addr}")
         };
+
+        println!();
+        println!("\x1b[1;34m╭───────────────────────────────────────────────╮");
+        println!("│          🚀 Welcome to Volga v{version:<5}           │");
+        println!("│     Listening on: {url:<28}│");
+        println!("╰───────────────────────────────────────────────╯\x1b[0m");
         
         let routes = self.pipeline
             .endpoints()

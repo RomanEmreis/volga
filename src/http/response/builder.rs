@@ -1,12 +1,24 @@
 ﻿pub const SERVER_NAME: &str = "Volga";
 pub const RESPONSE_ERROR: &str = "HTTP Response: Unable to create a response";
 
+#[inline]
+#[cfg(debug_assertions)]
+pub fn make_builder() -> crate::http::response::Builder {
+    crate::http::Response::builder()
+        .header(crate::headers::SERVER, SERVER_NAME)
+}
+
+#[inline]
+#[cfg(not(debug_assertions))]
+pub fn make_builder() -> crate::http::response::Builder {
+    crate::http::Response::builder()
+}
+
 /// Creates a default HTTP response builder
 #[macro_export]
 macro_rules! builder {
     () => {
-        $crate::http::Response::builder()
-            .header($crate::headers::SERVER, $crate::SERVER_NAME)
+        $crate::http::response::builder::make_builder()
     };
     ($status:expr) => {
         $crate::builder!()
