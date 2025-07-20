@@ -47,6 +47,7 @@ tokio-tungstenite = { version = "0.27.0", optional = true }
 tracing = { version = "0.1.41", default-features = false, optional = true }
 
 [dev-dependencies]
+base64 = { version = "0.22.1" }
 jsonwebtoken = "9.3.1"
 hyper = { version = "1.6.0", features = ["client"] }
 reqwest = { version = "0.12.22", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
@@ -123,6 +124,11 @@ required-features = ["di"]
 name = "mw"
 harness = false
 required-features = ["middleware"]
+
+[[bench]]
+name = "auth"
+harness = false
+required-features = ["jwt-auth","middleware"]
 
 [[test]]
 name = "middleware_mapping_tests"
