@@ -248,6 +248,7 @@ impl BearerTokenService {
 }
 
 /// Wraps a bearer token string
+#[derive(Debug)]
 pub struct Bearer(Box<str>);
 
 impl TryFrom<&HeaderValue> for Bearer {
@@ -370,5 +371,356 @@ impl FromPayload for BearerTokenService {
     #[inline]
     fn source() -> Source {
         Source::Parts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use serde::{Serialize, Deserialize};
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
+    use hyper::Request;
+    use crate::headers::{HeaderMap, HeaderValue};
+    use crate::http::Extensions;
+
+    #[derive(Debug, Serialize, Deserialize)]
+    struct TestClaims {
+        sub: String,
+        exp: u64,
+        aud: String,
+        iss: String,
+    }
+
+    const SECRET: &[u8] = b"test_secret_key";
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_default() {
+        let config = BearerAuthConfig::default();
+
+        assert!(config.validation.algorithms.contains(&Algorithm::HS256));
+        assert!(config.encoding.is_none());
+        assert!(config.decoding.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_set_decoding_key() {
+        let decoding_key = DecodingKey::from_secret(SECRET);
+        let config = BearerAuthConfig::default()
+            .set_decoding_key(decoding_key);
+
+        assert!(config.decoding.is_some());
+        assert!(config.decoding_key().is_some());
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_set_encoding_key() {
+        let encoding_key = EncodingKey::from_secret(SECRET);
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(encoding_key);
+
+        assert!(config.encoding.is_some());
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_with_alg() {
+        let config = BearerAuthConfig::default()
+            .with_alg(Algorithm::HS512)
+            .with_alg(Algorithm::RS256);
+
+        assert!(config.validation.algorithms.contains(&Algorithm::HS256));
+        assert!(config.validation.algorithms.contains(&Algorithm::HS512));
+        assert!(config.validation.algorithms.contains(&Algorithm::RS256));
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_with_aud() {
+        let audience = vec!["test-audience", "another-audience"];
+        let config = BearerAuthConfig::default()
+            .with_aud(&audience);
+
+        assert!(config.validation.aud.is_some());
+        let expected_aud: HashSet<String> = audience.iter().map(|s| s.to_string()).collect();
+        assert_eq!(config.validation.aud.unwrap(), expected_aud);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_with_iss() {
+        let issuers = vec!["test-issuer", "another-issuer"];
+        let config = BearerAuthConfig::default()
+            .with_iss(&issuers);
+
+        assert!(config.validation.iss.is_some());
+        let expected_iss: HashSet<String> = issuers.iter().map(|s| s.to_string()).collect();
+        assert_eq!(config.validation.iss.unwrap(), expected_iss);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_validate_aud() {
+        let config = BearerAuthConfig::default()
+            .validate_aud(false);
+
+        assert!(!config.validation.validate_aud);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_validate_exp() {
+        let config = BearerAuthConfig::default()
+            .validate_exp(false);
+
+        assert!(!config.validation.validate_exp);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_auth_config_validate_nbf() {
+        let config = BearerAuthConfig::default()
+            .validate_nbf(true);
+
+        assert!(config.validation.validate_nbf);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_token_service_from_config() {
+        let encoding_key = EncodingKey::from_secret(SECRET);
+        let decoding_key = DecodingKey::from_secret(SECRET);
+
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(encoding_key)
+            .set_decoding_key(decoding_key)
+            .with_alg(Algorithm::HS256);
+
+        let service: BearerTokenService = config.into();
+
+        assert!(service.encoding_key().is_some());
+        assert!(service.decoding_key().is_some());
+        assert!(service.validation().algorithms.contains(&Algorithm::HS256));
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_token_service_encode_success() {
+        let encoding_key = EncodingKey::from_secret(SECRET);
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(encoding_key);
+        let service: BearerTokenService = config.into();
+
+        let exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() + 3600;
+
+        let claims = TestClaims {
+            sub: "test".to_string(),
+            exp,
+            aud: "test-audience".to_string(),
+            iss: "test-issuer".to_string(),
+        };
+
+        let result = service.encode(&claims);
+        assert!(result.is_ok());
+
+        let bearer = result.unwrap();
+        assert!(!bearer.to_string().is_empty());
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_token_service_encode_missing_key() {
+        let config = BearerAuthConfig::default();
+        let service: BearerTokenService = config.into();
+
+        let claims = TestClaims {
+            sub: "test".to_string(),
+            exp: 0,
+            aud: "test-audience".to_string(),
+            iss: "test-issuer".to_string(),
+        };
+
+        let result = service.encode(&claims);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing security key"));
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_token_service_decode_success() {
+        let encoding_key = EncodingKey::from_secret(SECRET);
+        let decoding_key = DecodingKey::from_secret(SECRET);
+
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(encoding_key)
+            .set_decoding_key(decoding_key)
+            .with_aud(["test-audience"]) 
+            .with_iss(["test-issuer"]);
+        let service: BearerTokenService = config.into();
+
+        let exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() + 3600;
+
+        let original_claims = TestClaims {
+            sub: "test".to_string(),
+            exp,
+            aud: "test-audience".to_string(),
+            iss: "test-issuer".to_string(),
+        };
+
+        let bearer = service.encode(&original_claims).unwrap();
+        let decoded_claims: TestClaims = service.decode(bearer).unwrap();
+
+        assert_eq!(original_claims.sub, decoded_claims.sub);
+        assert_eq!(original_claims.exp, decoded_claims.exp);
+        assert_eq!(original_claims.aud, decoded_claims.aud);
+        assert_eq!(original_claims.iss, decoded_claims.iss);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_token_service_decode_missing_key() {
+        let config = BearerAuthConfig::default();
+        let service: BearerTokenService = config.into();
+
+        let bearer = Bearer("invalid.token.here".into());
+        let result: Result<TestClaims, Error> = service.decode(bearer);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing security key"));
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_from_header_value_success() {
+        let token_value = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test";
+        let header_value = HeaderValue::from_str(&format!("Bearer {token_value}")).unwrap();
+
+        let bearer = Bearer::try_from(&header_value).unwrap();
+        assert_eq!(bearer.to_string(), token_value);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_from_header_value_missing_bearer() {
+        let header_value = HeaderValue::from_static("InvalidScheme token");
+
+        let result = Bearer::try_from(&header_value);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing Credentials"));
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_from_header_value_invalid_utf8() {
+        let header_value = HeaderValue::from_static("Bearer valid-token");
+        let result = Bearer::try_from(&header_value);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_from_header_map_success() {
+        let mut headers = HeaderMap::new();
+        let token_value = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test";
+        headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {token_value}")).unwrap());
+
+        let bearer = Bearer::try_from(&headers).unwrap();
+        assert_eq!(bearer.to_string(), token_value);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_from_header_map_missing_header() {
+        let headers = HeaderMap::new();
+
+        let result = Bearer::try_from(&headers);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing Authorization header"));
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_from_parts_success() {
+        let token_value = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test";
+
+        let req = Request::builder()
+            .header(AUTHORIZATION, format!("Bearer {token_value}"))
+            .body(())
+            .unwrap();
+        let (parts, _) = req.into_parts();
+        let bearer = Bearer::try_from(&parts).unwrap();
+        assert_eq!(bearer.to_string(), token_value);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_token_service_from_extensions_success() {
+        let mut extensions = Extensions::new();
+        let service = BearerTokenService::from(BearerAuthConfig::default());
+        extensions.insert(service.clone());
+
+        let result = BearerTokenService::try_from(&extensions);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_token_service_from_extensions_missing() {
+        let extensions = Extensions::new();
+
+        let result = BearerTokenService::try_from(&extensions);
+        assert!(result.is_err());
+        assert!(result.err().unwrap().to_string().contains("Bearer Token authorization is not properly configured"));
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_display() {
+        let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test";
+        let bearer = Bearer(token.into());
+
+        assert_eq!(format!("{}", bearer), token);
+    }
+
+    #[tokio::test]
+    async fn it_tests_bearer_token_with_whitespace() {
+        let token_value = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test";
+        let header_value = HeaderValue::from_str(&format!("Bearer   {token_value}   ")).unwrap();
+
+        let bearer = Bearer::try_from(&header_value).unwrap();
+        assert_eq!(bearer.to_string(), token_value);
+    }
+
+    #[tokio::test]
+    async fn it_tests_service_validation_getter() {
+        let config = BearerAuthConfig::default()
+            .validate_exp(false)
+            .validate_aud(false);
+        let service: BearerTokenService = config.into();
+
+        let validation = service.validation();
+        assert!(!validation.validate_exp);
+        assert!(!validation.validate_aud);
+    }
+
+    #[tokio::test]
+    async fn it_tests_encode_decode_round_trip_with_validation() {
+        let encoding_key = EncodingKey::from_secret(SECRET);
+        let decoding_key = DecodingKey::from_secret(SECRET);
+
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(encoding_key)
+            .set_decoding_key(decoding_key)
+            .with_aud(vec!["test-audience"])
+            .with_iss(vec!["test-issuer"])
+            .validate_aud(true);
+
+        let service: BearerTokenService = config.into();
+
+        let exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() + 3600;
+
+        let claims = TestClaims {
+            sub: "test".to_string(),
+            exp,
+            aud: "test-audience".to_string(),
+            iss: "test-issuer".to_string(),
+        };
+
+        let bearer = service.encode(&claims).unwrap();
+        let decoded: TestClaims = service.decode(bearer).unwrap();
+
+        assert_eq!(claims.sub, decoded.sub);
+        assert_eq!(claims.aud, decoded.aud);
+        assert_eq!(claims.iss, decoded.iss);
     }
 }

@@ -7,6 +7,7 @@
 use uuid::Uuid;
 use volga::{
     App, HttpResult, http::Cookies,
+    headers::WWW_AUTHENTICATE,
     auth::Basic,
     error::Error,
     status, ok, see_other
@@ -21,7 +22,7 @@ async fn me(cookies: Cookies) -> HttpResult {
     cookies
         .get("session-id")
         .map_or_else(
-            || status!(401, "Unauthorized"),
+            || status!(401, "Unauthorized", [(WWW_AUTHENTICATE, "Basic realm=\"Restricted area\"")]),
             |_session_id| ok!("Success"))
     
 }
