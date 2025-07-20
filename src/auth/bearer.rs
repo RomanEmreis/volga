@@ -115,12 +115,12 @@ impl BearerAuthConfig {
     ///     .with_bearer_auth(|auth| auth
     ///         .with_iss(["some issuer"]));
     /// ```
-    pub fn with_iss<I, T>(mut self, aud: I) -> Self
+    pub fn with_iss<I, T>(mut self, iss: I) -> Self
     where
         T: ToString,
         I: AsRef<[T]>
     {
-        self.validation.set_issuer(aud.as_ref());
+        self.validation.set_issuer(iss.as_ref());
         self
     }
 
@@ -666,7 +666,7 @@ mod tests {
         let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test";
         let bearer = Bearer(token.into());
 
-        assert_eq!(format!("{}", bearer), token);
+        assert_eq!(format!("{bearer}"), token);
     }
 
     #[tokio::test]
