@@ -9,6 +9,7 @@ pub use hyper::{
         ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
         ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE,
         ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
+        AUTHORIZATION,
         CACHE_CONTROL,
         CONTENT_DISPOSITION, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
         ETAG,
@@ -23,7 +24,8 @@ pub use hyper::{
         VARY,
         UPGRADE,
         CONNECTION,
-        COOKIE, SET_COOKIE
+        COOKIE, SET_COOKIE,
+        WWW_AUTHENTICATE
     },
     http::{HeaderName, HeaderValue},
     HeaderMap
@@ -77,5 +79,19 @@ impl HeaderError {
     #[inline]
     fn from_to_str_error(error: ToStrError) -> Error {
         Error::client_error(format!("Header: {error}"))
+    }
+}
+
+impl core::convert::From<InvalidHeaderValue> for Error {
+    #[inline]
+    fn from(error: InvalidHeaderValue) -> Self {
+        HeaderError::from_invalid_header_value(error)
+    }
+}
+
+impl core::convert::From<ToStrError> for Error {
+    #[inline]
+    fn from(error: ToStrError) -> Self {
+        HeaderError::from_to_str_error(error)
     }
 }

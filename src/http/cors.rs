@@ -391,7 +391,7 @@ impl CorsConfig {
 }
 
 impl App {
-    /// Configures web server with specified CORS configuration
+    /// Configures a web server with specified CORS configuration
     ///
     /// Default: `None`
     ///

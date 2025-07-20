@@ -1,6 +1,6 @@
 ﻿//! Compression middleware
 //! 
-//! Middleware that compress HTTP response body
+//! Middleware that compresses HTTP response body
 
 use std::{
     collections::HashSet,

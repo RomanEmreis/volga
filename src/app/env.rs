@@ -38,7 +38,7 @@ impl Default for HostEnv {
 }
 
 impl HostEnv {
-    /// Creates a new [`HostEnv`] with given content root
+    /// Creates a new [`HostEnv`] with the given content root
     #[inline]
     pub fn new<T: ?Sized + AsRef<OsStr>>(content_root: &T) -> Self {
         let content_root = PathBuf::from(content_root);

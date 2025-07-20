@@ -1,6 +1,6 @@
 ﻿//! Decompression middleware
 //!
-//! Middleware that decompress HTTP request body
+//! Middleware that decompresses the HTTP request body
 
 #[cfg(feature = "decompression-brotli")]
 use async_compression::tokio::bufread::BrotliDecoder;

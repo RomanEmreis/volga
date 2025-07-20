@@ -94,6 +94,11 @@ impl Scope {
                     
                     #[cfg(feature = "di")]
                     extensions.insert(shared.container.create_scope());
+                    
+                    #[cfg(feature = "jwt-auth")]
+                    if let Some(bts) = &shared.bearer_token_service {
+                        extensions.insert(bts.clone());
+                    } 
                 }
 
                 let mut request = HttpRequest::new(Request::from_parts(parts.clone(), body))

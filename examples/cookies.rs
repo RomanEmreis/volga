@@ -1,18 +1,18 @@
 ﻿//! Run with:
 //!
 //! ```no_rust
-//! cargo run --example cookies --features cookie
+//! cargo run --example cookies --features cookie,basic-auth
 //! ```
 
 use uuid::Uuid;
 use volga::{
     App, HttpResult, http::Cookies,
+    auth::Basic,
     error::Error,
-    headers::{Header, Authorization},
     status, ok, see_other
 };
 
-async fn login(cookies: Cookies, auth: Header<Authorization>) -> Result<(HttpResult, Cookies), Error> {
+async fn login(cookies: Cookies, auth: Basic) -> Result<(HttpResult, Cookies), Error> {
     let session_id = authorize(auth)?;
     Ok((see_other!("/me"), cookies.add(("session-id", session_id))))
 }
@@ -26,10 +26,12 @@ async fn me(cookies: Cookies) -> HttpResult {
     
 }
 
-fn authorize(_auth: Header<Authorization>) -> Result<String, Error> {
-    // authorize the user and create a session
-    
-    Ok(Uuid::new_v4().to_string())
+fn authorize(auth: Basic) -> Result<String, Error> {
+    if auth.validate("foo", "bar") {
+        Ok(Uuid::new_v4().to_string())    
+    } else { 
+        Err(Error::client_error("Invalid Credentials"))
+    } 
 }
 
 #[tokio::main]
