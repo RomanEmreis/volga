@@ -114,6 +114,16 @@ all-features = true
 name = "server"
 harness = false
 
+[[bench]]
+name = "di"
+harness = false
+required-features = ["di"]
+
+[[bench]]
+name = "mw"
+harness = false
+required-features = ["middleware"]
+
 [[test]]
 name = "middleware_mapping_tests"
 required-features = ["middleware"]
