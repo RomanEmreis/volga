@@ -103,6 +103,17 @@ impl From<IoError> for Error {
     }
 }
 
+impl From<hyper::http::Error> for Error {
+    #[inline]
+    fn from(err: hyper::http::Error) -> Self {
+        Self {
+            instance: None,
+            inner: err.into(),
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    }
+}
+
 impl From<Error> for IoError {
     #[inline]
     fn from(err: Error) -> Self {

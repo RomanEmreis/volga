@@ -8,11 +8,13 @@ use {
 
 #[cfg(feature = "jwt-auth")]
 pub use {
-    jsonwebtoken::{Algorithm, EncodingKey, DecodingKey, errors::{ErrorKind, Error as JwtError}},
-    authorizer::{Authorizer, AuthClaims, role, roles, permissions, predicate},
-    crate::middleware::{HttpContext, NextFn},
     bearer::{BearerAuthConfig, Bearer, BearerTokenService},
-    crate::headers::{HeaderValue, WWW_AUTHENTICATE}
+    jsonwebtoken::{Algorithm, EncodingKey, DecodingKey, errors::{ErrorKind, Error as JwtError}},
+    claims::AuthClaims,
+    authorizer::{Authorizer, role, roles, permissions, predicate},
+    crate::headers::{HeaderValue, WWW_AUTHENTICATE, CACHE_CONTROL, cache_control::NO_STORE},
+    crate::middleware::{HttpContext, NextFn},
+    crate::http::response::Results
 };
 #[cfg(feature = "basic-auth")]
 pub use basic::Basic;
@@ -23,6 +25,8 @@ pub mod basic;
 pub mod bearer;
 #[cfg(feature = "jwt-auth")]
 pub mod authorizer;
+#[cfg(feature = "jwt-auth")]
+pub mod claims;
 
 #[cfg(feature = "jwt-auth")]
 impl From<JwtError> for Error {
@@ -211,7 +215,11 @@ impl<'a> RouteGroup<'a> {
 }
 
 #[cfg(feature = "jwt-auth")]
-fn authorize_impl<C>(authorizer: Arc<Authorizer<C>>, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult>
+fn authorize_impl<C>(
+    authorizer: Arc<Authorizer<C>>, 
+    ctx: HttpContext, 
+    next: NextFn
+) -> impl Future<Output = HttpResult>
 where
     C: AuthClaims + Send +  Sync + 'static
 {
@@ -219,7 +227,7 @@ where
     async move {
         let bearer: Bearer = ctx.extract()?;
         let bts: BearerTokenService = ctx.extract()?;
-        match bts.decode(bearer) {
+        let resp = match bts.decode(bearer) {
             Ok(claims) if authorizer.validate(&claims) => next(ctx).await,
             Ok(_) => status!(403, [
                 (WWW_AUTHENTICATE, authorizer::DEFAULT_ERROR_MSG)
@@ -234,7 +242,8 @@ where
                     (WWW_AUTHENTICATE, www_authenticate)
                 ])
             }
-        }
+        };
+        Results::with_header(resp, CACHE_CONTROL, NO_STORE)
     }
 }
 

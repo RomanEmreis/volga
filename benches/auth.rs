@@ -1,4 +1,4 @@
-use volga::App;
+use volga::{App, claims};
 
 use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -9,7 +9,7 @@ use tokio::{runtime::Runtime, time::Instant};
 use std::time::Duration;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
-use volga::auth::{roles, AuthClaims};
+use volga::auth::roles;
 
 const TEST_TOKEN: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJlbWFpbC5jb20iLCJjb21wYW55IjoiQXdlc29tZSBDby4iLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3NTMwMDEzODl9.5g6aE4KpRobZqsS8WFJndbHYakG6GydPtIpKt3L1X5o";
 
@@ -70,17 +70,13 @@ fn benchmark(c: &mut Criterion) {
 criterion_group!(benches, benchmark);
 criterion_main!(benches);
 
-#[derive(Serialize, Deserialize)]
-struct Claims {
-    sub: String,
-    company: String,
-    role: String,
-    permissions: Vec<String>,
-    exp: u64,
-}
-
-impl AuthClaims for Claims {
-    fn role(&self) -> Option<&str> {
-        Some(&self.role)
+claims! {
+    #[derive(Serialize, Deserialize)]
+    struct Claims {
+        sub: String,
+        company: String,
+        role: String,
+        permissions: Vec<String>,
+        exp: u64,
     }
 }

@@ -2,66 +2,9 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use serde::de::DeserializeOwned;
+use super::AuthClaims;
 
 pub(super) const DEFAULT_ERROR_MSG: &str = "Bearer error=\"insufficient_scope\" error_description=\"User does not have required role or permission\"";
-
-/// Trait representing extractable authorization claims from a JWT payload.
-///
-/// Types implementing this trait allow the framework to access optional authorization
-/// information such as roles or permissions, enabling role-based or permission-based
-/// access control.
-///
-/// This trait is intended to be implemented by your custom claims struct, which is typically
-/// deserialized from the JWT payload. All methods are optional; by default, they return `None`.
-/// You can override only the methods relevant to your use case.
-///
-/// # Example
-///
-/// ```no_run
-/// use serde::Deserialize;
-/// use volga::auth::AuthClaims;
-///
-/// #[derive(Debug, Deserialize)]
-/// struct MyClaims {
-///     sub: String,
-///     role: String,
-/// }
-///
-/// impl AuthClaims for MyClaims {
-///     fn role(&self) -> Option<&str> {
-///         Some(&self.role)
-///     }
-/// }
-/// ```
-pub trait AuthClaims: DeserializeOwned {
-    /// Returns the primary role associated with the claims.
-    ///
-    /// This is useful for role-based access control (RBAC) where only a single role is expected.
-    /// If multiple roles are used, prefer implementing the [`AuthClaims::roles()`] method.
-    ///
-    /// By default, returns `None`.
-    fn role(&self) -> Option<&str> {
-        None
-    }
-
-    /// Returns the list of roles associated with the claims.
-    ///
-    /// Useful when a subject can have multiple roles.
-    /// If a single role is used instead, you may override [`AuthClaims::role()`] instead.
-    ///
-    /// By default, returns `None`.
-    fn roles(&self) -> Option<&[String]> {
-        None
-    }
-
-    /// Returns the list of permissions granted to the subject.
-    ///
-    /// By default, returns `None`.
-    fn permissions(&self) -> Option<&[String]> {
-        None
-    }
-}
 
 /// Creates an [`Authorizer::Role`] authorizer for a single role.
 ///

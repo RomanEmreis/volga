@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 use volga::{ok, App};
-use volga::headers::AUTHORIZATION;
+use volga::headers::{AUTHORIZATION, CACHE_CONTROL, WWW_AUTHENTICATE};
 use volga::auth::{BearerTokenService, AuthClaims, predicate};
 
 #[derive(Serialize, Deserialize)]
@@ -91,6 +91,7 @@ async fn it_generates_jwt_and_authenticates_it() {
     }).await.unwrap().unwrap();
 
     assert!(response.status().is_success());
+    assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-store");
     assert_eq!(response.text().await.unwrap(), "Pass!");
 }
 
@@ -153,4 +154,6 @@ async fn it_generates_jwt_and_failed_to_authenticates_it() {
     }).await.unwrap().unwrap();
 
     assert!(!response.status().is_success());
+    assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-store");
+    assert_eq!(response.headers().get(WWW_AUTHENTICATE).unwrap(), "Bearer error=\"insufficient_scope\" error_description=\"User does not have required role or permission\"");
 }

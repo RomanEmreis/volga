@@ -11,6 +11,16 @@ use std::fs::Metadata;
 #[cfg(feature = "static-files")]
 const DEFAULT_MAX_AGE: u32 = 60 * 60 * 24; // 24 hours
 
+pub const NO_STORE: &str = "no-store";
+pub const NO_CACHE: &str = "no-cache";
+pub const MAX_AGE: &str = "max-age";
+pub const S_MAX_AGE: &str = "s-maxage";
+pub const MUST_REVALIDATE: &str = "must-revalidate";
+pub const PROXY_REVALIDATE: &str = "proxy-revalidate";
+pub const PUBLIC: &str = "public";
+pub const PRIVATE: &str = "private";
+pub const IMMUTABLE: &str = "immutable"; 
+
 /// Represents the HTTP [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
 /// header holds directives (instructions) in both requests and responses that control caching 
 /// in browsers and shared caches (e.g., Proxies, CDNs).
@@ -69,31 +79,31 @@ impl fmt::Display for CacheControl {
         let mut directives = Vec::new();
 
         if self.no_cache {
-            directives.push("no-cache".to_string());
+            directives.push(NO_CACHE.to_string());
         }
         if self.no_store {
-            directives.push("no-store".to_string());
+            directives.push(NO_STORE.to_string());
         }
         if let Some(max_age) = self.max_age {
-            directives.push(format!("max-age={max_age}"));
+            directives.push(format!("{MAX_AGE}={max_age}"));
         }
         if let Some(s_max_age) = self.s_max_age {
-            directives.push(format!("s-maxage={s_max_age}"));
+            directives.push(format!("{S_MAX_AGE}={s_max_age}"));
         }
         if self.must_revalidate {
-            directives.push("must-revalidate".to_string());
+            directives.push(MUST_REVALIDATE.to_string());
         }
         if self.proxy_revalidate {
-            directives.push("proxy-revalidate".to_string());
+            directives.push(PROXY_REVALIDATE.to_string());
         }
         if self.public {
-            directives.push("public".to_string());
+            directives.push(PUBLIC.to_string());
         }
         if self.private {
-            directives.push("private".to_string());
+            directives.push(PRIVATE.to_string());
         }
         if self.immutable {
-            directives.push("immutable".to_string());
+            directives.push(IMMUTABLE.to_string());
         }
         
         f.write_str(directives.join(", ").as_str())

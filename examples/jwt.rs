@@ -8,8 +8,8 @@ use std::{ops::Add, time::{SystemTime, UNIX_EPOCH, Duration}};
 use serde::{Serialize, Deserialize};
 use volga::{
     App, Json, HttpResult, 
-    auth::{AuthClaims, BearerTokenService, DecodingKey, EncodingKey, roles}, 
-    ok, status, bad_request
+    auth::{BearerTokenService, DecodingKey, EncodingKey, roles}, 
+    ok, status, bad_request, claims
 };
 
 async fn login(payload: Json<Payload>, bts: BearerTokenService) -> HttpResult {
@@ -59,17 +59,13 @@ fn main() {
     app.run_blocking()
 }
 
-#[derive(Serialize, Deserialize)]
-struct Claims {
-    sub: String,
-    company: String,
-    role: String,
-    exp: u64,
-}
-
-impl AuthClaims for Claims {
-    fn role(&self) -> Option<&str> {
-        Some(&self.role)
+claims! {
+    #[derive(Serialize, Deserialize)]
+    struct Claims {
+        sub: String,
+        company: String,
+        role: String,
+        exp: u64,
     }
 }
 
