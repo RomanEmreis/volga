@@ -334,6 +334,7 @@ mod tests {
     use crate::ok;
     use crate::http::endpoints::handlers::{Func, RouteHandler};
     use crate::http::endpoints::route::RouteNode;
+    #[cfg(debug_assertions)]
     use super::super::meta::RouteInfo;
     
     #[test]
@@ -371,6 +372,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_single_static_route() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -387,6 +389,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_multiple_methods_same_route() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -405,6 +408,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_nested_static_routes() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -424,6 +428,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_dynamic_routes() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -440,6 +445,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_mixed_static_and_dynamic_routes() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -462,6 +468,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_root_route() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -478,6 +485,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_complex_route_tree() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -506,6 +514,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_handles_empty_route_tree() {
         let route = RouteNode::Static(HashMap::new());
 
@@ -515,6 +524,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_routes_with_multiple_dynamic_segments() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -531,6 +541,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn it_collects_routes_with_different_http_methods() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
@@ -559,5 +570,4 @@ mod tests {
             assert_eq!(route.path, "/resource");
         }
     }
-
 }

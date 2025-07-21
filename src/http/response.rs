@@ -8,12 +8,8 @@ use std::collections::HashMap;
 use tokio::fs::File;
 use serde::Serialize;
 
-use hyper::{header::{HeaderName, HeaderValue}, http::response::Builder, Response, StatusCode};
-use hyper::header::{
-    CONTENT_DISPOSITION,
-    CONTENT_TYPE,
-    TRANSFER_ENCODING
-};
+use hyper::{header::{HeaderName, HeaderValue}, http, http::response::Builder, Response, StatusCode};
+use hyper::header::{IntoHeaderName, CONTENT_DISPOSITION, CONTENT_TYPE, TRANSFER_ENCODING};
 
 use mime::{
     APPLICATION_JSON,
@@ -77,6 +73,53 @@ pub type HttpResult = Result<HttpResponse, Error>;
 pub struct Results;
 
 impl Results {
+    /// Inserts a key-value pairs as HTTP headers for the [`HttpResult`] if it is [`Ok`].
+    ///
+    /// Otherwise, leaves the [`Err`] as is.
+    #[inline]
+    pub fn with_headers<K, V, const N: usize>(res: HttpResult, headers: [(K, V); N]) -> HttpResult
+    where
+        K: IntoHeaderName,
+        V: TryInto<HeaderValue>,
+        <V as TryInto<HeaderValue>>::Error: Into<http::Error>,
+    {
+        match res {
+            Err(err) => Err(err),
+            Ok(mut res) => {
+                let headers_mut = res.headers_mut();
+                for (k, v) in headers.into_iter() {
+                    match v.try_into() { 
+                        Ok(v) => headers_mut.insert(k, v),
+                        Err(err) => return Err(Error::from(err.into()))
+                    };
+                }
+                Ok(res)
+            },
+        }
+    }
+    
+    /// Inserts a key-value pair as an HTTP header for the [`HttpResult`] if it is [`Ok`].
+    /// 
+    /// Otherwise, leaves the [`Err`] as is.
+    #[inline]
+    pub fn with_header<K, V>(res: HttpResult, key: K, value: V) -> HttpResult
+    where 
+        K: IntoHeaderName,
+        V: TryInto<HeaderValue>,
+        <V as TryInto<HeaderValue>>::Error: Into<http::Error>,
+    {
+        match res {
+            Err(err) => Err(err),
+            Ok(mut res) => {
+                let value = value
+                    .try_into()
+                    .map_err(|err| Error::from(err.into()))?;
+                res.headers_mut().insert(key, value);
+                Ok(res)
+            },
+        }
+    }
+    
     /// Produces a customized `OK 200` response
     #[inline]
     pub fn from<T: Serialize>(context: ResponseContext<T>) -> HttpResult {
@@ -435,5 +478,38 @@ mod tests {
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert_eq!(String::from_utf8_lossy(body), "Hello World!");
         assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+    }
+    
+    #[test]
+    fn it_inserts_header() {
+        let response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        );
+        
+        let response = Results::with_header(response, "X-Api-Key", "some api key").unwrap();
+        assert_eq!(response.headers().get("X-Api-Key").unwrap(), "some api key");
+    }
+
+    #[test]
+    fn it_inserts_headers() {
+        let response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        );
+        
+        let response = Results::with_headers(response, [
+            ("X-Api-Key", "some api key"),
+            ("X-Api-Key-2", "some api key 2")
+        ]).unwrap();
+        
+        assert_eq!(response.headers().get("X-Api-Key").unwrap(), "some api key");
+        assert_eq!(response.headers().get("X-Api-Key-2").unwrap(), "some api key 2");   
     }
 }

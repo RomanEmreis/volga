@@ -39,6 +39,9 @@ use crate::tracing::TracingConfig;
 #[cfg(feature = "middleware")]
 use crate::http::CorsConfig;
 
+#[cfg(feature = "jwt-auth")]
+use crate::auth::bearer::{BearerAuthConfig, BearerTokenService};
+
 #[cfg(feature = "static-files")]
 pub use self::env::HostEnv;
 
@@ -100,6 +103,10 @@ pub struct App {
     /// Web Server's Hosting Environment
     #[cfg(feature = "static-files")]
     pub(super) host_env: HostEnv,
+    
+    /// Bearer Token Authentication & Authorization configuration options
+    #[cfg(feature = "jwt-auth")]
+    pub(super) auth_config: Option<BearerAuthConfig>,
     
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
@@ -169,6 +176,10 @@ pub(crate) struct AppInstance {
     #[cfg(feature = "static-files")]
     pub(super) host_env: HostEnv,
     
+    /// Service that validates/generates JWTs
+    #[cfg(feature = "jwt-auth")]
+    pub(super) bearer_token_service: Option<BearerTokenService>,
+    
     /// Graceful shutdown utilities
     pub(super) graceful_shutdown: GracefulShutdown,
     
@@ -191,6 +202,9 @@ impl TryFrom<App> for AppInstance {
             tls_config
                 .map(|config| TlsAcceptor::from(Arc::new(config)))
         };
+        #[cfg(feature = "jwt-auth")]
+        let bearer_token_service = app.auth_config.map(Into::into);
+        
         let app_instance = Self {
             body_limit: app.body_limit,
             pipeline: app.pipeline.build(),
@@ -199,6 +213,8 @@ impl TryFrom<App> for AppInstance {
             host_env: app.host_env,
             #[cfg(feature = "di")]
             container: app.container.build(),
+            #[cfg(feature = "jwt-auth")]
+            bearer_token_service,
             #[cfg(feature = "tls")]
             acceptor
         };
@@ -251,6 +267,8 @@ impl App {
             cors_config: None,
             #[cfg(feature = "static-files")]
             host_env: HostEnv::default(),
+            #[cfg(feature = "jwt-auth")]
+            auth_config: None,
             pipeline: PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),

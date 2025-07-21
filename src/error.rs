@@ -6,8 +6,9 @@ use std::{
     io::{ErrorKind, Error as IoError},
     error::Error as StdError
 };
+
 use super::{
-    App, 
+    App,
     http::{
         GenericHandler,
         MapErrHandler,
@@ -42,7 +43,7 @@ pub(crate) type BoxError = Box<
 pub struct Error {
     pub status: StatusCode,
     pub instance: Option<String>,
-    pub(crate) inner: BoxError
+    pub(crate) inner: BoxError,
 }
 
 impl fmt::Display for Error {
@@ -68,7 +69,7 @@ impl From<serde_json::Error> for Error {
         Self {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),
-            instance: None
+            instance: None,
         }
     }
 }
@@ -95,9 +96,20 @@ impl From<IoError> for Error {
         };
         
         Self { 
-            instance: None, 
+            instance: None,
             inner: err.into(),
             status
+        }
+    }
+}
+
+impl From<hyper::http::Error> for Error {
+    #[inline]
+    fn from(err: hyper::http::Error) -> Self {
+        Self {
+            instance: None,
+            inner: err.into(),
+            status: StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
@@ -125,7 +137,7 @@ impl Error {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             inner: err.into(),
-            instance: None
+            instance: None,
         }
     }
 
@@ -135,7 +147,7 @@ impl Error {
         Self {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),
-            instance: None
+            instance: None,
         }
     }
     

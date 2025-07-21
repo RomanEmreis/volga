@@ -51,6 +51,8 @@ pub mod tls;
 pub mod tracing;
 #[cfg(feature = "ws")]
 pub mod ws;
+#[cfg(any(feature = "basic-auth", feature = "jwt-auth"))]
+pub mod auth;
 #[cfg(test)]
 pub mod test_utils;
 
