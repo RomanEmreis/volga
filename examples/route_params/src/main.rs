@@ -23,12 +23,12 @@ async fn main() -> std::io::Result<()> {
         ok!("Hello {}!", name)
     });
 
-    // GET /hello-again/John/33
-    app.map_get("/hello-again/{name}/{age}", |user: Path<User>| async move {
+    // GET /hello/John/33
+    app.map_get("/hello/{name}/{age}", |user: Path<User>| async move {
         ok!("Hello {}! Your age is: {}", user.name, user.age)
     });
 
-    // GET /hello-again/John/33
+    // GET /hi/John/33
     app.map_get("/hi/{name}/{age}", |path: Path<HashMap<String, String>>| async move {
         let name = path.get("name").unwrap(); // "John"
         let age = path.get("age").unwrap(); // "33"

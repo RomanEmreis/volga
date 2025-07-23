@@ -12,7 +12,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     app.map_get("/download", || async {
-        let file = File::open("files/download.txt").await?;
+        let file = File::open("examples/file_download/files/download.txt").await?;
         file!("download.txt", file)
     });
 

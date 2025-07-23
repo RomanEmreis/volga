@@ -15,7 +15,7 @@ async fn main() -> std::io::Result<()> {
 
     let mut app = App::new()
         .with_host_env(|env| env
-            .with_content_root("static")
+            .with_content_root("examples/static_files/static")
             .with_fallback_file("404.html")
             .with_files_listing());
 

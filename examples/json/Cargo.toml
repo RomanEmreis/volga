@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 volga = { path = "../../volga" }
-serde = "1.0.219"
+serde = { version = "1.0.219", features = ["serde_derive"] }
 tokio = "1.46.1"
 
 [lints]

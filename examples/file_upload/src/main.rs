@@ -11,7 +11,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     app.map_post("/upload", |file: File| async move {
-        file.save_as("examples/files/upload_test.txt").await
+        file.save_as("examples/file_upload/files/upload_test.txt").await
     });
 
     app.run().await

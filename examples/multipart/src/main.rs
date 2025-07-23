@@ -12,11 +12,11 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     app.map_post("/upload", |files: Multipart| async move {
-        files.save_all("files").await
+        files.save_all("examples/multipart/files").await
     });
 
     app.map_post("/manual-upload", |mut files: Multipart| async move {
-        let path = Path::new("files");
+        let path = Path::new("examples/multipart/files");
         while let Some(field) = files.next_field().await? {
             field.save(path).await?;
         }

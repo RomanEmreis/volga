@@ -1,7 +1,7 @@
 //! Run with:
 //!
 //! ```no_rust
-//! cargo run -example cors
+//! cargo run -p cors
 //! ```
 
 use volga::{App, Form};
@@ -23,7 +23,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new()
         .bind("127.0.0.1:7878")
         .with_host_env(|env| env
-            .with_content_root("static"))
+            .with_content_root("examples/cors/static"))
         .with_cors(|cors| cors
             .with_origins(["http://127.0.0.1:7878"])
             .with_any_header()

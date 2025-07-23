@@ -1,7 +1,7 @@
 //! Run with:
 //!
 //! ```no_rust
-//! cargo run --p tracing
+//! cargo run -p tracing_example
 //! ```
 
 use volga::App;
