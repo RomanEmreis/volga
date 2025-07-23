@@ -1,0 +1,12 @@
+[package]
+name = "response_handler"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tokio = "1.46.1"
+volga = { path = "../../volga" }
+
+[lints]
+workspace = true

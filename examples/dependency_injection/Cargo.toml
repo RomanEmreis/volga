@@ -1,0 +1,14 @@
+[package]
+name = "dependency_injection"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+uuid = { version = "1.17.0", features = ["v4"] }
+serde = "1.0.219"
+tokio = "1.46.1"
+volga = { path = "../../volga", features = ["middleware","di"] }
+
+[lints]
+workspace = true

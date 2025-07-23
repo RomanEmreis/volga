@@ -12,11 +12,14 @@ jobs:
     environment: CICD
     runs-on: ubuntu-latest    
     steps:
-    - uses: actions/checkout@v4
-    - name: Release
-      run: cargo build --release
-    - uses: katyo/publish-crates@v2
-      with:
-        token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        ignore-unpublished-changes: true
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish volga-macros
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --manifest-path volga-macros/Cargo.toml
+
+      - name: Wait for index update
+        run: sleep 30
+
+      - name: Publish volga
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --manifest-path volga/Cargo.toml

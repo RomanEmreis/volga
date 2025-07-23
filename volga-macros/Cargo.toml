@@ -1,0 +1,27 @@
+[package]
+name = "volga-macros"
+version = "0.6.1"
+edition = "2021"
+rust-version = "1.80.0"
+authors = ["Roman Emreis <roman.emreis@outlook.com>"]
+license = "MIT"
+repository = "https://github.com/RomanEmreis/volga"
+description = "Macros for Volga Web Framework"
+documentation = "https://docs.rs/volga"
+readme = "README.md"
+homepage = "https://romanemreis.github.io/volga-docs"
+categories = ["web-programming::http-server"]
+keywords = ["volga", "server", "http", "web", "framework"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0.40"
+syn = { version = "2.0.101", features = ["full"] }
+proc-macro2 = "1.0.95"
+
+[features]
+default = []
+jwt-auth-derive = []
+

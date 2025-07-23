@@ -1,0 +1,15 @@
+[package]
+name = "cors"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+volga = { path = "../../volga", features = ["middleware","static-files","tracing"] }
+serde = "1.0.219"
+tokio = "1.46.1"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+[lints]
+workspace = true
