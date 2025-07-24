@@ -56,9 +56,6 @@ pub mod auth;
 #[cfg(test)]
 pub mod test_utils;
 
-#[cfg(feature = "jwt-auth-full")]
-pub use volga_macros::AuthClaims;
-
 pub use crate::app::App;
 pub use crate::http::{
     response::builder::{RESPONSE_ERROR, SERVER_NAME},

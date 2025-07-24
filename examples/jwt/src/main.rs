@@ -7,8 +7,8 @@
 use std::{ops::Add, time::{SystemTime, UNIX_EPOCH, Duration}};
 use serde::{Serialize, Deserialize};
 use volga::{
-    App, Json, HttpResult, AuthClaims,
-    auth::{BearerTokenService, DecodingKey, EncodingKey, roles},
+    App, Json, HttpResult,
+    auth::{Claims, BearerTokenService, DecodingKey, EncodingKey, roles},
     ok, status, bad_request
 };
 
@@ -59,7 +59,7 @@ async fn me() -> &'static str {
     "Hello from protected area"
 }
 
-#[derive(AuthClaims, Serialize, Deserialize)]
+#[derive(Claims, Serialize, Deserialize)]
 struct Claims {
     sub: String,
     company: String,

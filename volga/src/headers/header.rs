@@ -210,7 +210,7 @@ impl<T: FromHeaders> Header<T> {
         (T::header_type(), self.value)
     }
 
-    /// Unwraps to the [`HeaderName`] as string tuple of header name and value
+    /// Unwraps to the [`HeaderName`] as a string tuple of header name and value
     pub fn into_string_parts(self) -> Result<(String, String), Error> {
         let value = self.value.to_str().map_err(HeaderError::from_to_str_error)?;
         Ok((T::header_type().into(), value.into()))

@@ -42,6 +42,9 @@ pub use self::{
     macros::custom_headers
 };
 
+#[cfg(feature = "macros")]
+pub use volga_macros::http_header;
+
 pub(crate) mod helpers;
 pub mod extract;
 pub mod encoding;

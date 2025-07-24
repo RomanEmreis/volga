@@ -1,15 +1,18 @@
 //! Proc-Macros implementations for different features of Volga
+//! 
 
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::{parse_macro_input, ItemStruct};
 #[cfg(feature = "jwt-auth-derive")]
-use {
-    syn::{parse_macro_input, DeriveInput, Data, Fields},
-    proc_macro::TokenStream,
-    quote::quote
-};
+use syn::{DeriveInput, Data, Fields};
 
+mod attr;
+
+/// Implements the `AuthClaims` trait for the custom claims structure
 #[cfg(feature = "jwt-auth-derive")]
-#[proc_macro_derive(AuthClaims)]
-pub fn derive_auth_claims(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(Claims)]
+pub fn derive_claims(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
 
@@ -60,4 +63,54 @@ pub fn derive_auth_claims(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+/// Attribute macro to implement the `FromHeaders` trait for a struct,
+/// based on a specified HTTP header.
+///
+/// # Example
+/// Provide either a string literal for the inline header name:
+/// ```ignore
+/// # use volga_macros::http_header;
+/// #[http_header("x-api-key")]
+/// pub struct ApiKey;
+/// ```
+/// Or use a constant:
+/// ```ignore
+/// # use volga_macros::http_header;
+/// const X_HEADER: &str = "x-auth-token";
+///
+/// #[http_header(X_HEADER)]
+/// pub struct AuthToken;
+/// ```
+/// # Errors
+/// This macro will fail to compile if:
+/// - The attribute is missing
+/// - The argument is not a string literal or identifier
+/// - The input is not a unit-like struct
+#[proc_macro_attribute]
+pub fn http_header(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let header = parse_macro_input!(attr as attr::HeaderInput);
+    let input = parse_macro_input!(item as ItemStruct);
+
+    let struct_name = &input.ident;
+    let header_expr = header.as_token_stream();
+
+    let expanded = quote! {
+        #input
+
+        impl ::volga::headers::FromHeaders for #struct_name {
+            #[inline]
+            fn from_headers(headers: &::volga::headers::HeaderMap) -> Option<&::volga::headers::HeaderValue> {
+                headers.get(#header_expr)
+            }
+
+            #[inline]
+            fn header_type() -> &'static str {
+                #header_expr
+            }
+        }
+    };
+
+    expanded.into()
 }

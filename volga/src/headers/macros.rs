@@ -1,6 +1,6 @@
 ﻿//! Helper macros for HTTP headers
 
-/// Declares a custom HTTP headers
+/// Declares a custom HTTP headers structure
 ///
 /// # Example
 /// ```rust

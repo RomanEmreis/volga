@@ -9,13 +9,16 @@ use {
 #[cfg(feature = "jwt-auth")]
 pub use {
     bearer::{BearerAuthConfig, Bearer, BearerTokenService},
-    jsonwebtoken::{Algorithm, EncodingKey, DecodingKey, errors::{ErrorKind, Error as JwtError}},
     claims::AuthClaims,
+    jsonwebtoken::{Algorithm, EncodingKey, DecodingKey, errors::{ErrorKind, Error as JwtError}},
     authorizer::{Authorizer, role, roles, permissions, predicate},
     crate::headers::{HeaderValue, WWW_AUTHENTICATE, CACHE_CONTROL, cache_control::NO_STORE},
     crate::middleware::{HttpContext, NextFn},
     crate::http::response::Results
 };
+#[cfg(feature = "jwt-auth-full")]
+pub use volga_macros::Claims;
+
 #[cfg(feature = "basic-auth")]
 pub use basic::Basic;
 

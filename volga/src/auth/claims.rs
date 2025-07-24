@@ -59,7 +59,6 @@ pub trait AuthClaims: DeserializeOwned {
     }
 }
 
-//#[cfg(all(feature = "jwt-auth", not(feature = "jwt-auth-full")))]
 #[macro_export]
 macro_rules! claims {
     (

@@ -118,9 +118,21 @@ impl WebSocket {
         Fut: Future<Output = R> + Send
     {
         while let Some(msg) = self.recv::<M>().await {
-            let Ok(msg) = msg else { return; };
+            let msg = match msg { 
+                Ok(msg) => msg, 
+                Err(_e) => {
+                    #[cfg(feature = "tracing")]
+                    tracing::error!("Error receiving message: {_e}");
+                    return;
+                }
+            };
+
             let response = handler(msg).await;
-            if self.send(response).await.is_err() { return; }
+            if let Err(_e) = self.send(response).await {
+                #[cfg(feature = "tracing")]
+                tracing::error!("Error sending message: {_e}");
+                return;
+            }
         }
     }
 }

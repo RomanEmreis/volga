@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 tokio = "1.46.1"
-volga = { path = "../../volga", features = ["middleware"] }
+volga = { path = "../../volga", features = ["middleware", "macros"] }
 
 [lints]
 workspace = true

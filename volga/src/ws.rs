@@ -171,7 +171,7 @@ impl App {
             async move {
                 let (parts, body) = req.into_parts();
                 let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await?;
-                let args = Args::from_request(HttpRequest::from_parts(parts, body)).await.unwrap();
+                let args = Args::from_request(HttpRequest::from_parts(parts, body)).await?;
                 conn.on(|mut ws| async move {
                     ws.on_msg(move |msg: M| handler.call(msg, args.clone())).await;
                 })
