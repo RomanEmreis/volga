@@ -1,0 +1,12 @@
+[package]
+name = "hello_world"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+volga = { path = "../../volga" }
+tokio = "1.46.1"
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "trace_request"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tokio = "1.46.1"
+volga = { path = "../../volga", features = ["tracing"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+
+[lints]
+workspace = true

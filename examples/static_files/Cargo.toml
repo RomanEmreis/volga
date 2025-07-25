@@ -1,0 +1,13 @@
+[package]
+name = "static_files"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tokio = "1.46.1"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+volga = { path = "../../volga", features = ["static-files", "tracing"] }
+
+[lints]
+workspace = true

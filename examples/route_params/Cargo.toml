@@ -1,0 +1,13 @@
+[package]
+name = "route_params"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tokio = "1.46.1"
+serde = { version = "1.0.219", features = ["serde_derive"] }
+volga = { path = "../../volga" }
+
+[lints]
+workspace = true

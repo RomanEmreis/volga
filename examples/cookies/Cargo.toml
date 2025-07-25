@@ -1,0 +1,10 @@
+[package]
+name = "cookies"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+volga = { path = "../../volga", features = ["cookie", "basic-auth"] }
+tokio = "1.46.1"
+uuid = { version = "1.17.0", features = ["v4"] }

@@ -1,0 +1,12 @@
+[package]
+name = "jwt"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+volga = { path = "../../volga", features = ["jwt-auth-full","middleware"] }
+serde = "1.0.219"
+
+[lints]
+workspace = true
