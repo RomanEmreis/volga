@@ -96,8 +96,9 @@ async fn it_generates_jwt_and_failed_to_authenticates_it() {
                 .with_aud(["test"])
                 .with_iss(["test"]));
 
-        app.map_get("/test", || async { "Pass!" })
-            .authorize(predicate(|claims: &Claims| claims.roles.iter().any(|role| role == "admin")));
+        app.map_group("/tests")
+            .authorize(predicate(|claims: &Claims| claims.roles.iter().any(|role| role == "admin")))
+            .map_get("/test", || async { "Pass!" });
 
         app.map_post("/login", |bts: BearerTokenService| async move {
             let exp = SystemTime::now()
@@ -140,7 +141,7 @@ async fn it_generates_jwt_and_failed_to_authenticates_it() {
         } else {
             reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
         };
-        client.get("http://127.0.0.1:7961/test").header(AUTHORIZATION, format!("Bearer {token}")).send().await
+        client.get("http://127.0.0.1:7961/tests/test").header(AUTHORIZATION, format!("Bearer {token}")).send().await
     }).await.unwrap().unwrap();
 
     assert!(!response.status().is_success());
