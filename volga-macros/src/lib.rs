@@ -10,6 +10,23 @@ use syn::{DeriveInput, Data, Fields};
 mod attr;
 
 /// Implements the `AuthClaims` trait for the custom claims structure
+/// 
+/// # Example
+/// ```ignore
+/// use volga::auth::Claims;
+/// use serde::{Serialize, Deserialize}
+/// 
+/// #[derive(Claims, Serialize, Deserialize)]
+/// struct Claims {
+///     sub: String,
+///     iss: String,
+///     aud: String,
+///     company: String,
+///     roles: Vec<String>,
+///     permissions: Vec<String>,
+///     exp: u64,
+/// }
+/// ```
 #[cfg(feature = "jwt-auth-derive")]
 #[proc_macro_derive(Claims)]
 pub fn derive_claims(input: TokenStream) -> TokenStream {
@@ -71,13 +88,15 @@ pub fn derive_claims(input: TokenStream) -> TokenStream {
 /// # Example
 /// Provide either a string literal for the inline header name:
 /// ```ignore
-/// # use volga_macros::http_header;
+/// use volga::headers::http_header;
+/// 
 /// #[http_header("x-api-key")]
 /// pub struct ApiKey;
 /// ```
 /// Or use a constant:
 /// ```ignore
-/// # use volga_macros::http_header;
+/// use volga::headers::http_header;
+/// 
 /// const X_HEADER: &str = "x-auth-token";
 ///
 /// #[http_header(X_HEADER)]

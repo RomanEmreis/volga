@@ -256,7 +256,7 @@ mod tests {
     fn it_tests_mixed_and_or_structure() {
         let a = role::<Claims>("admin");
         let b = role::<Claims>("editor");
-        let c = role::<Claims>("moderator");
+        let c = roles(["moderator"]);
 
         let or_expr = a.or(b); // Or([admin, editor])
         let combined = or_expr.and(c); // And([Or([...]), moderator])

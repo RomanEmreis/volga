@@ -4,14 +4,14 @@ use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 use volga::{ok, App};
 use volga::headers::{AUTHORIZATION, CACHE_CONTROL, WWW_AUTHENTICATE};
-use volga::auth::{BearerTokenService, AuthClaims, predicate};
+use volga::auth::{Claims, BearerTokenService, predicate};
 
 #[derive(Serialize, Deserialize)]
 struct AuthData {
     access_token: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Claims, Serialize, Deserialize)]
 struct Claims {
     sub: String,
     iss: String,
@@ -20,16 +20,6 @@ struct Claims {
     roles: Vec<String>,
     permissions: Vec<String>,
     exp: u64,
-}
-
-impl AuthClaims for Claims {
-    fn roles(&self) -> Option<&[String]> {
-        Some(&self.roles)
-    }
-
-    fn permissions(&self) -> Option<&[String]> {
-        Some(&self.permissions)
-    }
 }
 
 #[tokio::test]
