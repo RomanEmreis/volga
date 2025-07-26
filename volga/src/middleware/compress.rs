@@ -29,7 +29,9 @@ use tokio_util::io::{
 
 use crate::{
     App,
+    routing::{Route, RouteGroup},
     error::Error,
+    middleware::{HttpContext, NextFn},
     headers::{
         AcceptEncoding,
         Header,
@@ -86,120 +88,134 @@ impl_compressor!(zstd, ZstdEncoder, Level::Default);
 impl App {
     /// Registers a middleware that applies a default compression algorithm
     pub fn use_compression(&mut self) -> &mut Self {
-        self.wrap(|ctx, next| async move {
-            let accept_encoding = ctx.extract::<Header<AcceptEncoding>>();
-            let http_result = next(ctx).await;
-            
-            if let Ok(accept_encoding) = accept_encoding { 
-                Self::negotiate(accept_encoding, http_result)
-            } else { 
-                http_result
-            }  
-        });
-        self
+        self.wrap(make_compression_fn)
     }
-    
-    fn negotiate(accept_encoding: Header<AcceptEncoding>, http_result: HttpResult) -> HttpResult {
-        let accept_encoding = accept_encoding.into_inner();
-        if  accept_encoding.is_empty() {
-            return http_result;
-        }
-        
-        let mut encodings_with_weights = vec![];
-        if let Ok(header_value) = accept_encoding.to_str() {
-            for part in header_value.split(',') {
-                if let Ok(quality) = Quality::<Encoding>::from_str(part.trim()) {
-                    encodings_with_weights.push(quality);
-                }
-            }
-            encodings_with_weights
-                .sort_by(|a, b| b.value
-                    .partial_cmp(&a.value)
-                    .unwrap_or(Ordering::Equal)
-                );
-        }
-        
-        if !encodings_with_weights.is_empty() && encodings_with_weights[0].item.is_any() {
-            #[cfg(feature = "compression-brotli")]
-            return Self::compress(Encoding::Brotli, http_result);
-            
-            #[cfg(all(
-                feature = "compression-gzip", 
-                not(feature = "compression-brotli"
-            )))]
-            return Self::compress(Encoding::Gzip, http_result);
-            
-            #[cfg(all(
-                feature = "compression-zstd", 
-                not(feature = "compression-brotli"), 
-                not(feature = "compression-gzip"
-            )))]
-            return Self::compress(Encoding::Gzip, http_result);
-            
-            #[cfg(all(
-                not(feature = "compression-brotli"), 
-                not(feature = "compression-gzip"), 
-                not(feature = "compression-zstd"), 
-                not(feature = "compression-full"
-            )))]
-            return http_result;
-        }
+}
 
-        let supported = SUPPORTED_ENCODINGS
-            .iter()
-            .collect::<HashSet<_>>();
-        
-        for encoding in encodings_with_weights {
-            if supported.contains(&encoding.item) { 
-                return Self::compress(encoding.item, http_result);
+impl<'a> RouteGroup<'a> {
+    /// Registers a middleware that applies a default compression algorithm for this group of routes
+    pub fn with_compression(self) -> Self {
+        self.wrap(make_compression_fn)
+    }
+}
+
+impl<'a> Route<'a> {
+    /// Registers a middleware that applies a default compression algorithm for this route
+    pub fn with_compression(self) -> Self {
+        self.wrap(make_compression_fn)
+    }
+}
+
+async fn make_compression_fn(ctx: HttpContext, next: NextFn) -> HttpResult {
+    let accept_encoding = ctx.extract::<Header<AcceptEncoding>>();
+    let http_result = next(ctx).await;
+    if let Ok(accept_encoding) = accept_encoding {
+        negotiate(accept_encoding, http_result)
+    } else {
+        http_result
+    }
+}
+
+fn negotiate(accept_encoding: Header<AcceptEncoding>, http_result: HttpResult) -> HttpResult {
+    let accept_encoding = accept_encoding.into_inner();
+    if  accept_encoding.is_empty() {
+        return http_result;
+    }
+
+    let mut encodings_with_weights = vec![];
+    if let Ok(header_value) = accept_encoding.to_str() {
+        for part in header_value.split(',') {
+            if let Ok(quality) = Quality::<Encoding>::from_str(part.trim()) {
+                encodings_with_weights.push(quality);
             }
         }
-
-        status!(406, [
-            (VARY, ACCEPT_ENCODING),
-            (ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))
-        ])
+        encodings_with_weights
+            .sort_by(|a, b| b.value
+                .partial_cmp(&a.value)
+                .unwrap_or(Ordering::Equal)
+            );
     }
-    
-    fn compress(encoding: Encoding, http_result: HttpResult) -> HttpResult {
-        if let Ok(response) = http_result {
-            let (mut parts, body) = response.into_parts();
-            parts.headers.remove(CONTENT_LENGTH);
-            parts.headers.remove(ACCEPT_RANGES);
-            parts.headers.append(VARY, ACCEPT_ENCODING.into());
-            
-            let body = Self::compress_body(&mut parts, encoding, body);
-            
-            Ok(HttpResponse::from_parts(parts, body))
-        } else { 
-            http_result
+
+    if !encodings_with_weights.is_empty() && encodings_with_weights[0].item.is_any() {
+        #[cfg(feature = "compression-brotli")]
+        return compress(Encoding::Brotli, http_result);
+
+        #[cfg(all(
+            feature = "compression-gzip",
+            not(feature = "compression-brotli"
+            )))]
+        return compress(Encoding::Gzip, http_result);
+
+        #[cfg(all(
+            feature = "compression-zstd",
+            not(feature = "compression-brotli"),
+            not(feature = "compression-gzip"
+            )))]
+        return compress(Encoding::Gzip, http_result);
+
+        #[cfg(all(
+            not(feature = "compression-brotli"),
+            not(feature = "compression-gzip"),
+            not(feature = "compression-zstd"),
+            not(feature = "compression-full"
+            )))]
+        return http_result;
+    }
+
+    let supported = SUPPORTED_ENCODINGS
+        .iter()
+        .collect::<HashSet<_>>();
+
+    for encoding in encodings_with_weights {
+        if supported.contains(&encoding.item) {
+            return compress(encoding.item, http_result);
         }
     }
 
-    fn compress_body(parts: &mut Parts, encoding: Encoding, body: HttpBody) -> HttpBody {
-        match encoding {
-            #[cfg(feature = "compression-brotli")]
-            Encoding::Brotli => {
-                parts.headers.append(CONTENT_ENCODING, Encoding::Brotli.into());
-                brotli(body)
-            },
-            #[cfg(feature = "compression-gzip")]
-            Encoding::Gzip => {
-                parts.headers.append(CONTENT_ENCODING, Encoding::Gzip.into());
-                gzip(body)
-            },
-            #[cfg(feature = "compression-gzip")]
-            Encoding::Deflate => {
-                parts.headers.append(CONTENT_ENCODING, Encoding::Deflate.into());
-                deflate(body)
-            },
-            #[cfg(feature = "compression-zstd")]
-            Encoding::Zstd => {
-                parts.headers.append(CONTENT_ENCODING, Encoding::Zstd.into());
-                zstd(body)
-            },
-            _ => body
-        }
+    status!(406, [
+        (VARY, ACCEPT_ENCODING),
+        (ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))
+    ])
+}
+
+fn compress(encoding: Encoding, http_result: HttpResult) -> HttpResult {
+    if let Ok(response) = http_result {
+        let (mut parts, body) = response.into_parts();
+        parts.headers.remove(CONTENT_LENGTH);
+        parts.headers.remove(ACCEPT_RANGES);
+        parts.headers.append(VARY, ACCEPT_ENCODING.into());
+
+        let body = compress_body(&mut parts, encoding, body);
+
+        Ok(HttpResponse::from_parts(parts, body))
+    } else {
+        http_result
+    }
+}
+
+fn compress_body(parts: &mut Parts, encoding: Encoding, body: HttpBody) -> HttpBody {
+    match encoding {
+        #[cfg(feature = "compression-brotli")]
+        Encoding::Brotli => {
+            parts.headers.append(CONTENT_ENCODING, Encoding::Brotli.into());
+            brotli(body)
+        },
+        #[cfg(feature = "compression-gzip")]
+        Encoding::Gzip => {
+            parts.headers.append(CONTENT_ENCODING, Encoding::Gzip.into());
+            gzip(body)
+        },
+        #[cfg(feature = "compression-gzip")]
+        Encoding::Deflate => {
+            parts.headers.append(CONTENT_ENCODING, Encoding::Deflate.into());
+            deflate(body)
+        },
+        #[cfg(feature = "compression-zstd")]
+        Encoding::Zstd => {
+            parts.headers.append(CONTENT_ENCODING, Encoding::Zstd.into());
+            zstd(body)
+        },
+        _ => body
     }
 }
 

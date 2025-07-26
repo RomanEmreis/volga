@@ -46,6 +46,83 @@ async fn it_decompress_brotli() {
 }
 
 #[tokio::test]
+async fn it_decompress_brotli_for_route() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7967");
+        app
+            .map_post("/decompress", |Json(value): Json<Value>| async move {
+                ok!(value)
+            })
+            .with_decompression();
+
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+
+        let data = b"{\"age\":33,\"name\":\"John\"}";
+        let mut encoder = BrotliEncoder::new(Vec::new());
+
+        encoder.write_all(data).await.unwrap();
+        encoder.shutdown().await.unwrap();
+        let body = encoder.into_inner();
+
+        client
+            .post("http://127.0.0.1:7967/decompress")
+            .header("content-encoding", "br")
+            .body(body)
+            .send()
+            .await.unwrap()
+    }).await.unwrap();
+
+    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
+}
+
+#[tokio::test]
+async fn it_decompress_brotli_for_group() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7968");
+        
+        app.map_group("/tests")
+            .with_decompression()
+            .map_post("/decompress", |Json(value): Json<Value>| async move {
+                ok!(value)
+            });
+
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+
+        let data = b"{\"age\":33,\"name\":\"John\"}";
+        let mut encoder = BrotliEncoder::new(Vec::new());
+
+        encoder.write_all(data).await.unwrap();
+        encoder.shutdown().await.unwrap();
+        let body = encoder.into_inner();
+
+        client
+            .post("http://127.0.0.1:7968/tests/decompress")
+            .header("content-encoding", "br")
+            .body(body)
+            .send()
+            .await.unwrap()
+    }).await.unwrap();
+
+    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
+}
+
+#[tokio::test]
 async fn it_decompress_gzip() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7917");

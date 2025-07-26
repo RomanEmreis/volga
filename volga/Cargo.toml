@@ -171,3 +171,7 @@ name = "sse"
 [[test]]
 name = "jwt"
 required-features = ["jwt-auth-full", "middleware"]
+
+[[test]]
+name = "response_caching"
+required-features = ["middleware"]

@@ -30,6 +30,68 @@ async fn it_returns_brotli_compressed() {
 }
 
 #[tokio::test]
+async fn it_returns_brotli_compressed_for_route() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7965");
+        app
+            .map_get("/compressed", || async {
+                let values= get_test_data();
+                ok!(values)
+            })
+            .with_compression();
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+        client
+            .get("http://127.0.0.1:7965/compressed")
+            .header("accept-encoding", "br")
+            .send()
+            .await.unwrap()
+    }).await.unwrap();
+
+    assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
+    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
+}
+
+#[tokio::test]
+async fn it_returns_brotli_compressed_for_group() {
+    tokio::spawn(async {
+        let mut app = App::new().bind("127.0.0.1:7966");
+        
+        app.map_group("/tests")
+            .with_compression()
+            .map_get("/compressed", || async {
+                let values= get_test_data();
+                ok!(values)
+            });
+            
+        app.run().await
+    });
+
+    let response = tokio::spawn(async {
+        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
+            reqwest::Client::builder().http1_only().build().unwrap()
+        } else {
+            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
+        };
+        client
+            .get("http://127.0.0.1:7966/tests/compressed")
+            .header("accept-encoding", "br")
+            .send()
+            .await.unwrap()
+    }).await.unwrap();
+
+    assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
+    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
+}
+
+#[tokio::test]
 async fn it_returns_gzip_compressed() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7909");
