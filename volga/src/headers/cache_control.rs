@@ -2,17 +2,22 @@
 
 use std::{fmt, time::SystemTime};
 use crate::{
-    App, 
-    HttpResponse, HttpResult,
-    routing::{Route, RouteGroup}, 
-    headers::{HeaderValue, ETag, CACHE_CONTROL}
+    headers::{HeaderValue, ETag},
+    error::Error
 };
 
 #[cfg(feature = "static-files")]
-use crate::error::Error;
-#[cfg(feature = "static-files")]
 use std::fs::Metadata;
-use std::future::Future;
+
+#[cfg(feature = "middleware")]
+use {
+    crate::{
+        App, HttpResponse, HttpResult, 
+        routing::{Route, RouteGroup}, 
+        headers::CACHE_CONTROL
+    },
+    std::future::Future
+};
 
 #[cfg(feature = "static-files")]
 const DEFAULT_MAX_AGE: u32 = 60 * 60 * 24; // 24 hours
