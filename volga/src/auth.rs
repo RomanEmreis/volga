@@ -3,6 +3,9 @@
 #[cfg(feature = "jwt-auth")]
 use {
     crate::{App, routing::{Route, RouteGroup}, http::StatusCode, error::Error, status, HttpResult},
+    crate::headers::{WWW_AUTHENTICATE, CACHE_CONTROL, cache_control::NO_STORE},
+    crate::middleware::{HttpContext, NextFn},
+    crate::http::response::Results,
     std::{future::Future, sync::Arc},
 };
 
@@ -11,11 +14,9 @@ pub use {
     bearer::{BearerAuthConfig, Bearer, BearerTokenService},
     claims::AuthClaims,
     jsonwebtoken::{Algorithm, EncodingKey, DecodingKey, errors::{ErrorKind, Error as JwtError}},
-    authorizer::{Authorizer, role, roles, permissions, predicate},
-    crate::headers::{HeaderValue, WWW_AUTHENTICATE, CACHE_CONTROL, cache_control::NO_STORE},
-    crate::middleware::{HttpContext, NextFn},
-    crate::http::response::Results
+    authorizer::{Authorizer, role, roles, permissions, predicate}
 };
+
 #[cfg(feature = "jwt-auth-full")]
 pub use volga_macros::Claims;
 
