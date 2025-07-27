@@ -91,6 +91,7 @@ impl<T: Inject + 'static> TryFrom<&Extensions> for Dc<T> {
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
         Container::try_from(extensions)?
             .resolve_shared::<T>()
+            .map_err(Into::into)
             .map(Dc)
     }
 }

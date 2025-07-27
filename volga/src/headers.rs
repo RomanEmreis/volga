@@ -1,5 +1,7 @@
 ﻿//! Tools for HTTP headers
 
+use crate::error::Error;
+
 // Re-exporting HeaderMap, HeaderValue and some headers from hyper
 pub use hyper::{
     header::{
@@ -32,7 +34,7 @@ pub use hyper::{
 };
 
 pub use self::{
-    super::{error::Error, http::StatusCode},
+    super::http::StatusCode,
     etag::ETag,
     cache_control::{CacheControl, ResponseCaching},
     encoding::Encoding,

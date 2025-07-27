@@ -5,7 +5,7 @@ use cookie::{CookieJar, PrivateJar, Key};
 use futures_util::future::{ready, Ready};
 use crate::{
     error::Error,
-    di::container::Container,
+    di::Container,
     headers::{HeaderMap},
     http::{
         endpoints::args::{FromPayload, Payload, Source},
@@ -145,7 +145,8 @@ impl FromPayload for PrivateCookies {
 
         ready(container
             .resolve::<PrivateKey>()
-            .map(|key| PrivateCookies::from_headers(key, &parts.headers)))
+            .map(|key| PrivateCookies::from_headers(key, &parts.headers))
+            .map_err(Into::into))
     }
 
     #[inline]

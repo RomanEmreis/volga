@@ -1,32 +1,29 @@
 ﻿//! Tools for Dependency Injection
 
 use super::{App, error::Error};
-pub use self::{
-    container::{Container, ContainerBuilder},
-    dc::Dc,
-    inject::Inject
+pub use {
+    self::dc::Dc,
+    volga_di::{
+        Container, 
+        ContainerBuilder,
+        Inject, 
+        singleton
+    },
 };
 
+#[cfg(feature = "di-full")]
+pub use volga_di::Singleton;
+
 pub mod dc;
-pub mod inject;
-pub mod container;
 
-struct DiError;
+pub mod error {
+    pub use volga_di::error::Error;
+}
 
-impl DiError {
+impl From<error::Error> for Error {
     #[inline]
-    fn service_not_registered(type_name: &str) -> Error {
-        Error::server_error(format!("Services Error: service not registered: {type_name}"))
-    }
-
-    #[inline]
-    fn resolve_error(type_name: &str) -> Error {
-        Error::server_error(format!("Services Error: unable to resolve the service: {type_name}"))
-    }
-
-    #[inline]
-    fn container_missing() -> Error {
-        Error::server_error("Services Error: DI container is missing")
+    fn from(err: error::Error) -> Self {
+        Error::server_error(err.to_string())
     }
 }
 

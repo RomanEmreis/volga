@@ -5,7 +5,7 @@ use cookie::{CookieJar, SignedJar, Key};
 use futures_util::future::{ready, Ready};
 use crate::{
     error::Error,
-    di::container::Container,
+    di::Container,
     headers::{HeaderMap},
     http::{
         endpoints::args::{FromPayload, Payload, Source}, 
@@ -146,7 +146,8 @@ impl FromPayload for SignedCookies {
 
         ready(container
             .resolve::<SignedKey>()
-            .map(|key| SignedCookies::from_headers(key, &parts.headers)))
+            .map(|key| SignedCookies::from_headers(key, &parts.headers))
+            .map_err(Into::into))
     }
 
     #[inline]
