@@ -4,8 +4,11 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, ItemStruct};
+
 #[cfg(feature = "jwt-auth-derive")]
-use syn::{DeriveInput, Data, Fields};
+use syn::{Data, Fields};
+#[cfg(any(feature = "di-derive", feature = "jwt-auth-derive"))]
+use syn::DeriveInput;
 
 mod attr;
 
@@ -76,6 +79,43 @@ pub fn derive_claims(input: TokenStream) -> TokenStream {
             #role_impl
             #roles_impl
             #permissions_impl
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+
+/// Derive macro for the `Inject` trait that always returns an error when resolving the type
+///
+/// Equivalent to using the `singleton!` macro.
+///
+/// # Example
+/// ```ignore
+/// use volga::di::Singleton;
+/// 
+/// #[derive(Singleton)]
+/// struct MyType;
+///
+/// // This expands to:
+/// // impl Inject for MyType {
+/// //     fn inject(_: &Container) -> Result<Self, Error> {
+/// //         Err(Error::ResolveFailed("MyType"))
+/// //     }
+/// // }
+/// ```
+#[cfg(feature = "di-derive")]
+#[proc_macro_derive(Singleton)]
+pub fn derive_singleton(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    let name = input.ident;
+
+    let expanded = quote! {
+        impl ::volga::di::Inject for #name {
+            #[inline]
+            fn inject(_: &::volga::di::Container) -> Result<Self, ::volga::di::error::Error> {
+                Err(::volga::di::error::Error::ResolveFailed(stringify!(#name)))
+            }
         }
     };
 

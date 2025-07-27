@@ -131,14 +131,18 @@ impl HttpRequest {
     #[inline]
     #[cfg(feature = "di")]
     pub fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
-        self.container().resolve::<T>()
+        self.container()
+            .resolve::<T>()
+            .map_err(Into::into)
     }
 
     /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
     pub fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
-        self.container().resolve_shared::<T>()
+        self.container()
+            .resolve_shared::<T>()
+            .map_err(Into::into)
     }
     
     /// Extracts a payload from request parts

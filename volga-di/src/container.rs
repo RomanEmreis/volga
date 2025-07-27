@@ -1,8 +1,7 @@
-﻿//! Dependency Injection container and tools
+//! Dependency Injection container and tools
 
-use super::{Inject, DiError};
-use crate::error::Error;
-use hyper::http::{Extensions, request::Parts};
+use crate::{Inject, error::Error};
+use http::{Extensions, request::Parts};
 use std::sync::OnceLock;
 use std::{
     any::{Any, TypeId},
@@ -139,17 +138,17 @@ impl Container {
         let type_id = TypeId::of::<T>();
         self.services
             .get(&type_id)
-            .ok_or_else(|| DiError::service_not_registered(std::any::type_name::<T>()))
+            .ok_or_else(|| Error::NotRegistered(std::any::type_name::<T>()))
     }
 
     #[inline]
     fn resolve_scoped<T: Inject + 'static>(&self, cell: &OnceLock<Result<ArcService, Error>>) -> Result<Arc<T>, Error> {
-        let instance = cell.get_or_init(|| 
+        let instance = cell.get_or_init(||
             T::inject(self).map(|scoped| Arc::new(scoped) as ArcService)
         );
         instance
             .as_ref()
-            .map_err(|err| Error::server_error(err.to_string()))
+            .map_err(|err| err.clone())
             .and_then(Self::resolve_internal)
     }
 
@@ -158,7 +157,7 @@ impl Container {
         instance
             .clone()
             .downcast::<T>()
-            .map_err(|_| DiError::resolve_error(std::any::type_name::<T>()))
+            .map_err(|_| Error::ResolveFailed(std::any::type_name::<T>()))
     }
 }
 
@@ -168,13 +167,13 @@ impl<'a> TryFrom<&'a Extensions> for &'a Container {
     #[inline]
     fn try_from(extensions: &'a Extensions) -> Result<Self, Self::Error> {
         extensions.get::<Container>()
-            .ok_or(DiError::container_missing())
+            .ok_or(Error::ContainerMissing)
     }
 }
 
 impl TryFrom<&Extensions> for Container {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
         let res: Result<&Container, Error> = extensions.try_into();
@@ -195,7 +194,7 @@ impl TryFrom<&Parts> for Container {
 mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
-    use hyper::Request;
+    use http::Request;
     use super::{Error, Container, ContainerBuilder, Inject};
 
     trait Cache: Send + Sync {
@@ -372,30 +371,30 @@ mod tests {
         assert_eq!(cache.inner.get("key1").unwrap(), "value 1");
         assert_eq!(cache.inner.get("key2").unwrap(), "value 2");
     }
-    
+
     #[test]
     fn it_extracts_from_parts() {
         let mut container = ContainerBuilder::new();
         container.register_singleton(InMemoryCache::default());
 
         let container = container.build();
-        
+
         let mut req = Request::get("/").body(()).unwrap();
         req.extensions_mut().insert(container.create_scope());
 
         let (parts, _) = req.into_parts();
-        
+
         let container = Container::try_from(&parts);
-        
+
         assert!(container.is_ok());
     }
-    
+
     #[test]
     fn it_returns_error_when_resolve_unregistered() {
         let container = ContainerBuilder::new().build();
 
         let cache = container.resolve::<CacheWrapper>();
-        
+
         assert!(cache.is_err());
     }
 

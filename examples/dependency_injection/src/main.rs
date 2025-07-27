@@ -8,7 +8,7 @@ use uuid::Uuid;
 use volga::{
     App,
     Json,
-    di::{Inject, Container, Dc},
+    di::{Inject, Singleton, Container, Dc, error::Error as DiError},
     error::Error,
     headers::HeaderValue,
     HttpRequest,
@@ -32,7 +32,7 @@ trait Cache: Send + Sync {
 }
 
 /// In memory KV-storage
-#[derive(Clone, Default)]
+#[derive(Clone, Singleton)]
 struct InMemoryCache {
     inner: Arc<Mutex<HashMap<String, String>>>
 }
@@ -60,7 +60,7 @@ async fn main() -> std::io::Result<()> {
 
     app.map_err(error_handler);
 
-    let global_cache = InMemoryCache::default();
+    let global_cache = InMemoryCache { inner: Default::default() };
     app
         .add_singleton(global_cache)       // Register a singleton service that is available globally 
         .add_scoped::<RequestLog>()        // Register a scoped service that will be available during the request lifetime
@@ -141,11 +141,12 @@ impl RequestLog {
 
 /// Custom implementation of the ` Inject ` trait that helps to construct the `RequestLog`
 impl Inject for RequestLog {
-    fn inject(container: &Container) -> Result<Self, Error> {
+    fn inject(container: &Container) -> Result<Self, DiError> {
         // We don't need to own this, and it's not implement a Clone, so we can resolve a shared pointer
         let req_gen = container.resolve_shared::<UuidGenerator>()?;
         // Since we need to own ity, and it's a clonable struct, it is fine to resolve as a clone
         let cache = container.resolve::<InMemoryCache>()?;
+        
         Ok(Self {
             request_id: req_gen.generate_id(),
             inner: Default::default(),
