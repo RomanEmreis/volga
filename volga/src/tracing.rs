@@ -1,8 +1,12 @@
 ﻿//! Tools for tracing, logging and observability
 
-use crate::{App, error::handler::call_weak_err_handler};
+use std::future::Future;
 use futures_util::TryFutureExt;
 use tracing::{Instrument, trace_span};
+use crate::{
+    App, HttpResult, middleware::{HttpContext, NextFn}, 
+    error::handler::call_weak_err_handler
+};
 
 const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
 
@@ -124,38 +128,43 @@ impl App {
     /// app.use_tracing(); 
     /// ```
     pub fn use_tracing(&mut self) -> &mut Self {
-        let tracing_config = self.tracing_config
+        let cfg = self.tracing_config
             .take()
             .unwrap_or_default();
-        
-        self.wrap(move |ctx, next| {
-            let tracing_config = tracing_config.clone();
-            async move {
-                let method = ctx.request.method();
-                let uri = ctx.request.uri();
-                
-                let span = trace_span!("request", %method, %uri);
-                let span_id = span.id();
-                let parts = ctx.request_parts_snapshot();
-                let error_handler = ctx.error_handler();
-                
-                let http_result = next(ctx)
-                    .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
-                    .instrument(span)
-                    .await;
-                
-                if tracing_config.include_header && span_id.is_some() {
-                    http_result.map(|mut response| {
-                        response.headers_mut().append(
-                            tracing_config.span_header_name,
-                            span_id.map_or(0, |id| id.into_u64()).into());
-                        response
-                    })
-                } else { 
-                    http_result
-                } 
-            }
-        })
+        self.wrap(move |ctx, next| wrap_tracing(&cfg, ctx, next))
+    }
+}
+
+fn wrap_tracing(
+    cfg: &TracingConfig, 
+    ctx: HttpContext, 
+    next: NextFn
+) -> impl Future<Output = HttpResult> {
+    let cfg = cfg.clone();
+    async move {
+        let method = ctx.request.method();
+        let uri = ctx.request.uri();
+
+        let span = trace_span!("request", %method, %uri);
+        let span_id = span.id();
+        let parts = ctx.request_parts_snapshot();
+        let error_handler = ctx.error_handler();
+
+        let http_result = next(ctx)
+            .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
+            .instrument(span)
+            .await;
+
+        if cfg.include_header && span_id.is_some() {
+            http_result.map(|mut response| {
+                response.headers_mut().append(
+                    cfg.span_header_name,
+                    span_id.map_or(0, |id| id.into_u64()).into());
+                response
+            })
+        } else {
+            http_result
+        }
     }
 }
 
