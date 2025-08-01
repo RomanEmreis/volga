@@ -75,6 +75,13 @@ impl Scope {
             request.extensions_mut().insert(shared.host_env.clone());
             request
         };
+
+        #[cfg(feature = "di")]
+        let request = {
+            let mut request = request;
+            request.extensions_mut().insert(shared.container.create_scope());
+            request
+        };
         
         let pipeline = &shared.pipeline;
         match pipeline.endpoints().get_endpoint(request.method(), request.uri()) {
@@ -91,9 +98,6 @@ impl Scope {
                     let extensions = &mut parts.extensions;
                     extensions.insert(cancellation_token);
                     extensions.insert(shared.body_limit);
-                    
-                    #[cfg(feature = "di")]
-                    extensions.insert(shared.container.create_scope());
                     
                     #[cfg(feature = "jwt-auth")]
                     if let Some(bts) = &shared.bearer_token_service {
