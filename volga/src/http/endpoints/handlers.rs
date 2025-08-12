@@ -15,7 +15,7 @@ pub(crate) type RouteHandler = Arc<
 >;
 
 pub(crate) trait Handler {
-    fn call(&self, req: HttpRequest) -> BoxFuture<HttpResult>;
+    fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult>;
 }
 
 /// Represents a function request handler that could take different arguments
@@ -56,7 +56,7 @@ where
     Args: FromRequest + Send + Sync
 {
     #[inline]
-    fn call(&self, req: HttpRequest) -> BoxFuture<HttpResult> {
+    fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult> {
         Box::pin(async move {
             let args = Args::from_request(req).await?;
             self.func

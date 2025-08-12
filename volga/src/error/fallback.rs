@@ -13,7 +13,7 @@ use crate::{
 
 /// Trait for types that represents a fallback handler
 pub trait FallbackHandler {
-    fn call(&self, req: Request<Incoming>) -> BoxFuture<HttpResult>;
+    fn call(&self, req: Request<Incoming>) -> BoxFuture<'_, HttpResult>;
 }
 
 /// Owns a closure that handles a 404
@@ -37,7 +37,7 @@ where
     R: IntoResponse
 {
     #[inline]
-    fn call(&self, req: Request<Incoming>) -> BoxFuture<HttpResult> {
+    fn call(&self, req: Request<Incoming>) -> BoxFuture<'_, HttpResult> {
         Box::pin(async move {
             let args = match Args::from_request(req).await {
                 Ok(args) => args,
