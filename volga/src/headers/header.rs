@@ -37,7 +37,7 @@ use std::{
 ///     ok!("Content-Length: {content_length}")
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct HttpHeaders {
     inner: HeaderMap<HeaderValue>
 }

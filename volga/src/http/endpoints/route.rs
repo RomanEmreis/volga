@@ -217,7 +217,7 @@ impl RouteNode {
         }
     }
 
-    pub(crate) fn find(&self, path_segments: &[Cow<'static, str>]) -> Option<RouteParams> {
+    pub(crate) fn find(&self, path_segments: &[Cow<'static, str>]) -> Option<RouteParams<'_>> {
         let mut current = Some(self);
         let mut params = Vec::new();
         for (index, segment) in path_segments.iter().enumerate() {

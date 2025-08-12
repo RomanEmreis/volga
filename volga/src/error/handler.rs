@@ -9,7 +9,7 @@ use std::sync::{Arc, Weak};
 
 /// Trait for types that represents an error handler
 pub trait ErrorHandler {
-    fn call(&self, parts: &Parts, err: Error) -> BoxFuture<HttpResult>;
+    fn call(&self, parts: &Parts, err: Error) -> BoxFuture<'_, HttpResult>;
 }
 
 /// Owns a closure that handles an error
@@ -44,7 +44,7 @@ where
     Args: FromRequestParts + Send + Sync + 'static,
 {
     #[inline]
-    fn call(&self, parts: &Parts, err: Error) -> BoxFuture<HttpResult> {
+    fn call(&self, parts: &Parts, err: Error) -> BoxFuture<'_, HttpResult> {
         let Ok(args) = Args::from_parts(parts) else { 
             return Box::pin(async move { Err(err) });
         };
