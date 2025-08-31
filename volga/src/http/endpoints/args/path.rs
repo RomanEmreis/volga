@@ -163,20 +163,50 @@ impl FromPayload for String {
     }
 }
 
-//impl FromPayload for &str {
-//    type Future = Ready<Result<Self, Error>>;
-//
-//    #[inline]
-//    fn from_payload(payload: Payload) -> Self::Future {
-//        let Payload::Path((_, value)) = payload else { unreachable!() };
-//        ok(value.to_owned().as_ref())
-//    }
-//
-//    #[inline]
-//    fn source() -> Source {
-//        Source::Path
-//    }
-//}
+impl FromPayload for Cow<'static, str> {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Path((_, value)) = payload else { unreachable!() };
+        ok(Cow::Owned(value.to_string()))
+    }
+
+    #[inline]
+    fn source() -> Source {
+        Source::Path
+    }
+}
+
+impl FromPayload for Box<str> {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Path((_, value)) = payload else { unreachable!() };
+        ok(value.to_string().into_boxed_str())
+    }
+
+    #[inline]
+    fn source() -> Source {
+        Source::Path
+    }
+}
+
+impl FromPayload for Box<[u8]> {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Path((_, value)) = payload else { unreachable!() };
+        ok(value.as_bytes().to_vec().into_boxed_slice())
+    }
+
+    #[inline]
+    fn source() -> Source {
+        Source::Path
+    }
+}
 
 macro_rules! impl_from_payload {
     { $($type:ty),* $(,)? } => {
@@ -331,6 +361,30 @@ mod tests {
         let id = u128::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_string_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = String::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, "123");
+    }
+
+    #[tokio::test]
+    async fn it_reads_box_str_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = Box::<str>::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(&*id, "123");
+    }
+
+    #[tokio::test]
+    async fn it_reads_box_bytes_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = Box::<[u8]>::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(&*id, [b'1', b'2', b'3']);
     }
 
     #[tokio::test]
