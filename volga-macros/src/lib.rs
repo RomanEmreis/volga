@@ -2,15 +2,13 @@
 //! 
 
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, ItemStruct};
+use syn::parse_macro_input;
 
+mod http;
 #[cfg(feature = "jwt-auth-derive")]
-use syn::{Data, Fields};
-#[cfg(any(feature = "di-derive", feature = "jwt-auth-derive"))]
-use syn::DeriveInput;
-
-mod attr;
+mod auth;
+#[cfg(feature = "di-derive")]
+mod di;
 
 /// Implements the `AuthClaims` trait for the custom claims structure
 /// 
@@ -33,56 +31,10 @@ mod attr;
 #[cfg(feature = "jwt-auth-derive")]
 #[proc_macro_derive(Claims)]
 pub fn derive_claims(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
-
-    let mut role_impl = quote! {};
-    let mut roles_impl = quote! {};
-    let mut permissions_impl = quote! {};
-
-    if let Data::Struct(data_struct) = &input.data {
-        if let Fields::Named(fields) = &data_struct.fields {
-            for field in &fields.named {
-                if let Some(ident) = &field.ident {
-                    let ident_str = ident.to_string();
-                    match ident_str.as_str() {
-                        "role" => {
-                            role_impl = quote! {
-                                fn role(&self) -> Option<&str> {
-                                    Some(&self.role)
-                                }
-                            };
-                        }
-                        "roles" => {
-                            roles_impl = quote! {
-                                fn roles(&self) -> Option<&[String]> {
-                                    Some(&self.roles)
-                                }
-                            };
-                        }
-                        "permissions" => {
-                            permissions_impl = quote! {
-                                fn permissions(&self) -> Option<&[String]> {
-                                    Some(&self.permissions)
-                                }
-                            };
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    let expanded = quote! {
-        impl ::volga::auth::AuthClaims for #name {
-            #role_impl
-            #roles_impl
-            #permissions_impl
-        }
-    };
-
-    TokenStream::from(expanded)
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    auth::expand_claims(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 
@@ -107,19 +59,10 @@ pub fn derive_claims(input: TokenStream) -> TokenStream {
 #[cfg(feature = "di-derive")]
 #[proc_macro_derive(Singleton)]
 pub fn derive_singleton(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let name = input.ident;
-
-    let expanded = quote! {
-        impl ::volga::di::Inject for #name {
-            #[inline]
-            fn inject(_: &::volga::di::Container) -> Result<Self, ::volga::di::error::Error> {
-                Err(::volga::di::error::Error::ResolveFailed(stringify!(#name)))
-            }
-        }
-    };
-
-    TokenStream::from(expanded)
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    di::expand_singleton(&input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
 
 /// Attribute macro to implement the `FromHeaders` trait for a struct,
@@ -149,27 +92,9 @@ pub fn derive_singleton(input: TokenStream) -> TokenStream {
 /// - The input is not a unit-like struct
 #[proc_macro_attribute]
 pub fn http_header(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let header = parse_macro_input!(attr as attr::HeaderInput);
-    let input = parse_macro_input!(item as ItemStruct);
-
-    let struct_name = &input.ident;
-    let header_expr = header.as_token_stream();
-
-    let expanded = quote! {
-        #input
-
-        impl ::volga::headers::FromHeaders for #struct_name {
-            #[inline]
-            fn from_headers(headers: &::volga::headers::HeaderMap) -> Option<&::volga::headers::HeaderValue> {
-                headers.get(#header_expr)
-            }
-
-            #[inline]
-            fn header_type() -> &'static str {
-                #header_expr
-            }
-        }
-    };
-
-    expanded.into()
+    let header = parse_macro_input!(attr as http::attr::HeaderInput);
+    let input = parse_macro_input!(item as syn::ItemStruct);
+    http::expand_http_header(&header, &input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
 }
