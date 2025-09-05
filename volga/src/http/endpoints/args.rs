@@ -22,6 +22,9 @@ pub mod cancellation_token;
 pub mod request;
 pub mod form;
 pub mod sse;
+pub mod option;
+pub mod result;
+pub mod vec;
 
 #[cfg(feature = "multipart")]
 pub mod multipart;

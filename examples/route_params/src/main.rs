@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use serde::Deserialize;
-use volga::{App, Path, ok};
+use volga::{App, Path, error::Error, ok};
 
 #[derive(Deserialize)]
 struct User {
@@ -36,5 +36,13 @@ async fn main() -> std::io::Result<()> {
         ok!("Hi {}! Your age is: {}", name, age)
     });
 
+    app.map_get("/hi/{age}", |age: Option<i32>| async move {
+        ok!("Age {:?}!", age)
+    });
+
+    app.map_get("/hey/{age}", |age: Result<u32, Error>| async move {
+        ok!("Age {:?}!", age)
+    });
+    
     app.run().await
 }

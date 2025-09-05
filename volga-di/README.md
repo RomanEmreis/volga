@@ -14,7 +14,7 @@ A standalone, flexible, and easy-to-configure DI container.
 #### Standalone
 ```toml
 [dependencies]
-volga-di = "0.6.3"
+volga-di = "0.6.4"
 ```
 #### Part of Volga Web Framework
 ```toml
@@ -24,7 +24,7 @@ volga = { version = "0.6.3", features = ["di"] }
 #### Derive-macro support
 ```toml
 [dependencies]
-volga = { version = "0.6.3", features = ["di-full"] }
+volga = { version = "0.6.4", features = ["di-full"] }
 ```
 
 ### Example

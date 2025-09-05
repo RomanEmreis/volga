@@ -1,15 +1,18 @@
 ﻿//! Extractors for route/path segments
 
 use crate::{HttpRequest, error::Error};
-use futures_util::future::{ready, Ready};
+use futures_util::future::{ready, ok, Ready};
 use hyper::http::{request::Parts, Extensions};
 use serde::de::DeserializeOwned;
 
 use std::{
+    net::{IpAddr, SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    ffi::{CString, OsString},
+    path::PathBuf,
+    num::NonZero,
     borrow::Cow,
     fmt::{self, Display, Formatter},
-    ops::{Deref, DerefMut},
-    str::FromStr
+    ops::{Deref, DerefMut}
 };
 
 use crate::http::endpoints::{
@@ -145,22 +148,96 @@ impl<T: DeserializeOwned + Send> FromPayload for Path<T> {
     }
 }
 
-/// Extracts path args directly into handler method args that implements `FromStr`
-impl<T: FromStr + Send> FromPayload for T {
+impl FromPayload for String {
+    type Future = Ready<Result<Self, Error>>;
+    
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Path((_, value)) = payload else { unreachable!() };
+        ok(value.to_string())
+    }
+    
+    #[inline]
+    fn source() -> Source {
+        Source::Path
+    }
+}
+
+impl FromPayload for Cow<'static, str> {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        let Payload::Path((arg, value)) = payload else { unreachable!() };
-        ready(value
-            .parse::<T>()
-            .map_err(|_| PathError::type_mismatch(arg)))
+        let Payload::Path((_, value)) = payload else { unreachable!() };
+        ok(Cow::Owned(value.to_string()))
     }
 
     #[inline]
     fn source() -> Source {
         Source::Path
     }
+}
+
+impl FromPayload for Box<str> {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Path((_, value)) = payload else { unreachable!() };
+        ok(value.to_string().into_boxed_str())
+    }
+
+    #[inline]
+    fn source() -> Source {
+        Source::Path
+    }
+}
+
+impl FromPayload for Box<[u8]> {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Path((_, value)) = payload else { unreachable!() };
+        ok(value.as_bytes().to_vec().into_boxed_slice())
+    }
+
+    #[inline]
+    fn source() -> Source {
+        Source::Path
+    }
+}
+
+macro_rules! impl_from_payload {
+    { $($type:ty),* $(,)? } => {
+        $(impl FromPayload for $type {
+            type Future = Ready<Result<Self, Error>>;
+            #[inline]
+            fn from_payload(payload: Payload) -> Self::Future {
+                let Payload::Path((arg, value)) = payload else { unreachable!() };
+                ready(value
+                    .parse::<$type>()
+                    .map_err(|_| PathError::type_mismatch(arg)))
+            }
+            #[inline]
+            fn source() -> Source {
+                Source::Path
+            }
+        })*
+    };
+}
+
+impl_from_payload! {
+    bool, 
+    char,
+    i8, i16, i32, i64, i128, isize,
+    u8, u16, u32, u64, u128, usize,
+    f32, f64,
+    NonZero<i8>, NonZero<i16>, NonZero<i32>, NonZero<i64>, NonZero<i128>, NonZero<isize>,
+    NonZero<u8>, NonZero<u16>, NonZero<u32>, NonZero<u64>, NonZero<u128>, NonZero<usize>,
+    IpAddr, SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6,
+    CString, OsString,
+    PathBuf
 }
 
 /// Describes errors of path extractor
@@ -199,12 +276,115 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_reads_from_payload() {
+    async fn it_reads_isize_from_payload() {
         let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        
+        let id = isize::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+    
+    #[tokio::test]
+    async fn it_reads_i8_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = i8::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+    
+    #[tokio::test]
+    async fn it_reads_i16_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = i16::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+    
+    #[tokio::test]
+    async fn it_reads_i32_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
         let id = i32::from_payload(Payload::Path(&param)).await.unwrap();
         
         assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_i64_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = i64::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_i128_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = i128::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_usize_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = usize::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_u8_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = u8::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_u16_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = u16::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_u32_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = u32::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_u128_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = u128::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_string_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = String::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(id, "123");
+    }
+
+    #[tokio::test]
+    async fn it_reads_box_str_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = Box::<str>::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(&*id, "123");
+    }
+
+    #[tokio::test]
+    async fn it_reads_box_bytes_from_payload() {
+        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let id = Box::<[u8]>::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(&*id, [b'1', b'2', b'3']);
     }
 
     #[tokio::test]

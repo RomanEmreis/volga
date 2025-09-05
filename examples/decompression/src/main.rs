@@ -4,7 +4,7 @@
 //! cargo run -p decompression
 //! ```
 
-use volga::{App, ok, Json};
+use volga::{App, ok};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct User {
@@ -18,7 +18,7 @@ async fn main() -> std::io::Result<()> {
 
     app.use_decompression();
 
-    app.map_post("/decompress", |Json(users): Json<Vec<User>>| async move {
+    app.map_post("/decompress", |users: Vec<User>| async move {
         ok!(users)
     });
 
