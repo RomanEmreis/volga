@@ -31,7 +31,7 @@ serde_json = "1.0.143"
 serde_urlencoded = "0.7.1"
 
 # optional
-async-compression = { version = "0.4.29", features = ["tokio"], optional = true }
+async-compression = { version = "0.4.30", features = ["tokio"], optional = true }
 base64 = { version = "0.22.1", optional = true }
 chrono = { version = "0.4.41", optional = true }
 cookie = { version = "0.18.1", features = ["percent-encode"], optional = true }
@@ -56,7 +56,7 @@ reqwest = { version = "0.12.23", features = ["blocking", "multipart", "stream", 
 serde = { version = "1.0.219", features = ["derive"] }
 tokio-stream = "0.1.17"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-uuid = { version = "1.18.0", features = ["v4"] }
+uuid = { version = "1.18.1", features = ["v4"] }
 criterion = { version = "0.7.0", features = ["async_tokio"] }
 
 [features]

@@ -81,6 +81,62 @@ impl FromRequestRef for HeaderMap<HeaderValue> {
     }
 }
 
+impl FromPayload for Parts {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ok(parts.clone())
+    }
+
+    fn source() -> Source {
+        Source::Parts
+    }
+}
+
+impl FromPayload for Extensions {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ok(parts.extensions.clone())
+    }
+
+    fn source() -> Source {
+        Source::Parts
+    }
+}
+
+impl FromPayload for Uri {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ok(parts.uri.clone())
+    }
+
+    fn source() -> Source {
+        Source::Parts
+    }
+}
+
+impl FromPayload for Method {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload) -> Self::Future {
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ok(parts.method.clone())
+    }
+
+    fn source() -> Source {
+        Source::Parts
+    }
+}
+
 impl FromPayload for HttpRequest {
     type Future = Ready<Result<Self, Error>>;
 
@@ -192,5 +248,70 @@ mod tests {
         
         assert_eq!(req.uri().path(), "/");
         assert_eq!(req.method(), Method::GET);
+    }
+
+    #[tokio::test]
+    async fn it_gets_extensions_from_payload() {
+        let req = Request::get("/")
+            .extension("ext")
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+
+        let ext = Extensions::from_payload(Payload::Parts(&parts)).await;
+
+        assert!(ext.is_ok());
+
+        let ext = ext.unwrap();
+        assert_eq!(ext.get::<&str>().cloned(), Some("ext"));
+    }
+
+    #[tokio::test]
+    async fn it_gets_method_from_payload() {
+        let req = Request::get("/")
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+
+        let method = Method::from_payload(Payload::Parts(&parts)).await;
+
+        assert!(method.is_ok());
+
+        let method = method.unwrap();
+        assert_eq!(method, Method::GET);
+    }
+
+    #[tokio::test]
+    async fn it_gets_uri_from_payload() {
+        let req = Request::get("/")
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+
+        let uri = Uri::from_payload(Payload::Parts(&parts)).await;
+
+        assert!(uri.is_ok());
+
+        let uri = uri.unwrap();
+        assert_eq!(uri.path(), "/");
+    }
+
+    #[tokio::test]
+    async fn it_gets_parts_from_payload() {
+        let req = Request::get("/")
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+
+        let parts = Parts::from_payload(Payload::Parts(&parts)).await;
+
+        assert!(parts.is_ok());
+
+        let parts = parts.unwrap();
+        assert_eq!(parts.uri.path(), "/");
     }
 }
