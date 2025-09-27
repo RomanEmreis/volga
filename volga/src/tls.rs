@@ -386,7 +386,8 @@ impl TlsConfig {
             match ask_generate() {
                 Ok(true) => {
                     if let Err(_err) = generate(DEV_CERT_NAMES
-                        .into_iter().map(|n| n.to_string())
+                        .iter()
+                        .map(|n| n.to_string())
                         .collect::<Vec<_>>()) {
                         #[cfg(feature = "tracing")]
                         tracing::error!("Failed to generate self-signed TLS certificates: {_err:#}");
