@@ -1,6 +1,6 @@
 [package]
 name = "volga-macros"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -10,8 +10,13 @@ description = "Macros for Volga Web Framework"
 documentation = "https://docs.rs/volga"
 readme = "README.md"
 homepage = "https://romanemreis.github.io/volga-docs"
-categories = ["web-programming::http-server"]
-keywords = ["volga", "server", "http", "web", "framework"]
+categories = [
+    "web-programming::http-server",
+    "web-programming::websocket",
+    "network-programming",
+    "asynchronous",
+]
+keywords = ["volga", "http", "web", "framework"]
 
 [lib]
 proc-macro = true

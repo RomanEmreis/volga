@@ -139,7 +139,9 @@ impl Default for HstsConfig {
 
 impl Default for TlsConfig {
     fn default() -> Self {
-        let path = std::env::current_dir().unwrap_or_default();
+        let path = std::env::current_dir()
+            .unwrap_or_default();
+        
         let cert = path.join(CERT_FILE_NAME);
         let key = path.join(KEY_FILE_NAME);
         Self { 
@@ -240,18 +242,6 @@ impl TlsConfig {
         let path = path.as_ref();
         self.key = path.join(KEY_FILE_NAME);
         self.cert = path.join(CERT_FILE_NAME);
-        self
-    }
-
-    /// Sets the path to a key file
-    pub fn set_key(mut self, key_path: &str) -> Self {
-        self.key = key_path.into();
-        self
-    }
-
-    /// Sets the path to a key file
-    pub fn set_cert(mut self, cert_path: &str) -> Self {
-        self.cert = cert_path.into();
         self
     }
     
@@ -363,6 +353,64 @@ impl TlsConfig {
     pub fn with_hsts_exclude_hosts(mut self, exclude_hosts: &[&'static str]) -> Self {
         self.hsts_config = self.hsts_config.with_exclude_hosts(exclude_hosts);
         self
+    }
+
+    /// Enables self-signed TLS certificates during local development.
+    ///
+    /// - If certificates are missing, the user will be prompted to generate them.
+    /// - In release mode, this function does nothing.
+    ///
+    /// If TLS was already preconfigured, it does not overwrite it
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::tls::TlsConfig;
+    ///
+    /// let app = App::new()
+    ///     .with_tls(|tls| tls.use_dev_cert());
+    /// ```
+    #[cfg(feature = "dev-cert")]
+    pub fn use_dev_cert(self) -> Self {
+        // do nothing for release mode
+        #[cfg(not(debug_assertions))]
+        { 
+            return self;
+        }
+        #[cfg(debug_assertions)]
+        {
+            use volga_dev_cert::{dev_cert_exists, ask_generate, generate, DEV_CERT_NAMES};
+
+            if dev_cert_exists() {
+                return self.with_dev_cert();
+            }
+
+            match ask_generate() {
+                Ok(true) => {
+                    if let Err(_err) = generate(DEV_CERT_NAMES
+                        .into_iter().map(|n| n.to_string())
+                        .collect::<Vec<_>>()) {
+                        #[cfg(feature = "tracing")]
+                        tracing::error!("Failed to generate self-signed TLS certificates: {_err:#}");
+                        return self;
+                    }
+
+                    self.with_dev_cert()
+                }
+                Ok(false) => self,
+                Err(_err) => {
+                    #[cfg(feature = "tracing")]
+                    tracing::error!("Failed to ask for certificate generation: {_err:#}");
+                    self
+                }
+            }
+        }
+    }
+
+    /// Enables default self-signed development certificates
+    #[inline]
+    #[cfg(feature = "dev-cert")]
+    pub(super) fn with_dev_cert(self) -> Self {
+        self.with_cert_path(volga_dev_cert::get_cert_path())
+            .with_key_path(volga_dev_cert::get_signing_key_path())
     }
 
     pub(super) fn build(self) -> Result<ServerConfig, Error> {
@@ -481,7 +529,8 @@ impl App {
     where
         T: FnOnce(TlsConfig) -> TlsConfig
     {
-        self.tls_config = Some(config(self.tls_config.unwrap_or_default()));
+        let tls = self.tls_config.unwrap_or_default();
+        self.tls_config = Some(config(tls));
         self
     }
 
@@ -934,8 +983,8 @@ mod tests {
     fn it_sets_tls_key_and_cert() {
         let app = App::new()
             .with_tls(|tls| tls
-                .set_key(KEY_FILE_NAME)
-                .set_cert(CERT_FILE_NAME));
+                .with_key_path(KEY_FILE_NAME)
+                .with_cert_path(CERT_FILE_NAME));
 
         let tls_config = app.tls_config.unwrap();
         

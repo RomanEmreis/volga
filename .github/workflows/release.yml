@@ -26,6 +26,12 @@ jobs:
 
       - name: Wait for index update
         run: sleep 30
+        
+      - name: Publish volga-dev-cert
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --manifest-path volga-dev-cert/Cargo.toml
+
+      - name: Wait for index update
+        run: sleep 30
 
       - name: Publish volga
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --manifest-path volga/Cargo.toml

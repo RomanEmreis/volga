@@ -13,6 +13,8 @@ async fn main() -> std::io::Result<()> {
         .bind("127.0.0.1:7878")
         .with_tls(|tls| tls
             .set_pem("examples/tls/cert")
+            // Uncomment to generate self-signed certificates for local development
+            //.use_dev_cert()
             .with_https_redirection()
             .with_http_port(7879))
         .with_hsts(|hsts| hsts
