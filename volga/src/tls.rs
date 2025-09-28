@@ -49,6 +49,15 @@ use hyper_util::rt::TokioExecutor;
 #[cfg(all(feature = "http1", not(feature = "http2")))]
 use hyper::server::conn::http1;
 
+/// Represents local development certificates mode
+#[cfg(feature = "dev-cert")]
+pub enum DevCertMode {
+    /// Always creates self-signed certificates if they're missing
+    Auto,
+    /// Asks whether to create of not self-signed certificates if they're missing
+    Ask
+}
+
 pub(super) mod https_redirect;
 
 const CERT_FILE_NAME: &str = "cert.pem";
@@ -357,19 +366,20 @@ impl TlsConfig {
 
     /// Enables self-signed TLS certificates during local development.
     ///
-    /// - If certificates are missing, the user will be prompted to generate them.
+    /// - With [`DevCertMode::Auto`] - if certificates are missing, it will automatically generate them.
+    /// - With [`DevCertMode::Ask`] - if certificates are missing, the user will be prompted to generate them.
     /// - In release mode, this function does nothing.
     ///
     /// If TLS was already preconfigured, it does not overwrite it
     /// ```no_run
-    /// use volga::App;
-    /// use volga::tls::TlsConfig;
+    /// use volga::{App, tls::DevCertMode};
     ///
     /// let app = App::new()
-    ///     .with_tls(|tls| tls.use_dev_cert());
+    ///     .with_tls(|tls| tls
+    ///         .with_dev_cert(DevCertMode::Ask));
     /// ```
     #[cfg(feature = "dev-cert")]
-    pub fn use_dev_cert(self) -> Self {
+    pub fn with_dev_cert(self, mode: DevCertMode) -> Self {
         // do nothing for release mode
         #[cfg(not(debug_assertions))]
         { 
@@ -380,27 +390,32 @@ impl TlsConfig {
             use volga_dev_cert::{dev_cert_exists, ask_generate, generate, DEV_CERT_NAMES};
 
             if dev_cert_exists() {
-                return self.with_dev_cert();
+                return self.use_dev_cert();
             }
-
-            match ask_generate() {
-                Ok(true) => {
-                    if let Err(_err) = generate(DEV_CERT_NAMES
-                        .iter()
-                        .map(|n| n.to_string())
-                        .collect::<Vec<_>>()) {
-                        #[cfg(feature = "tracing")]
-                        tracing::error!("Failed to generate self-signed TLS certificates: {_err:#}");
-                        return self;
-                    }
-
-                    self.with_dev_cert()
-                }
-                Ok(false) => self,
-                Err(_err) => {
+            
+            #[inline]
+            fn generate_impl(tls: TlsConfig) -> TlsConfig {
+                if let Err(_err) = generate(DEV_CERT_NAMES
+                    .iter()
+                    .map(|n| n.to_string())
+                    .collect::<Vec<_>>()) {
                     #[cfg(feature = "tracing")]
-                    tracing::error!("Failed to ask for certificate generation: {_err:#}");
-                    self
+                    tracing::error!("Failed to generate self-signed TLS certificates: {_err:#}");
+                    return tls;
+                }
+                tls.use_dev_cert()
+            }
+            
+            match mode { 
+                DevCertMode::Auto => generate_impl(self),
+                DevCertMode::Ask => match ask_generate() {
+                    Ok(true) => generate_impl(self),
+                    Ok(false) => self,
+                    Err(_err) => {
+                        #[cfg(feature = "tracing")]
+                        tracing::error!("Failed to ask for certificate generation: {_err:#}");
+                        self
+                    }
                 }
             }
         }
@@ -409,7 +424,7 @@ impl TlsConfig {
     /// Enables default self-signed development certificates
     #[inline]
     #[cfg(feature = "dev-cert")]
-    pub(super) fn with_dev_cert(self) -> Self {
+    pub(super) fn use_dev_cert(self) -> Self {
         self.with_cert_path(volga_dev_cert::get_cert_path())
             .with_key_path(volga_dev_cert::get_signing_key_path())
     }
