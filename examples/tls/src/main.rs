@@ -5,7 +5,7 @@
 //! ```
 
 use std::time::Duration;
-use volga::{App, Json, ok, tls};
+use volga::{App, Json, ok};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
