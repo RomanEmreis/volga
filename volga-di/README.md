@@ -1,7 +1,7 @@
 # Volga DI
 A standalone, flexible, and easy-to-configure DI container.
 
-[![latest](https://img.shields.io/badge/latest-0.6.3-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.6.5-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.80+-964B00)](https://crates.io/crates/volga)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
@@ -24,7 +24,7 @@ volga = { version = "0.6.5", features = ["di"] }
 #### Derive-macro support
 ```toml
 [dependencies]
-volga = { version = "0.6.4", features = ["di-full"] }
+volga = { version = "0.6.5", features = ["di-full"] }
 ```
 
 ### Example
