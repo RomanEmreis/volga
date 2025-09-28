@@ -1,12 +1,12 @@
 [package]
-name = "volga-di"
+name = "volga-dev-cert"
 version = "0.6.5"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
 license = "MIT"
 repository = "https://github.com/RomanEmreis/volga"
-description = "Dependency Injection tools for Volga Web Framework"
+description = "A Rust library for generating self-signed TLS certificates for local development."
 documentation = "https://docs.rs/volga"
 readme = "README.md"
 homepage = "https://romanemreis.github.io/volga-docs"
@@ -16,15 +16,10 @@ categories = [
     "network-programming",
     "asynchronous",
 ]
-keywords = ["volga", "container", "dependency", "injection", "di"]
+keywords = ["volga", "server", "https", "tls"]
 
 [dependencies]
-http = "1.3.1"
-volga-macros = { path = "../volga-macros", version = "0.6.5", features = ["di-derive"], optional = true }
-
-[features]
-default = []
-macros = ["dep:volga-macros"]
+rcgen = "0.14.5"
 
 [lints]
 workspace = true

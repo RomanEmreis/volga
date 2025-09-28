@@ -97,8 +97,8 @@ async fn it_works_with_tls_with_required_auth_unauthenticated() {
         let mut app = App::new()
             .bind("127.0.0.1:7923")
             .with_tls(|tls| tls
-                .set_key("tests/tls/server.key")
-                .set_pem("tests/tls/server.pem")
+                .with_key_path("tests/tls/server.key")
+                .with_cert_path("tests/tls/server.pem")
                 .with_required_client_auth("tests/tls/ca.pem"));
         
         app.map_get("/tls", || async {
