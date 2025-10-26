@@ -1,6 +1,6 @@
 ﻿//! Endpoints mapping utilities
 
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
 use hyper::{Method, Uri};
 use super::endpoints::{
     route::{RouteNode, RoutePipeline, PathArguments},
@@ -16,8 +16,8 @@ pub(crate) mod handlers;
 pub(crate) mod route;
 pub mod args;
 
-const ALLOW_METHOD_SEPARATOR : &str = ",";
-const PATH_SEPARATOR : char = '/';
+const ALLOW_METHOD_SEPARATOR: &str = ",";
+const PATH_SEPARATOR: char = '/';
 
 /// Describes a mapping between HTTP Verbs, routes and request handlers
 pub(crate) struct Endpoints {
@@ -49,7 +49,7 @@ impl EndpointContext {
 
 impl Endpoints {
     pub(crate) fn new() -> Self {
-        Self { routes: RouteNode::Static(HashMap::new()) }
+        Self { routes: RouteNode::new() }
     }
 
     /// Gets a context of the executing route by its `HttpRequest`
@@ -61,23 +61,15 @@ impl Endpoints {
             None => return RouteOption::RouteNotFound,
         };
 
-        if let RouteNode::Handler(handlers) = &route_params.route {
-            return handlers.get(method).map_or_else(
-                || {
-                    let allowed_methods = handlers
-                        .keys()
-                        .map(|key| key.as_str())
-                        .collect::<Vec<_>>()
-                        .join(ALLOW_METHOD_SEPARATOR);
-                    RouteOption::MethodNotFound(allowed_methods)
-                },
-                |handlers| RouteOption::Ok(
-                    EndpointContext::new(handlers.clone(), route_params.params)
-                ),
-            );
-        }
-
-        RouteOption::RouteNotFound
+        let handlers = &route_params.route.handlers;
+        handlers.get(method).map_or_else(
+            || RouteOption::MethodNotFound(handlers.keys()
+                .map(|key| key.as_str())
+                .collect::<Vec<_>>()
+                .join(ALLOW_METHOD_SEPARATOR)),
+            |handlers| RouteOption::Ok(
+                EndpointContext::new(handlers.clone(), route_params.params)
+        ))
     }
 
     /// Maps the request handler to the current HTTP Verb and route pattern
@@ -98,10 +90,9 @@ impl Endpoints {
     #[inline]
     pub(crate) fn contains(&mut self, method: &Method, pattern: &str) -> bool {
         let path_segments = Self::split_path(pattern);
-        self.routes.find(&path_segments).and_then(|params| match &params.route {
-            RouteNode::Handler(handlers) => Some(handlers.contains_key(method)),
-            _ => None,
-        }).unwrap_or(false)
+        self.routes.find(&path_segments)
+            .map(|params| params.route.handlers.contains_key(method))
+            .unwrap_or(false)
     }
 
     /// Traverses the route tree and collects all available routes.

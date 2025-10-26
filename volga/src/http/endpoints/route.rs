@@ -15,7 +15,6 @@ use crate::middleware::{
 #[cfg(not(feature = "middleware"))]
 use crate::http::request::HttpRequest;
 
-const END_OF_ROUTE: &str = "";
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const DEFAULT_CAPACITY: usize = 8;
@@ -151,10 +150,10 @@ impl RoutePipeline {
 
 /// A node in the route tree
 #[derive(Clone)]
-pub(crate) enum RouteNode {
-    Static(HashMap<Cow<'static, str>, RouteNode>),
-    Dynamic(HashMap<Cow<'static, str>, RouteNode>),
-    Handler(HashMap<Method, RoutePipeline>),
+pub(crate) struct RouteNode {
+    pub(crate) handlers: HashMap<Method, RoutePipeline>,
+    static_routes: HashMap<Cow<'static, str>, RouteNode>,
+    dynamic_route: Option<(Cow<'static, str>, Box<RouteNode>)>,
 }
 
 /// Parameters of a route
@@ -164,117 +163,98 @@ pub(crate) struct RouteParams<'route> {
 }
 
 impl RouteNode {
-    pub(crate) fn insert(
-        &mut self, 
-        path_segments: &[Cow<'static, str>], 
-        method: Method, 
-        handler: Layer
-    ) {
-        let mut current = self;
-        for (index, segment) in path_segments.iter().enumerate() {
-            let is_last = index == path_segments.len() - 1;
-            let is_dynamic = Self::is_dynamic_segment(segment);
-
-            current = match current {
-                RouteNode::Static(map) | RouteNode::Dynamic(map) => {
-                    let entry = map.entry(segment.clone()).or_insert_with(|| {
-                        if is_dynamic {
-                            RouteNode::Dynamic(HashMap::with_capacity(DEFAULT_CAPACITY))
-                        } else {
-                            RouteNode::Static(HashMap::with_capacity(DEFAULT_CAPACITY))
-                        }
-                    });
-
-                    // Check if this segment is the last and add the handler
-                    if is_last {
-                        // Assumes the inserted or existing route has HashMap as associated data
-                        match entry {
-                            RouteNode::Dynamic(ref mut map) |
-                            RouteNode::Static(ref mut map) => {
-                                if let Some(endpoint) = map.get_mut(END_OF_ROUTE) { 
-                                    match endpoint {
-                                        RouteNode::Handler(ref mut methods) =>
-                                            methods
-                                                .entry(method.clone())
-                                                .or_insert_with(RoutePipeline::new)
-                                                .insert(handler.clone()),
-                                        _ => unreachable!()
-                                    };
-                                } else { 
-                                    let node = RouteNode::Handler(HashMap::from([
-                                        (method.clone(), RoutePipeline::from(handler.clone()))
-                                    ]));
-                                    map.insert(END_OF_ROUTE.into(), node);
-                                }
-                            },
-                            _ => ()
-                        }
-                    }
-                    entry // Continue traversing or inserting into this entry
-                },
-                RouteNode::Handler(_) => panic!("Attempt to insert a route under a handler"),
-            };
+    #[inline]
+    pub(crate) fn new() -> Self {
+        Self {
+            static_routes: HashMap::with_capacity(DEFAULT_CAPACITY),
+            handlers: HashMap::new(),
+            dynamic_route: None,
         }
     }
 
-    pub(crate) fn find(&self, path_segments: &[Cow<'static, str>]) -> Option<RouteParams<'_>> {
-        let mut current = Some(self);
-        let mut params = Vec::new();
+    pub(crate) fn insert(
+        &mut self,
+        path_segments: &[Cow<'static, str>],
+        method: Method,
+        handler: Layer,
+    ) {
+        let mut current = self;
+
         for (index, segment) in path_segments.iter().enumerate() {
             let is_last = index == path_segments.len() - 1;
 
-            current = match current {
-                Some(RouteNode::Static(map)) | Some(RouteNode::Dynamic(map)) => {
-                    // Trying direct match first
-                    let direct_match = map.get(segment);
+            if Self::is_dynamic_segment(segment) {
+                let param_name = segment.clone();
 
-                    // If no direct match, try dynamic route resolution
-                    let resolved_route = direct_match.or_else(|| {
-                        map.iter()
-                            .filter(|(key, _)| Self::is_dynamic_segment(key))
-                            .map(|(key, route)| {
-                                if let Some(param_name) = key.strip_prefix(OPEN_BRACKET).and_then(|k| k.strip_suffix(CLOSE_BRACKET)) {
-                                    params.push((Cow::Owned(param_name.to_owned()), segment.clone()));
-                                }
-                                route
-                            })
-                            .next()
-                    });
+                current = current
+                    .dynamic_route
+                    .get_or_insert_with(|| (param_name.clone(), Box::new(RouteNode::new())))
+                    .1
+                    .as_mut();
+            } else {
+                current = current
+                    .static_routes
+                    .entry(segment.clone())
+                    .or_insert_with(RouteNode::new);
+            }
 
-                    // Retrieve handler or further route if this is the last segment
-                    if let Some(route) = resolved_route {
-                        if is_last {
-                            match route {
-                                RouteNode::Dynamic(inner_map) | RouteNode::Static(inner_map) => {
-                                    // Attempt to get the handler directly if no further routing is possible
-                                    inner_map.get(END_OF_ROUTE).or(Some(route))
-                                },
-                                handler @ RouteNode::Handler(_) => Some(handler), // Direct handler return
-                            }
-                        } else {
-                            Some(route) // Continue on non-terminal routes
-                        }
-                    } else {
-                        None // No route resolved
-                    }
-                },
-                _ => None,
-            };
+            if is_last {
+                current
+                    .handlers
+                    .entry(method.clone())
+                    .or_insert_with(RoutePipeline::new)
+                    .insert(handler.clone());
+            }
+        }
+    }
+
+    pub(crate) fn find(
+        &self,
+        path_segments: &[Cow<'static, str>],
+    ) -> Option<RouteParams<'_>> {
+        let mut current = self;
+        let mut params = Vec::new();
+
+        for segment in path_segments.iter() {
+            if let Some(next) = current.static_routes.get(segment) {
+                current = next;
+                continue;
+            }
+
+            if let Some((param_name, dyn_node)) = &current.dynamic_route {
+                params.push((param_name.clone(), segment.clone()));
+                current = dyn_node;
+                continue;
+            }
+
+            return None;
         }
 
-        current.map(|route| RouteParams { route, params: params.into_boxed_slice() })
+        if current.handlers.is_empty() {
+            None
+        } else {
+            Some(RouteParams {
+                route: current,
+                params: params.into_boxed_slice(),
+            })
+        }
     }
     
     #[cfg(feature = "middleware")]
     pub(crate) fn compose(&mut self) {
-        match self {
-            RouteNode::Static(map) | 
-            RouteNode::Dynamic(map) => map
-                .values_mut()
-                .for_each(|route| route.compose()),
-            RouteNode::Handler(map) => map
-                .values_mut()
-                .for_each(|pipeline| pipeline.compose())
+        // Compose all static routes
+        for route in self.static_routes.values_mut() {
+            route.compose();
+        }
+
+        // Compose dynamic route if present
+        if let Some((_, ref mut dyn_route)) = self.dynamic_route {
+            dyn_route.compose();
+        }
+
+        // Compose handlers at this level
+        for pipeline in self.handlers.values_mut() {
+            pipeline.compose();
         }
     }
 
@@ -288,35 +268,39 @@ impl RouteNode {
     }
 
     #[cfg(debug_assertions)]
-    fn traverse_routes(&self, routes: &mut Vec<super::meta::RouteInfo>, current_path: String) {
-        match self {
-            RouteNode::Static(map) | RouteNode::Dynamic(map) => {
-                for (segment, node) in map {
-                    if segment == END_OF_ROUTE {
-                        // This is a handler node at the end of a route
-                        node.traverse_routes(routes, current_path.clone());
-                    } else {
-                        // Build the path for this segment
-                        let new_path = if current_path.is_empty() {
-                            format!("/{segment}", )
-                        } else {
-                            format!("{current_path}/{segment}")
-                        };
-                        node.traverse_routes(routes, new_path);
-                    }
-                }
-            }
-            RouteNode::Handler(methods) => {
-                // We've reached a handler node - collect all HTTP methods for this route
-                for method in methods.keys() {
-                    let route_path = if current_path.is_empty() {
-                        "/".to_string()
-                    } else {
-                        current_path.clone()
-                    };
-                    routes.push(super::meta::RouteInfo::new(method.clone(), &route_path));
-                }
-            }
+    fn traverse_routes(
+        &self, 
+        routes: &mut Vec<super::meta::RouteInfo>, 
+        current_path: String
+    ) {
+        // Traverse static routes
+        for (segment, node) in &self.static_routes {
+            let new_path = if current_path.is_empty() {
+                format!("/{segment}")
+            } else {
+                format!("{current_path}/{segment}")
+            };
+            node.traverse_routes(routes, new_path);
+        }
+
+        // Traverse dynamic route (if any)
+        if let Some((param_name, dyn_node)) = &self.dynamic_route {
+            let new_path = if current_path.is_empty() {
+                format!("/{param_name}")
+            } else {
+                format!("{current_path}/{param_name}")
+            };
+            dyn_node.traverse_routes(routes, new_path);
+        }
+
+        // Record handlers for this node
+        for method in self.handlers.keys() {
+            let route_path = if current_path.is_empty() {
+                "/".to_string()
+            } else {
+                current_path.clone()
+            };
+            routes.push(super::meta::RouteInfo::new(method.clone(), &route_path));
         }
     }
 
@@ -329,7 +313,6 @@ impl RouteNode {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use hyper::Method;
     use crate::ok;
     use crate::http::endpoints::handlers::{Func, RouteHandler};
@@ -344,7 +327,7 @@ mod tests {
         
         let path = ["test".into()];
         
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path, Method::GET, handler.into());
         
         let route_params = route.find(&path);
@@ -359,7 +342,7 @@ mod tests {
 
         let path = ["test".into(), "{value}".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path, Method::GET, handler.into());
 
         let path = ["test".into(), "some".into()];
@@ -379,7 +362,7 @@ mod tests {
 
         let path = ["users".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path, Method::GET, handler.into());
 
         let routes = route.collect();
@@ -396,7 +379,7 @@ mod tests {
 
         let path = ["users".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path, Method::GET, handler.clone().into());
         route.insert(&path, Method::POST, handler.into());
 
@@ -416,7 +399,7 @@ mod tests {
         let path1 = ["users".into()];
         let path2 = ["users".into(), "profile".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path1, Method::GET, handler.clone().into());
         route.insert(&path2, Method::GET, handler.into());
 
@@ -435,7 +418,7 @@ mod tests {
 
         let path = ["users".into(), "{id}".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path, Method::GET, handler.into());
 
         let routes = route.collect();
@@ -454,7 +437,7 @@ mod tests {
         let path2 = ["users".into(), "{id}".into()];
         let path3 = ["users".into(), "{id}".into(), "posts".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path1, Method::GET, handler.clone().into());
         route.insert(&path2, Method::GET, handler.clone().into());
         route.insert(&path3, Method::GET, handler.into());
@@ -475,7 +458,7 @@ mod tests {
 
         let path = ["".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path, Method::GET, handler.into());
 
         let routes = route.collect();
@@ -490,7 +473,7 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
 
         // Add various routes
         route.insert(&["api".into(), "v1".into(), "users".into()], Method::GET, handler.clone().into());
@@ -516,7 +499,7 @@ mod tests {
     #[test]
     #[cfg(debug_assertions)]
     fn it_handles_empty_route_tree() {
-        let route = RouteNode::Static(HashMap::new());
+        let route = RouteNode::new();
 
         let routes = route.collect();
 
@@ -531,7 +514,7 @@ mod tests {
 
         let path = ["users".into(), "{userId}".into(), "posts".into(), "{postId}".into(), "comments".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path, Method::GET, handler.into());
 
         let routes = route.collect();
@@ -548,7 +531,7 @@ mod tests {
 
         let path = ["resource".into()];
 
-        let mut route = RouteNode::Static(HashMap::new());
+        let mut route = RouteNode::new();
         route.insert(&path, Method::GET, handler.clone().into());
         route.insert(&path, Method::POST, handler.clone().into());
         route.insert(&path, Method::PUT, handler.clone().into());
