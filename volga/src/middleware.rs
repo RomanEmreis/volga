@@ -100,20 +100,14 @@ impl Middlewares {
         // Fetching the last middleware which is the request handler to be the initial `next`.
         let request_handler = self.pipeline.last().unwrap().clone();
         let mut next: NextFn = Arc::new(move |ctx| {
-            let handler = request_handler.clone();
             // Call the last middleware, ignoring its `next` argument with an empty placeholder
-            handler(ctx, Arc::new(|_| Box::pin(async { not_found!() })))
+            request_handler(ctx, Arc::new(|_| Box::pin(async { not_found!() })))
         });
 
         for mw in self.pipeline.iter().rev().skip(1) {
             let current_mw: MiddlewareFn = mw.clone();
             let prev_next: NextFn = next.clone();
-
-            next = Arc::new(move |ctx| {
-                let current_mw = current_mw.clone();
-                let prev_next = prev_next.clone();
-                current_mw(ctx, prev_next)
-            });
+            next = Arc::new(move |ctx| current_mw(ctx, prev_next.clone()));
         }
         Some(next)
     }
