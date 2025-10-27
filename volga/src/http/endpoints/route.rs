@@ -17,7 +17,6 @@ use crate::http::request::HttpRequest;
 
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
-//const DEFAULT_CAPACITY: usize = 8;
 
 /// Route path arguments
 pub(crate) type PathArguments = Box<[(Cow<'static, str>, Cow<'static, str>)]>;
@@ -178,17 +177,18 @@ impl RouteNode {
         method: Method,
         handler: Layer,
     ) {
+        let last_index = path_segments.len() - 1;
         let mut current = self;
 
         for (index, segment) in path_segments.iter().enumerate() {
-            let is_last = index == path_segments.len() - 1;
+            let is_last = index == last_index;
 
             if Self::is_dynamic_segment(segment) {
                 let param_name = segment.clone();
 
                 current = current
                     .dynamic_route
-                    .get_or_insert_with(|| (param_name.clone(), Box::new(RouteNode::new())))
+                    .get_or_insert_with(|| (param_name, Box::new(RouteNode::new())))
                     .1
                     .as_mut();
             } else {
