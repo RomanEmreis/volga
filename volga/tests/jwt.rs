@@ -11,7 +11,7 @@ struct AuthData {
     access_token: String,
 }
 
-#[derive(Claims, Serialize, Deserialize)]
+#[derive(Claims, Clone, Serialize, Deserialize)]
 struct Claims {
     sub: String,
     iss: String,

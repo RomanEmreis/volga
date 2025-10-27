@@ -237,11 +237,11 @@ impl BearerTokenService {
     /// Decodes and validates a JSON Web Token
     ///
     /// If the token or its signature is invalid or the claims fail validation, it will return an error.
-    pub fn decode<C: DeserializeOwned>(&self, bearer: Bearer) -> Result<C, Error> {
+    pub fn decode<C: DeserializeOwned + Clone>(&self, bearer: Bearer) -> Result<C, Error> {
         let Some(decoding_key) = &self.decoding else { 
             return Err(Error::server_error("Missing security key")); 
         };
-        jsonwebtoken::decode(&bearer.0, decoding_key, &self.validation)
+        jsonwebtoken::decode(&*bearer.0, decoding_key, &self.validation)
             .map_err(Error::from)
             .map(|t| t.claims)
     }
@@ -385,7 +385,7 @@ mod tests {
     use crate::headers::{HeaderMap, HeaderValue};
     use crate::http::Extensions;
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     struct TestClaims {
         sub: String,
         exp: u64,

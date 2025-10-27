@@ -61,7 +61,10 @@ impl Endpoints {
             None => return RouteOption::RouteNotFound,
         };
 
-        let handlers = &route_params.route.handlers;
+        let Some(handlers) = &route_params.route.handlers else { 
+            return RouteOption::RouteNotFound;
+        };
+        
         handlers.get(method).map_or_else(
             || RouteOption::MethodNotFound(handlers.keys()
                 .map(|key| key.as_str())
@@ -91,7 +94,9 @@ impl Endpoints {
     pub(crate) fn contains(&mut self, method: &Method, pattern: &str) -> bool {
         let path_segments = Self::split_path(pattern);
         self.routes.find(&path_segments)
-            .map(|params| params.route.handlers.contains_key(method))
+            .map(|params| params.route.handlers
+                .as_ref()
+                .is_some_and(|h| h.contains_key(method)))
             .unwrap_or(false)
     }
 

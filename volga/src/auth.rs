@@ -59,7 +59,6 @@ fn map_jwt_error_to_status(err: &ErrorKind) -> StatusCode {
         Base64(_)
         | Json(_)
         | Utf8(_)
-        | Crypto(_)
         | InvalidKeyFormat => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -82,7 +81,6 @@ fn map_jwt_error_to_www_authenticate(err: &ErrorKind) -> &'static str {
         Json(_) => r#"Bearer error="invalid_request", error_description="Token payload is not valid JSON""#,
         Utf8(_) => r#"Bearer error="invalid_request", error_description="Token contains invalid UTF-8 characters""#,
         InvalidKeyFormat => r#"Bearer error="invalid_request", error_description="Invalid key format""#,
-        Crypto(_) => r#"Bearer error="invalid_token", error_description="Cryptographic error during token validation""#,
         _ => r#"Bearer error="server_error", error_description="Internal token processing error""#,
     }
 }
@@ -115,7 +113,7 @@ impl App {
     /// use volga::{App, auth::{AuthClaims, roles}};
     /// use serde::Deserialize;
     ///
-    /// #[derive(Deserialize)]
+    /// #[derive(Clone, Deserialize)]
     /// struct MyClaims {
     ///     role: String
     /// }
@@ -160,7 +158,7 @@ impl<'a> Route<'a> {
     /// use volga::{App, auth::{AuthClaims, roles}};
     /// use serde::Deserialize;
     /// 
-    /// #[derive(Deserialize)]
+    /// #[derive(Clone, Deserialize)]
     /// struct MyClaims {
     ///     role: String
     /// }
@@ -193,7 +191,7 @@ impl<'a> RouteGroup<'a> {
     /// use volga::{App, auth::{AuthClaims, roles}};
     /// use serde::Deserialize;
     ///
-    /// #[derive(Deserialize)]
+    /// #[derive(Clone, Deserialize)]
     /// struct MyClaims {
     ///     role: String
     /// }

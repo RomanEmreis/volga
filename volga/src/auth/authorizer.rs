@@ -75,7 +75,7 @@ pub type ClaimsValidator<C> = dyn Fn(&C) -> bool + Send + Sync + 'static;
 /// use volga::auth::{Authorizer, AuthClaims, role, roles};
 /// use serde::Deserialize;
 /// 
-/// #[derive(Deserialize)]
+/// #[derive(Clone, Deserialize)]
 /// struct MyClaims {
 ///     role: String
 /// }
@@ -201,7 +201,7 @@ impl<C: AuthClaims> Authorizer<C> {
 mod tests {
     use super::{Authorizer, AuthClaims, role, roles};
 
-    #[derive(serde::Deserialize)]
+    #[derive(Clone, serde::Deserialize)]
     struct Claims {
         role: String,
     }

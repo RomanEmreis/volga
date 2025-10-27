@@ -17,7 +17,7 @@ use crate::http::request::HttpRequest;
 
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
-const DEFAULT_CAPACITY: usize = 8;
+//const DEFAULT_CAPACITY: usize = 8;
 
 /// Route path arguments
 pub(crate) type PathArguments = Box<[(Cow<'static, str>, Cow<'static, str>)]>;
@@ -151,7 +151,7 @@ impl RoutePipeline {
 /// A node in the route tree
 #[derive(Clone)]
 pub(crate) struct RouteNode {
-    pub(crate) handlers: HashMap<Method, RoutePipeline>,
+    pub(crate) handlers: Option<HashMap<Method, RoutePipeline>>,
     static_routes: HashMap<Cow<'static, str>, RouteNode>,
     dynamic_route: Option<(Cow<'static, str>, Box<RouteNode>)>,
 }
@@ -166,8 +166,8 @@ impl RouteNode {
     #[inline]
     pub(crate) fn new() -> Self {
         Self {
-            static_routes: HashMap::with_capacity(DEFAULT_CAPACITY),
-            handlers: HashMap::new(),
+            static_routes: HashMap::new(),
+            handlers: None,
             dynamic_route: None,
         }
     }
@@ -201,6 +201,7 @@ impl RouteNode {
             if is_last {
                 current
                     .handlers
+                    .get_or_insert_with(HashMap::new)
                     .entry(method.clone())
                     .or_insert_with(RoutePipeline::new)
                     .insert(handler.clone());
@@ -229,15 +230,15 @@ impl RouteNode {
 
             return None;
         }
-
-        if current.handlers.is_empty() {
-            None
-        } else {
-            Some(RouteParams {
+        
+        (!current
+            .handlers
+            .as_ref()
+            .map_or(true, |h| h.is_empty()))
+            .then_some(RouteParams {
                 route: current,
                 params: params.into_boxed_slice(),
             })
-        }
     }
     
     #[cfg(feature = "middleware")]
@@ -247,14 +248,16 @@ impl RouteNode {
             route.compose();
         }
 
-        // Compose dynamic route if present
+        // Compose a dynamic route if present
         if let Some((_, ref mut dyn_route)) = self.dynamic_route {
             dyn_route.compose();
         }
 
         // Compose handlers at this level
-        for pipeline in self.handlers.values_mut() {
-            pipeline.compose();
+        if let Some(ref mut handlers) = self.handlers {
+            for pipeline in handlers.values_mut() {
+                pipeline.compose();
+            }    
         }
     }
 
@@ -294,7 +297,10 @@ impl RouteNode {
         }
 
         // Record handlers for this node
-        for method in self.handlers.keys() {
+        let Some(ref handlers) = self.handlers else { 
+            return;
+        };
+        for method in handlers.keys() {
             let route_path = if current_path.is_empty() {
                 "/".to_string()
             } else {
