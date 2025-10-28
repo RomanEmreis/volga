@@ -1,5 +1,6 @@
-﻿use std::{borrow::Cow, collections::HashMap};
+﻿use std::borrow::Cow;
 use hyper::Method;
+use smallvec::SmallVec;
 use crate::http::endpoints::handlers::RouteHandler;
 use crate::{status, HttpResult};
 
@@ -147,12 +148,24 @@ impl RoutePipeline {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct RouteEndpoint {
+    pub(crate) method: Method,
+    pub(crate) pipeline: RoutePipeline
+}
+
+#[derive(Clone)]
+pub(crate) struct RouteEntry {
+    path: Cow<'static, str>,
+    node: Box<RouteNode>
+}
+
 /// A node in the route tree
 #[derive(Clone)]
 pub(crate) struct RouteNode {
-    pub(crate) handlers: Option<HashMap<Method, RoutePipeline>>,
-    static_routes: HashMap<Cow<'static, str>, RouteNode>,
-    dynamic_route: Option<(Cow<'static, str>, Box<RouteNode>)>,
+    pub(crate) handlers: Option<SmallVec<[RouteEndpoint; 4]>>,
+    static_routes: SmallVec<[RouteEntry; 8]>,
+    dynamic_route: Option<RouteEntry>,
 }
 
 /// Parameters of a route
@@ -161,11 +174,38 @@ pub(crate) struct RouteParams<'route> {
     pub(crate) params: PathArguments
 }
 
+impl RouteEntry {
+    #[inline]
+    fn new(path: Cow<'static, str>) -> Self {
+        Self { 
+            node: Box::new(RouteNode::new()),
+            path
+        }
+    }
+}
+
+impl RouteEndpoint {
+    #[inline]
+    fn new(method: Method) -> Self {
+        Self { method, pipeline: RoutePipeline::new() }
+    }
+    
+    #[inline]
+    fn insert(&mut self, handler: Layer) {
+        self.pipeline.insert(handler);
+    }
+    
+    #[inline(always)]
+    pub(super) fn cmp(&self, method: &Method) -> std::cmp::Ordering {
+        method_order(&self.method).cmp(&method_order(method))
+    }
+}
+
 impl RouteNode {
     #[inline]
     pub(crate) fn new() -> Self {
         Self {
-            static_routes: HashMap::new(),
+            static_routes: SmallVec::new(),
             handlers: None,
             dynamic_route: None,
         }
@@ -177,34 +217,20 @@ impl RouteNode {
         method: Method,
         handler: Layer,
     ) {
-        let last_index = path_segments.len() - 1;
         let mut current = self;
-
+        let  last_index = path_segments.len() - 1;
+        
         for (index, segment) in path_segments.iter().enumerate() {
             let is_last = index == last_index;
 
             if Self::is_dynamic_segment(segment) {
-                let param_name = segment.clone();
-
-                current = current
-                    .dynamic_route
-                    .get_or_insert_with(|| (param_name, Box::new(RouteNode::new())))
-                    .1
-                    .as_mut();
+                current = current.insert_dynamic_node(segment.clone())
             } else {
-                current = current
-                    .static_routes
-                    .entry(segment.clone())
-                    .or_insert_with(RouteNode::new);
+                current = current.insert_static_node(segment.clone());
             }
 
             if is_last {
-                current
-                    .handlers
-                    .get_or_insert_with(HashMap::new)
-                    .entry(method.clone())
-                    .or_insert_with(RoutePipeline::new)
-                    .insert(handler.clone());
+                current.insert_handler(method.clone(), handler.clone());
             }
         }
     }
@@ -217,14 +243,14 @@ impl RouteNode {
         let mut params = Vec::new();
 
         for segment in path_segments.iter() {
-            if let Some(next) = current.static_routes.get(segment) {
-                current = next;
+            if let Ok(i) = current.static_routes.binary_search_by(|r| r.path.cmp(segment)) {
+                current = current.static_routes[i].node.as_ref();
                 continue;
             }
 
-            if let Some((param_name, dyn_node)) = &current.dynamic_route {
-                params.push((param_name.clone(), segment.clone()));
-                current = dyn_node;
+            if let Some(next) = &current.dynamic_route {
+                params.push((next.path.clone(), segment.clone()));
+                current = next.node.as_ref();
                 continue;
             }
 
@@ -244,20 +270,19 @@ impl RouteNode {
     #[cfg(feature = "middleware")]
     pub(crate) fn compose(&mut self) {
         // Compose all static routes
-        for route in self.static_routes.values_mut() {
-            route.compose();
+        for route in self.static_routes.iter_mut() {
+            route.node.compose();
         }
 
         // Compose a dynamic route if present
-        if let Some((_, ref mut dyn_route)) = self.dynamic_route {
-            dyn_route.compose();
+        if let Some(route) = self.dynamic_route.as_mut() {
+            route.node.compose();
         }
-
-        // Compose handlers at this level
+        
         if let Some(ref mut handlers) = self.handlers {
-            for pipeline in handlers.values_mut() {
-                pipeline.compose();
-            }    
+            for pipeline in handlers.iter_mut() {
+                pipeline.pipeline.compose();
+            }
         }
     }
 
@@ -277,43 +302,94 @@ impl RouteNode {
         current_path: String
     ) {
         // Traverse static routes
-        for (segment, node) in &self.static_routes {
+        for route in self.static_routes.iter() {
             let new_path = if current_path.is_empty() {
-                format!("/{segment}")
+                format!("/{}", route.path)
             } else {
-                format!("{current_path}/{segment}")
+                format!("{current_path}/{}", route.path)
             };
-            node.traverse_routes(routes, new_path);
+            route.node.traverse_routes(routes, new_path);
         }
-
+        
         // Traverse dynamic route (if any)
-        if let Some((param_name, dyn_node)) = &self.dynamic_route {
+        if let Some(route) = &self.dynamic_route {
             let new_path = if current_path.is_empty() {
-                format!("/{param_name}")
+                format!("/{}", route.path)
             } else {
-                format!("{current_path}/{param_name}")
+                format!("{current_path}/{}", route.path)
             };
-            dyn_node.traverse_routes(routes, new_path);
+            route.node.traverse_routes(routes, new_path);
         }
 
         // Record handlers for this node
         let Some(ref handlers) = self.handlers else { 
             return;
         };
-        for method in handlers.keys() {
+
+        for handler in handlers.iter() {
             let route_path = if current_path.is_empty() {
                 "/".to_string()
             } else {
                 current_path.clone()
             };
-            routes.push(super::meta::RouteInfo::new(method.clone(), &route_path));
+            routes.push(super::meta::RouteInfo::new(handler.method.clone(), &route_path));
         }
     }
 
     #[inline]
+    fn insert_static_node(&mut self, segment: Cow<'static, str>) -> &mut Self {
+        match self.static_routes.binary_search_by(|r| r.path.cmp(&segment)) {
+            Ok(i) => &mut self.static_routes[i].node,
+            Err(i) => {
+                self.static_routes.insert(i, RouteEntry::new(segment));
+                &mut self.static_routes[i].node
+            }
+        }
+    }
+
+    #[inline]
+    fn insert_dynamic_node(&mut self, segment: Cow<'static, str>) -> &mut Self {
+        self
+            .dynamic_route
+            .get_or_insert_with(|| RouteEntry::new(segment))
+            .node
+            .as_mut()
+    }
+
+    #[inline]
+    fn insert_handler(&mut self, method: Method, handler: Layer) {
+        let handlers = self
+            .handlers
+            .get_or_insert_with(SmallVec::new);
+
+        let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
+            Ok(i) => &mut handlers[i],
+            Err(i) => {
+                handlers.insert(i, RouteEndpoint::new(method));
+                &mut handlers[i]
+            }
+        };
+        endpoint.insert(handler);
+    }
+
+    #[inline(always)]
     fn is_dynamic_segment(segment: &str) -> bool {
-        segment.starts_with(OPEN_BRACKET) && 
+        segment.starts_with(OPEN_BRACKET) &&
         segment.ends_with(CLOSE_BRACKET)
+    }
+}
+
+#[inline(always)]
+fn method_order(method: &Method) -> u8 {
+    match *method {
+        Method::GET => 0,
+        Method::POST => 1,
+        Method::PUT => 2,
+        Method::DELETE => 3,
+        Method::PATCH => 4,
+        Method::OPTIONS => 5,
+        Method::HEAD => 6,
+        _ => 255,
     }
 }
 

@@ -43,6 +43,7 @@ fn benchmark(c: &mut Criterion) {
                 .without_greeter();
             
             app.map_get("/", || async { "Hello, World!" });
+            app.map_get("/a/ab/bc/d", || async { "Hello, World!" });
             app.map_get("/err", || async { Error::other("error") });
             app.map_err(|err: volga::error::Error| async move { status!(500, err.to_string()) });
             app.map_fallback(|| async { status!(404) });
@@ -52,6 +53,9 @@ fn benchmark(c: &mut Criterion) {
     
     c.bench_function("ok", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/")))
+    ));
+    c.bench_function("path", |b| b.iter_custom(
+        |iters| rt.block_on(routing(iters, black_box("//a/ab/bc/d")))
     ));
     c.bench_function("err", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/err")))

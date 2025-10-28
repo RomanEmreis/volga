@@ -64,15 +64,17 @@ impl Endpoints {
         let Some(handlers) = &route_params.route.handlers else { 
             return RouteOption::RouteNotFound;
         };
-        
-        handlers.get(method).map_or_else(
-            || RouteOption::MethodNotFound(handlers.keys()
-                .map(|key| key.as_str())
+
+        handlers
+            .binary_search_by(|h| h.cmp(method))
+            .map_or_else(
+            |_| RouteOption::MethodNotFound(handlers.iter()
+                .map(|h| h.method.as_str())
                 .collect::<Vec<_>>()
                 .join(ALLOW_METHOD_SEPARATOR)),
-            |handlers| RouteOption::Ok(
-                EndpointContext::new(handlers.clone(), route_params.params)
-        ))
+            |i| RouteOption::Ok(
+                EndpointContext::new(handlers[i].pipeline.clone(), route_params.params)
+            ))
     }
 
     /// Maps the request handler to the current HTTP Verb and route pattern
@@ -96,7 +98,8 @@ impl Endpoints {
         self.routes.find(&path_segments)
             .map(|params| params.route.handlers
                 .as_ref()
-                .is_some_and(|h| h.contains_key(method)))
+                .is_some_and(|h| h.iter().any(|h| h.method == *method)))
+                //.is_some_and(|h| h.contains_key(method)))
             .unwrap_or(false)
     }
 

@@ -34,6 +34,7 @@ tokio-util = "0.7.16"
 serde = "1.0.228"
 serde_json = "1.0.145"
 serde_urlencoded = "0.7.1"
+smallvec = "1.15.1"
 
 # optional
 async-compression = { version = "0.4.32", features = ["tokio"], optional = true }
