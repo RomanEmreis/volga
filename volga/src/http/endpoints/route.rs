@@ -1,6 +1,6 @@
-﻿use std::borrow::Cow;
-use hyper::Method;
+﻿use hyper::Method;
 use smallvec::SmallVec;
+use std::sync::Arc;
 use crate::http::endpoints::handlers::RouteHandler;
 use crate::{status, HttpResult};
 
@@ -18,9 +18,12 @@ use crate::http::request::HttpRequest;
 
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
+const PATH_SEPARATOR: char = '/';
+const DEFAULT_SEGMENT_NUMBER: usize = 6;
+const DEFAULT_HANDLER_NUMBER: usize = 4;
 
 /// Route path arguments
-pub(crate) type PathArguments = Box<[(Cow<'static, str>, Cow<'static, str>)]>;
+pub(crate) type PathArgs = Box<[(Arc<str>, Arc<str>)]>;
 
 /// A layer of middleware or a route handler
 #[derive(Clone)]
@@ -156,31 +159,36 @@ pub(crate) struct RouteEndpoint {
 
 #[derive(Clone)]
 pub(crate) struct RouteEntry {
-    path: Cow<'static, str>,
+    path: Box<str>,
     node: Box<RouteNode>
 }
 
 /// A node in the route tree
 #[derive(Clone)]
 pub(crate) struct RouteNode {
-    pub(crate) handlers: Option<SmallVec<[RouteEndpoint; 4]>>,
-    static_routes: SmallVec<[RouteEntry; 8]>,
+    pub(crate) handlers: Option<SmallVec<[RouteEndpoint; DEFAULT_HANDLER_NUMBER]>>,
+    static_routes: SmallVec<[RouteEntry; DEFAULT_SEGMENT_NUMBER]>,
     dynamic_route: Option<RouteEntry>,
 }
 
 /// Parameters of a route
 pub(crate) struct RouteParams<'route> {
     pub(crate) route: &'route RouteNode,
-    pub(crate) params: PathArguments
+    pub(crate) params: PathArgs
 }
 
 impl RouteEntry {
     #[inline]
-    fn new(path: Cow<'static, str>) -> Self {
+    fn new(path: &str) -> Self {
         Self { 
             node: Box::new(RouteNode::new()),
-            path
+            path: path.into()
         }
+    }
+
+    #[inline(always)]
+    fn cmp(&self, path: &str) -> std::cmp::Ordering {
+        self.path.as_ref().cmp(path)
     }
 }
 
@@ -213,43 +221,37 @@ impl RouteNode {
 
     pub(crate) fn insert(
         &mut self,
-        path_segments: &[Cow<'static, str>],
+        path: &str,
         method: Method,
         handler: Layer,
     ) {
         let mut current = self;
-        let  last_index = path_segments.len() - 1;
+        let path_segments = split_path(path);
         
-        for (index, segment) in path_segments.iter().enumerate() {
-            let is_last = index == last_index;
-
+        for segment in path_segments {
             if Self::is_dynamic_segment(segment) {
                 current = current.insert_dynamic_node(segment.clone())
             } else {
                 current = current.insert_static_node(segment.clone());
             }
-
-            if is_last {
-                current.insert_handler(method.clone(), handler.clone());
-            }
         }
+
+        current.insert_handler(method, handler);
     }
 
-    pub(crate) fn find(
-        &self,
-        path_segments: &[Cow<'static, str>],
-    ) -> Option<RouteParams<'_>> {
+    pub(crate) fn find(&self, path: &str) -> Option<RouteParams<'_>> {
         let mut current = self;
         let mut params = Vec::new();
+        let path_segments = split_path(path);
 
-        for segment in path_segments.iter() {
-            if let Ok(i) = current.static_routes.binary_search_by(|r| r.path.cmp(segment)) {
+        for segment in path_segments {
+            if let Ok(i) = current.static_routes.binary_search_by(|r| r.cmp(segment)) {
                 current = current.static_routes[i].node.as_ref();
                 continue;
             }
 
             if let Some(next) = &current.dynamic_route {
-                params.push((next.path.clone(), segment.clone()));
+                params.push((next.path.clone().into(), segment.into()));
                 current = next.node.as_ref();
                 continue;
             }
@@ -337,8 +339,8 @@ impl RouteNode {
     }
 
     #[inline]
-    fn insert_static_node(&mut self, segment: Cow<'static, str>) -> &mut Self {
-        match self.static_routes.binary_search_by(|r| r.path.cmp(&segment)) {
+    fn insert_static_node(&mut self, segment: &str) -> &mut Self {
+        match self.static_routes.binary_search_by(|r| r.cmp(segment)) {
             Ok(i) => &mut self.static_routes[i].node,
             Err(i) => {
                 self.static_routes.insert(i, RouteEntry::new(segment));
@@ -348,7 +350,7 @@ impl RouteNode {
     }
 
     #[inline]
-    fn insert_dynamic_node(&mut self, segment: Cow<'static, str>) -> &mut Self {
+    fn insert_dynamic_node(&mut self, segment: &str) -> &mut Self {
         self
             .dynamic_route
             .get_or_insert_with(|| RouteEntry::new(segment))
@@ -380,6 +382,12 @@ impl RouteNode {
 }
 
 #[inline(always)]
+fn split_path(path: &str) -> impl Iterator<Item = &str> {
+    path.trim_matches(PATH_SEPARATOR)
+        .split(PATH_SEPARATOR)
+}
+
+#[inline(always)]
 fn method_order(method: &Method) -> u8 {
     match *method {
         Method::GET => 0,
@@ -407,12 +415,12 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
         
-        let path = ["test".into()];
+        let path = "test";
         
         let mut route = RouteNode::new();
-        route.insert(&path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into());
         
-        let route_params = route.find(&path);
+        let route_params = route.find(path);
         
         assert!(route_params.is_some());
     }
@@ -422,18 +430,18 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path = ["test".into(), "{value}".into()];
+        let path = "test/{value}";
 
         let mut route = RouteNode::new();
-        route.insert(&path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into());
 
-        let path = ["test".into(), "some".into()];
+        let path = "test/some";
         
-        let route_params = route.find(&path).unwrap();
+        let route_params = route.find(path).unwrap();
         let param = route_params.params.first().unwrap();
         let (_param, val) = param;
         
-        assert_eq!(val, "some");
+        assert_eq!(val.as_ref(), "some");
     }
 
     #[test]
@@ -442,10 +450,10 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path = ["users".into()];
+        let path = "/users";
 
         let mut route = RouteNode::new();
-        route.insert(&path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into());
 
         let routes = route.collect();
 
@@ -459,11 +467,11 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path = ["users".into()];
+        let path = "/users";
 
         let mut route = RouteNode::new();
-        route.insert(&path, Method::GET, handler.clone().into());
-        route.insert(&path, Method::POST, handler.into());
+        route.insert(path, Method::GET, handler.clone().into());
+        route.insert(path, Method::POST, handler.into());
 
         let routes = route.collect();
 
@@ -478,18 +486,18 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path1 = ["users".into()];
-        let path2 = ["users".into(), "profile".into()];
+        let path1 = "/users";
+        let path2 = "/users/profile";
 
         let mut route = RouteNode::new();
-        route.insert(&path1, Method::GET, handler.clone().into());
-        route.insert(&path2, Method::GET, handler.into());
+        route.insert(path1, Method::GET, handler.clone().into());
+        route.insert(path2, Method::GET, handler.into());
 
         let routes = route.collect();
 
         assert_eq!(routes.len(), 2);
-        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users")));
-        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users/profile")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, path1)));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, path2)));
     }
 
     #[test]
@@ -498,15 +506,15 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path = ["users".into(), "{id}".into()];
+        let path = "/users/{id}";
 
         let mut route = RouteNode::new();
-        route.insert(&path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into());
 
         let routes = route.collect();
 
         assert_eq!(routes.len(), 1);
-        assert_eq!(routes[0], (Method::GET, "/users/{id}"));
+        assert_eq!(routes[0], (Method::GET, path));
     }
 
     #[test]
@@ -515,21 +523,21 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path1 = ["users".into()];
-        let path2 = ["users".into(), "{id}".into()];
-        let path3 = ["users".into(), "{id}".into(), "posts".into()];
+        let path1 = "/users";
+        let path2 = "/users/{id}";
+        let path3 = "/users/{id}/posts";
 
         let mut route = RouteNode::new();
-        route.insert(&path1, Method::GET, handler.clone().into());
-        route.insert(&path2, Method::GET, handler.clone().into());
-        route.insert(&path3, Method::GET, handler.into());
+        route.insert(path1, Method::GET, handler.clone().into());
+        route.insert(path2, Method::GET, handler.clone().into());
+        route.insert(path3, Method::GET, handler.into());
 
         let routes = route.collect();
         
         assert_eq!(routes.len(), 3);
-        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users")));
-        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users/{id}")));
-        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users/{id}/posts")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, path1)));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, path2)));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, path3)));
     }
 
     #[test]
@@ -538,10 +546,10 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path = ["".into()];
+        let path = "";
 
         let mut route = RouteNode::new();
-        route.insert(&path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into());
 
         let routes = route.collect();
 
@@ -558,13 +566,13 @@ mod tests {
         let mut route = RouteNode::new();
 
         // Add various routes
-        route.insert(&["api".into(), "v1".into(), "users".into()], Method::GET, handler.clone().into());
-        route.insert(&["api".into(), "v1".into(), "users".into()], Method::POST, handler.clone().into());
-        route.insert(&["api".into(), "v1".into(), "users".into(), "{id}".into()], Method::GET, handler.clone().into());
-        route.insert(&["api".into(), "v1".into(), "users".into(), "{id}".into()], Method::PUT, handler.clone().into());
-        route.insert(&["api".into(), "v1".into(), "users".into(), "{id}".into()], Method::DELETE, handler.clone().into());
-        route.insert(&["api".into(), "v1".into(), "posts".into()], Method::GET, handler.clone().into());
-        route.insert(&["api".into(), "v2".into(), "users".into()], Method::GET, handler.into());
+        route.insert("/api/v1/users", Method::GET, handler.clone().into());
+        route.insert("/api/v1/users", Method::POST, handler.clone().into());
+        route.insert("/api/v1/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/api/v1/users/{id}", Method::PUT, handler.clone().into());
+        route.insert("/api/v1/users/{id}", Method::DELETE, handler.clone().into());
+        route.insert("/api/v1/posts", Method::GET, handler.clone().into());
+        route.insert("/api/v2/users", Method::GET, handler.into());
 
         let routes = route.collect();
 
@@ -594,15 +602,15 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path = ["users".into(), "{userId}".into(), "posts".into(), "{postId}".into(), "comments".into()];
+        let path = "/users/{userId}/posts/{postId}/comments";
 
         let mut route = RouteNode::new();
-        route.insert(&path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into());
 
         let routes = route.collect();
 
         assert_eq!(routes.len(), 1);
-        assert_eq!(routes[0], (Method::GET, "/users/{userId}/posts/{postId}/comments"));
+        assert_eq!(routes[0], (Method::GET, path));
     }
 
     #[test]
@@ -611,14 +619,14 @@ mod tests {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
 
-        let path = ["resource".into()];
+        let path = "resource";
 
         let mut route = RouteNode::new();
-        route.insert(&path, Method::GET, handler.clone().into());
-        route.insert(&path, Method::POST, handler.clone().into());
-        route.insert(&path, Method::PUT, handler.clone().into());
-        route.insert(&path, Method::DELETE, handler.clone().into());
-        route.insert(&path, Method::PATCH, handler.into());
+        route.insert(path, Method::GET, handler.clone().into());
+        route.insert(path, Method::POST, handler.clone().into());
+        route.insert(path, Method::PUT, handler.clone().into());
+        route.insert(path, Method::DELETE, handler.clone().into());
+        route.insert(path, Method::PATCH, handler.into());
 
         let routes = route.collect();
 

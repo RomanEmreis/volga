@@ -1,9 +1,8 @@
 ﻿//! Endpoints mapping utilities
 
-use std::borrow::Cow;
 use hyper::{Method, Uri};
 use super::endpoints::{
-    route::{RouteNode, RoutePipeline, PathArguments},
+    route::{RouteNode, RoutePipeline, PathArgs},
     handlers::RouteHandler
 };
 
@@ -17,7 +16,6 @@ pub(crate) mod route;
 pub mod args;
 
 const ALLOW_METHOD_SEPARATOR: &str = ",";
-const PATH_SEPARATOR: char = '/';
 
 /// Describes a mapping between HTTP Verbs, routes and request handlers
 pub(crate) struct Endpoints {
@@ -34,20 +32,21 @@ pub(crate) enum RouteOption {
 /// Describes the context of the executing route
 pub(crate) struct EndpointContext {
     pub(crate) pipeline: RoutePipeline,
-    pub(crate) params: PathArguments
+    pub(crate) params: PathArgs
 }
 
 impl EndpointContext {
-    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArguments) {
+    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs) {
         (self.pipeline, self.params)
     }
 
-    fn new(pipeline: RoutePipeline, params: PathArguments) -> Self {
+    fn new(pipeline: RoutePipeline, params: PathArgs) -> Self {
         Self { pipeline, params }
     }
 }
 
 impl Endpoints {
+    /// Creates a new endpoints collection
     pub(crate) fn new() -> Self {
         Self { routes: RouteNode::new() }
     }
@@ -55,8 +54,7 @@ impl Endpoints {
     /// Gets a context of the executing route by its `HttpRequest`
     #[inline]
     pub(crate) fn get_endpoint(&self, method: &Method, uri: &Uri) -> RouteOption {
-        let path_segments = Self::split_path(uri.path());
-        let route_params = match self.routes.find(&path_segments) {
+        let route_params = match self.routes.find(uri.path()) {
             Some(params) => params,
             None => return RouteOption::RouteNotFound,
         };
@@ -68,38 +66,38 @@ impl Endpoints {
         handlers
             .binary_search_by(|h| h.cmp(method))
             .map_or_else(
-            |_| RouteOption::MethodNotFound(handlers.iter()
-                .map(|h| h.method.as_str())
-                .collect::<Vec<_>>()
-                .join(ALLOW_METHOD_SEPARATOR)),
-            |i| RouteOption::Ok(
-                EndpointContext::new(handlers[i].pipeline.clone(), route_params.params)
+                |_| RouteOption::MethodNotFound(handlers.iter()
+                    .map(|h| h.method.as_str())
+                    .collect::<Vec<_>>()
+                    .join(ALLOW_METHOD_SEPARATOR)),
+                |i| RouteOption::Ok(
+                    EndpointContext::new(handlers[i].pipeline.clone(), route_params.params)
             ))
     }
 
     /// Maps the request handler to the current HTTP Verb and route pattern
     #[inline]
     pub(crate) fn map_route(&mut self, method: Method, pattern: &str, handler: RouteHandler) {
-        let path_segments = Self::split_path(pattern);
-        self.routes.insert(&path_segments, method, handler.into());
+        self.routes
+            .insert(pattern, method, handler.into());
     }
 
     /// Maps the request layer to the current HTTP Verb and route pattern
     #[inline]
     #[cfg(feature = "middleware")]
     pub(crate) fn map_layer(&mut self, method: Method, pattern: &str, handler: Layer) {
-        let path_segments = Self::split_path(pattern);
-        self.routes.insert(&path_segments, method, handler);
+        self.routes
+            .insert(pattern, method, handler);
     }
     
     #[inline]
     pub(crate) fn contains(&mut self, method: &Method, pattern: &str) -> bool {
-        let path_segments = Self::split_path(pattern);
-        self.routes.find(&path_segments)
+        self.routes.find(pattern)
             .map(|params| params.route.handlers
                 .as_ref()
-                .is_some_and(|h| h.iter().any(|h| h.method == *method)))
-                //.is_some_and(|h| h.contains_key(method)))
+                .is_some_and(|h| h
+                    .binary_search_by(|r| r.cmp(method))
+                    .is_ok()))
             .unwrap_or(false)
     }
 
@@ -113,14 +111,6 @@ impl Endpoints {
     #[cfg(feature = "middleware")]
     pub(crate) fn compose(&mut self) {
         self.routes.compose();
-    }
-
-    #[inline]
-    fn split_path(path: &str) -> Vec<Cow<'static, str>> {
-        path.trim_matches(PATH_SEPARATOR)
-            .split(PATH_SEPARATOR)
-            .map(|s| Cow::Owned(s.to_owned()))
-            .collect()
     }
 }
 

@@ -58,7 +58,7 @@ mod tests {
     use futures_util::future::{ok, err, Ready};
     use hyper::Request;
     use std::borrow::Cow;
-    use crate::http::endpoints::route::PathArguments;
+    use crate::http::endpoints::route::PathArgs;
 
     // Test extractors for testing
     struct SuccessExtractor;

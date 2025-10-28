@@ -1,6 +1,6 @@
 ﻿//! Extractors for HTTP request parts and body
 
-use std::{borrow::Cow, future::Future};
+use std::{sync::Arc, future::Future};
 use hyper::{
     body::Incoming,
     http::request::Parts,
@@ -9,7 +9,7 @@ use hyper::{
 
 use crate::{
     error::Error,
-    http::endpoints::route::PathArguments,
+    http::endpoints::route::PathArgs,
     HttpBody,
     HttpRequest
 };
@@ -38,7 +38,7 @@ pub(crate) enum Payload<'a> {
     Full(&'a Parts, HttpBody),
     Parts(&'a Parts),
     Body(HttpBody),
-    Path(&'a (Cow<'a, str>, Cow<'a, str>)),
+    Path(&'a (Arc<str>, Arc<str>)),
 }
 
 /// Describes a data source for extractors to read from
@@ -155,7 +155,7 @@ macro_rules! define_generic_from_request {
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
                 let (parts, body) = req.into_parts();
                 
-                let params = parts.extensions.get::<PathArguments>()
+                let params = parts.extensions.get::<PathArgs>()
                     .map(|params| &params[..])
                     .unwrap_or(&[]);
                 
@@ -167,7 +167,7 @@ macro_rules! define_generic_from_request {
                         Source::None => Payload::None,
                         Source::Parts => Payload::Parts(&parts),
                         Source::Path => match iter.next() {
-                            Some(param) => Payload::Path(&param),
+                            Some(param) => Payload::Path(param),
                             None => Payload::None
                         },
                         Source::Body => match body.take() {

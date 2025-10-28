@@ -16,7 +16,7 @@ use std::{
 };
 
 use crate::http::endpoints::{
-    route::PathArguments,
+    route::PathArgs,
     args::{
         FromPayload, 
         FromRequestParts, 
@@ -97,7 +97,7 @@ impl<T: DeserializeOwned + Send> TryFrom<&Extensions> for Path<T> {
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Error> {
         extensions
-            .get::<PathArguments>()
+            .get::<PathArgs>()
             .ok_or_else(PathError::args_missing)
             .and_then(|params| Self::from_slice(params))
     }
@@ -266,7 +266,7 @@ mod tests {
     use serde::Deserialize;
     use std::borrow::Cow;
     use crate::{HttpBody, HttpRequest, Path};
-    use crate::http::endpoints::route::PathArguments;
+    use crate::http::endpoints::route::PathArgs;
     use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
 
     #[derive(Deserialize)]
