@@ -37,8 +37,9 @@ pub(crate) enum Payload<'a> {
     Request(Box<HttpRequest>),
     Full(&'a Parts, HttpBody),
     Parts(&'a Parts),
+    Path(PathArg),
     Body(HttpBody),
-    Path(&'a PathArg),
+    PathArgs(PathArgs)
 }
 
 /// Describes a data source for extractors to read from
@@ -50,6 +51,7 @@ pub(crate) enum Source {
     Parts,
     Path,
     Body,
+    PathArgs
 }
 
 /// Specifies extractors to read data from HTTP request
@@ -153,19 +155,21 @@ macro_rules! define_generic_from_request {
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
             #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
-                let (parts, body) = req.into_parts();
+                let (mut parts, body) = req.into_parts();
                 
-                let params = parts.extensions.get::<PathArgs>()
-                    .map(|params| &params[..])
-                    .unwrap_or(&[]);
-                
+                let params = parts.extensions
+                    .remove::<PathArgs>()
+                    .unwrap_or_default();
+
                 let mut body = Some(body);
-                let mut iter = params.iter();
+                let mut iter = params.into_iter();
                 let tuple = (
                     $(
                     $T::from_payload(match $T::source() {
                         Source::None => Payload::None,
                         Source::Parts => Payload::Parts(&parts),
+                        Source::PathArgs => Payload::PathArgs(std::mem::take(&mut iter)
+                            .collect::<PathArgs>()),
                         Source::Path => match iter.next() {
                             Some(param) => Payload::Path(param),
                             None => Payload::None

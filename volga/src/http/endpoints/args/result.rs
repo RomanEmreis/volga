@@ -185,7 +185,7 @@ mod tests {
     async fn it_extracts_result_with_path_extractor() {
         let param = PathArg { name: "id".into(), value: "123".into() };
 
-        let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(&param)).await;
+        let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(param)).await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -197,7 +197,7 @@ mod tests {
     async fn it_extracts_result_with_path_extractor_returns_invalid_value() {
         let param = PathArg { name: "id".into(), value: "invalid".into() };
 
-        let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(&param)).await;
+        let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(param)).await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -220,7 +220,7 @@ mod tests {
     async fn it_extracts_result_with_primitive_types() {
         // Test with i32
         let param = PathArg { name: "id".into(), value: "42".into() };
-        let result = Result::<i32, Error>::from_payload(Payload::Path(&param)).await;
+        let result = Result::<i32, Error>::from_payload(Payload::Path(param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
@@ -228,14 +228,14 @@ mod tests {
 
         // Test with invalid i32
         let param = PathArg { name: "id".into(), value: "invalid".into() };
-        let result = Result::<i32, Error>::from_payload(Payload::Path(&param)).await;
+        let result = Result::<i32, Error>::from_payload(Payload::Path(param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_err());
 
         // Test with String
         let param = PathArg { name: "name".into(), value: "test".into() };
-        let result = Result::<String, Error>::from_payload(Payload::Path(&param)).await;
+        let result = Result::<String, Error>::from_payload(Payload::Path(param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
@@ -339,25 +339,14 @@ mod tests {
             PathArg { name: "id".into(), value: "123".into() }
         ];
 
-        let req = Request::get("/")
-            .extension(args)
-            .body(())
-            .unwrap();
-
-        let (parts, _) = req.into_parts();
-
         // Valid path should return Ok(Ok(value))
-        let result = Result::<Path<Params>, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result = Result::<Path<Params>, Error>::from_payload(Payload::PathArgs(args)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
         assert_eq!(inner_result.unwrap().id, 123);
 
-        // Test with missing path arguments - should return Ok(Err(error))
-        let req = Request::get("/").body(()).unwrap();
-        let (parts, _) = req.into_parts();
-
-        let result = Result::<Path<Params>, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result = Result::<Path<Params>, Error>::from_payload(Payload::PathArgs(PathArgs::new())).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_err());
