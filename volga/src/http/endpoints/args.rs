@@ -1,6 +1,6 @@
 ﻿//! Extractors for HTTP request parts and body
 
-use std::{sync::Arc, future::Future};
+use std::future::Future;
 use hyper::{
     body::Incoming,
     http::request::Parts,
@@ -9,7 +9,7 @@ use hyper::{
 
 use crate::{
     error::Error,
-    http::endpoints::route::PathArgs,
+    http::endpoints::route::{PathArg, PathArgs},
     HttpBody,
     HttpRequest
 };
@@ -38,7 +38,7 @@ pub(crate) enum Payload<'a> {
     Full(&'a Parts, HttpBody),
     Parts(&'a Parts),
     Body(HttpBody),
-    Path(&'a (Arc<str>, Arc<str>)),
+    Path(&'a PathArg),
 }
 
 /// Describes a data source for extractors to read from

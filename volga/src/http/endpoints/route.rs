@@ -1,6 +1,4 @@
 ﻿use hyper::Method;
-use smallvec::SmallVec;
-use std::sync::Arc;
 use crate::http::endpoints::handlers::RouteHandler;
 use crate::{status, HttpResult};
 
@@ -19,11 +17,23 @@ use crate::http::request::HttpRequest;
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const PATH_SEPARATOR: char = '/';
-const DEFAULT_SEGMENT_NUMBER: usize = 6;
-const DEFAULT_HANDLER_NUMBER: usize = 4;
 
 /// Route path arguments
-pub(crate) type PathArgs = Box<[(Arc<str>, Arc<str>)]>;
+pub(crate) type PathArgs = Vec<PathArg>;
+
+#[derive(Clone)]
+pub(crate) struct PathArg {
+    pub(crate) name: Box<str>,
+    pub(crate) value: Box<str>,
+}
+
+impl PathArg {
+    /// Creates a string in key=value format
+    #[inline]
+    pub(crate) fn query_format(&self) -> String {
+        format!("{}={}", self.name, self.value)
+    }
+}
 
 /// A layer of middleware or a route handler
 #[derive(Clone)]
@@ -166,8 +176,8 @@ pub(crate) struct RouteEntry {
 /// A node in the route tree
 #[derive(Clone)]
 pub(crate) struct RouteNode {
-    pub(crate) handlers: Option<SmallVec<[RouteEndpoint; DEFAULT_HANDLER_NUMBER]>>,
-    static_routes: SmallVec<[RouteEntry; DEFAULT_SEGMENT_NUMBER]>,
+    pub(crate) handlers: Option<Vec<RouteEndpoint>>,
+    static_routes: Vec<RouteEntry>,
     dynamic_route: Option<RouteEntry>,
 }
 
@@ -213,7 +223,7 @@ impl RouteNode {
     #[inline]
     pub(crate) fn new() -> Self {
         Self {
-            static_routes: SmallVec::new(),
+            static_routes: Vec::new(),
             handlers: None,
             dynamic_route: None,
         }
@@ -230,9 +240,9 @@ impl RouteNode {
         
         for segment in path_segments {
             if Self::is_dynamic_segment(segment) {
-                current = current.insert_dynamic_node(segment.clone())
+                current = current.insert_dynamic_node(segment)
             } else {
-                current = current.insert_static_node(segment.clone());
+                current = current.insert_static_node(segment);
             }
         }
 
@@ -251,7 +261,10 @@ impl RouteNode {
             }
 
             if let Some(next) = &current.dynamic_route {
-                params.push((next.path.clone().into(), segment.into()));
+                params.push(PathArg {
+                    name: next.path.clone(),
+                    value: segment.into()
+                });
                 current = next.node.as_ref();
                 continue;
             }
@@ -265,7 +278,7 @@ impl RouteNode {
             .map_or(true, |h| h.is_empty()))
             .then_some(RouteParams {
                 route: current,
-                params: params.into_boxed_slice(),
+                params,
             })
     }
     
@@ -362,7 +375,7 @@ impl RouteNode {
     fn insert_handler(&mut self, method: Method, handler: Layer) {
         let handlers = self
             .handlers
-            .get_or_insert_with(SmallVec::new);
+            .get_or_insert_with(Vec::new);
 
         let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
             Ok(i) => &mut handlers[i],
@@ -439,9 +452,8 @@ mod tests {
         
         let route_params = route.find(path).unwrap();
         let param = route_params.params.first().unwrap();
-        let (_param, val) = param;
         
-        assert_eq!(val.as_ref(), "some");
+        assert_eq!(param.value.as_ref(), "some");
     }
 
     #[test]

@@ -58,8 +58,7 @@ mod tests {
     use crate::{HttpBody, error::Error};
     use futures_util::future::{ok, err, Ready};
     use hyper::Request;
-    use std::borrow::Cow;
-    use crate::http::endpoints::route::PathArgs;
+    use crate::http::endpoints::route::{PathArg, PathArgs};
 
     // Test extractors for testing
     struct SuccessExtractor;
@@ -113,11 +112,11 @@ mod tests {
         type Future = Ready<Result<Self, Error>>;
 
         fn from_payload(payload: Payload) -> Self::Future {
-            let Payload::Path((_, value)) = payload else {
+            let Payload::Path(param) = payload else {
                 return err(Error::client_error("Expected path payload"));
             };
 
-            match value.parse::<u32>() {
+            match param.value.parse::<u32>() {
                 Ok(id) => ok(PathExtractor(id)),
                 Err(_) => err(Error::client_error("Invalid path parameter"))
             }
@@ -182,7 +181,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_option_with_path_extractor() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
+        let param = PathArg { name: "id".into(), value: "123".into() };
 
         let result = Option::<PathExtractor>::from_payload(Payload::Path(&param)).await;
 
@@ -194,7 +193,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_option_with_path_extractor_returns_invalid_value() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("invalid"));
+        let param = PathArg { name: "id".into(), value: "invalid".into() };
 
         let result = Option::<PathExtractor>::from_payload(Payload::Path(&param)).await;
 
@@ -216,19 +215,19 @@ mod tests {
     #[tokio::test]
     async fn it_extracts_option_with_primitive_types() {
         // Test with i32
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("42"));
+        let param = PathArg { name: "id".into(), value: "42".into() };
         let result = Option::<i32>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some(42));
 
         // Test with invalid i32
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("invalid"));
+        let param = PathArg { name: "id".into(), value: "invalid".into() };
         let result = Option::<i32>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
 
         // Test with String
-        let param = (Cow::Borrowed("name"), Cow::Borrowed("test"));
+        let param = PathArg { name: "name".into(), value: "test".into() };
         let result = Option::<String>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some("test".to_string()));
@@ -305,9 +304,9 @@ mod tests {
             id: u32,
         }
 
-        let args: PathArguments = vec![
-            (Cow::Borrowed("id"), Cow::Borrowed("123"))
-        ].into_boxed_slice();
+        let args: PathArgs = vec![
+            PathArg { name: "id".into(), value: "123".into() }
+        ];
 
         let req = Request::get("/")
             .extension(args)
