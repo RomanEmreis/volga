@@ -23,6 +23,11 @@ const DEFAULT_DEPTH: usize = 4;
 /// Route path arguments
 pub(crate) type PathArgs = SmallVec<[PathArg; DEFAULT_DEPTH]>;
 
+#[inline(always)]
+pub(crate) fn empty_path_args_iter<const N: usize>() -> smallvec::IntoIter<[PathArg; N]> {
+    SmallVec::<[PathArg; N]>::new().into_iter()
+}
+
 /// A single path argument
 #[derive(Clone)]
 pub(crate) struct PathArg {
@@ -214,7 +219,9 @@ impl RouteEntry {
     /// Compares two route entries
     #[inline(always)]
     fn cmp(&self, path: &str) -> std::cmp::Ordering {
-        self.path.as_ref().cmp(path)
+        self.path
+            .as_ref()
+            .cmp(path)
     }
 }
 
@@ -234,7 +241,9 @@ impl RouteEndpoint {
     /// Compares two route endpoints
     #[inline(always)]
     pub(super) fn cmp(&self, method: &Method) -> std::cmp::Ordering {
-        method_order(&self.method).cmp(&method_order(method))
+        let left = method_order(&self.method);
+        let right = method_order(method);
+        left.cmp(&right)
     }
 }
 
@@ -258,10 +267,10 @@ impl RouteNode {
     ) {
         let mut current = self;
         let path_segments = split_path(path);
-        
+
         for segment in path_segments {
             if Self::is_dynamic_segment(segment) {
-                current = current.insert_dynamic_node(segment)
+                current = current.insert_dynamic_node(segment);
             } else {
                 current = current.insert_static_node(segment);
             }
@@ -307,19 +316,20 @@ impl RouteNode {
     #[cfg(feature = "middleware")]
     pub(crate) fn compose(&mut self) {
         // Compose all static routes
-        for route in self.static_routes.iter_mut() {
-            route.node.compose();
-        }
+        self.static_routes
+            .iter_mut()
+            .for_each(|r| r.node.compose());
 
         // Compose a dynamic route if present
         if let Some(route) = self.dynamic_route.as_mut() {
             route.node.compose();
         }
         
-        if let Some(ref mut handlers) = self.handlers {
-            for pipeline in handlers.iter_mut() {
-                pipeline.pipeline.compose();
-            }
+        // Compose oute endpoint pipeline if present
+        if let Some(handlers) = self.handlers.as_mut() {
+            handlers
+                .iter_mut()
+                .for_each(|r| r.pipeline.compose());
         }
     }
 
@@ -373,7 +383,7 @@ impl RouteNode {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn insert_static_node(&mut self, segment: &str) -> &mut Self {
         match self.static_routes.binary_search_by(|r| r.cmp(segment)) {
             Ok(i) => &mut self.static_routes[i].node,
@@ -384,7 +394,7 @@ impl RouteNode {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn insert_dynamic_node(&mut self, segment: &str) -> &mut Self {
         self
             .dynamic_route
@@ -393,7 +403,7 @@ impl RouteNode {
             .as_mut()
     }
 
-    #[inline]
+    #[inline(always)]
     fn insert_handler(&mut self, method: Method, handler: Layer) {
         let handlers = self
             .handlers

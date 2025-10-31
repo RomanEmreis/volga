@@ -36,23 +36,25 @@ pub(crate) struct EndpointContext {
 }
 
 impl EndpointContext {
-    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs) {
-        (self.pipeline, self.params)
-    }
-
+    #[inline]
     fn new(pipeline: RoutePipeline, params: PathArgs) -> Self {
         Self { pipeline, params }
+    }
+
+    #[inline]
+    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs) {
+        (self.pipeline, self.params)
     }
 }
 
 impl Endpoints {
     /// Creates a new endpoints collection
+    #[inline]
     pub(crate) fn new() -> Self {
         Self { routes: RouteNode::new() }
     }
 
     /// Gets a context of the executing route by its `HttpRequest`
-    #[inline]
     pub(crate) fn get_endpoint(&self, method: &Method, uri: &Uri) -> RouteOption {
         let route_params = match self.routes.find(uri.path()) {
             Some(params) => params,

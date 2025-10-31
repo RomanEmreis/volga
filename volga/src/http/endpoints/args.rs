@@ -9,7 +9,7 @@ use hyper::{
 
 use crate::{
     error::Error,
-    http::endpoints::route::{PathArg, PathArgs},
+    http::endpoints::route::{PathArg, PathArgs, empty_path_args_iter},
     HttpBody,
     HttpRequest
 };
@@ -153,7 +153,6 @@ macro_rules! define_generic_from_request {
             }
         }
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
-            #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
                 let (mut parts, body) = req.into_parts();
                 
@@ -168,8 +167,9 @@ macro_rules! define_generic_from_request {
                     $T::from_payload(match $T::source() {
                         Source::None => Payload::None,
                         Source::Parts => Payload::Parts(&parts),
-                        Source::PathArgs => Payload::PathArgs(std::mem::replace(&mut iter, default_args())
-                            .collect::<PathArgs>()),
+                        Source::PathArgs => Payload::PathArgs(
+                            std::mem::replace(&mut iter, empty_path_args_iter()).collect::<PathArgs>()
+                        ),
                         Source::Path => match iter.next() {
                             Some(param) => Payload::Path(param),
                             None => Payload::None
@@ -183,7 +183,9 @@ macro_rules! define_generic_from_request {
                             None => Payload::None
                         },
                         Source::Request => match body.take() {
-                            Some(body) => Payload::Request(Box::new(HttpRequest::from_parts(parts.clone(), body))),
+                            Some(body) => Payload::Request(
+                                Box::new(HttpRequest::from_parts(parts.clone(), body))
+                            ),
                             None => Payload::None
                         },
                     }).await?,
@@ -205,10 +207,6 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
-
-fn default_args() -> smallvec::IntoIter<[PathArg; 4]> {
-    PathArgs::new().into_iter()
-}
 
 #[cfg(test)]
 mod tests {
