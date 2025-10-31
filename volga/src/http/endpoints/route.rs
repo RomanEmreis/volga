@@ -18,9 +18,10 @@ use crate::http::request::HttpRequest;
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const PATH_SEPARATOR: char = '/';
+const DEFAULT_DEPTH: usize = 4;
 
 /// Route path arguments
-pub(crate) type PathArgs = Vec<PathArg>;
+pub(crate) type PathArgs = SmallVec<[PathArg; DEFAULT_DEPTH]>;
 
 /// A single path argument
 #[derive(Clone)]
@@ -185,10 +186,10 @@ pub(crate) struct RouteEntry {
 #[derive(Clone)]
 pub(crate) struct RouteNode {
     /// A list of associated endpoints for each HTTP method
-    pub(crate) handlers: Option<SmallVec<[RouteEndpoint; 4]>>,
+    pub(crate) handlers: Option<SmallVec<[RouteEndpoint; DEFAULT_DEPTH]>>,
     
     /// List of static routes
-    static_routes: SmallVec<[RouteEntry; 4]>,
+    static_routes: SmallVec<[RouteEntry; DEFAULT_DEPTH]>,
     
     /// Dynamic route
     dynamic_route: Option<RouteEntry>,
@@ -272,7 +273,7 @@ impl RouteNode {
     /// Finds handlers by path
     pub(crate) fn find(&self, path: &str) -> Option<RouteParams<'_>> {
         let mut current = self;
-        let mut params = Vec::new();
+        let mut params = PathArgs::new();
         let path_segments = split_path(path);
 
         for segment in path_segments {

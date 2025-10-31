@@ -168,7 +168,7 @@ macro_rules! define_generic_from_request {
                     $T::from_payload(match $T::source() {
                         Source::None => Payload::None,
                         Source::Parts => Payload::Parts(&parts),
-                        Source::PathArgs => Payload::PathArgs(std::mem::take(&mut iter)
+                        Source::PathArgs => Payload::PathArgs(std::mem::replace(&mut iter, default_args())
                             .collect::<PathArgs>()),
                         Source::Path => match iter.next() {
                             Some(param) => Payload::Path(param),
@@ -205,6 +205,10 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
+
+fn default_args() -> smallvec::IntoIter<[PathArg; 4]> {
+    PathArgs::new().into_iter()
+}
 
 #[cfg(test)]
 mod tests {

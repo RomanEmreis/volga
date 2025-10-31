@@ -388,7 +388,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_path_from_payload() {
-        let args: PathArgs = vec![
+        let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
         ];
@@ -401,7 +401,7 @@ mod tests {
     
     #[test]
     fn it_parses_slice() {
-        let args: PathArgs = vec![
+        let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
         ];
@@ -414,7 +414,7 @@ mod tests {
 
     #[test]
     fn it_parses_request_extensions() {
-        let args: PathArgs = vec![
+        let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
         ];
@@ -430,7 +430,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_path_from_parts() {
-        let args: PathArgs = vec![
+        let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
         ];
@@ -449,7 +449,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_path_from_request_ref() {
-        let args: PathArgs = vec![
+        let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
         ];

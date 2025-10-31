@@ -304,7 +304,7 @@ mod tests {
             id: u32,
         }
 
-        let args: PathArgs = vec![
+        let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() }
         ];
 
