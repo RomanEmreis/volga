@@ -1,6 +1,7 @@
 ﻿use hyper::Method;
 use crate::http::endpoints::handlers::RouteHandler;
 use crate::{status, HttpResult};
+use smallvec::SmallVec;
 
 #[cfg(feature = "middleware")]
 use crate::middleware::{
@@ -21,9 +22,13 @@ const PATH_SEPARATOR: char = '/';
 /// Route path arguments
 pub(crate) type PathArgs = Vec<PathArg>;
 
+/// A single path argument
 #[derive(Clone)]
 pub(crate) struct PathArg {
+    /// Argument name
     pub(crate) name: Box<str>,
+    
+    /// Argument value
     pub(crate) value: Box<str>,
 }
 
@@ -161,12 +166,15 @@ impl RoutePipeline {
     }
 }
 
+/// Represents a full route's "local" middleware pipeline
+/// with handler 
 #[derive(Clone)]
 pub(crate) struct RouteEndpoint {
     pub(crate) method: Method,
     pub(crate) pipeline: RoutePipeline
 }
 
+/// Represents route path node
 #[derive(Clone)]
 pub(crate) struct RouteEntry {
     path: Box<str>,
@@ -176,8 +184,13 @@ pub(crate) struct RouteEntry {
 /// A node in the route tree
 #[derive(Clone)]
 pub(crate) struct RouteNode {
-    pub(crate) handlers: Option<Vec<RouteEndpoint>>,
-    static_routes: Vec<RouteEntry>,
+    /// A list of associated endpoints for each HTTP method
+    pub(crate) handlers: Option<SmallVec<[RouteEndpoint; 4]>>,
+    
+    /// List of static routes
+    static_routes: SmallVec<[RouteEntry; 4]>,
+    
+    /// Dynamic route
     dynamic_route: Option<RouteEntry>,
 }
 
@@ -188,6 +201,7 @@ pub(crate) struct RouteParams<'route> {
 }
 
 impl RouteEntry {
+    /// Creates a new [`RouteEntry`]
     #[inline]
     fn new(path: &str) -> Self {
         Self { 
@@ -196,6 +210,7 @@ impl RouteEntry {
         }
     }
 
+    /// Compares two route entries
     #[inline(always)]
     fn cmp(&self, path: &str) -> std::cmp::Ordering {
         self.path.as_ref().cmp(path)
@@ -203,16 +218,19 @@ impl RouteEntry {
 }
 
 impl RouteEndpoint {
+    /// Creates a new [`RouteEndpoint`]
     #[inline]
     fn new(method: Method) -> Self {
         Self { method, pipeline: RoutePipeline::new() }
     }
     
+    /// Inserts a layer into the pipeline
     #[inline]
     fn insert(&mut self, handler: Layer) {
         self.pipeline.insert(handler);
     }
     
+    /// Compares two route endpoints
     #[inline(always)]
     pub(super) fn cmp(&self, method: &Method) -> std::cmp::Ordering {
         method_order(&self.method).cmp(&method_order(method))
@@ -220,15 +238,17 @@ impl RouteEndpoint {
 }
 
 impl RouteNode {
+    /// Create a new [`RouteNode`]
     #[inline]
     pub(crate) fn new() -> Self {
         Self {
-            static_routes: Vec::new(),
+            static_routes: SmallVec::new(),
             handlers: None,
             dynamic_route: None,
         }
     }
 
+    /// Inserts a handler to the route tree
     pub(crate) fn insert(
         &mut self,
         path: &str,
@@ -249,6 +269,7 @@ impl RouteNode {
         current.insert_handler(method, handler);
     }
 
+    /// Finds handlers by path
     pub(crate) fn find(&self, path: &str) -> Option<RouteParams<'_>> {
         let mut current = self;
         let mut params = Vec::new();
@@ -375,7 +396,7 @@ impl RouteNode {
     fn insert_handler(&mut self, method: Method, handler: Layer) {
         let handlers = self
             .handlers
-            .get_or_insert_with(Vec::new);
+            .get_or_insert_with(SmallVec::new);
 
         let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
             Ok(i) => &mut handlers[i],
