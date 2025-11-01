@@ -153,6 +153,7 @@ macro_rules! define_generic_from_request {
             }
         }
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
+            #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
                 let (mut parts, body) = req.into_parts();
                 

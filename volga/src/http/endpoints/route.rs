@@ -18,15 +18,11 @@ use crate::http::request::HttpRequest;
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const PATH_SEPARATOR: char = '/';
+const ALLOW_METHOD_SEPARATOR: &str = ",";
 const DEFAULT_DEPTH: usize = 4;
 
 /// Route path arguments
 pub(crate) type PathArgs = SmallVec<[PathArg; DEFAULT_DEPTH]>;
-
-#[inline(always)]
-pub(crate) fn empty_path_args_iter<const N: usize>() -> smallvec::IntoIter<[PathArg; N]> {
-    SmallVec::<[PathArg; N]>::new().into_iter()
-}
 
 /// A single path argument
 #[derive(Clone)]
@@ -175,23 +171,23 @@ impl RoutePipeline {
 /// Represents a full route's "local" middleware pipeline
 /// with handler 
 #[derive(Clone)]
-pub(crate) struct RouteEndpoint {
-    pub(crate) method: Method,
-    pub(crate) pipeline: RoutePipeline
+pub(super) struct RouteEndpoint {
+    pub(super) method: Method,
+    pub(super) pipeline: RoutePipeline
 }
 
 /// Represents route path node
 #[derive(Clone)]
-pub(crate) struct RouteEntry {
+pub(super) struct RouteEntry {
     path: Box<str>,
     node: Box<RouteNode>
 }
 
 /// A node in the route tree
 #[derive(Clone)]
-pub(crate) struct RouteNode {
+pub(super) struct RouteNode {
     /// A list of associated endpoints for each HTTP method
-    pub(crate) handlers: Option<SmallVec<[RouteEndpoint; DEFAULT_DEPTH]>>,
+    pub(super) handlers: Option<SmallVec<[RouteEndpoint; DEFAULT_DEPTH]>>,
     
     /// List of static routes
     static_routes: SmallVec<[RouteEntry; DEFAULT_DEPTH]>,
@@ -201,9 +197,9 @@ pub(crate) struct RouteNode {
 }
 
 /// Parameters of a route
-pub(crate) struct RouteParams<'route> {
-    pub(crate) route: &'route RouteNode,
-    pub(crate) params: PathArgs
+pub(super) struct RouteParams<'route> {
+    pub(super) route: &'route RouteNode,
+    pub(super) params: PathArgs
 }
 
 impl RouteEntry {
@@ -250,7 +246,7 @@ impl RouteEndpoint {
 impl RouteNode {
     /// Create a new [`RouteNode`]
     #[inline]
-    pub(crate) fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             static_routes: SmallVec::new(),
             handlers: None,
@@ -259,7 +255,7 @@ impl RouteNode {
     }
 
     /// Inserts a handler to the route tree
-    pub(crate) fn insert(
+    pub(super) fn insert(
         &mut self,
         path: &str,
         method: Method,
@@ -280,7 +276,8 @@ impl RouteNode {
     }
 
     /// Finds handlers by path
-    pub(crate) fn find(&self, path: &str) -> Option<RouteParams<'_>> {
+    #[inline]
+    pub(super) fn find(&self, path: &str) -> Option<RouteParams<'_>> {
         let mut current = self;
         let mut params = PathArgs::new();
         let path_segments = split_path(path);
@@ -314,7 +311,7 @@ impl RouteNode {
     }
     
     #[cfg(feature = "middleware")]
-    pub(crate) fn compose(&mut self) {
+    pub(super) fn compose(&mut self) {
         // Compose all static routes
         self.static_routes
             .iter_mut()
@@ -336,7 +333,7 @@ impl RouteNode {
     /// Traverses the route tree and collects all available routes
     /// Returns a vector of tuples containing (HTTP method, route path)
     #[cfg(debug_assertions)]
-    pub(crate) fn collect(&self) -> super::meta::RoutesInfo {
+    pub(super) fn collect(&self) -> super::meta::RoutesInfo {
         let mut routes = Vec::new();
         self.traverse_routes(&mut routes, String::new());
         super::meta::RoutesInfo(routes)
@@ -424,6 +421,25 @@ impl RouteNode {
         segment.starts_with(OPEN_BRACKET) &&
         segment.ends_with(CLOSE_BRACKET)
     }
+}
+
+#[inline(always)]
+pub(crate) fn empty_path_args_iter<const N: usize>() -> smallvec::IntoIter<[PathArg; N]> {
+    SmallVec::<[PathArg; N]>::new().into_iter()
+}
+
+#[inline(always)]
+pub(super) fn create_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoint; N]>) -> String {
+    let mut allowed = String::with_capacity(handlers.len() * DEFAULT_DEPTH);
+    let mut iter = handlers.iter().map(|h| h.method.as_str());
+    if let Some(first) = iter.next() {
+        allowed.push_str(first);
+        for s in iter {
+            allowed.push_str(ALLOW_METHOD_SEPARATOR);
+            allowed.push_str(s);
+        }
+    }
+    allowed
 }
 
 #[inline(always)]

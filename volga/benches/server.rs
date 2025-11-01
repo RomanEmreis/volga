@@ -51,7 +51,7 @@ fn benchmark(c: &mut Criterion) {
             _ = app.run().await;
         });
     });
-    
+
     c.bench_function("ok", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/")))
     ));

@@ -2,7 +2,7 @@
 
 use hyper::{Method, Uri};
 use super::endpoints::{
-    route::{RouteNode, RoutePipeline, PathArgs},
+    route::{RouteNode, RoutePipeline, PathArgs, create_allowed_str},
     handlers::RouteHandler
 };
 
@@ -15,32 +15,36 @@ pub(crate) mod handlers;
 pub(crate) mod route;
 pub mod args;
 
-const ALLOW_METHOD_SEPARATOR: &str = ",";
-
 /// Describes a mapping between HTTP Verbs, routes and request handlers
 pub(crate) struct Endpoints {
     routes: RouteNode
 }
 
 /// Specifies statuses that could be returned after route matching
-pub(crate) enum RouteOption {
+pub(crate) enum FindResult {
     RouteNotFound,
     MethodNotFound(String),
-    Ok(EndpointContext)
+    Ok(Endpoint)
 }
 
-/// Describes the context of the executing route
-pub(crate) struct EndpointContext {
+/// Describes the endpoint that could be either a request handler 
+/// or a middleware pipeline with a request handler at the end.
+pub(crate) struct Endpoint {
+    /// Request handler or middleware pipeline
     pub(crate) pipeline: RoutePipeline,
+    
+    /// Current request path parameters with their values
     pub(crate) params: PathArgs
 }
 
-impl EndpointContext {
+impl Endpoint {
+    /// Creates a new endpoint with the given request handler and path parameters
     #[inline]
     fn new(pipeline: RoutePipeline, params: PathArgs) -> Self {
         Self { pipeline, params }
     }
 
+    /// Converts the endpoint into a tuple of (request handler, path parameters)
     #[inline]
     pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs) {
         (self.pipeline, self.params)
@@ -55,26 +59,25 @@ impl Endpoints {
     }
 
     /// Gets a context of the executing route by its `HttpRequest`
-    pub(crate) fn get_endpoint(&self, method: &Method, uri: &Uri) -> RouteOption {
+    #[inline]
+    pub(crate) fn find(&self, method: &Method, uri: &Uri) -> FindResult {
         let route_params = match self.routes.find(uri.path()) {
             Some(params) => params,
-            None => return RouteOption::RouteNotFound,
+            None => return FindResult::RouteNotFound,
         };
 
         let Some(handlers) = &route_params.route.handlers else { 
-            return RouteOption::RouteNotFound;
+            return FindResult::RouteNotFound;
         };
 
         handlers
             .binary_search_by(|h| h.cmp(method))
             .map_or_else(
-                |_| RouteOption::MethodNotFound(handlers.iter()
-                    .map(|h| h.method.as_str())
-                    .collect::<Vec<_>>()
-                    .join(ALLOW_METHOD_SEPARATOR)),
-                |i| RouteOption::Ok(
-                    EndpointContext::new(handlers[i].pipeline.clone(), route_params.params)
-            ))
+                |_| FindResult::MethodNotFound(create_allowed_str(handlers)),
+                |i| FindResult::Ok(
+                    Endpoint::new(handlers[i].pipeline.clone(), route_params.params)
+                )
+            )
     }
 
     /// Maps the request handler to the current HTTP Verb and route pattern
@@ -118,7 +121,7 @@ impl Endpoints {
 
 #[cfg(test)]
 mod tests {
-    use super::{Endpoints, RouteOption, handlers::Func};
+    use super::{Endpoints, FindResult, handlers::Func};
     use crate::Results;
     use hyper::{Method, Request};
 
@@ -131,10 +134,10 @@ mod tests {
         endpoints.map_route(Method::POST, "path/to/handler", handler);
         
         let request = Request::post("https://example.com/path/to/handler").body(()).unwrap();
-        let post_handler = endpoints.get_endpoint(request.method(), request.uri());
+        let post_handler = endpoints.find(request.method(), request.uri());
 
         match post_handler {
-            RouteOption::Ok(_) => (),
+            FindResult::Ok(_) => (),
             _ => panic!("`post_handler` must be is the `Ok` state")
         }
     }
@@ -148,10 +151,10 @@ mod tests {
         endpoints.map_route(Method::POST, "path/to/handler", handler);
 
         let request = Request::post("https://example.com/path/to/another-handler").body(()).unwrap();
-        let post_handler = endpoints.get_endpoint(request.method(), request.uri());
+        let post_handler = endpoints.find(request.method(), request.uri());
 
         match post_handler {
-            RouteOption::RouteNotFound => (),
+            FindResult::RouteNotFound => (),
             _ => panic!("`post_handler` must be is the `RouteNotFound` state")
         } 
     }
@@ -165,10 +168,10 @@ mod tests {
         endpoints.map_route(Method::GET, "path/to/handler", handler);
 
         let request = Request::post("https://example.com/path/to/handler").body(()).unwrap();
-        let post_handler = endpoints.get_endpoint(request.method(), request.uri());
+        let post_handler = endpoints.find(request.method(), request.uri());
 
         match post_handler {
-            RouteOption::MethodNotFound(allow) => assert_eq!(allow, "GET"),
+            FindResult::MethodNotFound(allow) => assert_eq!(allow, "GET"),
             _ => panic!("`post_handler` must be is the `MethodNotFound` state")
         }
     }

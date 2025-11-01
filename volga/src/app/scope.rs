@@ -14,7 +14,7 @@ use hyper::{
 use crate::{
     app::AppInstance, 
     error::{Error, handler::call_weak_err_handler}, 
-    http::endpoints::RouteOption,
+    http::endpoints::FindResult,
     HttpResponse, HttpRequest, HttpBody, HttpResult,
     status
 };
@@ -84,13 +84,13 @@ impl Scope {
         };
         
         let pipeline = &shared.pipeline;
-        match pipeline.endpoints().get_endpoint(request.method(), request.uri()) {
-            RouteOption::RouteNotFound => pipeline.fallback(request).await,
-            RouteOption::MethodNotFound(allowed) => status!(405, [
+        match pipeline.endpoints().find(request.method(), request.uri()) {
+            FindResult::RouteNotFound => pipeline.fallback(request).await,
+            FindResult::MethodNotFound(allowed) => status!(405, [
                 (ALLOW, allowed)
             ]),
-            RouteOption::Ok(endpoint_context) => {
-                let (route_pipeline, params) = endpoint_context.into_parts();
+            FindResult::Ok(endpoint) => {
+                let (route_pipeline, params) = endpoint.into_parts();
                 let error_handler = pipeline.error_handler();
 
                 let (mut parts, body) = request.into_parts();
