@@ -40,7 +40,7 @@ impl<T: FromPayload> FromPayload for Result<T, Error> {
     type Future = ResultFromPayloadFuture<T::Future>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         ResultFromPayloadFuture {
             inner: T::from_payload(payload),
         }
@@ -65,7 +65,7 @@ mod tests {
     impl FromPayload for SuccessExtractor {
         type Future = Ready<Result<Self, Error>>;
 
-        fn from_payload(_: Payload) -> Self::Future {
+        fn from_payload(_: Payload<'_>) -> Self::Future {
             ok(SuccessExtractor)
         }
 
@@ -79,7 +79,7 @@ mod tests {
     impl FromPayload for FailureExtractor {
         type Future = Ready<Result<Self, Error>>;
 
-        fn from_payload(_: Payload) -> Self::Future {
+        fn from_payload(_: Payload<'_>) -> Self::Future {
             err(Error::client_error("Test error"))
         }
 
@@ -93,7 +93,7 @@ mod tests {
     impl FromPayload for BodyExtractor {
         type Future = Ready<Result<Self, Error>>;
 
-        fn from_payload(payload: Payload) -> Self::Future {
+        fn from_payload(payload: Payload<'_>) -> Self::Future {
             match payload {
                 Payload::Body(_) => ok(BodyExtractor("body content".to_string())),
                 _ => err(Error::client_error("Expected body payload"))
@@ -110,7 +110,7 @@ mod tests {
     impl FromPayload for PathExtractor {
         type Future = Ready<Result<Self, Error>>;
 
-        fn from_payload(payload: Payload) -> Self::Future {
+        fn from_payload(payload: Payload<'_>) -> Self::Future {
             let Payload::Path(param) = payload else {
                 return err(Error::client_error("Expected path payload"));
             };
@@ -360,7 +360,7 @@ mod tests {
         impl FromPayload for CustomExtractor {
             type Future = Ready<Result<Self, Error>>;
 
-            fn from_payload(_: Payload) -> Self::Future {
+            fn from_payload(_: Payload<'_>) -> Self::Future {
                 err(Error::server_error("Custom internal error"))
             }
 
@@ -390,7 +390,7 @@ mod tests {
         impl FromPayload for ValueExtractor {
             type Future = Ready<Result<Self, Error>>;
 
-            fn from_payload(_: Payload) -> Self::Future {
+            fn from_payload(_: Payload<'_>) -> Self::Future {
                 ok(ValueExtractor(42))
             }
 

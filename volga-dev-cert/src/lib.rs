@@ -3,12 +3,19 @@
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use std::{fs, path::PathBuf, io::{Error, Result, Write}};
 
+/// Defaut name of folder with TLS certificates
 pub const DEFAULT_CERT_FOLDER: &str = "cert";
+
+/// Default name of development certificate file
 pub const DEFAULT_CERT_FILE_NAME: &str = "dev-cert.pem";
+
+/// Default name of signing key file
 pub const DEFAULT_KEY_FILE_NAME: &str = "dev-key.pem";
 
+/// Default certificate names
 #[cfg(target_os = "windows")]
 pub const DEV_CERT_NAMES: &[&str] = &["localhost"];
+/// Default certificate names
 #[cfg(not(target_os = "windows"))]
 pub const DEV_CERT_NAMES: &[&str] = &["localhost", "0.0.0.0"];
 
@@ -41,12 +48,14 @@ pub fn dev_cert_exists() -> bool {
     get_signing_key_path().exists()
 }
 
+/// Returns default path to the development TLS certificate .pem file
 #[inline]
 pub fn get_cert_path() -> PathBuf {
     PathBuf::from(DEFAULT_CERT_FOLDER)
         .join(DEFAULT_CERT_FILE_NAME)
 }
 
+/// Returns default path to the signin key .pem file 
 #[inline]
 pub fn get_signing_key_path() -> PathBuf {
     PathBuf::from(DEFAULT_CERT_FOLDER)

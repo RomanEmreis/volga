@@ -30,7 +30,15 @@ pub mod request_body_limit;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
+    /// Inner [`Request`]
     pub inner: Request<HttpBody>
+}
+
+impl std::fmt::Debug for HttpRequest {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HttpRequest(..)")
+    }
 }
 
 impl Deref for HttpRequest {

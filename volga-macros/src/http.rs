@@ -6,7 +6,7 @@ use quote::quote;
 pub(super) mod attr;
 
 /// Expands a header struct into a FromHeaders implementation.
-pub fn expand_http_header(header: &attr::HeaderInput, input: &syn::ItemStruct) -> syn::Result<TokenStream> {
+pub(super) fn expand_http_header(header: &attr::HeaderInput, input: &syn::ItemStruct) -> syn::Result<TokenStream> {
     let struct_name = &input.ident;
     let header_expr = header.as_token_stream();
     Ok(quote! {

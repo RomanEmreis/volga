@@ -1,4 +1,6 @@
-﻿use std::time::Duration;
+﻿#![allow(missing_docs)]
+
+use std::time::Duration;
 use volga::App;
 use volga::http::StatusCode;
 use volga::headers::{STRICT_TRANSPORT_SECURITY, LOCATION};

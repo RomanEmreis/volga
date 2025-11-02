@@ -1,6 +1,6 @@
 [package]
 name = "volga-macros"
-version = "0.6.8"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.90.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -31,3 +31,5 @@ default = []
 jwt-auth-derive = []
 di-derive = []
 
+[lints]
+workspace = true

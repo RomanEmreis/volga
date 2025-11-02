@@ -1,4 +1,6 @@
-﻿use volga::{App, Json, ok};
+﻿#![allow(missing_docs)]
+
+use volga::{App, Json, ok};
 use serde_json::{Value, json};
 
 use async_compression::tokio::write::{

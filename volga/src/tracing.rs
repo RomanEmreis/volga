@@ -1,6 +1,5 @@
 ﻿//! Tools for tracing, logging and observability
 
-use std::future::Future;
 use futures_util::TryFutureExt;
 use tracing::{Instrument, trace_span};
 use crate::{
@@ -11,7 +10,7 @@ use crate::{
 const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
 
 /// Represents a tracing configuration
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct TracingConfig {
     /// Specifies whether to include a span id HTTP header
     /// 
@@ -131,40 +130,37 @@ impl App {
         let cfg = self.tracing_config
             .take()
             .unwrap_or_default();
-        self.wrap(move |ctx, next| wrap_tracing(cfg.clone(), ctx, next))
+        self.wrap(move |ctx, next| wrap_tracing(cfg, ctx, next))
     }
 }
 
-fn wrap_tracing(
+async fn wrap_tracing(
     cfg: TracingConfig, 
     ctx: HttpContext, 
     next: NextFn
-) -> impl Future<Output = HttpResult> {
-    let cfg = cfg.clone();
-    async move {
-        let method = ctx.request.method();
-        let uri = ctx.request.uri();
+) -> HttpResult {
+    let method = ctx.request.method();
+    let uri = ctx.request.uri();
 
-        let span = trace_span!("request", %method, %uri);
-        let span_id = span.id();
-        let parts = ctx.request_parts_snapshot();
-        let error_handler = ctx.error_handler();
+    let span = trace_span!("request", %method, %uri);
+    let span_id = span.id();
+    
+    let parts = ctx.request_parts_snapshot();
+    let error_handler = ctx.error_handler();
+    let http_result = next(ctx)
+        .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
+        .instrument(span)
+        .await;
 
-        let http_result = next(ctx)
-            .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
-            .instrument(span)
-            .await;
-
-        if cfg.include_header && span_id.is_some() {
-            http_result.map(|mut response| {
-                response.headers_mut().append(
-                    cfg.span_header_name,
-                    span_id.map_or(0, |id| id.into_u64()).into());
-                response
-            })
-        } else {
-            http_result
-        }
+    if cfg.include_header && span_id.is_some() {
+        http_result.map(|mut response| {
+            response.headers_mut().append(
+                cfg.span_header_name,
+                span_id.map_or(0, |id| id.into_u64()).into());
+            response
+        })
+    } else {
+        http_result
     }
 }
 

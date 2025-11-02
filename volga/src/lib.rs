@@ -29,9 +29,6 @@
 //! }
 //! ```
 
-#![forbid(unsafe_code)]
-#![deny(unreachable_pub)]
-
 mod server;
 pub(crate) mod utils;
 
@@ -80,6 +77,7 @@ pub use crate::http::{
 #[cfg(feature = "multipart")]
 pub use crate::http::endpoints::args::multipart::Multipart;
 
+/// Route mapping helpers
 pub mod routing {
     pub use crate::app::router::{RouteGroup, Route};
 }

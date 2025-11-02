@@ -59,6 +59,7 @@ where
     Authorizer::Predicate(Arc::new(f))
 }
 
+/// Claims validator function
 pub type ClaimsValidator<C> = dyn Fn(&C) -> bool + Send + Sync + 'static;
 
 /// Specifies the validation rules for role-based or permission-based access control.
@@ -120,6 +121,13 @@ pub enum Authorizer<C: AuthClaims> {
     ///
     /// Logical **OR** operation.
     Or(Vec<Authorizer<C>>),
+}
+
+impl<C: AuthClaims> std::fmt::Debug for Authorizer<C> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Authorizer(..)")
+    }
 }
 
 impl<C: AuthClaims> Authorizer<C> {

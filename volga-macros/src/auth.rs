@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 /// Expands a derive-macro for AuthClaims
-pub fn expand_claims(input: &syn::DeriveInput) -> syn::Result<TokenStream> {
+pub(super) fn expand_claims(input: &syn::DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     let mut role_impl = quote! {};
     let mut roles_impl = quote! {};

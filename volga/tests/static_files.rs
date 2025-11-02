@@ -1,4 +1,6 @@
-﻿use volga::App;
+﻿#![allow(missing_docs)]
+
+use volga::App;
 use volga::app::HostEnv;
 
 #[tokio::test]

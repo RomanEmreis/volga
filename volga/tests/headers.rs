@@ -1,4 +1,6 @@
-﻿use volga::{App, ok};
+﻿#![allow(missing_docs)]
+
+use volga::{App, ok};
 use volga::headers::{Header, HttpHeaders, ContentType};
 
 #[tokio::test]

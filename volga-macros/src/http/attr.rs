@@ -13,7 +13,7 @@ use syn::{
 ///
 /// The actual header name will be extracted and used as an argument
 /// to the `HeaderMap::get()` method.
-pub enum HeaderInput {
+pub(crate) enum HeaderInput {
     /// A literal string (e.g., `"x-api-key"`)
     Literal(LitStr),
 
@@ -29,7 +29,7 @@ impl Parse for HeaderInput {
     /// - An identifier, e.g. `X_API_KEY`
     ///
     /// Returns an error if input is empty or of an unsupported form.
-    fn parse(input: ParseStream) -> Result<Self> {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
         if input.peek(LitStr) {
             let lit: LitStr = input.parse()?;
             Ok(HeaderInput::Literal(lit))
@@ -49,7 +49,7 @@ impl HeaderInput {
     /// Returns either:
     /// - `quote! { "x-api-key" }` if literal
     /// - `quote! { X_API_KEY }` if constant
-    pub fn as_token_stream(&self) -> proc_macro2::TokenStream {
+    pub(super) fn as_token_stream(&self) -> proc_macro2::TokenStream {
         match self {
             HeaderInput::Literal(lit) => quote::quote! { #lit },
             HeaderInput::Constant(ident) => quote::quote! { #ident },

@@ -1,4 +1,6 @@
-﻿use volga::App;
+﻿#![allow(missing_docs)]
+
+use volga::App;
 use volga::headers::{
     ACCESS_CONTROL_ALLOW_ORIGIN,
     ACCESS_CONTROL_ALLOW_HEADERS,

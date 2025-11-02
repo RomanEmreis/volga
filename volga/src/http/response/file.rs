@@ -1,4 +1,6 @@
-﻿/// Produces `OK 200` response with file body
+﻿//! Macros for file responses
+
+/// Produces `OK 200` response with file body
 /// 
 /// # Examples
 /// ## Default usage

@@ -23,6 +23,13 @@ pub(crate) struct PipelineBuilder {
     fallback_handler: PipelineFallbackHandler
 }
 
+impl std::fmt::Debug for PipelineBuilder {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PipelineBuilder(..)")
+    }
+}
+
 pub(crate) struct Pipeline {
     #[cfg(feature = "middleware")]
     start: Option<NextFn>,

@@ -1,4 +1,6 @@
-﻿use std::collections::HashMap;
+﻿#![allow(missing_docs)]
+
+use std::collections::HashMap;
 use serde::Deserialize;
 use volga::{App, Results, Query};
 

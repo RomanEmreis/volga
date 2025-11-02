@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::ops::Add;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use jsonwebtoken::{DecodingKey, EncodingKey};

@@ -1,4 +1,6 @@
-﻿/// Produces `OK 200` response with HTML body
+﻿//! Macros for HTML responses
+
+/// Produces `OK 200` response with HTML body
 /// 
 /// # Examples
 /// ## Default usage

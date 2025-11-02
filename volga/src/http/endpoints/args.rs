@@ -56,21 +56,25 @@ pub(crate) enum Source {
 
 /// Specifies extractors to read data from HTTP request
 pub trait FromRequest: Sized {
+    /// Extracts data from HTTP request
     fn from_request(req: HttpRequest) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
 /// Specifies extractors to read data from raw HTTP request
 pub trait FromRawRequest: Sized {
+    /// Extracts data from raw HTTP request
     fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
 /// Specifies extractors to read data from a borrowed HTTP request
 pub trait FromRequestRef: Sized {
+    /// Extracts data from HTTP request reference
     fn from_request(req: &HttpRequest) -> Result<Self, Error>;
 }
 
 /// Specifies extractors to read data from HTTP request parts
 pub trait FromRequestParts: Sized {
+    /// Extracts data from HTTP request parts
     fn from_parts(parts: &Parts) -> Result<Self, Error>;
 }
 
@@ -80,7 +84,7 @@ pub(crate) trait FromPayload: Send + Sized {
     type Future: Future<Output = Result<Self, Error>> + Send;
     
     /// Extracts data from give [`Payload`]
-    fn from_payload(payload: Payload) -> Self::Future;
+    fn from_payload(payload: Payload<'_>) -> Self::Future;
 
     /// Returns a [`Source`] where the payload should be extracted from
     fn source() -> Source {
@@ -220,7 +224,7 @@ mod tests {
     impl FromPayload for TestNone {
         type Future = Ready<Result<TestNone, Error>>;
 
-        fn from_payload(_: Payload) -> Self::Future {
+        fn from_payload(_: Payload<'_>) -> Self::Future {
             ok(TestNone)
         }
     }

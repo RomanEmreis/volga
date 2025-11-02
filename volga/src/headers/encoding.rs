@@ -11,25 +11,37 @@ use std::{
     fmt
 };
 
+/// Represents encoding formats
 #[derive(Hash, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Encoding {
+    /// Wildcard (`*`) encoding
     Any,
+
+    /// No encoding
     Identity,
+
+    /// Brotli encoding
     #[cfg(any(
         feature = "compression-brotli", 
         feature = "decompression-brotli"
     ))]
     Brotli,
+
+    /// Gzip encoding
     #[cfg(any(
         feature = "compression-gzip",
         feature = "decompression-gzip"
     ))]
     Gzip,
+
+    /// Deflate encoding
     #[cfg(any(
         feature = "compression-gzip",
         feature = "decompression-gzip"
     ))]
     Deflate,
+
+    /// Z-standard encoding
     #[cfg(any(
         feature = "compression-zstd",
         feature = "decompression-zstd"
@@ -121,7 +133,7 @@ impl FromStr for Encoding {
 
 impl fmt::Display for Encoding {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match *self { 
             Encoding::Any => "*",
             Encoding::Identity => "identity",

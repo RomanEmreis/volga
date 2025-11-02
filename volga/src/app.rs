@@ -83,6 +83,7 @@ const DEFAULT_PORT: u16 = 7878;
 /// let app = App::new().bind("127.0.0.1:7878");
 /// app.run_blocking();
 /// ```
+#[derive(Debug)]
 pub struct App {
     /// Dependency Injection container builder
     #[cfg(feature = "di")]
@@ -131,6 +132,7 @@ pub struct App {
 }
 
 /// Wraps a socket
+#[derive(Debug)]
 pub struct Connection {
     socket: SocketAddr
 }
@@ -456,7 +458,7 @@ impl App {
         #[cfg(feature = "tls")]
         let redirection_config = self.tls_config
             .as_ref()
-            .map(|config| config.https_redirection_config.clone());
+            .map(|config| config.https_redirection_config);
         
         let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
         

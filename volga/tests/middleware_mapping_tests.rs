@@ -1,4 +1,6 @@
-﻿use hyper::StatusCode;
+﻿#![allow(missing_docs)]
+
+use hyper::StatusCode;
 use volga::{App, HttpRequest, HttpResponse, Results};
 use volga::error::Error;
 use volga::headers::HttpHeaders;

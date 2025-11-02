@@ -104,7 +104,7 @@ impl FromPayload for Cookies {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Ok(Cookies::from(&parts.headers)))
     }

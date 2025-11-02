@@ -40,7 +40,7 @@ impl<T: FromPayload> FromPayload for Option<T> {
     type Future = OptionFromPayloadFuture<T::Future>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         OptionFromPayloadFuture {
             inner: T::from_payload(payload),
         }
@@ -66,7 +66,7 @@ mod tests {
     impl FromPayload for SuccessExtractor {
         type Future = Ready<Result<Self, Error>>;
 
-        fn from_payload(_: Payload) -> Self::Future {
+        fn from_payload(_: Payload<'_>) -> Self::Future {
             ok(SuccessExtractor)
         }
 
@@ -80,7 +80,7 @@ mod tests {
     impl FromPayload for FailureExtractor {
         type Future = Ready<Result<Self, Error>>;
 
-        fn from_payload(_: Payload) -> Self::Future {
+        fn from_payload(_: Payload<'_>) -> Self::Future {
             err(Error::client_error("Test error"))
         }
 
@@ -94,7 +94,7 @@ mod tests {
     impl FromPayload for BodyExtractor {
         type Future = Ready<Result<Self, Error>>;
 
-        fn from_payload(payload: Payload) -> Self::Future {
+        fn from_payload(payload: Payload<'_>) -> Self::Future {
             match payload {
                 Payload::Body(_) => ok(BodyExtractor("body content".to_string())),
                 _ => err(Error::client_error("Expected body payload"))
@@ -111,7 +111,7 @@ mod tests {
     impl FromPayload for PathExtractor {
         type Future = Ready<Result<Self, Error>>;
 
-        fn from_payload(payload: Payload) -> Self::Future {
+        fn from_payload(payload: Payload<'_>) -> Self::Future {
             let Payload::Path(param) = payload else {
                 return err(Error::client_error("Expected path payload"));
             };

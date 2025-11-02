@@ -1,4 +1,6 @@
-﻿/// Produces HTTP 301 MOVED PERMANENTLY response
+﻿//! Macros for redirect responses
+
+/// Produces HTTP 301 MOVED PERMANENTLY response
 ///
 /// # Example
 /// ```no_run

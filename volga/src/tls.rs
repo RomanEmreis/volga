@@ -51,6 +51,7 @@ use hyper::server::conn::http1;
 
 /// Represents local development certificates mode
 #[cfg(feature = "dev-cert")]
+#[derive(Debug)]
 pub enum DevCertMode {
     /// Always creates self-signed certificates if they're missing
     Auto,
@@ -66,6 +67,7 @@ const DEFAULT_PORT: u16 = 7879;
 const DEFAULT_MAX_AGE: u64 = 30 * 24 * 60 * 60; // 30 days = 2,592,000 seconds
 
 /// Represents TLS (Transport Layer Security) configuration options
+#[derive(Debug)]
 pub struct TlsConfig {
     /// Path to a certificate
     pub cert: PathBuf,
@@ -84,7 +86,7 @@ pub struct TlsConfig {
 }
 
 /// Represents HTTPS redirection configuration options
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct RedirectionConfig {
     /// Specifies whether HTTPS redirection is enabled
     /// 
@@ -98,6 +100,7 @@ pub struct RedirectionConfig {
 } 
 
 /// Represents HSTS (HTTP Strict Transport Security Protocol) configuration options
+#[derive(Debug)]
 pub struct HstsConfig {
     /// Specifies whether include a `preload` to HSTS header
     /// 
@@ -165,7 +168,7 @@ impl Default for TlsConfig {
 
 impl fmt::Display for HstsConfig {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut str = String::new();
         str.push_str(&format!("max-age={}", self.max_age.as_secs()));
         

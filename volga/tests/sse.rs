@@ -1,4 +1,6 @@
-﻿use volga::{App, sse};
+﻿#![allow(missing_docs)]
+
+use volga::{App, sse};
 use futures_util::stream::{repeat_with};
 use tokio_stream::StreamExt;
 use volga::error::Error;

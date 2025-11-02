@@ -26,6 +26,7 @@ macro_rules! define_header {
     ($(($struct_name:ident, $header_name:ident)),* $(,)?) => {
         $(
             #[doc = concat!("See [`", stringify!($header_name), "`] for more details.")]
+            #[allow(missing_debug_implementations)]
             pub struct $struct_name;
 
             impl FromHeaders for $struct_name {

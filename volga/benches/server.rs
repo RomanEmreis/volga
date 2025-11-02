@@ -1,4 +1,6 @@
-﻿use volga::{ok, status, App};
+﻿#![allow(missing_docs)]
+
+use volga::{ok, status, App};
 
 use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, Criterion};

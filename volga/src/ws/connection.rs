@@ -1,3 +1,5 @@
+//! WebSocket connection extractors and uutils
+
 use super::{WebSocket, WebSocketError};
 use hyper_util::rt::TokioIo;
 use std::future::Future;
@@ -40,6 +42,13 @@ pub struct WebSocketConnection {
     protocol: Option<HeaderValue>,
     sec_websocket_key: Option<HeaderValue>,
     sec_websocket_protocol: Option<HeaderValue>,
+}
+
+impl std::fmt::Debug for WebSocketConnection {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WebSocketConnection(..)")
+    }
 }
 
 impl WebSocketConnection {
@@ -252,7 +261,7 @@ impl FromPayload for WebSocketConnection {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(parts.try_into())
     }

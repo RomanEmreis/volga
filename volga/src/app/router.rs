@@ -426,6 +426,20 @@ pub struct RouteGroup<'a> {
     pub(crate) middleware: Vec<MiddlewareFn>,
 }
 
+impl std::fmt::Debug for Route<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Route(..)")
+    }
+}
+
+impl std::fmt::Debug for RouteGroup<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RouteGroup(..)")
+    }
+}
+
 impl<'a> Deref for Route<'a> {
     type Target = App;
     

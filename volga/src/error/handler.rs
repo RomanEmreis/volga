@@ -9,10 +9,12 @@ use std::sync::{Arc, Weak};
 
 /// Trait for types that represents an error handler
 pub trait ErrorHandler {
+    /// Calls the error handler function
     fn call(&self, parts: &Parts, err: Error) -> BoxFuture<'_, HttpResult>;
 }
 
 /// Owns a closure that handles an error
+#[derive(Debug)]
 pub struct ErrorFunc<F, R, Args>
 where
     F: MapErrHandler<Args, Output = R>,

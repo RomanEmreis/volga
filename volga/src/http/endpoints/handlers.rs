@@ -70,17 +70,23 @@ where
 /// Describes a generic request handler that could take 0 or N parameters of types
 /// that are implement [`FromPayload`] trait
 pub trait GenericHandler<Args>: Clone + Send + Sync + 'static {
+    /// Return type
     type Output;
+    /// Generic handler future
     type Future: Future<Output = Self::Output> + Send;
 
+    /// Calls a generic handler
     fn call(&self, args: Args) -> Self::Future;
 }
 
 /// Describes a generic [`map_err`] middleware handler that could take 0 or N parameters and [`Error`]
 pub trait MapErrHandler<Args>: Clone + Send + Sync + 'static {
+    /// Return type
     type Output;
+    /// Error handler future
     type Future: Future<Output = Self::Output> + Send;
 
+    /// Calls an error handler
     fn call(&self, err: Error, args: Args) -> Self::Future;
 }
 

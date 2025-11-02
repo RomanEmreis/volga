@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.6.8"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.90.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -53,9 +53,9 @@ tokio-tungstenite = { version = "0.28.0", optional = true }
 tracing = { version = "0.1.41", default-features = false, optional = true }
 
 # volga
-volga-dev-cert = { path = "../volga-dev-cert", version = "0.6.8", optional = true }
-volga-di = { path = "../volga-di", version = "0.6.8", optional = true }
-volga-macros = { path = "../volga-macros", version = "0.6.8", optional = true }
+volga-dev-cert = { path = "../volga-dev-cert", version = "0.7.0", optional = true }
+volga-di = { path = "../volga-di", version = "0.7.0", optional = true }
+volga-macros = { path = "../volga-macros", version = "0.7.0", optional = true }
 
 [dev-dependencies]
 base64 = { version = "0.22.1" }
@@ -125,6 +125,9 @@ decompression-zstd = ["middleware", "dep:async-compression", "async-compression?
 
 [package.metadata.docs.rs]
 all-features = true
+
+[lints]
+workspace = true
 
 [[bench]]
 name = "server"

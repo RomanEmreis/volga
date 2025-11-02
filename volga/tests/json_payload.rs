@@ -1,4 +1,6 @@
-﻿use serde::{Deserialize, Serialize};
+﻿#![allow(missing_docs)]
+
+use serde::{Deserialize, Serialize};
 use volga::{App, ok, Results, Json};
 
 #[derive(Deserialize, Serialize)]

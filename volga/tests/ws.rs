@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use volga::App;
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::{

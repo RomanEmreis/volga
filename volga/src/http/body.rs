@@ -30,7 +30,10 @@ use std::{
     pin::Pin,
 };
 
+/// A boxed body
 pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, Error>;
+
+/// A boxed body that is !Sync
 pub type UnsyncBoxBody = http_body_util::combinators::UnsyncBoxBody<Bytes, Error>;
 
 pin_project! {

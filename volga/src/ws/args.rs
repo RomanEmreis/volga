@@ -14,9 +14,11 @@ use std::{
 /// Represents various forms of WebSockets message
 /// 
 /// See also [`tungstenite::Message`]
+#[derive(Debug)]
 pub struct Message(pub(super) tungstenite::Message);
 
 impl Message {
+    /// Unwwraps the inner message
     #[inline]
     pub fn into_inner(self) -> tungstenite::Message {
         self.0
@@ -216,18 +218,24 @@ impl TryFrom<Message> for Bytes {
 /// Describes a generic WebSocket/WebTransport handler that could take a [`WebSocket`] 
 /// and 0 or N parameters of types
 pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
+    /// The type of valure returned from a WebSocket/WebTransport handler
     type Output;
+    /// Output future of a WebSocket/WebTransport handler
     type Future: Future<Output = Self::Output> + Send;
 
+    /// Calls a WebSocket/WebTransport handler
     fn call(&self, ws: WebSocket, args: Args) -> Self::Future;
 }
 
 /// Describes a generic WebSocket/WebTransport message handler that could take a message 
 /// in a format that implements the[`FromMessage`] and 0 or N parameters of types
 pub trait MessageHandler<M: TryFrom<Message>, Args>: Clone + Send + Sync + 'static {
+    /// The type of valure returned from a WebSocket/WebTransport message handler
     type Output;
+    /// Output future of a WebSocket/WebTransport message handler
     type Future: Future<Output = Self::Output> + Send;
 
+    /// Calls a WebSocket/WebTransport message handler
     fn call(&self, msg: M, args: Args) -> Self::Future;
 }
 

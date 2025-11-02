@@ -28,11 +28,13 @@ use crate::http::endpoints::args::{
 ///     ok!("Files saved!")
 /// }
 /// ```
+#[derive(Debug)]
 pub struct Multipart(multer::Multipart<'static>);
 
 /// Represents a single field in a multipart stream
 /// 
 ///> See also [`multer::Field`]
+#[derive(Debug)]
 pub struct Field(multer::Field<'static>);
 
 impl Field {
@@ -203,7 +205,7 @@ impl FromPayload for Multipart {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         ready(payload.try_into())
     }
 

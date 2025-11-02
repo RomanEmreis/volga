@@ -19,7 +19,7 @@ use jsonwebtoken::{
 const SCHEME: &str = "Bearer ";
 
 /// Bearer Token Authentication configuration
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct BearerAuthConfig {
     validation: Validation,
     encoding: Option<EncodingKey>,
@@ -183,6 +183,7 @@ impl BearerAuthConfig {
         self
     }
 
+    /// Retuuns a ecret key to decode a JWT
     pub fn decoding_key(&self) -> Option<&DecodingKey> {
         self.decoding.as_ref()
     }
@@ -194,6 +195,17 @@ pub struct BearerTokenService {
     validation: Arc<Validation>,
     encoding: Option<Arc<EncodingKey>>,
     decoding: Option<Arc<DecodingKey>>,
+}
+
+impl std::fmt::Debug for BearerTokenService {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BearerTokenService")
+            .field("validation", &"[redacted]")
+            .field("encoding", &"[redacted]")
+            .field("decoding", &"[redacted]")
+            .finish()
+    }
 }
 
 impl From<BearerAuthConfig> for BearerTokenService {
@@ -248,8 +260,16 @@ impl BearerTokenService {
 }
 
 /// Wraps a bearer token string
-#[derive(Debug)]
 pub struct Bearer(Box<str>);
+
+impl std::fmt::Debug for Bearer {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Bearer")
+            .field(&"[redacted]")
+            .finish()
+    }
+}
 
 impl TryFrom<&HeaderValue> for Bearer {
     type Error = Error;
@@ -322,7 +342,7 @@ impl FromPayload for Bearer {
     type Future = Ready<Result<Self, Error>>;
     
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
     }
@@ -363,7 +383,7 @@ impl FromPayload for BearerTokenService {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
     }

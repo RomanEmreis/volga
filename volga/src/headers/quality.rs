@@ -12,9 +12,15 @@ pub trait Ranked {
     fn rank(&self) -> u8;
 }
 
+/// Represents a quality used in q-factor values.
+/// 
+/// See [more](https://datatracker.ietf.org/doc/html/rfc7231#section-5.3.1).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Quality<T: FromStr + Ranked> {
+    /// Quality source
     pub item: T,
+
+    /// Quality value
     pub value: f32,
 }
 
@@ -22,10 +28,13 @@ impl<T: FromStr + Ranked> Quality<T> {
     const PREFIX: [&'static str; 2] = ["q=", "Q="];
     const DELIMITER: &'static str = ";";
     
+    /// Creates a new [`Quality`]
+    #[inline]
     pub fn new(item: T, value: f32) -> Self {
         Quality { item, value }
     }
     
+    /// Creates a new [`Quality`] with rank based on source q-factor
     #[inline]
     pub fn ranked(item: T) -> Self {
         let rank = item.rank() as f32;

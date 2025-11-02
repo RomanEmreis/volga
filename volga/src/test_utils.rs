@@ -1,8 +1,11 @@
-﻿use std::path::Path;
+﻿//! Utilities for unit tests
+
+use std::path::Path;
 use http_body_util::BodyExt;
 use tokio::io::AsyncReadExt;
 use crate::HttpResponse;
 
+/// Read response body bytes
 pub async fn read_file_bytes(response: &mut HttpResponse) -> Vec<u8> {
     let mut buffer = vec![];
     while let Some(next) = response.body_mut().frame().await {
@@ -20,6 +23,7 @@ pub async fn read_file_bytes(response: &mut HttpResponse) -> Vec<u8> {
     buffer
 }
 
+/// Reads a file
 pub async fn read_file(path: impl AsRef<Path>) -> Vec<u8> {
     let mut file = tokio::fs::File::open(path).await.unwrap();
     let mut bytes = vec![];
