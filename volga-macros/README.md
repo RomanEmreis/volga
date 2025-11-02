@@ -1,8 +1,8 @@
 # Volga Macros
 Macros library for Volga Web Framework
 
-[![latest](https://img.shields.io/badge/latest-0.6.7-blue)](https://crates.io/crates/volga)
-[![latest](https://img.shields.io/badge/rustc-1.80+-964B00)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.6.8-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://crates.io/crates/volga)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
 [![Release](https://github.com/RomanEmreis/volga/actions/workflows/release.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/release.yml)
@@ -12,6 +12,6 @@ Macros library for Volga Web Framework
 ## Dependencies
 ```toml
 [dependencies]
-volga = { version = "0.6.7", features = ["macros"] }
+volga = { version = "0.6.8", features = ["macros"] }
 ```
 

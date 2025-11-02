@@ -193,7 +193,7 @@ impl RouteNode {
         (!current
             .handlers
             .as_ref()
-            .map_or(true, |h| h.is_empty()))
+            .is_none_or(|h| h.is_empty()))
             .then_some(RouteParams {
                 route: current,
                 params,

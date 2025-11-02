@@ -1,8 +1,8 @@
 # Volga
 Fast, Easy, and very flexible Web Framework for Rust based on [Tokio](https://tokio.rs/) runtime and [hyper](https://hyper.rs/) for fun and painless microservices crafting.
 
-[![latest](https://img.shields.io/badge/latest-0.6.7-blue)](https://crates.io/crates/volga)
-[![latest](https://img.shields.io/badge/rustc-1.80+-964B00)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.6.8-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://crates.io/crates/volga)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
 [![Release](https://github.com/RomanEmreis/volga/actions/workflows/release.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/release.yml)
@@ -18,12 +18,12 @@ Fast, Easy, and very flexible Web Framework for Rust based on [Tokio](https://to
 * Dependency Injection
 * WebSockets and WebTransport
 * Full [Tokio](https://tokio.rs/) compatibility
-* Runs on stable Rust 1.80+
+* Runs on stable Rust 1.90+
 ## Getting Started
 ### Dependencies
 ```toml
 [dependencies]
-volga = "0.6.7"
+volga = "0.6.8"
 tokio = { version = "1", features = ["full"] }
 ```
 ### Simple request handler

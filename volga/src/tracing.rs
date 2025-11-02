@@ -131,12 +131,12 @@ impl App {
         let cfg = self.tracing_config
             .take()
             .unwrap_or_default();
-        self.wrap(move |ctx, next| wrap_tracing(&cfg, ctx, next))
+        self.wrap(move |ctx, next| wrap_tracing(cfg.clone(), ctx, next))
     }
 }
 
 fn wrap_tracing(
-    cfg: &TracingConfig, 
+    cfg: TracingConfig, 
     ctx: HttpContext, 
     next: NextFn
 ) -> impl Future<Output = HttpResult> {

@@ -461,13 +461,12 @@ impl App {
         let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
         
         #[cfg(feature = "tls")]
-        if let Some(redirection_config) = redirection_config {
-            if redirection_config.enabled {
-                Self::run_https_redirection_middleware(
-                    socket,
-                    redirection_config.http_port,
-                    shutdown_tx.clone());
-            }
+        if let Some(redirection_config) = redirection_config 
+            && redirection_config.enabled {
+            Self::run_https_redirection_middleware(
+                socket,
+                redirection_config.http_port,
+                shutdown_tx.clone());
         }
 
         loop {
