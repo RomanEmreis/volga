@@ -79,12 +79,7 @@ impl<T: DeserializeOwned> Path<T> {
     /// Parses the slice of tuples `(String, String)` into [`Path<T>`]
     #[inline]
     pub(crate) fn from_slice(route_params: &PathArgs) -> Result<Self, Error> {
-        let route_str = route_params
-            .iter()
-            .map(PathArg::query_format)
-            .collect::<Vec<String>>()
-            .join("&");
-        
+        let route_str = PathArg::make_query_str(route_params)?;
         serde_urlencoded::from_str::<T>(&route_str)
             .map(Path)
             .map_err(PathError::from_serde_error)

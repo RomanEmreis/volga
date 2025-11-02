@@ -42,9 +42,12 @@ fn benchmark(c: &mut Criterion) {
                 .without_body_limit()
                 .without_greeter();
             
-            app.map_get("/", || async { "Hello, World!" });
+            app.map_get("/", || async {});
+            app.map_get("/a", || async { "Hello, World!" });
             app.map_get("/a/ab/bc/d", || async { "Hello, World!" });
+            app.map_get("/a/b/c/d/e/i/k", || async { "Hello, World!" });
             app.map_get("/a/{b}", |b: String| async move { ok!("Hello, {b}!") });
+            app.map_get("/a/{b}/{c}", |b: i32, c: String| async move { ok!("{b}, {c}!") });
             app.map_get("/err", || async { Error::other("error") });
             app.map_err(|err: volga::error::Error| async move { status!(500, err.to_string()) });
             app.map_fallback(|| async { status!(404) });
@@ -56,10 +59,19 @@ fn benchmark(c: &mut Criterion) {
         |iters| rt.block_on(routing(iters, black_box("/")))
     ));
     c.bench_function("path", |b| b.iter_custom(
+        |iters| rt.block_on(routing(iters, black_box("/a")))
+    ));
+    c.bench_function("short path", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/a/ab/bc/d")))
     ));
-    c.bench_function("params", |b| b.iter_custom(
+    c.bench_function("long path", |b| b.iter_custom(
+        |iters| rt.block_on(routing(iters, black_box("/a/b/c/d/e/i/k")))
+    ));
+    c.bench_function("one param", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/a/b")))
+    ));
+    c.bench_function("many params", |b| b.iter_custom(
+        |iters| rt.block_on(routing(iters, black_box("/a/1/c")))
     ));
     c.bench_function("err", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/err")))

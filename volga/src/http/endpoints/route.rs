@@ -1,172 +1,62 @@
-﻿use hyper::Method;
-use crate::http::endpoints::handlers::RouteHandler;
-use crate::{status, HttpResult};
+﻿//! # Route Tree Implementation
+//!
+//! This module implements a hierarchical route tree optimized for fast lookups
+//! and minimal runtime overhead. Instead of using a `HashMap` for storing child
+//! routes or handlers, this implementation relies on sorted `Vec`s combined with
+//! binary search. This design choice is intentional and based on the following
+//! observations:
+//!
+//! - **Read-heavy, write-once workload:**  
+//!   The route tree is fully constructed during application startup and remains
+//!   immutable during request handling. As a result, hash table insert overhead,
+//!   rehashing, and memory fragmentation provide no advantage compared to a
+//!   contiguous `Vec` structure.
+//!
+//! - **Better cache locality:**  
+//!   Route lookup involves traversing a small number of nodes and comparing short
+//!   path segments. Using a compact `Vec` means that route entries are stored
+//!   contiguously in memory, which improves CPU cache hit rates and branch
+//!   prediction compared to the pointer-heavy layout of a `HashMap`.
+//!
+//! - **Predictable binary search cost:**  
+//!   Each route level uses a sorted `Vec` of static segments and performs a
+//!   `binary_search_by`. The number of elements per level is typically small
+//!   (dozens at most), making binary search faster in practice than hash lookup
+//!   due to lower constant factors and better branch predictability.
+//!
+//! - **Dynamic routes are rare and handled separately:**  
+//!   Each node may have at most one dynamic child (e.g., `/user/{id}`), stored
+//!   as an `Option<RouteEntry>`. This avoids unnecessary branching and memory
+//!   overhead in the common case of static routing.
+//!
+//! ## Use of `SmallVec`
+//!
+//! `SmallVec` is used for short collections such as `PathArgs`, which typically
+//! contain zero or one path parameters. `SmallVec<[T; N]>` stores elements
+//! directly on the stack for small `N`, avoiding heap allocations in the common
+//! case. Since these values are later moved into heap-allocated request
+//! extensions, this approach eliminates an early allocation while preserving
+//! performance for longer paths.
+//!
+//! In summary, this design prioritizes **low per-request latency, cache
+//! efficiency, and predictable memory access patterns** over theoretical
+//! O(1) lookup complexity, which in practice provides better real-world
+//! performance under concurrent, read-only workloads.
+
+use hyper::Method;
 use smallvec::SmallVec;
 
-#[cfg(feature = "middleware")]
-use crate::middleware::{
-    from_handler,
-    HttpContext,
-    Middlewares,
-    MiddlewareFn,
-    NextFn,
-};
+pub(crate) use path_args::{PathArgs, PathArg};
+pub(crate) use layer::{RoutePipeline, Layer};
 
-#[cfg(not(feature = "middleware"))]
-use crate::http::request::HttpRequest;
+pub(crate) mod path_args;
+pub(crate) mod layer;
 
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const PATH_SEPARATOR: char = '/';
 const ALLOW_METHOD_SEPARATOR: &str = ",";
 const DEFAULT_DEPTH: usize = 4;
-
-/// Route path arguments
-pub(crate) type PathArgs = SmallVec<[PathArg; DEFAULT_DEPTH]>;
-
-/// A single path argument
-#[derive(Clone)]
-pub(crate) struct PathArg {
-    /// Argument name
-    pub(crate) name: Box<str>,
-    
-    /// Argument value
-    pub(crate) value: Box<str>,
-}
-
-impl PathArg {
-    /// Creates a string in key=value format
-    #[inline]
-    pub(crate) fn query_format(&self) -> String {
-        format!("{}={}", self.name, self.value)
-    }
-}
-
-/// A layer of middleware or a route handler
-#[derive(Clone)]
-pub(crate) enum Layer {
-    Handler(RouteHandler),
-    #[cfg(feature = "middleware")]
-    Middleware(MiddlewareFn),
-}
-
-impl From<RouteHandler> for Layer {
-    #[inline]
-    fn from(handler: RouteHandler) -> Self {
-        Self::Handler(handler)
-    }
-}
-
-#[cfg(feature = "middleware")]
-impl From<MiddlewareFn> for Layer {
-    #[inline]
-    fn from(mw: MiddlewareFn) -> Self {
-        Self::Middleware(mw)
-    }
-}
-
-impl From<Layer> for RouteHandler {
-    #[inline]
-    fn from(layer: Layer) -> Self {
-        match layer {
-            Layer::Handler(handler) => handler,
-            #[cfg(feature = "middleware")]
-            Layer::Middleware(_) => unreachable!(),
-        }
-    }
-}
-
-#[cfg(feature = "middleware")]
-impl From<Layer> for MiddlewareFn {
-    #[inline]
-    fn from(layer: Layer) -> Self {
-        match layer { 
-            Layer::Middleware(mw) => mw,
-            Layer::Handler(handler) => from_handler(handler)
-        }
-    }
-}
-
-/// Route's middleware pipeline
-#[derive(Clone)]
-pub(crate) enum RoutePipeline {
-    #[cfg(feature = "middleware")]
-    Builder(Middlewares),
-    #[cfg(feature = "middleware")]
-    Middleware(Option<NextFn>),
-    #[cfg(not(feature = "middleware"))]
-    Handler(Option<RouteHandler>)
-}
-
-impl From<Layer> for RoutePipeline {
-    fn from(handler: Layer) -> Self {
-        #[cfg(feature = "middleware")]
-        let pipeline = Self::Builder(Middlewares::from(MiddlewareFn::from(handler)));
-        #[cfg(not(feature = "middleware"))]
-        let pipeline = Self::Handler(Some(RouteHandler::from(handler)));
-        pipeline
-    }
-}
-
-impl RoutePipeline {
-    /// Creates s new middleware pipeline
-    pub(super) fn new() -> Self {
-        #[cfg(feature = "middleware")]
-        let pipeline = Self::Builder(Middlewares::new());
-        #[cfg(not(feature = "middleware"))]
-        let pipeline = Self::Handler(None);
-        pipeline
-    }
-    
-    /// Inserts a layer into the pipeline
-    pub(super) fn insert(&mut self, layer: Layer) {
-        match self {
-            #[cfg(feature = "middleware")]
-            Self::Builder(mx) => mx.add(layer.into()),
-            #[cfg(feature = "middleware")]
-            Self::Middleware(_) => (),
-            #[cfg(not(feature = "middleware"))]
-            Self::Handler(ref mut route_handler) => *route_handler = Some(layer.into()),
-        }
-    }
-
-    /// Calls the pipeline chain
-    #[cfg(feature = "middleware")]
-    pub(crate) async fn call(self, ctx: HttpContext) -> HttpResult {
-        match self {
-            Self::Middleware(Some(next)) => {
-                let next = next.clone();
-                next(ctx).await
-            },
-            _ => status!(405)
-        }
-    }
-    
-    /// Calls the request handler
-    #[cfg(not(feature = "middleware"))]
-    pub(crate) async fn call(self, req: HttpRequest) -> HttpResult {
-        match self { 
-            Self::Handler(Some(handler)) => handler.call(req).await,
-            _ => status!(405)
-        }
-    }
-
-    /// Builds a middleware pipeline
-    #[cfg(feature = "middleware")]
-    pub(super) fn compose(&mut self) {
-        let next = match self {
-            Self::Middleware(_) => return,
-            Self::Builder(mx) => {
-                // Unlike global, in route middlewares the route handler 
-                // initially locates at the beginning of the pipeline, 
-                // so we need to take it to the end
-                mx.pipeline.rotate_left(1);
-                mx.compose()
-            },
-        };
-        *self = Self::Middleware(next)
-    }
-}
 
 /// Represents a full route's "local" middleware pipeline
 /// with handler 
@@ -421,11 +311,6 @@ impl RouteNode {
         segment.starts_with(OPEN_BRACKET) &&
         segment.ends_with(CLOSE_BRACKET)
     }
-}
-
-#[inline(always)]
-pub(crate) fn empty_path_args_iter<const N: usize>() -> smallvec::IntoIter<[PathArg; N]> {
-    SmallVec::<[PathArg; N]>::new().into_iter()
 }
 
 #[inline(always)]

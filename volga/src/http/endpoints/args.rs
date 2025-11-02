@@ -9,7 +9,7 @@ use hyper::{
 
 use crate::{
     error::Error,
-    http::endpoints::route::{PathArg, PathArgs, empty_path_args_iter},
+    http::endpoints::route::{PathArg, PathArgs},
     HttpBody,
     HttpRequest
 };
@@ -169,7 +169,7 @@ macro_rules! define_generic_from_request {
                         Source::None => Payload::None,
                         Source::Parts => Payload::Parts(&parts),
                         Source::PathArgs => Payload::PathArgs(
-                            std::mem::replace(&mut iter, empty_path_args_iter()).collect::<PathArgs>()
+                            std::mem::replace(&mut iter, PathArg::empty()).collect::<PathArgs>()
                         ),
                         Source::Path => match iter.next() {
                             Some(param) => Payload::Path(param),
