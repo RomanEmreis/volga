@@ -44,6 +44,10 @@ pin_project! {
 pin_project! {
     #[project = InnerBodyProj]
     pub(crate) enum InnerBody {
+        Empty {
+            #[pin]
+            inner: Empty<Bytes>
+        },
         Incoming {
             #[pin]
             inner: Incoming
@@ -70,6 +74,7 @@ impl Body for HttpBody {
     #[inline]
     fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         match self.project().inner.project() {
+            InnerBodyProj::Empty { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Incoming { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Limited { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::BoxedLimited  { inner } => inner.poll_frame(cx).map_err(Error::client_error),
@@ -80,6 +85,7 @@ impl Body for HttpBody {
     #[inline]
     fn is_end_stream(&self) -> bool {
         match &self.inner {
+            InnerBody::Empty { inner } => inner.is_end_stream(),
             InnerBody::Incoming { inner } => inner.is_end_stream(),
             InnerBody::Limited { inner } => inner.is_end_stream(),
             InnerBody::BoxedLimited  { inner } => inner.is_end_stream(),
@@ -90,6 +96,7 @@ impl Body for HttpBody {
     #[inline]
     fn size_hint(&self) -> SizeHint {
         match &self.inner {
+            InnerBody::Empty { inner } => inner.size_hint(),
             InnerBody::Incoming { inner } => inner.size_hint(),
             InnerBody::Limited { inner } => inner.size_hint(),
             InnerBody::BoxedLimited { inner } => inner.size_hint(),
@@ -115,6 +122,9 @@ impl HttpBody {
     #[inline]
     pub(crate) fn limited(inner: HttpBody, limit: usize) -> Self {
         match inner.inner {
+            InnerBody::Empty { inner: _ } => Self {
+                inner: InnerBody::BoxedLimited { inner: Limited::new(inner.boxed(), limit) }
+            },
             InnerBody::Limited { inner } => Self { 
                 inner: InnerBody::Limited { inner }
             },
@@ -145,6 +155,9 @@ impl HttpBody {
     pub fn into_boxed(self) -> BoxBody {
         match self.inner {
             InnerBody::Boxed { inner } => inner,
+            InnerBody::Empty { inner } => inner
+                .map_err(Error::client_error)
+                .boxed(),
             InnerBody::BoxedLimited { inner } => inner
                 .map_err(Error::client_error)
                 .boxed(),
@@ -215,10 +228,8 @@ impl HttpBody {
     /// Creates an empty [`HttpBody`]
     #[inline]
     pub fn empty() -> HttpBody {
-        let inner = Empty::<Bytes>::new()
-            .map_err(Error::from)
-            .boxed();
-        Self { inner: InnerBody::Boxed { inner } }
+        let inner = Empty::<Bytes>::new();
+        Self { inner: InnerBody::Empty { inner } }
     }
 
     /// Creates a new [`HttpBody`] from [`File`] stream
