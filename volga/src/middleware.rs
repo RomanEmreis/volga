@@ -93,28 +93,22 @@ impl Middlewares {
 
     /// Composes middlewares into a "Linked List" and returns head
     pub(super) fn compose(&self) -> Option<NextFn> {
-        if self.pipeline.is_empty() {
-            return None;
-        }
-
-        // Fetching the last middleware which is the request handler to be the initial `next`.
-        let request_handler = self.pipeline.last().unwrap().clone();
-        let mut next: NextFn = Arc::new(move |ctx| {
-            let handler = request_handler.clone();
+        let mut iter = self.pipeline.iter().rev();
+        // Fetching the last middleware which is the request handler to be the initial `next`
+        let last = iter.next()?;
+        let mut next: NextFn = {
+            let handler = last.clone();
             // Call the last middleware, ignoring its `next` argument with an empty placeholder
-            handler(ctx, Arc::new(|_| Box::pin(async { not_found!() })))
-        });
+            Arc::new(move |ctx| 
+                handler(ctx, Arc::new(|_| Box::pin(async { not_found!() }))))
+        };
 
-        for mw in self.pipeline.iter().rev().skip(1) {
-            let current_mw: MiddlewareFn = mw.clone();
-            let prev_next: NextFn = next.clone();
-
-            next = Arc::new(move |ctx| {
-                let current_mw = current_mw.clone();
-                let prev_next = prev_next.clone();
-                current_mw(ctx, prev_next)
-            });
+        for mw in iter {
+            let current_mw = mw.clone();
+            let prev_next = next.clone();
+            next = Arc::new(move |ctx| current_mw(ctx, prev_next.clone()));
         }
+
         Some(next)
     }
 }

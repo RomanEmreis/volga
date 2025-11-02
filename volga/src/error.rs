@@ -121,6 +121,17 @@ impl From<Error> for IoError {
     }
 }
 
+impl From<fmt::Error> for Error {
+    #[inline]
+    fn from(err: fmt::Error) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            inner: err.into(),
+            instance: None,
+        }
+    }
+}
+
 impl Error {
     /// Creates a new [`Error`]
     pub fn new(instance: &str, err: impl Into<BoxError>) -> Self {
@@ -401,5 +412,15 @@ mod tests {
         let inner = error.into_inner();
         
         assert_eq!(format!("{inner}"), "some error");
+    }
+
+    #[test]
+    #[allow(clippy::default_constructed_unit_structs)]
+    fn it_converts_from_fmt_error() {
+        let fmt_error = std::fmt::Error::default();
+        let err = Error::from(fmt_error);
+
+        assert!(err.is_client_error());
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
     }
 }

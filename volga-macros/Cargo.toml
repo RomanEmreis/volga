@@ -1,6 +1,6 @@
 [package]
 name = "volga-macros"
-version = "0.6.6"
+version = "0.6.7"
 edition = "2021"
 rust-version = "1.80.0"
 authors = ["Roman Emreis <roman.emreis@outlook.com>"]
@@ -22,9 +22,9 @@ keywords = ["volga", "http", "web", "framework"]
 proc-macro = true
 
 [dependencies]
-quote = "1.0.40"
-syn = { version = "2.0.106", features = ["full"] }
-proc-macro2 = "1.0.101"
+quote = "1.0.41"
+syn = { version = "2.0.108", features = ["full"] }
+proc-macro2 = "1.0.103"
 
 [features]
 default = []

@@ -71,7 +71,7 @@ criterion_group!(benches, benchmark);
 criterion_main!(benches);
 
 claims! {
-    #[derive(Serialize, Deserialize)]
+    #[derive(Clone, Serialize, Deserialize)]
     struct Claims {
         sub: String,
         company: String,

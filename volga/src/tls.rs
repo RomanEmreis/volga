@@ -379,7 +379,7 @@ impl TlsConfig {
     ///         .with_dev_cert(DevCertMode::Ask));
     /// ```
     #[cfg(feature = "dev-cert")]
-    pub fn with_dev_cert(self, mode: DevCertMode) -> Self {
+    pub fn with_dev_cert(self, _mode: DevCertMode) -> Self {
         // do nothing for release mode
         #[cfg(not(debug_assertions))]
         { 
@@ -406,7 +406,7 @@ impl TlsConfig {
                 tls.use_dev_cert()
             }
             
-            match mode { 
+            match _mode { 
                 DevCertMode::Auto => generate_impl(self),
                 DevCertMode::Ask => match ask_generate() {
                     Ok(true) => generate_impl(self),

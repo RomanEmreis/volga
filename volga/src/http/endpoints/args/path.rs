@@ -16,7 +16,7 @@ use std::{
 };
 
 use crate::http::endpoints::{
-    route::PathArguments,
+    route::{PathArg, PathArgs},
     args::{
         FromPayload, 
         FromRequestParts, 
@@ -78,13 +78,8 @@ impl<T: Display> Display for Path<T> {
 impl<T: DeserializeOwned> Path<T> {
     /// Parses the slice of tuples `(String, String)` into [`Path<T>`]
     #[inline]
-    pub(crate) fn from_slice(route_params: &[(Cow<str>, Cow<str>)]) -> Result<Self, Error> {
-        let route_str = route_params
-            .iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect::<Vec<String>>()
-            .join("&");
-        
+    pub(crate) fn from_slice(route_params: &PathArgs) -> Result<Self, Error> {
+        let route_str = PathArg::make_query_str(route_params)?;
         serde_urlencoded::from_str::<T>(&route_str)
             .map(Path)
             .map_err(PathError::from_serde_error)
@@ -97,7 +92,7 @@ impl<T: DeserializeOwned + Send> TryFrom<&Extensions> for Path<T> {
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Error> {
         extensions
-            .get::<PathArguments>()
+            .get::<PathArgs>()
             .ok_or_else(PathError::args_missing)
             .and_then(|params| Self::from_slice(params))
     }
@@ -138,13 +133,13 @@ impl<T: DeserializeOwned + Send> FromPayload for Path<T> {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
-        ready(parts.try_into())
+        let Payload::PathArgs(params) = payload else { unreachable!() };
+        ready(Self::from_slice(&params))
     }
 
     #[inline]
     fn source() -> Source {
-        Source::Parts
+        Source::PathArgs
     }
 }
 
@@ -153,8 +148,8 @@ impl FromPayload for String {
     
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        let Payload::Path((_, value)) = payload else { unreachable!() };
-        ok(value.to_string())
+        let Payload::Path(param) = payload else { unreachable!() };
+        ok(param.value.into_string())
     }
     
     #[inline]
@@ -168,8 +163,8 @@ impl FromPayload for Cow<'static, str> {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        let Payload::Path((_, value)) = payload else { unreachable!() };
-        ok(Cow::Owned(value.to_string()))
+        let Payload::Path(param) = payload else { unreachable!() };
+        ok(Cow::Owned(param.value.into_string()))
     }
 
     #[inline]
@@ -183,8 +178,8 @@ impl FromPayload for Box<str> {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        let Payload::Path((_, value)) = payload else { unreachable!() };
-        ok(value.to_string().into_boxed_str())
+        let Payload::Path(param) = payload else { unreachable!() };
+        ok(param.value)
     }
 
     #[inline]
@@ -198,8 +193,8 @@ impl FromPayload for Box<[u8]> {
 
     #[inline]
     fn from_payload(payload: Payload) -> Self::Future {
-        let Payload::Path((_, value)) = payload else { unreachable!() };
-        ok(value.as_bytes().to_vec().into_boxed_slice())
+        let Payload::Path(param) = payload else { unreachable!() };
+        ok(param.value.into_boxed_bytes())
     }
 
     #[inline]
@@ -214,10 +209,10 @@ macro_rules! impl_from_payload {
             type Future = Ready<Result<Self, Error>>;
             #[inline]
             fn from_payload(payload: Payload) -> Self::Future {
-                let Payload::Path((arg, value)) = payload else { unreachable!() };
-                ready(value
+                let Payload::Path(param) = payload else { unreachable!() };
+                ready(param.value
                     .parse::<$type>()
-                    .map_err(|_| PathError::type_mismatch(arg)))
+                    .map_err(|_| PathError::type_mismatch(param.name.as_ref())))
             }
             #[inline]
             fn source() -> Source {
@@ -264,9 +259,8 @@ impl PathError {
 mod tests {
     use hyper::{Request, http::Extensions};
     use serde::Deserialize;
-    use std::borrow::Cow;
     use crate::{HttpBody, HttpRequest, Path};
-    use crate::http::endpoints::route::PathArguments;
+    use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
 
     #[derive(Deserialize)]
@@ -277,130 +271,124 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_isize_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = isize::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = isize::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
     
     #[tokio::test]
     async fn it_reads_i8_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = i8::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i8::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
     
     #[tokio::test]
     async fn it_reads_i16_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = i16::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i16::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
     
     #[tokio::test]
     async fn it_reads_i32_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = i32::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i32::from_payload(Payload::Path(param)).await.unwrap();
         
         assert_eq!(id, 123);
     }
 
     #[tokio::test]
     async fn it_reads_i64_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = i64::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i64::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
 
     #[tokio::test]
     async fn it_reads_i128_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = i128::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i128::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
 
     #[tokio::test]
     async fn it_reads_usize_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = usize::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = usize::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
 
     #[tokio::test]
     async fn it_reads_u8_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = u8::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u8::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
 
     #[tokio::test]
     async fn it_reads_u16_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = u16::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u16::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
 
     #[tokio::test]
     async fn it_reads_u32_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = u32::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u32::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
 
     #[tokio::test]
     async fn it_reads_u128_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = u128::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u128::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
 
     #[tokio::test]
     async fn it_reads_string_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = String::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = String::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(id, "123");
     }
 
     #[tokio::test]
     async fn it_reads_box_str_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = Box::<str>::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = Box::<str>::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(&*id, "123");
     }
 
     #[tokio::test]
     async fn it_reads_box_bytes_from_payload() {
-        let param = (Cow::Borrowed("id"), Cow::Borrowed("123"));
-        let id = Box::<[u8]>::from_payload(Payload::Path(&param)).await.unwrap();
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = Box::<[u8]>::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(&*id, [b'1', b'2', b'3']);
     }
 
     #[tokio::test]
     async fn it_reads_path_from_payload() {
-        let args: PathArguments = vec![
-            (Cow::Borrowed("id"), Cow::Borrowed("123")),
-            (Cow::Borrowed("name"), Cow::Borrowed("John"))
-        ].into_boxed_slice();
+        let args: PathArgs = smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
+        ];
 
-        let req = Request::get("/")
-            .extension(args)
-            .body(())
-            .unwrap();
-
-        let (parts, _) = req.into_parts();
-        let path = Path::<Params>::from_payload(Payload::Parts(&parts)).await.unwrap();
+        let path = Path::<Params>::from_payload(Payload::PathArgs(args)).await.unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
@@ -408,12 +396,12 @@ mod tests {
     
     #[test]
     fn it_parses_slice() {
-        let slice = [
-            (Cow::Borrowed("id"), Cow::Borrowed("123")),
-            (Cow::Borrowed("name"), Cow::Borrowed("John"))
+        let args: PathArgs = smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
         ];
         
-        let path = Path::<Params>::from_slice(&slice).unwrap();
+        let path = Path::<Params>::from_slice(&args).unwrap();
         
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
@@ -421,10 +409,10 @@ mod tests {
 
     #[test]
     fn it_parses_request_extensions() {
-        let args: PathArguments = vec![
-            (Cow::Borrowed("id"), Cow::Borrowed("123")),
-            (Cow::Borrowed("name"), Cow::Borrowed("John"))
-        ].into_boxed_slice();
+        let args: PathArgs = smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
+        ];
         
         let mut ext = Extensions::new();
         ext.insert(args);
@@ -437,10 +425,10 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_path_from_parts() {
-        let args: PathArguments = vec![
-            (Cow::Borrowed("id"), Cow::Borrowed("123")),
-            (Cow::Borrowed("name"), Cow::Borrowed("John"))
-        ].into_boxed_slice();
+        let args: PathArgs = smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
+        ];
 
         let req = Request::get("/")
             .extension(args)
@@ -456,10 +444,10 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_path_from_request_ref() {
-        let args: PathArguments = vec![
-            (Cow::Borrowed("id"), Cow::Borrowed("123")),
-            (Cow::Borrowed("name"), Cow::Borrowed("John"))
-        ].into_boxed_slice();
+        let args: PathArgs = smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
+        ];
 
         let req = Request::get("/")
             .extension(args)

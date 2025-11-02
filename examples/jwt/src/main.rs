@@ -59,7 +59,7 @@ async fn me() -> &'static str {
     "Hello from protected area"
 }
 
-#[derive(Claims, Serialize, Deserialize)]
+#[derive(Claims, Clone, Serialize, Deserialize)]
 struct Claims {
     sub: String,
     company: String,

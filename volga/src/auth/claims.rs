@@ -18,7 +18,7 @@ use serde::de::DeserializeOwned;
 /// use serde::Deserialize;
 /// use volga::auth::AuthClaims;
 ///
-/// #[derive(Debug, Deserialize)]
+/// #[derive(Debug, Clone, Deserialize)]
 /// struct MyClaims {
 ///     sub: String,
 ///     role: String,
@@ -30,7 +30,7 @@ use serde::de::DeserializeOwned;
 ///     }
 /// }
 /// ```
-pub trait AuthClaims: DeserializeOwned {
+pub trait AuthClaims: DeserializeOwned + Clone {
     /// Returns the primary role associated with the claims.
     ///
     /// This is useful for role-based access control (RBAC) where only a single role is expected.
@@ -110,7 +110,7 @@ mod tests {
     use serde::{Serialize, Deserialize};
 
     claims! {
-        #[derive(Debug, Serialize, Deserialize)]
+        #[derive(Clone, Debug, Serialize, Deserialize)]
         struct MyClaims {
             sub: String,
             role: String,
@@ -119,7 +119,7 @@ mod tests {
     }
 
     claims! {
-        #[derive(Debug, Serialize, Deserialize)]
+        #[derive(Clone, Debug, Serialize, Deserialize)]
         struct MyClaims2 {
             sub: String,
             roles: Vec<String>,
