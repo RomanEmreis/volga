@@ -131,13 +131,13 @@ impl Scope {
                 let response = route_pipeline.call(request).await;
                 
                 match response {
-                    Err(err) => call_weak_err_handler(error_handler, &parts, err).await,
                     Ok(response) if parts.method != Method::HEAD => Ok(response),
                     Ok(mut response) => {
                         Self::keep_content_length(response.size_hint(), response.headers_mut());
                         *response.body_mut() = HttpBody::empty();
                         Ok(response)
-                    }
+                    },
+                    Err(err) => call_weak_err_handler(error_handler, &parts, err).await,
                 }
             }
         }

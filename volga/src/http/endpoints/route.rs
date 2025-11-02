@@ -314,7 +314,11 @@ impl RouteNode {
 }
 
 #[inline(always)]
-pub(super) fn create_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoint; N]>) -> String {
+pub(super) fn make_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoint; N]>) -> String {
+    if handlers.is_empty() { 
+        return String::new();
+    } 
+    
     let mut allowed = String::with_capacity(handlers.len() * DEFAULT_DEPTH);
     let mut iter = handlers.iter().map(|h| h.method.as_str());
     if let Some(first) = iter.next() {
@@ -343,6 +347,8 @@ fn method_order(method: &Method) -> u8 {
         Method::PATCH => 4,
         Method::OPTIONS => 5,
         Method::HEAD => 6,
+        Method::CONNECT => 7,
+        Method::TRACE => 8,
         _ => 255,
     }
 }
@@ -350,9 +356,11 @@ fn method_order(method: &Method) -> u8 {
 #[cfg(test)]
 mod tests {
     use hyper::Method;
+    use smallvec::SmallVec;
     use crate::ok;
     use crate::http::endpoints::handlers::{Func, RouteHandler};
-    use crate::http::endpoints::route::RouteNode;
+    use crate::http::endpoints::route::{make_allowed_str, method_order, split_path, RouteNode, DEFAULT_DEPTH};
+    use super::RouteEndpoint;
     #[cfg(debug_assertions)]
     use super::super::meta::RouteInfo;
     
@@ -587,5 +595,71 @@ mod tests {
         for route in routes.iter() {
             assert_eq!(route.path, "/resource");
         }
+    }
+    
+    #[test]
+    fn in_check_method_order() {
+        let methods = [
+            Method::GET, 
+            Method::POST, 
+            Method::PUT, 
+            Method::DELETE, 
+            Method::PATCH,
+            Method::OPTIONS,
+            Method::HEAD,
+            Method::CONNECT,
+            Method::TRACE
+        ];
+        for i in 0..methods.len() - 1 {
+            assert!(method_order(&methods[i]) < method_order(&methods[i + 1]));
+        }
+    }
+    
+    #[test]
+    fn it_splits_path() {
+        let path = "/a/b/c/d";
+        let split = split_path(path);
+        assert_eq!(
+            split.collect::<Vec<_>>(),
+            vec!["a", "b", "c", "d"]
+        )
+    }
+    
+    #[test]
+    fn it_splits_path_with_trailing_slash() {
+        let path = "/a/b/c/d/";
+        let split = split_path(path);
+        assert_eq!(
+            split.collect::<Vec<_>>(),
+            vec!["a", "b", "c", "d"]
+        )
+    }
+    
+    #[test]
+    fn it_splits_path_without_leading_slash() {
+        let path = "a/b/c/d";
+        let split = split_path(path);
+        assert_eq!(
+            split.collect::<Vec<_>>(),
+            vec!["a", "b", "c", "d"]
+        )
+    }
+    
+    #[test]
+    fn it_makes_allowed_str() {
+        let handlers: SmallVec<[RouteEndpoint; DEFAULT_DEPTH]> = smallvec::smallvec![
+            RouteEndpoint::new(Method::GET),
+            RouteEndpoint::new(Method::HEAD),
+        ];
+        
+        let allowed = make_allowed_str(&handlers);
+        assert_eq!(allowed, "GET,HEAD");
+    }
+
+    #[test]
+    fn it_makes_empty_allowed_str_if_no_handlers() {
+        let handlers: SmallVec<[RouteEndpoint; DEFAULT_DEPTH]> = smallvec::smallvec![];
+        let allowed = make_allowed_str(&handlers);
+        assert_eq!(allowed, "");
     }
 }

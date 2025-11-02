@@ -122,8 +122,8 @@ impl HttpBody {
     #[inline]
     pub(crate) fn limited(inner: HttpBody, limit: usize) -> Self {
         match inner.inner {
-            InnerBody::Empty { inner: _ } => Self {
-                inner: InnerBody::BoxedLimited { inner: Limited::new(inner.boxed(), limit) }
+            InnerBody::Empty { inner } => Self {
+                inner: InnerBody::Empty { inner }
             },
             InnerBody::Limited { inner } => Self { 
                 inner: InnerBody::Limited { inner }
@@ -267,6 +267,7 @@ impl From<Cow<'static, str>> for HttpBody {
 #[cfg(test)]
 mod tests {
     use http_body_util::BodyExt;
+    use hyper::body::Body;
     use serde::{Serialize, Serializer};
     use crate::HttpBody;
     
@@ -318,9 +319,21 @@ mod tests {
         let body = HttpBody::form(content);
 
         let collected = body.collect().await;
-
+        
         assert!(collected.is_ok());
         assert_eq!(String::from_utf8_lossy(&collected.unwrap().to_bytes()), "Form Data serialization error: oops...")
+    }
+
+    #[tokio::test]
+    async fn it_returns_empty_body() {
+        let body = HttpBody::empty();
+
+        let collected = body.collect().await;
+        assert!(collected.is_ok());
+        
+        let size = collected.unwrap().size_hint();
+        assert_eq!(size.lower(), 0);
+        assert_eq!(size.upper(), None)
     }
 }
 

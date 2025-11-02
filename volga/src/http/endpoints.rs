@@ -2,7 +2,7 @@
 
 use hyper::{Method, Uri};
 use super::endpoints::{
-    route::{RouteNode, RoutePipeline, PathArgs, create_allowed_str},
+    route::{RouteNode, RoutePipeline, PathArgs, make_allowed_str},
     handlers::RouteHandler
 };
 
@@ -73,7 +73,7 @@ impl Endpoints {
         handlers
             .binary_search_by(|h| h.cmp(method))
             .map_or_else(
-                |_| FindResult::MethodNotFound(create_allowed_str(handlers)),
+                |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
                 |i| FindResult::Ok(
                     Endpoint::new(handlers[i].pipeline.clone(), route_params.params)
                 )
