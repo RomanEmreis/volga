@@ -165,34 +165,38 @@ macro_rules! define_generic_from_request {
                     .remove::<PathArgs>()
                     .unwrap_or_default();
 
+                let mut parts = Some(parts);
                 let mut body = Some(body);
                 let mut iter = params.into_iter();
                 let tuple = (
                     $(
                     $T::from_payload(match $T::source() {
-                        Source::None => Payload::None,
-                        Source::Parts => Payload::Parts(&parts),
-                        Source::PathArgs => Payload::PathArgs(
-                            std::mem::replace(&mut iter, PathArg::empty()).collect::<PathArgs>()
-                        ),
                         Source::Path => match iter.next() {
                             Some(param) => Payload::Path(param),
+                            None => Payload::None
+                        },
+                        Source::Parts => match &parts {
+                            Some(parts) => Payload::Parts(parts),
                             None => Payload::None
                         },
                         Source::Body => match body.take() {
                             Some(body) => Payload::Body(body),
                             None => Payload::None
                         },
-                        Source::Full => match body.take() {
-                            Some(body) => Payload::Full(&parts, body),
-                            None => Payload::None
+                        Source::PathArgs => Payload::PathArgs(
+                            std::mem::replace(&mut iter, PathArg::empty()).collect::<PathArgs>()
+                        ),
+                        Source::Full => match (&parts, body.take()) {
+                            (Some(parts), Some(body)) => Payload::Full(parts, body),
+                            _ => Payload::None
                         },
-                        Source::Request => match body.take() {
-                            Some(body) => Payload::Request(
-                                Box::new(HttpRequest::from_parts(parts.clone(), body))
+                        Source::Request => match (parts.take(), body.take()) {
+                            (Some(parts), Some(body)) => Payload::Request(
+                                Box::new(HttpRequest::from_parts(parts, body))
                             ),
-                            None => Payload::None
+                            _ => Payload::None
                         },
+                        Source::None => Payload::None,
                     }).await?,
                     )*    
                 );
