@@ -28,3 +28,40 @@ impl Display for Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_displays_container_missing() {
+        assert_eq!(
+            format!("{}", Error::ContainerMissing), 
+            "Services Error: DI container is missing"
+        );
+    }
+
+    #[test]
+    fn it_displays_resolve_failed() {
+        assert_eq!(
+            format!("{}", Error::ResolveFailed("Type")), 
+            "Services Error: unable to resolve the service: Type"
+        );
+    }
+
+    #[test]
+    fn it_displays_not_registered() {
+        assert_eq!(
+            format!("{}", Error::NotRegistered("Type")), 
+            "Services Error: service not registered: Type"
+        );
+    }
+
+    #[test]
+    fn it_displays_other() {
+        assert_eq!(
+            format!("{}", Error::Other("some error")), 
+            "some error"
+        );
+    }
+}
