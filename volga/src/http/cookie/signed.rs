@@ -290,6 +290,15 @@ mod tests {
         let _ = SignedKey::from_file("tests/resources/key");
     }
 
+    #[test]
+    fn it_debugs() {
+        let key = SignedKey::generate();
+        let cookies = SignedCookies::new(key.clone());
+
+        assert_eq!(format!("{key:?}"), r#"SignedKey("[redacted]")"#);
+        assert_eq!(format!("{cookies:?}"), r#"SignedCookies("[redacted]")"#);
+    }
+
     fn set_cookies_for_request(jar: CookieJar, headers: &mut HeaderMap) {
         for cookie in jar.delta() {
             if let Ok(header_value) = cookie.encoded().to_string().parse() {

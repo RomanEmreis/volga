@@ -346,4 +346,11 @@ mod tests {
         assert!(basic.validate(username, password));
         assert!(!basic.validate(username, "pass"));
     }
+
+    #[test]
+    fn it_debugs() {
+        let basic = Basic(STANDARD.encode("testuser:testpass").into_boxed_str());
+
+        assert_eq!(format!("{basic:?}"), r#"Basic("[redacted]")"#);
+    }
 }

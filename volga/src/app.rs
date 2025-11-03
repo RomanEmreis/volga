@@ -652,4 +652,11 @@ mod tests {
 
         assert_eq!(limit, 5242880);
     }
+
+    #[test]
+    fn it_debugs_connection() {
+        let connection: Connection = ([127, 0, 0, 1], 5000).into();
+
+        assert_eq!(format!("{connection:?}"), "Connection { socket: 127.0.0.1:5000 }");
+    }
 }

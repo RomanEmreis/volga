@@ -19,11 +19,22 @@ use jsonwebtoken::{
 const SCHEME: &str = "Bearer ";
 
 /// Bearer Token Authentication configuration
-#[derive(Default, Debug)]
+#[derive(Default)]
 pub struct BearerAuthConfig {
     validation: Validation,
     encoding: Option<EncodingKey>,
     decoding: Option<DecodingKey>,
+}
+
+impl std::fmt::Debug for BearerAuthConfig {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BearerAuthConfig")
+            .field("validation", &"[redacted]")
+            .field("encoding", &"[redacted]")
+            .field("decoding", &"[redacted]")
+            .finish()
+    }
 }
 
 impl BearerAuthConfig {
@@ -742,5 +753,45 @@ mod tests {
         assert_eq!(claims.sub, decoded.sub);
         assert_eq!(claims.aud, decoded.aud);
         assert_eq!(claims.iss, decoded.iss);
+    }
+
+    #[test]
+    fn it_debugs_bearer() {
+        let token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test";
+        let bearer = Bearer(token.into());
+
+        assert_eq!(format!("{bearer:?}"), r#"Bearer("[redacted]")"#);
+    }
+
+    #[test]
+    fn it_debugs_bearer_auth_config() {
+        let encoding_key = EncodingKey::from_secret(SECRET);
+        let decoding_key = DecodingKey::from_secret(SECRET);
+
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(encoding_key)
+            .set_decoding_key(decoding_key)
+            .with_aud(vec!["test-audience"])
+            .with_iss(vec!["test-issuer"])
+            .validate_aud(true);
+
+        assert_eq!(format!("{config:?}"), r#"BearerAuthConfig { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]" }"#);
+    }
+
+    #[test]
+    fn it_debugs_bearer_token_service_config() {
+        let encoding_key = EncodingKey::from_secret(SECRET);
+        let decoding_key = DecodingKey::from_secret(SECRET);
+
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(encoding_key)
+            .set_decoding_key(decoding_key)
+            .with_aud(vec!["test-audience"])
+            .with_iss(vec!["test-issuer"])
+            .validate_aud(true);
+
+        let service: BearerTokenService = config.into();
+
+        assert_eq!(format!("{service:?}"), r#"BearerTokenService { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]" }"#);
     }
 }

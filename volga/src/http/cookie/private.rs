@@ -289,6 +289,15 @@ mod tests {
         let _ = PrivateKey::from_file("tests/resources/key");
     }
 
+    #[test]
+    fn it_debugs() {
+        let key = PrivateKey::generate();
+        let cookies = PrivateCookies::new(key.clone());
+
+        assert_eq!(format!("{key:?}"), r#"PrivateKey("[redacted]")"#);
+        assert_eq!(format!("{cookies:?}"), r#"PrivateCookies("[redacted]")"#);
+    }
+
     fn set_cookies_for_request(jar: CookieJar, headers: &mut HeaderMap) {
         for cookie in jar.delta() {
             if let Ok(header_value) = cookie.encoded().to_string().parse() {
