@@ -45,6 +45,7 @@ fn benchmark(c: &mut Criterion) {
                 .without_greeter();
             
             app.map_get("/", || async {});
+            app.map_put("/b", || async {});
             app.map_get("/a", || async { "Hello, World!" });
             app.map_get("/a/ab/bc/d", || async { "Hello, World!" });
             app.map_get("/a/b/c/d/e/i/k", || async { "Hello, World!" });
@@ -59,6 +60,9 @@ fn benchmark(c: &mut Criterion) {
 
     c.bench_function("ok", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/")))
+    ));
+    c.bench_function("405", |b| b.iter_custom(
+        |iters| rt.block_on(routing(iters, black_box("/b")))
     ));
     c.bench_function("path", |b| b.iter_custom(
         |iters| rt.block_on(routing(iters, black_box("/a")))

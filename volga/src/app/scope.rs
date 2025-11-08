@@ -92,12 +92,14 @@ impl Scope {
             FindResult::Ok(endpoint) => {
                 let (route_pipeline, params) = endpoint.into_parts();
                 let error_handler = pipeline.error_handler();
-
                 let (mut parts, body) = request.into_parts();
+                
                 {
                     let extensions = &mut parts.extensions;
                     extensions.insert(cancellation_token);
                     extensions.insert(shared.body_limit);
+                    extensions.insert(params);
+                    extensions.insert(error_handler.clone());
                     
                     #[cfg(feature = "jwt-auth")]
                     if let Some(bts) = &shared.bearer_token_service {
@@ -105,20 +107,16 @@ impl Scope {
                     } 
                 }
 
-                let mut request = HttpRequest::new(Request::from_parts(parts.clone(), body))
+                let request = HttpRequest::new(Request::from_parts(parts.clone(), body))
                     .into_limited(shared.body_limit);
                 
                 #[cfg(any(feature = "tls", feature = "tracing"))]
-                let parts = Arc::new(parts);
-
-                {
-                    let extensions = request.extensions_mut();
-                    extensions.insert(params);
-                    extensions.insert(error_handler.clone());
-
-                    #[cfg(any(feature = "tls", feature = "tracing"))]
-                    extensions.insert(parts.clone());
-                }
+                let (request, parts) = {
+                    let mut request = request;
+                    let parts= Arc::new(parts);
+                    request.extensions_mut().insert(parts.clone());
+                    (request, parts)
+                };
                 
                 #[cfg(feature = "middleware")]
                 let response = if pipeline.has_middleware_pipeline() {
