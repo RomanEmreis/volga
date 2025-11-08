@@ -4,7 +4,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 /// Creates a derive-macro for a singleton
-pub fn expand_singleton(input: &syn::DeriveInput) -> syn::Result<TokenStream> {
+pub(super) fn expand_singleton(input: &syn::DeriveInput) -> syn::Result<TokenStream> {
     let name = &input.ident;
     Ok(quote! {
         impl ::volga::di::Inject for #name {

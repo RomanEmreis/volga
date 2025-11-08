@@ -1,4 +1,6 @@
-﻿use volga::{App, ok};
+﻿#![allow(missing_docs)]
+
+use volga::{App, ok};
 
 #[tokio::test]
 async fn it_returns_brotli_compressed() {

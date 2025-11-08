@@ -32,6 +32,13 @@ pub struct HttpContext {
     pipeline: Option<RoutePipeline>
 }
 
+impl std::fmt::Debug for HttpContext {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HttpContext(..)")
+    }
+}
+
 impl HttpContext {
     /// Creates a new [`HttpContext`]
     #[inline]
@@ -137,5 +144,55 @@ impl HttpContext {
             .get::<Arc<Parts>>()
             .expect("http request parts snapshot must be provided")
             .clone()
+    }
+}
+
+#[cfg(test)]
+#[allow(unreachable_pub)]
+mod tests {
+    use hyper::Request;
+    use crate::{HttpBody, headers::custom_headers};
+    use super::*;
+    
+    custom_headers! {
+        (Foo, "x-foo")
+    }
+    
+    #[test]
+    fn it_debugs() {
+        let (parts, body) = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+        
+        let ctx = HttpContext::new(HttpRequest::from_parts(parts, body), None);
+        assert_eq!(format!("{ctx:?}"), "HttpContext(..)");
+    }
+    
+    #[test]
+    fn it_splits_into_parts() {
+        let (parts, body) = Request::get("/test")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let ctx = HttpContext::slim(HttpRequest::from_parts(parts, body));
+
+        let (parts, _) = ctx.into_parts();
+        
+        assert_eq!(parts.inner.uri(), "/test")
+    }
+
+    #[test]
+    fn it_inserts_and_header() {
+        let (parts, body) = Request::get("/test")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let mut ctx = HttpContext::slim(HttpRequest::from_parts(parts, body));
+        ctx.insert_header::<Foo>(Header::from("x-foo"));
+
+        assert_eq!(ctx.extract::<Header<Foo>>().unwrap().into_inner(), "x-foo");
     }
 }

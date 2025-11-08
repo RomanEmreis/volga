@@ -4,7 +4,13 @@ default-members = ["volga", "volga-*"]
 resolver = "2"
 
 [workspace.package]
-rust-version = "1.80.0"
+license = "MIT"
+edition = "2024"
+rust-version = "1.90.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+rust_2018_idioms = { level = "warn", priority = -1 }
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+unreachable_pub = "warn"

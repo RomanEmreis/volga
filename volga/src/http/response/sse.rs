@@ -1,4 +1,6 @@
-﻿/// Produces `OK 200` response with SSE (Server-Sent Events) stream body
+﻿//! Macros for SSE (Server Sent Events) responses
+
+/// Produces `OK 200` response with SSE (Server-Sent Events) stream body
 /// 
 #[macro_export]
 macro_rules! sse {

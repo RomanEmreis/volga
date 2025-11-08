@@ -1,4 +1,6 @@
-﻿use reqwest::Method;
+﻿#![allow(missing_docs)]
+
+use reqwest::Method;
 use volga::{App, HttpRequest, Results};
 
 #[tokio::test]

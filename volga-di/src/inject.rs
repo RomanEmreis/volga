@@ -61,6 +61,7 @@ use crate::error::Error;
 /// });
 /// ```
 pub trait Inject: Sized + Send + Sync {
+    /// Constructs a type with dependencies
     fn inject(container: &Container) -> Result<Self, Error>;
 }
 

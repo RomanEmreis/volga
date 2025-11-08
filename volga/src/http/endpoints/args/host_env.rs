@@ -41,7 +41,7 @@ impl FromPayload for HostEnv {
     type Future = Ready<Result<Self, Error>>;
     
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(HostEnv::from_parts(parts))
     }
@@ -49,5 +49,105 @@ impl FromPayload for HostEnv {
     #[inline]
     fn source() -> Source {
         Source::Parts
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hyper::Request;
+    use crate::HttpBody;
+
+    #[test]
+    fn it_returns_hostenv_when_present_in_extensions() {
+        let mut ext = Extensions::new();
+        ext.insert(HostEnv::new("root"));
+
+        let result = HostEnv::try_from(&ext).unwrap();
+        assert_eq!(result, HostEnv::new("root"));
+    }
+
+    #[test]
+    fn it_returns_error_when_hostenv_missing_in_extensions() {
+        let ext = Extensions::new();
+        let err = HostEnv::try_from(&ext).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Server Error: hosting environment is not specified"
+        );
+    }
+
+    #[test]
+    fn it_from_request_ref_extracts_hostenv() {
+        let (parts, body) = Request::get("/")
+            .extension(HostEnv::new("root"))
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let req = HttpRequest::from_parts(parts, body);
+
+        let result = HostEnv::from_request(&req).unwrap();
+        assert_eq!(result, HostEnv::new("root"));
+    }
+
+    #[test]
+    fn it_from_request_ref_returns_error_when_missing() {
+        let (parts, body) = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let req = HttpRequest::from_parts(parts, body);
+
+        let err = HostEnv::from_request(&req).unwrap_err();
+
+        assert_eq!(
+            err.to_string(),
+            "Server Error: hosting environment is not specified"
+        );
+    }
+
+    #[test]
+    fn it_from_parts_extracts_hostenv() {
+        let (parts, _) = Request::get("/")
+            .extension(HostEnv::new("root"))
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let result = HostEnv::from_parts(&parts).unwrap();
+        assert_eq!(result, HostEnv::new("root"));
+    }
+
+    #[test]
+    fn it_from_parts_returns_error_when_missing() {
+        let (parts, _) = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let err = HostEnv::from_parts(&parts).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Server Error: hosting environment is not specified"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_from_payload_resolves_correctly() {
+        let (parts, _) = Request::get("/")
+            .extension(HostEnv::new("root"))
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let result = HostEnv::from_payload(Payload::Parts(&parts)).await.unwrap();
+        assert_eq!(result, HostEnv::new("root"));
+    }
+
+    #[test]
+    fn it_source_returns_parts_variant() {
+        assert!(matches!(HostEnv::source(), Source::Parts));
     }
 }

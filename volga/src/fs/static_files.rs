@@ -1,4 +1,6 @@
-﻿use tokio::fs::{File, metadata};
+﻿//! Tools and utilities for handling static files
+
+use tokio::fs::{File, metadata};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf}

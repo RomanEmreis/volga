@@ -16,6 +16,7 @@ type ArcService = Arc<
     + Sync
 >;
 
+#[derive(Debug)]
 pub(crate) enum ServiceEntry {
     Singleton(ArcService),
     Scoped(OnceLock<Result<ArcService, Error>>),
@@ -55,11 +56,13 @@ impl Hasher for TypeIdHasher {
 }
 
 /// Represents a DI container builder
+#[derive(Debug)]
 pub struct ContainerBuilder {
     services: ServiceMap
 }
 
 impl Default for ContainerBuilder {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }
@@ -98,7 +101,7 @@ impl ContainerBuilder {
 }
 
 /// Represents a DI container
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Container {
     services: Arc<ServiceMap>
 }
@@ -148,7 +151,7 @@ impl Container {
         );
         instance
             .as_ref()
-            .map_err(|err| err.clone())
+            .map_err(|err| *err)
             .and_then(Self::resolve_internal)
     }
 

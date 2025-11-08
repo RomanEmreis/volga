@@ -83,6 +83,7 @@ const DEFAULT_PORT: u16 = 7878;
 /// let app = App::new().bind("127.0.0.1:7878");
 /// app.run_blocking();
 /// ```
+#[derive(Debug)]
 pub struct App {
     /// Dependency Injection container builder
     #[cfg(feature = "di")]
@@ -131,6 +132,7 @@ pub struct App {
 }
 
 /// Wraps a socket
+#[derive(Debug)]
 pub struct Connection {
     socket: SocketAddr
 }
@@ -456,18 +458,17 @@ impl App {
         #[cfg(feature = "tls")]
         let redirection_config = self.tls_config
             .as_ref()
-            .map(|config| config.https_redirection_config.clone());
+            .map(|config| config.https_redirection_config);
         
         let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
         
         #[cfg(feature = "tls")]
-        if let Some(redirection_config) = redirection_config {
-            if redirection_config.enabled {
-                Self::run_https_redirection_middleware(
-                    socket,
-                    redirection_config.http_port,
-                    shutdown_tx.clone());
-            }
+        if let Some(redirection_config) = redirection_config 
+            && redirection_config.enabled {
+            Self::run_https_redirection_middleware(
+                socket,
+                redirection_config.http_port,
+                shutdown_tx.clone());
         }
 
         loop {
@@ -650,5 +651,12 @@ mod tests {
         let RequestBodyLimit::Enabled(limit) = app_instance.body_limit else { unreachable!() };
 
         assert_eq!(limit, 5242880);
+    }
+
+    #[test]
+    fn it_debugs_connection() {
+        let connection: Connection = ([127, 0, 0, 1], 5000).into();
+
+        assert_eq!(format!("{connection:?}"), "Connection { socket: 127.0.0.1:5000 }");
     }
 }

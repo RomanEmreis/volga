@@ -6,6 +6,7 @@ use crate::http::IntoResponse;
 use crate::HttpResult;
 
 /// Result of filter or validation middleware.
+#[derive(Debug)]
 pub struct FilterResult(Result<(), Error>);
 
 impl Deref for FilterResult {

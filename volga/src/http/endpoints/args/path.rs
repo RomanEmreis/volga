@@ -132,7 +132,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Path<T> {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::PathArgs(params) = payload else { unreachable!() };
         ready(Self::from_slice(&params))
     }
@@ -147,7 +147,7 @@ impl FromPayload for String {
     type Future = Ready<Result<Self, Error>>;
     
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
         ok(param.value.into_string())
     }
@@ -162,7 +162,7 @@ impl FromPayload for Cow<'static, str> {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
         ok(Cow::Owned(param.value.into_string()))
     }
@@ -177,7 +177,7 @@ impl FromPayload for Box<str> {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
         ok(param.value)
     }
@@ -192,7 +192,7 @@ impl FromPayload for Box<[u8]> {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
         ok(param.value.into_boxed_bytes())
     }
@@ -208,7 +208,7 @@ macro_rules! impl_from_payload {
         $(impl FromPayload for $type {
             type Future = Ready<Result<Self, Error>>;
             #[inline]
-            fn from_payload(payload: Payload) -> Self::Future {
+            fn from_payload(payload: Payload<'_>) -> Self::Future {
                 let Payload::Path(param) = payload else { unreachable!() };
                 ready(param.value
                     .parse::<$type>()

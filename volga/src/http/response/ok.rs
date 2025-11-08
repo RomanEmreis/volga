@@ -1,4 +1,6 @@
-﻿/// Produces an `OK 200` response with plain text or JSON body
+﻿//! Macros for `OK 200` HTTP responses
+
+/// Produces an `OK 200` response with plain text or JSON body
 /// 
 /// # Examples
 /// ## plain/text

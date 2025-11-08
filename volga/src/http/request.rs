@@ -30,7 +30,15 @@ pub mod request_body_limit;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
+    /// Inner [`Request`]
     pub inner: Request<HttpBody>
+}
+
+impl std::fmt::Debug for HttpRequest {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HttpRequest(..)")
+    }
 }
 
 impl Deref for HttpRequest {
@@ -177,18 +185,24 @@ impl HttpRequest {
 }
 
 #[cfg(test)]
+#[allow(unreachable_pub)]
 mod tests {
     use http_body_util::BodyExt;
-    use crate::headers::{Header, Vary};
+    use crate::headers::{Header, Vary, custom_headers};
     use super::*;
     
     #[cfg(feature = "di")]
     use std::collections::HashMap;
     #[cfg(feature = "di")]
     use std::sync::Mutex;
+    
     #[cfg(feature = "di")]
     use crate::di::ContainerBuilder;
 
+    custom_headers! {
+        (Foo, "x-foo")
+    }
+    
     #[cfg(feature = "di")]
     #[allow(dead_code)]
     #[derive(Clone, Default)]
@@ -315,5 +329,43 @@ mod tests {
         let cache = http_req.resolve_shared::<InMemoryCache>();
 
         assert!(cache.is_ok());
+    }
+
+    #[test]
+    fn it_debugs() {
+        let (parts, body) = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let req = HttpRequest::from_parts(parts, body);
+        assert_eq!(format!("{req:?}"), "HttpRequest(..)");
+    }
+
+    #[test]
+    fn it_splits_into_parts() {
+        let (parts, body) = Request::get("/test")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let ctx = HttpRequest::from_parts(parts, body);
+
+        let (parts, _) = ctx.into_parts();
+
+        assert_eq!(parts.uri, "/test")
+    }
+
+    #[test]
+    fn it_inserts_and_header() {
+        let (parts, body) = Request::get("/test")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let mut req = HttpRequest::from_parts(parts, body);
+        req.insert_header::<Foo>(Header::from("x-foo"));
+
+        assert_eq!(req.extract::<Header<Foo>>().unwrap().into_inner(), "x-foo");
     }
 }

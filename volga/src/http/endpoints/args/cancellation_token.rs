@@ -30,6 +30,7 @@ pub type CancellationToken = TokenGuard;
 ///     ok!("Token cancellation status: {}", token.is_cancelled())
 /// }
 /// ```
+#[derive(Debug)]
 pub struct TokenGuard(TokioCancellationToken);
 
 impl TokenGuard {
@@ -113,7 +114,7 @@ impl FromPayload for TokenGuard {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ok(parts.into())
     }

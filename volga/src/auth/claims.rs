@@ -59,6 +59,7 @@ pub trait AuthClaims: DeserializeOwned + Clone {
     }
 }
 
+/// Declares a structure as JWT claims and implements [`AuthClaims`] trait
 #[macro_export]
 macro_rules! claims {
     (

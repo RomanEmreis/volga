@@ -1,4 +1,6 @@
-﻿/// Produces a response with specified `StatusCode` with plain text or JSON body
+﻿//! Macros for responses with various HTTP statuses
+
+/// Produces a response with specified `StatusCode` with plain text or JSON body
 ///
 /// # Examples
 /// ## Without body

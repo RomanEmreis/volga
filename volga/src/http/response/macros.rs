@@ -1,4 +1,6 @@
-﻿/// Produces HTTP 404 NOT FOUND response
+﻿//! Macros for various HTTP responses
+
+/// Produces HTTP 404 NOT FOUND response
 ///
 /// # Examples
 /// ## Without body

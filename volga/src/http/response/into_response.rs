@@ -1,4 +1,6 @@
-﻿use super::{HttpResponse, HttpResult, HttpBody, Results, ResponseContext};
+﻿//! [`From ] trait implementations from various types into HTTP response
+
+use super::{HttpResponse, HttpResult, HttpBody, Results, ResponseContext};
 use crate::{Json, Form, ok, status, form, response};
 use crate::error::Error;
 use crate::http::StatusCode;
@@ -21,6 +23,7 @@ use std::{
 
 /// Trait for types that can be returned from request handlers
 pub trait IntoResponse {
+    /// Converts object into response
     fn into_response(self) -> HttpResult;
 }
 

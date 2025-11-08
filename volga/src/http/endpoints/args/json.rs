@@ -116,7 +116,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
     type Future = ExtractJsonPayloadFut<T>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Body(body) = payload else { unreachable!() };
         ExtractJsonPayloadFut { fut: body.collect(), _marker: PhantomData }
     }

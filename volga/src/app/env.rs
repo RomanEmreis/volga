@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 const DEFAULT_INDEX_FILE: &str = "index.html";
 
 /// Describes a Web Server's Hosting Environment
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct HostEnv {
     /// Root folder of static content
     /// 

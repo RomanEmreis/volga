@@ -1,3 +1,5 @@
+//! WebSocket streaming and messsaging utils
+
 use crate::{error::Error, headers::HeaderValue};
 use super::Message;
 
@@ -24,6 +26,20 @@ pub struct WsSink(SplitSink<WebSocketStream<TokioIo<Upgraded>>, tungstenite::Mes
 
 /// A [`Stream`] part of [`WebSocket`] split
 pub struct WsStream(SplitStream<WebSocketStream<TokioIo<Upgraded>>>);
+
+impl std::fmt::Debug for WsSink {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WsSink(..)")
+    }
+}
+
+impl std::fmt::Debug for WsStream {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WsStream(..)")
+    }
+}
 
 impl WsSink {
     /// Unwraps the inner [`Sink`]
@@ -61,6 +77,7 @@ impl WsStream {
 }
 
 /// Represents a stream of WebSocket messages.
+#[derive(Debug)]
 pub struct WebSocket {
     inner: WebSocketStream<TokioIo<Upgraded>>,
     protocol: Option<HeaderValue>,

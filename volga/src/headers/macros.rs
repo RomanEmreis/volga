@@ -15,6 +15,7 @@
 macro_rules! custom_headers {
     ($(($struct_name:ident, $header_name:expr)),* $(,)?) => {
         $(
+            /// Custom HTTP header
             pub struct $struct_name;
 
             impl $crate::headers::FromHeaders for $struct_name {

@@ -16,6 +16,7 @@ pub use volga_di::Singleton;
 
 pub mod dc;
 
+/// Dependency injection errors
 pub mod error {
     pub use volga_di::error::Error;
 }

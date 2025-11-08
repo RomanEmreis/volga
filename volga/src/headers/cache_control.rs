@@ -22,14 +22,23 @@ use {
 #[cfg(feature = "static-files")]
 const DEFAULT_MAX_AGE: u32 = 60 * 60 * 24; // 24 hours
 
+/// "no-store" directive
 pub const NO_STORE: &str = "no-store";
+/// "no-cache" directive
 pub const NO_CACHE: &str = "no-cache";
+/// "max-age" directive
 pub const MAX_AGE: &str = "max-age";
+/// "s-maxage" directive
 pub const S_MAX_AGE: &str = "s-maxage";
+/// "must-revalidate" directive
 pub const MUST_REVALIDATE: &str = "must-revalidate";
+/// "proxy-revalidate" directive
 pub const PROXY_REVALIDATE: &str = "proxy-revalidate";
+/// "public" directive
 pub const PUBLIC: &str = "public";
+/// "private" directive
 pub const PRIVATE: &str = "private";
+/// "immutable" directive
 pub const IMMUTABLE: &str = "immutable"; 
 
 /// Represents the HTTP [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
@@ -219,6 +228,7 @@ impl CacheControl {
 /// [`ETag`](https://developer.mozilla.org/ru/docs/Web/HTTP/Headers/ETag),
 /// [`Last-Modified`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified) and
 /// [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
+#[derive(Debug)]
 pub struct ResponseCaching {
     /// Represents 
     /// [`ETag`](https://developer.mozilla.org/ru/docs/Web/HTTP/Headers/ETag)

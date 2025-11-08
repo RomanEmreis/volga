@@ -41,8 +41,13 @@ pub(crate) type BoxError = Box<
 /// Generic error
 #[derive(Debug)]
 pub struct Error {
+    /// HTTP status code
     pub status: StatusCode,
+
+    /// An instance where this error happened
     pub instance: Option<String>,
+
+    /// Inner error object
     pub(crate) inner: BoxError,
 }
 

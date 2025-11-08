@@ -1,4 +1,6 @@
-﻿/// Produces `OK 200` response with Form Data body
+﻿//! Macros for Form Data responses
+
+/// Produces `OK 200` response with Form Data body
 ///
 /// # Example
 /// ```no_run

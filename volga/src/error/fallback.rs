@@ -13,10 +13,12 @@ use crate::{
 
 /// Trait for types that represents a fallback handler
 pub trait FallbackHandler {
+    /// Calls the fallback handler function for the given request
     fn call(&self, req: Request<Incoming>) -> BoxFuture<'_, HttpResult>;
 }
 
 /// Owns a closure that handles a 404
+#[derive(Debug)]
 pub struct FallbackFunc<F, Args>(pub(crate) F, PhantomData<Args>);
 
 impl<F, Args, R> FallbackFunc<F, Args>

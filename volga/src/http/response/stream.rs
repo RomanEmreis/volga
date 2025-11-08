@@ -1,4 +1,6 @@
-﻿/// Produces `OK 200` response with stream body
+﻿//! Macros for stream responses
+
+/// Produces `OK 200` response with stream body
 /// 
 /// # Examples
 /// ## Default usage

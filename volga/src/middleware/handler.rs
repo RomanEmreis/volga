@@ -24,6 +24,13 @@ pub struct Next {
     ctx: Option<HttpContext>
 }
 
+impl std::fmt::Debug for Next {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Next(..)")
+    }
+}
+
 impl Future for Next {
     type Output = HttpResult;
 
@@ -46,25 +53,34 @@ impl Next {
 
 /// Describes a generic middleware handler that could take 0 or N parameters and [`Next`] middleware
 pub trait MiddlewareHandler<Args>: Clone + Send + Sync + 'static {
+    /// Return type
     type Output;
+    /// Middleware handler future
     type Future: Future<Output = Self::Output> + Send;
 
+    /// Calls the middleware handler
     fn call(&self, args: Args, next: Next) -> Self::Future;
 }
 
 /// Describes a generic [`tap_req`] middleware handler that could take 0 or N parameters and [`HttpRequest`]
 pub trait TapReqHandler<Args>: Clone + Send + Sync + 'static {
+    /// Return type
     type Output;
+    /// Tap handler future
     type Future: Future<Output = Self::Output> + Send;
 
+    /// Calls the [`tap_req`] handler
     fn call(&self, req: HttpRequest, args: Args) -> Self::Future;
 }
 
 /// Describes a generic [`map_ok`] middleware handler that could take 0 or N parameters and [`HttpResponse`]
 pub trait MapOkHandler<Args>: Clone + Send + Sync + 'static {
+    /// Return type
     type Output;
+    /// MapOk handler future
     type Future: Future<Output = Self::Output> + Send;
 
+    /// Calls the [`map_ok`] handler
     fn call(&self, resp: HttpResponse, args: Args) -> Self::Future;
 }
 

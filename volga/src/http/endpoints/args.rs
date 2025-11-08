@@ -56,21 +56,25 @@ pub(crate) enum Source {
 
 /// Specifies extractors to read data from HTTP request
 pub trait FromRequest: Sized {
+    /// Extracts data from HTTP request
     fn from_request(req: HttpRequest) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
 /// Specifies extractors to read data from raw HTTP request
 pub trait FromRawRequest: Sized {
+    /// Extracts data from raw HTTP request
     fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send;
 }
 
 /// Specifies extractors to read data from a borrowed HTTP request
 pub trait FromRequestRef: Sized {
+    /// Extracts data from HTTP request reference
     fn from_request(req: &HttpRequest) -> Result<Self, Error>;
 }
 
 /// Specifies extractors to read data from HTTP request parts
 pub trait FromRequestParts: Sized {
+    /// Extracts data from HTTP request parts
     fn from_parts(parts: &Parts) -> Result<Self, Error>;
 }
 
@@ -80,7 +84,7 @@ pub(crate) trait FromPayload: Send + Sized {
     type Future: Future<Output = Result<Self, Error>> + Send;
     
     /// Extracts data from give [`Payload`]
-    fn from_payload(payload: Payload) -> Self::Future;
+    fn from_payload(payload: Payload<'_>) -> Self::Future;
 
     /// Returns a [`Source`] where the payload should be extracted from
     fn source() -> Source {
@@ -161,34 +165,38 @@ macro_rules! define_generic_from_request {
                     .remove::<PathArgs>()
                     .unwrap_or_default();
 
+                let mut parts = Some(parts);
                 let mut body = Some(body);
                 let mut iter = params.into_iter();
                 let tuple = (
                     $(
                     $T::from_payload(match $T::source() {
-                        Source::None => Payload::None,
-                        Source::Parts => Payload::Parts(&parts),
-                        Source::PathArgs => Payload::PathArgs(
-                            std::mem::replace(&mut iter, PathArg::empty()).collect::<PathArgs>()
-                        ),
                         Source::Path => match iter.next() {
                             Some(param) => Payload::Path(param),
+                            None => Payload::None
+                        },
+                        Source::Parts => match &parts {
+                            Some(parts) => Payload::Parts(parts),
                             None => Payload::None
                         },
                         Source::Body => match body.take() {
                             Some(body) => Payload::Body(body),
                             None => Payload::None
                         },
-                        Source::Full => match body.take() {
-                            Some(body) => Payload::Full(&parts, body),
-                            None => Payload::None
+                        Source::PathArgs => Payload::PathArgs(
+                            std::mem::replace(&mut iter, PathArg::empty()).collect::<PathArgs>()
+                        ),
+                        Source::Full => match (&parts, body.take()) {
+                            (Some(parts), Some(body)) => Payload::Full(parts, body),
+                            _ => Payload::None
                         },
-                        Source::Request => match body.take() {
-                            Some(body) => Payload::Request(
-                                Box::new(HttpRequest::from_parts(parts.clone(), body))
+                        Source::Request => match (parts.take(), body.take()) {
+                            (Some(parts), Some(body)) => Payload::Request(
+                                Box::new(HttpRequest::from_parts(parts, body))
                             ),
-                            None => Payload::None
+                            _ => Payload::None
                         },
+                        Source::None => Payload::None,
                     }).await?,
                     )*    
                 );
@@ -220,7 +228,7 @@ mod tests {
     impl FromPayload for TestNone {
         type Future = Ready<Result<TestNone, Error>>;
 
-        fn from_payload(_: Payload) -> Self::Future {
+        fn from_payload(_: Payload<'_>) -> Self::Future {
             ok(TestNone)
         }
     }

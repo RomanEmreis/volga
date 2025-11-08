@@ -85,7 +85,7 @@ impl FromPayload for Parts {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ok(parts.clone())
     }
@@ -99,7 +99,7 @@ impl FromPayload for Extensions {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ok(parts.extensions.clone())
     }
@@ -113,7 +113,7 @@ impl FromPayload for Uri {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ok(parts.uri.clone())
     }
@@ -127,7 +127,7 @@ impl FromPayload for Method {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ok(parts.method.clone())
     }
@@ -141,7 +141,7 @@ impl FromPayload for HttpRequest {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Request(req) = payload else { unreachable!() };
         ok(*req)
     }

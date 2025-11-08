@@ -37,6 +37,13 @@ pub struct FileStream<B: Body<Data = Bytes, Error = Error> + Unpin> {
     stream: B
 }
 
+impl<B: Body<Data = Bytes, Error = Error> + Unpin> std::fmt::Debug for FileStream<B> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FileStream(..)")
+    }
+}
+
 impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     /// Create a new file stream
     fn new(name: Option<&str>, stream: B) -> Self {
@@ -46,6 +53,7 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
         }
     }
     
+    /// Returns a file name
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
@@ -125,7 +133,7 @@ impl FromPayload for File {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Full(parts, body) = payload else { unreachable!() };
         let name = parts.headers
             .get(&CONTENT_DISPOSITION)

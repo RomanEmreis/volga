@@ -27,6 +27,24 @@ impl Default for PrivateKey {
     }
 }
 
+impl std::fmt::Debug for PrivateCookies {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("PrivateCookies")
+            .field(&"[redacted]")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for PrivateKey {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("PrivateKey")
+            .field(&"[redacted]")
+            .finish()
+    }
+}
+
 impl PrivateKey {
     /// Creates a new [`PrivateKey`] from a 512-bit cryptographically random string.
     ///
@@ -138,7 +156,7 @@ impl FromPayload for PrivateCookies {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         let container = Container::try_from(parts)
             .expect("DI Container must be provided");
@@ -269,6 +287,15 @@ mod tests {
     #[test]
     fn it_reads_signed_key_from_bytes() {
         let _ = PrivateKey::from_file("tests/resources/key");
+    }
+
+    #[test]
+    fn it_debugs() {
+        let key = PrivateKey::generate();
+        let cookies = PrivateCookies::new(key.clone());
+
+        assert_eq!(format!("{key:?}"), r#"PrivateKey("[redacted]")"#);
+        assert_eq!(format!("{cookies:?}"), r#"PrivateCookies("[redacted]")"#);
     }
 
     fn set_cookies_for_request(jar: CookieJar, headers: &mut HeaderMap) {

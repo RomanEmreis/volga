@@ -1,4 +1,6 @@
-﻿use volga::{App, file};
+﻿#![allow(missing_docs)]
+
+use volga::{App, file};
 use tokio::fs::File;
 
 #[tokio::test]

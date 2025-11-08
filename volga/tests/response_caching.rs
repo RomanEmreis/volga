@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use volga::App;
 
 #[tokio::test]

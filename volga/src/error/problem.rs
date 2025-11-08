@@ -101,9 +101,11 @@ macro_rules! problem {
 }
 
 /// Holds tools to work with Problem Details
+#[allow(missing_debug_implementations)]
 pub struct Problem;
 
 impl Problem {
+    /// Returns a URL to the RFC 9110 section depending on status code
     pub fn get_problem_type_url(status: u16) -> String {
         let minor = if status < 500 { 5 } else { 6 };
         let suffix = (status % 100) + 1;

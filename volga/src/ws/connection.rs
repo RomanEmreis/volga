@@ -1,3 +1,5 @@
+//! WebSocket connection extractors and uutils
+
 use super::{WebSocket, WebSocketError};
 use hyper_util::rt::TokioIo;
 use std::future::Future;
@@ -32,7 +34,6 @@ use tokio_tungstenite::{
 
 /// Represents the extractor for establishing WebSockets connections
 pub struct WebSocketConnection {
-    //uri: Uri,
     parts: Parts,
     config: WebSocketConfig,
     error_handler: WeakErrorHandler,
@@ -40,6 +41,13 @@ pub struct WebSocketConnection {
     protocol: Option<HeaderValue>,
     sec_websocket_key: Option<HeaderValue>,
     sec_websocket_protocol: Option<HeaderValue>,
+}
+
+impl std::fmt::Debug for WebSocketConnection {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WebSocketConnection(..)")
+    }
 }
 
 impl WebSocketConnection {
@@ -132,7 +140,6 @@ impl WebSocketConnection {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let WebSocketConnection {
-            //uri,
             parts,
             config,
             protocol,
@@ -252,7 +259,7 @@ impl FromPayload for WebSocketConnection {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(parts.try_into())
     }
@@ -297,7 +304,6 @@ mod tests {
             .await
             .unwrap();
         
-        //assert_eq!(conn.uri, parts.uri);
         assert_eq!(conn.parts.uri, parts.uri);
         assert_eq!(conn.protocol, None);
         assert_eq!(conn.sec_websocket_key, parts.headers.get("Sec-WebSocket-Key").cloned());

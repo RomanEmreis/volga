@@ -27,6 +27,24 @@ impl Default for SignedKey {
     }
 }
 
+impl std::fmt::Debug for SignedCookies {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SignedCookies")
+            .field(&"[redacted]")
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for SignedKey {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("SignedKey")
+            .field(&"[redacted]")
+            .finish()
+    }
+}
+
 impl SignedKey {
     /// Creates a new [`SignedKey`] from a 512-bit cryptographically random string.
     /// 
@@ -139,7 +157,7 @@ impl FromPayload for SignedCookies {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         let container = Container::try_from(parts)
             .expect("DI Container must be provided");
@@ -270,6 +288,15 @@ mod tests {
     #[test]
     fn it_reads_signed_key_from_bytes() {
         let _ = SignedKey::from_file("tests/resources/key");
+    }
+
+    #[test]
+    fn it_debugs() {
+        let key = SignedKey::generate();
+        let cookies = SignedCookies::new(key.clone());
+
+        assert_eq!(format!("{key:?}"), r#"SignedKey("[redacted]")"#);
+        assert_eq!(format!("{cookies:?}"), r#"SignedCookies("[redacted]")"#);
     }
 
     fn set_cookies_for_request(jar: CookieJar, headers: &mut HeaderMap) {

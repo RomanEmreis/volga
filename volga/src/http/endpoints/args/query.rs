@@ -120,7 +120,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Query<T> {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(parts.try_into())
     }

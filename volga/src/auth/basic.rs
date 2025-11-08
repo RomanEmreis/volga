@@ -14,8 +14,17 @@ use crate::{
 
 const SCHEME: &str = "Basic ";
 
-#[derive(Debug)]
+/// Basic authorization context
 pub struct Basic(Box<str>);
+
+impl std::fmt::Debug for Basic {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Basic")
+            .field(&"[redacted]")
+            .finish()
+    }
+}
 
 impl TryFrom<&HeaderValue> for Basic {
     type Error = Error;
@@ -88,7 +97,7 @@ impl FromPayload for Basic {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
     }
@@ -336,5 +345,12 @@ mod tests {
 
         assert!(basic.validate(username, password));
         assert!(!basic.validate(username, "pass"));
+    }
+
+    #[test]
+    fn it_debugs() {
+        let basic = Basic(STANDARD.encode("testuser:testpass").into_boxed_str());
+
+        assert_eq!(format!("{basic:?}"), r#"Basic("[redacted]")"#);
     }
 }

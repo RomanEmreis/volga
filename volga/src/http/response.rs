@@ -62,14 +62,29 @@ pub mod filter_result;
 ///     headers
 /// });
 /// ```
+#[derive(Debug)]
 pub struct ResponseContext<T: Serialize> {
+    /// Response content
     pub content: T,
+
+    /// HTTP response status code
     pub status: u16,
+
+    /// HTTP response headers
     pub headers: HashMap<String, String>
 }
 
+/// Represents an HTTP response
+/// 
+/// See [`Response`]
 pub type HttpResponse = Response<HttpBody>;
+
+/// Represents a result of HTTP request that could be 
+/// either [`HttpResponse`] or [`Error`]
 pub type HttpResult = Result<HttpResponse, Error>;
+
+/// s
+#[allow(missing_debug_implementations)]
 pub struct Results;
 
 impl Results {

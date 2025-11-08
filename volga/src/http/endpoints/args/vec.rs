@@ -48,7 +48,7 @@ where
     type Future = ExtractVecFromPayloadFut<T, <Json<Vec<T>> as FromPayload>::Future>;
 
     #[inline]
-    fn from_payload(payload: Payload) -> Self::Future {
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
         ExtractVecFromPayloadFut {
             inner: Json::<Vec<T>>::from_payload(payload),
             _marker: PhantomData

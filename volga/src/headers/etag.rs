@@ -68,6 +68,7 @@ impl Display for ETag {
 }
 
 impl ETag {
+    /// Creates a new [`ETag`]
     #[inline]
     pub fn new(etag: &str) -> Self {
         Self::from(format!("\"{etag}\""))

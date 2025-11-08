@@ -99,7 +99,7 @@ impl RoutePipeline {
             #[cfg(feature = "middleware")]
             Self::Middleware(_) => (),
             #[cfg(not(feature = "middleware"))]
-            Self::Handler(ref mut route_handler) => *route_handler = Some(layer.into()),
+            Self::Handler(route_handler) => *route_handler = Some(layer.into()),
         }
     }
 

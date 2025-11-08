@@ -1,4 +1,6 @@
-﻿use volga::{App, Results};
+﻿#![allow(missing_docs)]
+
+use volga::{App, Results};
 use tracing_subscriber::util::SubscriberInitExt;
 
 #[tokio::test]
