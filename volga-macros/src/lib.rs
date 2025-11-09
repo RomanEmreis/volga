@@ -7,8 +7,6 @@ use syn::parse_macro_input;
 mod http;
 #[cfg(feature = "jwt-auth-derive")]
 mod auth;
-#[cfg(feature = "di-derive")]
-mod di;
 
 /// Implements the `AuthClaims` trait for the custom claims structure
 /// 
@@ -33,34 +31,6 @@ mod di;
 pub fn derive_claims(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::DeriveInput);
     auth::expand_claims(&input)
-        .unwrap_or_else(syn::Error::into_compile_error)
-        .into()
-}
-
-
-/// Derive macro for the `Inject` trait that always returns an error when resolving the type
-///
-/// Equivalent to using the `singleton!` macro.
-///
-/// # Example
-/// ```ignore
-/// use volga::di::Singleton;
-/// 
-/// #[derive(Singleton)]
-/// struct MyType;
-///
-/// // This expands to:
-/// // impl Inject for MyType {
-/// //     fn inject(_: &Container) -> Result<Self, Error> {
-/// //         Err(Error::ResolveFailed("MyType"))
-/// //     }
-/// // }
-/// ```
-#[cfg(feature = "di-derive")]
-#[proc_macro_derive(Singleton)]
-pub fn derive_singleton(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as syn::DeriveInput);
-    di::expand_singleton(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

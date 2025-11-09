@@ -20,9 +20,6 @@ use {
 #[cfg(any(feature = "tls", feature = "tracing", feature = "di"))]
 use std::sync::Arc;
 
-#[cfg(feature = "di")]
-use crate::di::Inject;
-
 /// Describes current HTTP context which consists of the current HTTP request data 
 /// and the reference to the method handler for this request
 pub struct HttpContext {
@@ -96,14 +93,14 @@ impl HttpContext {
     /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
     #[inline]
     #[cfg(feature = "di")]
-    pub fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
+    pub fn resolve<T: Send + Sync + Clone + 'static>(&self) -> Result<T, Error> {
         self.request.resolve::<T>()
     }
 
     /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
-    pub fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
+    pub fn resolve_shared<T: Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
         self.request.resolve_shared::<T>()
     }
     

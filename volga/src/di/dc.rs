@@ -1,6 +1,6 @@
 ﻿//! Extractors for Dependency Injection
 
-use super::{Container, Inject};
+use super::Container;
 use futures_util::future::{ready, Ready};
 use hyper::http::{request::Parts, Extensions};
 use crate::{
@@ -52,31 +52,34 @@ use std::{
 ///# app.run().await
 ///# }
 /// ```
-#[derive(Debug, Default, Clone)]
-pub struct Dc<T: Inject>(Arc<T>);
+#[derive(Debug, Clone)]
+pub struct Dc<T: Send + Sync>(Arc<T>);
 
-impl<T: Inject> Deref for Dc<T> {
+impl<T: Send + Sync> Deref for Dc<T> {
     type Target = T;
 
+    #[inline]
     fn deref(&self) -> &T {
         &self.0
     }
 }
 
-impl<T: Inject + Clone> DerefMut for Dc<T> {
+impl<T: Send + Sync + Clone> DerefMut for Dc<T> {
+    #[inline]
     fn deref_mut(&mut self) -> &mut T {
         Arc::make_mut(&mut self.0)
     }
 }
 
-impl<T: Inject> Dc<T> {
+impl<T: Send + Sync> Dc<T> {
     /// Unwraps the inner [`Arc`]
+    #[inline]
     pub fn into_inner(self) -> Arc<T> {
         self.0
     }
 }
 
-impl<T: Inject + Clone> Dc<T> {
+impl<T: Send + Sync + Clone> Dc<T> {
     /// Returns a clone of the inner `T` if it implements [`Clone`]
     #[inline]
     pub fn cloned(&self) -> T {
@@ -84,7 +87,7 @@ impl<T: Inject + Clone> Dc<T> {
     }
 }
 
-impl<T: Inject + 'static> TryFrom<&Extensions> for Dc<T> {
+impl<T: Send + Sync + 'static> TryFrom<&Extensions> for Dc<T> {
     type Error = Error;
     
     #[inline]
@@ -96,14 +99,14 @@ impl<T: Inject + 'static> TryFrom<&Extensions> for Dc<T> {
     }
 }
 
-impl<T: Inject + 'static> FromRequestRef for Dc<T> {
+impl<T: Send + Sync + 'static> FromRequestRef for Dc<T> {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         req.extensions().try_into()
     }    
 }
 
-impl<T: Inject + 'static> FromRequestParts for Dc<T> {
+impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         let ext = &parts.extensions;
@@ -111,7 +114,7 @@ impl<T: Inject + 'static> FromRequestParts for Dc<T> {
     }
 }
 
-impl<T: Inject + 'static> FromPayload for Dc<T> {
+impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
@@ -141,7 +144,7 @@ mod tests {
     async fn it_reads_from_payload() {
         let mut container = ContainerBuilder::new();
         
-        container.register_scoped::<Cache>();
+        container.register_scoped_default::<Cache>();
         
         let container = container.build();
         
