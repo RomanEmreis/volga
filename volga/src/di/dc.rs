@@ -1,6 +1,6 @@
 ﻿//! Extractors for Dependency Injection
 
-use super::Container;
+use super::{Container, FromContainer, error::Error as DiError};
 use futures_util::future::{ready, Ready};
 use hyper::http::{request::Parts, Extensions};
 use crate::{
@@ -19,9 +19,16 @@ use std::{
     sync::Arc
 };
 
-/// `Dc` stands for Dependency Container, This struct wraps the injectable type of `T` 
-/// `T` must be registered in Dependency Injection Container
+/// `Dc` stands for Dependency Container.  
+/// This struct wraps an injectable type `T` that is **shared** between all handlers
+/// through an [`Arc`].  
 /// 
+/// Use this version for long-lived or shared services (e.g., caches, database pools, or
+/// other stateful components).  
+/// 
+/// Unlike [`DcOwned`], which clones the value from the container, `Dc` provides a
+/// cheap-to-clone shared reference via [`Arc<T>`].
+///
 /// # Example
 /// ```no_run
 /// use volga::{App, di::Dc, ok, not_found};
@@ -29,22 +36,22 @@ use std::{
 ///     collections::HashMap,
 ///     sync::{Arc, Mutex}
 /// };
-/// 
-/// #[derive(Clone, Default)]
+///
+/// #[derive(Default)]
 /// struct InMemoryCache {
 ///     inner: Arc<Mutex<HashMap<String, String>>>
 /// }
-/// 
+///
 ///# #[tokio::main]
 ///# async fn main() -> std::io::Result<()> {
 /// let mut app = App::new();
-/// 
+///
 /// app.add_singleton(InMemoryCache::default());
-/// 
+///
 /// app.map_get("/user/{id}", |id: String, cache: Dc<InMemoryCache>| async move {
 ///     let cache_guard = cache.inner.lock().unwrap();
 ///     let user = cache_guard.get(&id);
-///     match user { 
+///     match user {
 ///         Some(user) => ok!(user),
 ///         None => not_found!()
 ///     }
@@ -55,6 +62,40 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct Dc<T: Send + Sync>(Arc<T>);
 
+/// `DcOwned` stands for Dependency Container (Owned).  
+/// This struct wraps an injectable type `T` that is **cloned** from the Dependency Injection Container
+/// when extracted.  
+/// 
+/// Use this version when your service implements [`Clone`] and does not require shared ownership
+/// (e.g., lightweight value types or small stateful structs).  
+/// 
+/// Unlike [`Dc`], which uses an [`Arc`] for shared ownership, `DcOwned` retrieves and clones
+/// the underlying service on demand.
+/// 
+/// # Example
+/// ```no_run
+/// use volga::{App, di::DcOwned, ok};
+/// 
+/// #[derive(Clone, Default)]
+/// struct Config {
+///     message: String,
+/// }
+/// 
+///# #[tokio::main]
+///# async fn main() -> std::io::Result<()> {
+/// let mut app = App::new();
+///
+/// app.add_singleton(Config { message: "Hello".into() });
+///
+/// app.map_get("/ping", |cfg: DcOwned<Config>| async move {
+///     ok!("{} world!", cfg.message)
+/// });
+///# app.run().await
+///# }
+/// ```
+#[derive(Debug, Clone)]
+pub struct DcOwned<T: Clone + Send + Sync>(T);
+
 impl<T: Send + Sync> Deref for Dc<T> {
     type Target = T;
 
@@ -64,10 +105,26 @@ impl<T: Send + Sync> Deref for Dc<T> {
     }
 }
 
-impl<T: Send + Sync + Clone> DerefMut for Dc<T> {
+impl<T: Clone + Send + Sync> DerefMut for Dc<T> {
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
         Arc::make_mut(&mut self.0)
+    }
+}
+
+impl<T: Clone + Send + Sync> Deref for DcOwned<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: Clone + Send + Sync + Clone> DerefMut for DcOwned<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
     }
 }
 
@@ -84,6 +141,20 @@ impl<T: Send + Sync + Clone> Dc<T> {
     #[inline]
     pub fn cloned(&self) -> T {
         self.0.as_ref().clone()
+    }
+}
+
+impl<T: Clone + Send + Sync> DcOwned<T> {
+    /// Unwraps the inner `T`
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+
+    /// Returns a clone of the inner `T` if it implements [`Clone`]
+    #[inline]
+    pub fn cloned(&self) -> T {
+        self.0.clone()
     }
 }
 
@@ -114,6 +185,33 @@ impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
     }
 }
 
+impl<T: Clone + Send + Sync + 'static> TryFrom<&Extensions> for DcOwned<T> {
+    type Error = Error;
+    
+    #[inline]
+    fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
+        Container::try_from(extensions)?
+            .resolve::<T>()
+            .map_err(Into::into)
+            .map(DcOwned)
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> FromRequestRef for DcOwned<T> {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        req.extensions().try_into()
+    }    
+}
+
+impl<T: Clone + Send + Sync + 'static> FromRequestParts for DcOwned<T> {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        let ext = &parts.extensions;
+        ext.try_into()
+    }
+}
+
 impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
     type Future = Ready<Result<Self, Error>>;
 
@@ -128,17 +226,70 @@ impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
     }
 }
 
+impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
+    #[inline]
+    fn from_container(container: &Container) -> Result<Self, DiError> {
+        container
+            .resolve_shared::<T>()
+            .map(Dc)
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> FromPayload for DcOwned<T> {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
+        let Payload::Parts(parts) = payload else { unreachable!() };
+        ready(Self::from_parts(parts))
+    }
+
+    fn source() -> Source {
+        Source::Parts
+    }
+}
+
+impl<T: Clone + Send + Sync + 'static> FromContainer for DcOwned<T> {
+    #[inline]
+    fn from_container(container: &Container) -> Result<Self, DiError> {
+        container
+            .resolve::<T>()
+            .map(DcOwned)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
     use hyper::http::Extensions;
     use hyper::Request;
-    use super::Dc;
-    use crate::di::ContainerBuilder;
+    use super::{Dc, DcOwned, DiError};
+    use crate::di::{ContainerBuilder, FromContainer, Container};
     use crate::http::endpoints::args::{FromPayload, FromRequestRef, FromRequestParts, Payload};
     use crate::{HttpBody, HttpRequest};
 
     type Cache = Arc<Mutex<Vec<i32>>>;
+
+    #[derive(Debug, Clone, Copy)]
+    struct X(i32);
+
+    #[derive(Debug, Clone, Copy)]
+    struct Y(i32);
+
+    #[derive(Debug, Clone, Copy)]
+    struct Point(X, Y);
+
+    impl FromContainer for X {
+        fn from_container(container: &Container) -> Result<Self, DiError> {
+            container.resolve()
+        }
+    }
+
+    impl FromContainer for Y {
+        fn from_container(container: &Container) -> Result<Self, DiError> {
+            container.resolve()
+        }
+    }
     
     #[tokio::test]
     async fn it_reads_from_payload() {
@@ -258,4 +409,100 @@ mod tests {
         assert_eq!(final_vec[1], 2);
     }
 
+    #[test]
+    fn it_resolves_references() {
+        let mut container = ContainerBuilder::new();
+        container.register_singleton::<Cache>(Arc::new(Mutex::new(Vec::new())));
+        let container = container.build();
+
+        let mut extensions = Extensions::new();
+        extensions.insert(container);
+
+        let dc1 = DcOwned::<Cache>::try_from(&extensions).unwrap();
+        dc1.lock().unwrap().push(1);
+
+        let dc2 = DcOwned::<Cache>::try_from(&extensions).unwrap();
+        dc2.lock().unwrap().push(2);
+
+        let final_vec = dc1.lock().unwrap();
+        assert_eq!(final_vec.len(), 2);
+        assert_eq!(final_vec[0], 1);
+        assert_eq!(final_vec[1], 2);
+    }
+
+    #[test]
+    fn it_resolves_by_injection() {
+        let mut container = ContainerBuilder::new();
+        container.register_transient_factory(|| X(1));
+        container.register_transient_factory(|| Y(2));
+        container.register_transient_factory(|x: X, y: Y| Ok(Point(x, y)));
+
+        let container = container.build();
+
+        let point = Dc::<Point>::from_container(&container)
+            .unwrap()
+            .into_inner();
+        
+        assert_eq!(point.0.0, 1);
+        assert_eq!(point.1.0, 2);
+    }
+
+    #[test]
+    fn it_resolves_from_container() {
+        let mut container = ContainerBuilder::new();
+        container.register_transient_factory(|| X(1));
+        container.register_transient_factory(|| Y(2));
+        container.register_transient_factory(|c: Container| {
+            let x: X = c.resolve()?;
+            let y: Y = c.resolve()?;
+            Ok(Point(x, y))
+        });
+
+        let container = container.build();
+
+        let point = Dc::<Point>::from_container(&container)
+            .unwrap()
+            .into_inner();
+        
+        assert_eq!(point.0.0, 1);
+        assert_eq!(point.1.0, 2);
+    }
+
+    #[test]
+    fn it_resolves_owned_by_injection() {
+        let mut container = ContainerBuilder::new();
+        container.register_transient_factory(|| X(1));
+        container.register_transient_factory(|| Y(2));
+        container.register_transient_factory(|x: X, y: Y| Ok(Point(x, y)));
+
+        let container = container.build();
+
+        let point = DcOwned::<Point>::from_container(&container)
+            .unwrap()
+            .into_inner();
+        
+        assert_eq!(point.0.0, 1);
+        assert_eq!(point.1.0, 2);
+    }
+
+    #[test]
+    fn it_resolves_owned_from_container() {
+        let mut container = ContainerBuilder::new();
+        container.register_transient_factory(|| X(1));
+        container.register_transient_factory(|| Y(2));
+        container.register_transient_factory(|c: Container| {
+            let x: X = c.resolve()?;
+            let y: Y = c.resolve()?;
+            Ok(Point(x, y))
+        });
+
+        let container = container.build();
+
+        let point = DcOwned::<Point>::from_container(&container)
+            .unwrap()
+            .into_inner();
+        
+        assert_eq!(point.0.0, 1);
+        assert_eq!(point.1.0, 2);
+    }
 }

@@ -9,89 +9,15 @@ use std::{
     hash::{BuildHasherDefault, Hasher},
     sync::{Arc, OnceLock}
 };
+pub use {
+    from_container::FromContainer,
+    factory::GenericFactory
+};
 
-/// A trait that defines how to extract the `Self` from DI container
-pub trait FromContainer: Sized + Send + Sync {
-    /// Extracts `Self` from DI container
-    fn from_container(container: &Container) -> Result<Self, Error>;
-}
+pub mod from_container;
+pub mod factory;
 
-impl FromContainer for Container {
-    #[inline]
-    fn from_container(container: &Container) -> Result<Self, Error> {
-        Ok(container.clone())
-    }
-}
-
-impl FromContainer for () {
-    #[inline]
-    fn from_container(_: &Container) -> Result<Self, Error> {
-        Ok(())
-    }
-}
-
-/// A trait that describes a generic factory function 
-/// that can resolve objects registered in DI container
-pub trait GenericFactory<Args>: Clone + Send + Sync + 'static {
-    /// A type of object that will be resolved
-    type Output;
-    
-    /// Calls a generic function and returns either resolved object or error
-    fn call(&self, args: Args) -> Result<Self::Output, Error>;
-}
-
-impl<F, R> GenericFactory<()> for F
-where
-    F: Fn() -> R + Clone + Send + Sync + 'static
-{
-    type Output = R;
-    
-    #[inline]
-    fn call(&self, _: ()) -> Result<Self::Output, Error> {
-        Ok(self())
-    }
-}
-
-macro_rules! define_generic_factory ({ $($param:ident)* } => {
-    impl<F, R, $($param,)*> GenericFactory<($($param,)*)> for F
-    where
-        F: Fn($($param),*) -> Result<R, Error> + Clone + Send + Sync + 'static
-    {
-        type Output = R;
-
-        #[inline]
-        #[allow(non_snake_case)]
-        fn call(&self, ($($param,)*): ($($param,)*)) -> Result<Self::Output, Error> {
-            (self)($($param,)*)
-        }
-    }    
-});
-
-define_generic_factory! { T1 }
-define_generic_factory! { T1 T2 }
-define_generic_factory! { T1 T2 T3 }
-
-macro_rules! define_generic_from_container {
-    ($($T: ident),*) => {
-        impl<$($T: FromContainer),+> FromContainer for ($($T,)+) {
-            #[inline]
-            #[allow(non_snake_case)]
-            fn from_container(container: &Container) -> Result<Self, Error>{
-                let tuple = (
-                    $(
-                    $T::from_container(container)?,
-                    )*    
-                );
-                Ok(tuple)
-            }
-        }
-    }
-}
-
-define_generic_from_container! { T1 }
-define_generic_from_container! { T1, T2 }
-define_generic_from_container! { T1, T2, T3 }
-
+/// Helper function that creates a [`ResolverFn`] from regular functions
 #[inline]
 fn make_resolver_fn<T, F, Args>(resolver: F) -> ResolverFn
 where
@@ -101,22 +27,39 @@ where
 {
     Arc::new(move |c: &Container| -> Result<ArcService, Error> {
         let args = Args::from_container(c)?;
-        resolver.call(args).map(|t| Arc::new(t) as ArcService)
+        resolver
+            .call(args)
+            .map(|t| Arc::new(t) as ArcService)
     })
 }
 
+/// Helper function that creates a [`ResolverFn`] for injectable types
+#[inline]
+fn make_inject_resolver_fn<T>() -> ResolverFn
+where
+    T: Inject + 'static,
+{
+    Arc::new(move |c: &Container| -> Result<ArcService, Error> {
+        T::inject(c)
+            .map(|t| Arc::new(t) as ArcService)
+    })
+}
+
+/// A dynamic resolver function for resolving objects
 type ResolverFn = Arc<
     dyn Fn(&Container) -> Result<ArcService, Error> 
     + Send 
     + Sync
 >;
 
+/// A dynamic wrapper for object in DI container
 type ArcService = Arc<
     dyn Any
     + Send
     + Sync
 >;
 
+/// Represents a service registered with a spwcific lifetime in DI container
 pub(crate) enum ServiceEntry {
     Singleton(ArcService),
     Scoped(OnceLock<Result<ArcService, Error>>, ResolverFn),
@@ -131,12 +74,31 @@ impl Debug for ServiceEntry {
 }
 
 impl ServiceEntry {
+    /// Creates a singleton [`ServiceEntry`]
+    #[inline(always)]
+    fn singleton<T: Send + Sync + 'static>(instance: T) -> Self {
+        Self::Singleton(Arc::new(instance))
+    }
+
+    /// Creates a scoped [`ServiceEntry`]
+    #[inline(always)]
+    fn scoped(resolver: ResolverFn) -> Self {
+        Self::Scoped(OnceLock::new(), resolver)
+    }
+
+    /// Creates a transient [`ServiceEntry`]
+    #[inline(always)]
+    fn transient(resolver: ResolverFn) -> Self {
+        Self::Transient(resolver)
+    }
+
+    /// Create a new scope
     #[inline]
-    fn as_scope(&self) -> Self {
+    fn to_scope(&self) -> Self {
         match self {
-            ServiceEntry::Singleton(service) => ServiceEntry::Singleton(service.clone()),
-            ServiceEntry::Scoped(_, r) => ServiceEntry::Scoped(OnceLock::new(), r.clone()),
-            ServiceEntry::Transient(r) => ServiceEntry::Transient(r.clone()),
+            Self::Singleton(service) => Self::Singleton(service.clone()),
+            Self::Scoped(_, r) => Self::scoped(r.clone()),
+            Self::Transient(r) => Self::transient(r.clone()),
         }
     }
 }
@@ -148,6 +110,7 @@ type ServiceMap = HashMap<
     BuildHasherDefault<TypeIdHasher>
 >;
 
+/// A hasher for types in DI container
 #[derive(Default)]
 struct TypeIdHasher(u64);
 
@@ -200,8 +163,9 @@ impl ContainerBuilder {
 
     /// Register a singleton service
     pub fn register_singleton<T: Send + Sync + 'static>(&mut self, instance: T) {
-        let entry = ServiceEntry::Singleton(Arc::new(instance));
-        self.services.insert(TypeId::of::<T>(), entry);
+        self.services.insert(
+            TypeId::of::<T>(), 
+            ServiceEntry::singleton(instance));
     }
 
     /// Register a scoped service
@@ -211,8 +175,9 @@ impl ContainerBuilder {
         F: GenericFactory<Args, Output = T>,
         Args: FromContainer
     {
-        let entry = ServiceEntry::Scoped(OnceLock::new(), make_resolver_fn(factory));
-        self.services.insert(TypeId::of::<T>(), entry);
+        self.services.insert(
+            TypeId::of::<T>(), 
+            ServiceEntry::scoped(make_resolver_fn(factory)));
     }
 
     /// Register a transient service that required to be resolved as [`Default`]
@@ -225,7 +190,9 @@ impl ContainerBuilder {
 
     /// Register a transient service that required to be resolved as [`Inject`]
     pub fn register_scoped<T: Inject + 'static>(&mut self) {
-        self.register_scoped_factory(|c: Container| T::inject(&c));
+        self.services.insert(
+            TypeId::of::<T>(), 
+            ServiceEntry::scoped(make_inject_resolver_fn::<T>()));
     }
     
     /// Register a transient service
@@ -235,8 +202,9 @@ impl ContainerBuilder {
         F: GenericFactory<Args, Output = T>,
         Args: FromContainer
     {
-        let entry = ServiceEntry::Transient(make_resolver_fn(factory));
-        self.services.insert(TypeId::of::<T>(), entry);
+        self.services.insert(
+            TypeId::of::<T>(), 
+            ServiceEntry::transient(make_resolver_fn(factory)));
     }
 
     /// Register a transient service that required to be resolved as [`Default`]
@@ -249,7 +217,9 @@ impl ContainerBuilder {
 
     /// Register a transient service that required to be resolved as [`Inject`]
     pub fn register_transient<T: Inject + 'static>(&mut self) {
-        self.register_transient_factory(|c: Container| T::inject(&c));
+        self.services.insert(
+            TypeId::of::<T>(), 
+            ServiceEntry::transient(make_inject_resolver_fn::<T>()));
     }
 }
 
@@ -277,7 +247,7 @@ impl Container {
     #[inline]
     pub fn create_scope(&self) -> Self {
         let services = self.services.iter()
-            .map(|(key, value)| (*key, value.as_scope()))
+            .map(|(key, value)| (*key, value.to_scope()))
             .collect::<HashMap<_, _, _>>();
         Self { services: Arc::new(services) }
     }
@@ -301,7 +271,7 @@ impl Container {
         }
     }
 
-    /// Fetch the service entry or return an error if not registered.
+    /// Fetches the service entry or return an error if not registered.
     #[inline]
     fn get_service_entry<T: Send + Sync + 'static>(&self) -> Result<&ServiceEntry, Error> {
         let type_id = TypeId::of::<T>();
@@ -310,6 +280,7 @@ impl Container {
             .ok_or_else(|| Error::NotRegistered(std::any::type_name::<T>()))
     }
 
+    /// Resolves scoped service fro DI container
     #[inline]
     fn resolve_scoped<T: Send + Sync + 'static>(
         &self, 
@@ -322,6 +293,7 @@ impl Container {
             .and_then(Self::resolve_internal)
     }
 
+    /// Unwraps `T` from [`ArcService`]
     #[inline]
     fn resolve_internal<T: Send + Sync + 'static>(instance: &ArcService) -> Result<Arc<T>, Error> {
         instance
