@@ -2,7 +2,7 @@
 
 use super::{App, error::Error};
 pub use {
-    self::dc::{Dc, DcOwned},
+    self::dc::Dc,
     volga_di::{
         Container, 
         ContainerBuilder,
