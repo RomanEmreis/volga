@@ -6,7 +6,6 @@ pub use {
     volga_di::{
         Container, 
         ContainerBuilder,
-        FromContainer,
         GenericFactory,
         Inject
     },
@@ -94,7 +93,7 @@ impl App {
     where
         T: Send + Sync + 'static,
         F: GenericFactory<Args, Output = T>,
-        Args: FromContainer
+        Args: Inject
     {
         self.container.register_scoped_factory(factory);
         self
@@ -171,7 +170,7 @@ impl App {
     where
         T: Send + Sync + 'static,
         F: GenericFactory<Args, Output = T>,
-        Args: FromContainer
+        Args: Inject
     {
         self.container.register_transient_factory(factory);
         self

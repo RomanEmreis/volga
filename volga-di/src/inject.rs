@@ -47,6 +47,43 @@ pub trait Inject: Sized + Send + Sync {
     fn inject(container: &Container) -> Result<Self, Error>;
 }
 
+impl Inject for Container {
+    #[inline]
+    fn inject(container: &Container) -> Result<Self, Error> {
+        Ok(container.clone())
+    }
+}
+
+impl Inject for () {
+    #[inline]
+    fn inject(_: &Container) -> Result<Self, Error> {
+        Ok(())
+    }
+}
+
+macro_rules! define_inject {
+    ($($T: ident),*) => {
+        impl<$($T: Inject),+> Inject for ($($T,)+) {
+            #[inline]
+            #[allow(non_snake_case)]
+            fn inject(container: &Container) -> Result<Self, Error>{
+                let tuple = (
+                    $(
+                    $T::inject(container)?,
+                    )*    
+                );
+                Ok(tuple)
+            }
+        }
+    }
+}
+
+define_inject! { T1 }
+define_inject! { T1, T2 }
+define_inject! { T1, T2, T3 }
+define_inject! { T1, T2, T3, T4 }
+define_inject! { T1, T2, T3, T4, T5 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

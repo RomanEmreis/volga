@@ -47,7 +47,7 @@ define_generic_factory! { T1 T2 T3 T4 T5 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Container, ContainerBuilder, FromContainer};
+    use crate::{Container, ContainerBuilder, Inject};
     use super::*;
 
     #[derive(Debug, Clone, Copy)]
@@ -59,14 +59,14 @@ mod tests {
     #[derive(Debug, Clone, Copy)]
     struct Point(X, Y);
 
-    impl FromContainer for X {
-        fn from_container(container: &Container) -> Result<Self, Error> {
+    impl Inject for X {
+        fn inject(container: &Container) -> Result<Self, Error> {
             container.resolve()
         }
     }
 
-    impl FromContainer for Y {
-        fn from_container(container: &Container) -> Result<Self, Error> {
+    impl Inject for Y {
+        fn inject(container: &Container) -> Result<Self, Error> {
             container.resolve()
         }
     }

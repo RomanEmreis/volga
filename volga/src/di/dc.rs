@@ -1,6 +1,6 @@
 ﻿//! Extractors for Dependency Injection
 
-use super::{Container, FromContainer, error::Error as DiError};
+use super::{Container, Inject, error::Error as DiError};
 use futures_util::future::{ready, Ready};
 use hyper::http::{request::Parts, Extensions};
 use crate::{
@@ -137,9 +137,9 @@ impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
     }
 }
 
-impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
+impl<T: Send + Sync + 'static> Inject for Dc<T> {
     #[inline]
-    fn from_container(container: &Container) -> Result<Self, DiError> {
+    fn inject(container: &Container) -> Result<Self, DiError> {
         container
             .resolve_shared::<T>()
             .map(Dc)
@@ -152,7 +152,7 @@ mod tests {
     use hyper::http::Extensions;
     use hyper::Request;
     use super::{Dc, DiError};
-    use crate::di::{ContainerBuilder, FromContainer, Container};
+    use crate::di::{ContainerBuilder, Inject, Container};
     use crate::http::endpoints::args::{FromPayload, FromRequestRef, FromRequestParts, Payload};
     use crate::{HttpBody, HttpRequest};
 
@@ -167,14 +167,14 @@ mod tests {
     #[derive(Debug, Clone, Copy)]
     struct Point(X, Y);
 
-    impl FromContainer for X {
-        fn from_container(container: &Container) -> Result<Self, DiError> {
+    impl Inject for X {
+        fn inject(container: &Container) -> Result<Self, DiError> {
             container.resolve()
         }
     }
 
-    impl FromContainer for Y {
-        fn from_container(container: &Container) -> Result<Self, DiError> {
+    impl Inject for Y {
+        fn inject(container: &Container) -> Result<Self, DiError> {
             container.resolve()
         }
     }
@@ -306,7 +306,7 @@ mod tests {
 
         let container = container.build();
 
-        let point = Dc::<Point>::from_container(&container)
+        let point = Dc::<Point>::inject(&container)
             .unwrap()
             .into_inner();
         
@@ -327,7 +327,7 @@ mod tests {
 
         let container = container.build();
 
-        let point = Dc::<Point>::from_container(&container)
+        let point = Dc::<Point>::inject(&container)
             .unwrap()
             .into_inner();
         
@@ -342,7 +342,7 @@ mod tests {
 
         let container = container.build();
 
-        let x = Dc::<X>::from_container(&container)
+        let x = Dc::<X>::inject(&container)
             .unwrap();
         
         let mut copy = x.cloned();

@@ -9,12 +9,9 @@ use std::{
     hash::{BuildHasherDefault, Hasher},
     sync::{Arc, OnceLock}
 };
-pub use {
-    from_container::FromContainer,
-    factory::GenericFactory
-};
 
-pub mod from_container;
+pub use factory::GenericFactory;
+
 pub mod factory;
 
 /// Helper function that creates a [`ResolverFn`] from regular functions
@@ -23,10 +20,10 @@ fn make_resolver_fn<T, F, Args>(resolver: F) -> ResolverFn
 where
     T: Send + Sync + 'static,
     F: GenericFactory<Args, Output = T>,
-    Args: FromContainer
+    Args: Inject
 {
     Arc::new(move |c: &Container| -> Result<ArcService, Error> {
-        let args = Args::from_container(c)?;
+        let args = Args::inject(c)?;
         resolver
             .call(args)
             .map(|t| Arc::new(t) as ArcService)
@@ -173,7 +170,7 @@ impl ContainerBuilder {
     where
         T: Send + Sync + 'static,
         F: GenericFactory<Args, Output = T>,
-        Args: FromContainer
+        Args: Inject
     {
         self.services.insert(
             TypeId::of::<T>(), 
@@ -200,7 +197,7 @@ impl ContainerBuilder {
     where
         T: Send + Sync + 'static,
         F: GenericFactory<Args, Output = T>,
-        Args: FromContainer
+        Args: Inject
     {
         self.services.insert(
             TypeId::of::<T>(), 

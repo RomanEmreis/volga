@@ -26,7 +26,7 @@
 //! ```
 
 pub use crate::{
-    container::{Container, ContainerBuilder, FromContainer, GenericFactory},
+    container::{Container, ContainerBuilder, GenericFactory},
     inject::Inject,
 };
 
