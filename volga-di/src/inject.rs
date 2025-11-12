@@ -66,7 +66,7 @@ macro_rules! define_inject {
         impl<$($T: Inject),+> Inject for ($($T,)+) {
             #[inline]
             #[allow(non_snake_case)]
-            fn inject(container: &Container) -> Result<Self, Error>{
+            fn inject(container: &Container) -> Result<Self, Error> {
                 let tuple = (
                     $(
                     $T::inject(container)?,

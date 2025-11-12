@@ -36,7 +36,7 @@ macro_rules! define_generic_factory ({ $($param:ident)* } => {
         fn call(&self, ($($param,)*): ($($param,)*)) -> Result<Self::Output, Error> {
             (self)($($param,)*)
         }
-    }    
+    } 
 });
 
 define_generic_factory! { T1 }
