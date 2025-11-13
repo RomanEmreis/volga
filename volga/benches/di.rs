@@ -47,8 +47,8 @@ fn benchmark(c: &mut Criterion) {
                 .without_greeter();
 
             app.add_singleton(Counter::default());
-            app.add_scoped::<Cache>();
-            app.add_transient::<Transient>();
+            app.add_scoped_default::<Cache>();
+            app.add_transient_default::<Transient>();
             app.map_post("/singleton", |c: Dc<Counter>| async move { *c.0.write().unwrap() += 1; });
             app.map_post("/scoped", |c: Dc<Cache>| async move { c.0.write().unwrap().push(1); });
             app.map_put("/transient", |c: Dc<Transient>| async move { let _ = c; });

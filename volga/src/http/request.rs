@@ -22,7 +22,7 @@ use crate::http::{
 };
 
 #[cfg(feature = "di")]
-use crate::di::{Container, Inject};
+use crate::di::Container;
 #[cfg(feature = "di")]
 use std::sync::Arc;
 
@@ -138,7 +138,7 @@ impl HttpRequest {
     /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
     #[inline]
     #[cfg(feature = "di")]
-    pub fn resolve<T: Inject + Clone + 'static>(&self) -> Result<T, Error> {
+    pub fn resolve<T: Send + Sync + Clone + 'static>(&self) -> Result<T, Error> {
         self.container()
             .resolve::<T>()
             .map_err(Into::into)
@@ -147,7 +147,7 @@ impl HttpRequest {
     /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
-    pub fn resolve_shared<T: Inject + 'static>(&self) -> Result<Arc<T>, Error> {
+    pub fn resolve_shared<T: Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
         self.container()
             .resolve_shared::<T>()
             .map_err(Into::into)

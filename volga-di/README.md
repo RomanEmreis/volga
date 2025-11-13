@@ -21,18 +21,14 @@ volga-di = "0.7.0"
 [dependencies]
 volga = { version = "0.7.0", features = ["di"] }
 ```
-#### Derive-macro support
-```toml
-[dependencies]
-volga = { version = "0.7.0", features = ["di-full"] }
-```
 
 ### Example
 ```rust
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use volga_di::ContainerBuilder;
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct InMemoryCache {
     inner: Arc<Mutex<HashMap<String, String>>>
 }
@@ -44,7 +40,7 @@ fn main() {
     let container = container.build();
 
     let Ok(cache) = container.resolve::<InMemoryCache>() else { 
-        eprintln!("Unable to resolve InMemoryCache")
+        panic!("Unable to resolve InMemoryCache")
     };
 
     // Do work...
