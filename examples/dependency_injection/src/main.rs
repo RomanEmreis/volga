@@ -26,7 +26,7 @@ async fn main() -> std::io::Result<()> {
     let global_cache = InMemoryCache { inner: Default::default() };
     app
         .add_singleton(global_cache)                // Register a singleton service that is available globally 
-        .add_scoped::<RequestLog>()                // Register a scoped service that will be available during the request lifetime
+        .add_scoped::<RequestLog>()                 // Register a scoped service that will be available during the request lifetime
         .add_transient_default::<UuidGenerator>();  // Register a scoped service that will be available during the request lifetime
 
     // Each request uses a scoped logger to write some logs ("Request {ID} started", "Requests {ID} ended")
