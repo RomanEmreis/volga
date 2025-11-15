@@ -264,7 +264,7 @@ mod tests {
     fn it_tests_send_sync_requirements() {
         fn assert_send_sync<T: Send + Sync>() {}
 
-        // These should compile without issues due to the Send + Sync bounds
+        // These should compile without issues due to the Send and Sync bounds
         assert_send_sync::<SimpleService>();
         assert_send_sync::<ServiceWithDependency>();
         assert_send_sync::<ComplexService>();

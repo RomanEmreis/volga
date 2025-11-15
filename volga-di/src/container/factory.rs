@@ -3,12 +3,12 @@
 use super::Error;
 
 /// A trait that describes a generic factory function 
-/// that can resolve objects registered in DI container
+/// that can resolve objects registered in a DI container
 pub trait GenericFactory<Args>: Send + Sync + 'static {
     /// A type of object that will be resolved
     type Output;
     
-    /// Calls a generic function and returns either resolved object or error
+    /// Calls a generic function and returns either a resolved object or error
     fn call(&self, args: Args) -> Result<Self::Output, Error>;
 }
 
@@ -86,7 +86,7 @@ mod tests {
         assert_eq!(point.1.0, 2);
     }
 
-        #[test]
+    #[test]
     fn it_resolves_from_container() {
         let mut container = ContainerBuilder::new();
         container.register_transient_factory(|| X(1));
