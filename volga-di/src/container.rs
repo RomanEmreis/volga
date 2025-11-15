@@ -37,8 +37,7 @@ where
     T: Inject + 'static,
 {
     Arc::new(move |c: &Container| -> Result<ArcService, Error> {
-        T::inject(c)
-            .map(|t| Arc::new(t) as ArcService)
+        T::inject(c).map(|t| Arc::new(t) as ArcService)
     })
 }
 
