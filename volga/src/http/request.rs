@@ -17,7 +17,7 @@ use crate::{
 };
 
 use crate::http::{
-    endpoints::args::FromRequestRef, 
+    endpoints::{args::FromRequestRef, route::PathArgs}, 
     request::request_body_limit::RequestBodyLimit
 };
 
@@ -167,13 +167,42 @@ impl HttpRequest {
     /// }
     ///
     /// # fn docs(req: HttpRequest) -> std::io::Result<()> {
+    /// // https://www.example.com?id=1&value=test
     /// let params: Query<Params> = req.extract()?;
+    /// 
+    /// assert_eq!(params.id, 1u32);
+    /// assert_eq!(params.key, "test");
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
     pub fn extract<T: FromRequestRef>(&self) -> Result<T, Error> {
         T::from_request(self)
+    }
+
+    /// Returns iterator of URL path params
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::HttpRequest;
+    ///
+    /// # fn docs(req: HttpRequest) -> std::io::Result<()> {
+    /// // https://www.example.com/1/test
+    /// let mut args = req.path_args();
+    /// 
+    /// assert_eq!(args.next().unwrap(), "1");
+    /// assert_eq!(args.next().unwrap(), "test");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn path_args(&self) -> impl Iterator<Item = &str> {
+        self.extensions()
+            .get::<PathArgs>()
+            .map(|args| args
+                .iter()
+                .map(|arg| arg.value.as_ref()))
+            .into_iter()
+            .flatten()
     }
 
     /// Inserts the [`Header<T>`] to HTTP request headers
@@ -189,6 +218,7 @@ impl HttpRequest {
 mod tests {
     use http_body_util::BodyExt;
     use crate::headers::{Header, Vary, custom_headers};
+    use crate::http::endpoints::route::PathArg;
     use super::*;
     
     #[cfg(feature = "di")]
@@ -354,6 +384,41 @@ mod tests {
         let (parts, _) = ctx.into_parts();
 
         assert_eq!(parts.uri, "/test")
+    }
+
+    #[test]
+    fn it_returns_url_path() {
+        let args: PathArgs = smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
+        ];
+
+        let req = Request::get("/")
+            .extension(args)
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let mut args = req.path_args();
+
+        assert_eq!(args.next().unwrap(), "123");
+        assert_eq!(args.next().unwrap(), "John");
+    }
+
+    #[test]
+    fn it_returns_empty_iter_if_no_path_params() {
+        let req = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let mut args = req.path_args();
+
+        assert!(args.next().is_none());
     }
 
     #[test]
