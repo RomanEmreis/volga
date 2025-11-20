@@ -162,16 +162,16 @@ impl HttpRequest {
     ///
     /// #[derive(Deserialize)]
     /// struct Params {
-    ///     id: u32,
-    ///     key: String
+    ///     key: u32,
+    ///     value: String
     /// }
     ///
     /// # fn docs(req: HttpRequest) -> std::io::Result<()> {
-    /// // https://www.example.com?id=1&value=test
+    /// // https://www.example.com?key=1&value=test
     /// let params: Query<Params> = req.extract()?;
     /// 
-    /// assert_eq!(params.id, 1u32);
-    /// assert_eq!(params.key, "test");
+    /// assert_eq!(params.key, 1u32);
+    /// assert_eq!(params.value, "test");
     /// # Ok(())
     /// # }
     /// ```
@@ -187,20 +187,50 @@ impl HttpRequest {
     /// use volga::HttpRequest;
     ///
     /// # fn docs(req: HttpRequest) -> std::io::Result<()> {
+    /// // https://www.example.com/{key}/{value}
     /// // https://www.example.com/1/test
     /// let mut args = req.path_args();
     /// 
-    /// assert_eq!(args.next().unwrap(), "1");
-    /// assert_eq!(args.next().unwrap(), "test");
+    /// assert_eq!(args.next().unwrap(), ("key", "1"));
+    /// assert_eq!(args.next().unwrap(), ("value", "test"));
     /// # Ok(())
     /// # }
     /// ```
-    pub fn path_args(&self) -> impl Iterator<Item = &str> {
+    pub fn path_args(&self) -> impl Iterator<Item = (&str, &str)> {
         self.extensions()
             .get::<PathArgs>()
             .map(|args| args
                 .iter()
-                .map(|arg| arg.value.as_ref()))
+                .map(|arg| (arg.name.as_ref(), arg.value.as_ref())))
+            .into_iter()
+            .flatten()
+    }
+
+    /// Returns iterator of URL query params
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::HttpRequest;
+    ///
+    /// # fn docs(req: HttpRequest) -> std::io::Result<()> {
+    /// // https://www.example.com?key=1&value=test
+    /// let mut args = req.query_args();
+    /// 
+    /// assert_eq!(args.next().unwrap(), ("key", "1"));
+    /// assert_eq!(args.next().unwrap(), ("value", "test"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn query_args(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.uri()
+            .query()
+            .map(|query| query.split('&')
+                .map(|arg| {
+                    let mut parts = arg.split('=');
+                    let key = parts.next().unwrap();
+                    let value = parts.next().unwrap();
+                    (key, value)
+                }))
             .into_iter()
             .flatten()
     }
@@ -403,8 +433,23 @@ mod tests {
 
         let mut args = req.path_args();
 
-        assert_eq!(args.next().unwrap(), "123");
-        assert_eq!(args.next().unwrap(), "John");
+        assert_eq!(args.next().unwrap(), ("id", "123"));
+        assert_eq!(args.next().unwrap(), ("name", "John"));
+    }
+
+    #[test]
+    fn it_returns_url_query() {
+        let req = Request::get("/test?id=123&name=John")
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let mut args = req.query_args();
+
+        assert_eq!(args.next().unwrap(), ("id", "123"));
+        assert_eq!(args.next().unwrap(), ("name", "John"));
     }
 
     #[test]
@@ -417,6 +462,20 @@ mod tests {
         let req = HttpRequest::from_parts(parts, body);
 
         let mut args = req.path_args();
+
+        assert!(args.next().is_none());
+    }
+
+    #[test]
+    fn it_returns_empty_iter_if_no_query_params() {
+        let req = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let mut args = req.query_args();
 
         assert!(args.next().is_none());
     }

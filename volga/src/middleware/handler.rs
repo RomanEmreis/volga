@@ -3,6 +3,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+
 use crate::error::Error;
 use crate::{HttpRequest, HttpResponse, HttpResult};
 use super::{HttpContext, NextFn};
@@ -20,8 +21,7 @@ use super::{HttpContext, NextFn};
 /// });
 /// ```
 pub struct Next {
-    next: NextFn,
-    ctx: Option<HttpContext>
+    inner: Option<Pin<Box<dyn Future<Output = HttpResult> + Send>>>
 }
 
 impl std::fmt::Debug for Next {
@@ -35,19 +35,26 @@ impl Future for Next {
     type Output = HttpResult;
 
     #[inline]
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let ctx = self.ctx
-            .take()
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        let fut = this
+            .inner
+            .as_mut()
             .ok_or_else(|| Error::server_error("Next polled after completion"))?;
-        let fut = (self.next)(ctx);
-        Box::pin(fut).as_mut().poll(cx)
+
+        let poll = fut.as_mut().poll(cx);
+        if matches!(poll, Poll::Ready(_)) {
+            this.inner = None;
+        }
+        poll
     }
 }
 
 impl Next {
     /// Creates a new [`Next`]
     pub fn new(ctx: HttpContext, next: NextFn) -> Self {
-        Self { ctx: Some(ctx), next }
+        Self { inner: Some(Box::pin(next(ctx))) }
+        //Self { ctx: Some(ctx), next }
     }
 }
 
