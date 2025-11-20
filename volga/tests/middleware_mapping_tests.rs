@@ -467,8 +467,8 @@ async fn it_adds_shortcut_with_middleware_for_route() {
 
         app.map_get("/test", || async { "Pass!" })
             .wrap(|ctx, next| async move { next(ctx).await })
-            .with(|_| async { volga::bad_request!("Error!") })
-            .with(|next| next);
+            .with(|next| next)
+            .with(|_| async { volga::bad_request!("Error!") });
 
         app.run().await
     });

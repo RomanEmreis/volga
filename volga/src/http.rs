@@ -2,7 +2,7 @@
 
 // Re-exporting HTTP status codes, Response and some headers from hyper/http
 pub use hyper::{
-    http::{Extensions, Method, Uri},
+    http::{request::Parts, Extensions, Method, Uri},
     Response,
     StatusCode,
 };

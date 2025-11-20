@@ -103,6 +103,47 @@ impl HttpContext {
     pub fn resolve_shared<T: Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
         self.request.resolve_shared::<T>()
     }
+
+    /// Returns iterator of URL path params
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::middleware::HttpContext;
+    ///
+    /// # fn docs(ctx: HttpContext) -> std::io::Result<()> {
+    /// // https://www.example.com/{key}/{value}
+    /// // https://www.example.com/1/test
+    /// let mut args = ctx.path_args();
+    /// 
+    /// assert_eq!(args.next().unwrap(), ("key", "1"));
+    /// assert_eq!(args.next().unwrap(), ("value", "test"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    pub fn path_args(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.request.path_args()
+    }
+
+    /// Returns iterator of URL query params
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::middleware::HttpContext;
+    ///
+    /// # fn docs(ctx: HttpContext) -> std::io::Result<()> {
+    /// // https://www.example.com?key=1&value=test
+    /// let mut args = ctx.query_args();
+    /// 
+    /// assert_eq!(args.next().unwrap(), ("key", "1"));
+    /// assert_eq!(args.next().unwrap(), ("value", "test"));
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    pub fn query_args(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.request.query_args()
+    }
     
     /// Inserts the [`Header<T>`] to HTTP request headers
     #[inline]
@@ -149,6 +190,7 @@ impl HttpContext {
 mod tests {
     use hyper::Request;
     use crate::{HttpBody, headers::custom_headers};
+    use crate::http::endpoints::route::{PathArg, PathArgs};
     use super::*;
     
     custom_headers! {
@@ -191,5 +233,69 @@ mod tests {
         ctx.insert_header::<Foo>(Header::from("x-foo"));
 
         assert_eq!(ctx.extract::<Header<Foo>>().unwrap().into_inner(), "x-foo");
+    }
+
+    #[test]
+    fn it_returns_url_path() {
+        let args: PathArgs = smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
+        ];
+
+        let req = Request::get("/")
+            .extension(args)
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let ctx = HttpContext::slim(HttpRequest::from_parts(parts, body));
+
+        let mut args = ctx.path_args();
+
+        assert_eq!(args.next().unwrap(), ("id", "123"));
+        assert_eq!(args.next().unwrap(), ("name", "John"));
+    }
+
+    #[test]
+    fn it_returns_url_query() {
+        let req = Request::get("/test?id=123&name=John")
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let ctx = HttpContext::slim(HttpRequest::from_parts(parts, body));
+
+        let mut args = ctx.query_args();
+
+        assert_eq!(args.next().unwrap(), ("id", "123"));
+        assert_eq!(args.next().unwrap(), ("name", "John"));
+    }
+
+    #[test]
+    fn it_returns_empty_iter_if_no_path_params() {
+        let req = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let ctx = HttpContext::slim(HttpRequest::from_parts(parts, body));
+
+        let mut args = ctx.path_args();
+
+        assert!(args.next().is_none());
+    }
+
+    #[test]
+    fn it_returns_empty_iter_if_no_query_params() {
+        let req = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let ctx = HttpContext::slim(HttpRequest::from_parts(parts, body));
+
+        let mut args = ctx.query_args();
+
+        assert!(args.next().is_none());
     }
 }
