@@ -45,6 +45,7 @@
 
 use hyper::Method;
 use smallvec::SmallVec;
+use crate::utils::str::memchr_split_nonempty;
 
 pub(crate) use path_args::{PathArgs, PathArg};
 pub(crate) use layer::{RoutePipeline, Layer};
@@ -54,8 +55,8 @@ pub(crate) mod layer;
 
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
-const PATH_SEPARATOR: char = '/';
-const ALLOW_METHOD_SEPARATOR: &str = ",";
+const PATH_SEPARATOR: u8 = b'/';
+const ALLOW_METHOD_SEPARATOR: char = ',';
 const DEFAULT_DEPTH: usize = 4;
 
 /// Represents a full route's "local" middleware pipeline
@@ -324,7 +325,7 @@ pub(super) fn make_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoin
     if let Some(first) = iter.next() {
         allowed.push_str(first);
         for s in iter {
-            allowed.push_str(ALLOW_METHOD_SEPARATOR);
+            allowed.push(ALLOW_METHOD_SEPARATOR);
             allowed.push_str(s);
         }
     }
@@ -333,8 +334,9 @@ pub(super) fn make_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoin
 
 #[inline(always)]
 fn split_path(path: &str) -> impl Iterator<Item = &str> {
-    path.trim_matches(PATH_SEPARATOR)
-        .split(PATH_SEPARATOR)
+    memchr_split_nonempty(PATH_SEPARATOR, path.as_bytes())
+        .map(|s| std::str::from_utf8(s)
+            .expect("Invalid UTF-8 sequence in path"))
 }
 
 #[inline(always)]

@@ -7,6 +7,16 @@ resolver = "2"
 license = "MIT"
 edition = "2024"
 rust-version = "1.90.0"
+authors = ["Roman Emreis <roman.emreis@outlook.com>"]
+repository = "https://github.com/RomanEmreis/volga"
+documentation = "https://docs.rs/volga"
+homepage = "https://romanemreis.github.io/volga-docs"
+categories = [
+    "web-programming::http-server",
+    "web-programming::websocket",
+    "network-programming",
+    "asynchronous",
+]
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

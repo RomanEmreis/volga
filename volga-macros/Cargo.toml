@@ -1,29 +1,24 @@
 [package]
 name = "volga-macros"
-version = "0.7.1"
-edition = "2024"
-rust-version = "1.90.0"
-authors = ["Roman Emreis <roman.emreis@outlook.com>"]
-license = "MIT"
-repository = "https://github.com/RomanEmreis/volga"
-description = "Macros for Volga Web Framework"
-documentation = "https://docs.rs/volga"
+version = "0.7.2"
 readme = "README.md"
-homepage = "https://romanemreis.github.io/volga-docs"
-categories = [
-    "web-programming::http-server",
-    "web-programming::websocket",
-    "network-programming",
-    "asynchronous",
-]
+description = "Macros for Volga Web Framework"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+categories.workspace = true
 keywords = ["volga", "http", "web", "framework"]
 
 [lib]
 proc-macro = true
 
 [dependencies]
-quote = "1.0.41"
-syn = { version = "2.0.109", features = ["full"] }
+quote = "1.0.42"
+syn = { version = "2.0.111", features = ["full"] }
 proc-macro2 = "1.0.103"
 
 [features]

@@ -1,21 +1,16 @@
 [package]
 name = "volga-dev-cert"
-version = "0.7.1"
-edition = "2024"
-rust-version = "1.90.0"
-authors = ["Roman Emreis <roman.emreis@outlook.com>"]
-license = "MIT"
-repository = "https://github.com/RomanEmreis/volga"
-description = "A Rust library for generating self-signed TLS certificates for local development."
-documentation = "https://docs.rs/volga"
+version = "0.7.2"
 readme = "README.md"
-homepage = "https://romanemreis.github.io/volga-docs"
-categories = [
-    "web-programming::http-server",
-    "web-programming::websocket",
-    "network-programming",
-    "asynchronous",
-]
+description = "A Rust library for generating self-signed TLS certificates for local development."
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+categories.workspace = true
 keywords = ["volga", "server", "https", "tls"]
 
 [dependencies]
