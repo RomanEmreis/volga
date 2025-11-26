@@ -1,25 +1,20 @@
 [package]
 name = "volga-di"
-version = "0.7.1"
-edition = "2024"
-rust-version = "1.90.0"
-authors = ["Roman Emreis <roman.emreis@outlook.com>"]
-license = "MIT"
-repository = "https://github.com/RomanEmreis/volga"
-description = "Dependency Injection tools for Volga Web Framework"
-documentation = "https://docs.rs/volga"
+version = "0.7.2"
 readme = "README.md"
-homepage = "https://romanemreis.github.io/volga-docs"
-categories = [
-    "web-programming::http-server",
-    "web-programming::websocket",
-    "network-programming",
-    "asynchronous",
-]
+description = "Dependency Injection tools for Volga Web Framework"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+categories.workspace = true
 keywords = ["volga", "container", "dependency", "injection", "di"]
 
 [dependencies]
-http = "1.3.1"
+http = "1.4.0"
 
 [features]
 default = []
