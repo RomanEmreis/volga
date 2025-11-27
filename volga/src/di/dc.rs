@@ -19,15 +19,10 @@ use std::{
     sync::Arc
 };
 
-/// `Dc` stands for Dependency Container.  
+/// `Dc` stands for Dependency Container.
+/// 
 /// This struct wraps an injectable type `T` that is **shared** between all handlers
 /// through an [`Arc`].  
-/// 
-/// Use this version for long-lived or shared services (e.g., caches, database pools, or
-/// other stateful components).  
-/// 
-/// Unlike [`DcOwned`], which clones the value from the container, `Dc` provides a
-/// cheap-to-clone shared reference via [`Arc<T>`].
 ///
 /// # Example
 /// ```no_run
