@@ -40,7 +40,7 @@ pub use custom_headers;
 mod test {
     use hyper::header::HeaderValue;
     use hyper::HeaderMap;
-    use crate::headers::{Header, FromHeaders, custom_headers};
+    use crate::headers::{Header, FromHeaders};
 
     custom_headers! {
         (ApiKey, "x-api-key")

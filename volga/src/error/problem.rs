@@ -120,7 +120,6 @@ impl Problem {
 
 #[cfg(test)]
 mod tests {
-    use crate::problem;
     use http_body_util::BodyExt;
     
     #[tokio::test]
