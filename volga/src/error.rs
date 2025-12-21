@@ -25,7 +25,7 @@ pub use self::{
 };
 
 #[cfg(feature = "problem-details")]
-pub use self::problem::Problem;
+pub use self::problem::{Problem, ProblemDetails};
 
 pub mod handler;
 pub mod fallback;
