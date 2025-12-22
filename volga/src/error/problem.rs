@@ -3,9 +3,14 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::http::{HttpBody, HttpResult, IntoResponse};
+use super::Error;
+use crate::{
+    http::{HttpBody, HttpResult, StatusCode, IntoResponse},
+    routing::{Route, RouteGroup},
+    App
+};
 
-/// Produces an error response in a [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
+/// Produces an error response in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
 /// 
 /// # Example
 /// ```no_run
@@ -110,7 +115,7 @@ macro_rules! problem {
 /// See [`Problem`]
 pub type ProblemDetails = Problem<HashMap<String, Value>>;
 
-/// Produces an error response in a [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
+/// Represents an error response in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E: Serialize",
@@ -140,6 +145,27 @@ pub struct Problem<E = HashMap<String, Value>> {
     /// Additional information about the error.
     #[serde(flatten)]
     pub extensions: E,
+}
+
+impl<T: Default> From<StatusCode> for Problem<T> {
+    #[inline]
+    fn from(status: StatusCode) -> Self {
+        Self::new(status.as_u16())
+    }
+}
+
+impl<T: Default> From<Error> for Problem<T> {
+    #[inline]
+    fn from(err: Error) -> Self {
+        let (status, instance, err) = err.into_parts();
+        let problem = Self::from(status).with_detail(err.to_string());
+
+        if let Some(instance) = instance {
+            problem.with_instance(instance)
+        } else {
+            problem
+        }
+    }
 }
 
 impl<E: Serialize> IntoResponse for Problem<E> {
@@ -175,8 +201,8 @@ impl<E: Default> Problem<E> {
     /// Creates a new [`Problem`] details
     #[inline]
     pub fn new(status: u16) -> Self {
-        let title = crate::http::StatusCode::from_u16(status)
-            .unwrap_or(crate::http::StatusCode::OK)
+        let title = StatusCode::from_u16(status)
+            .unwrap_or(StatusCode::OK)
             .canonical_reason()
             .unwrap_or("unknown status code");
 
@@ -226,6 +252,86 @@ impl<E: Default> Problem<E> {
     }
 }
 
+impl App {
+    /// Adds a global error handler that produces error responses 
+    /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
+    /// 
+    /// # Example
+    /// ```no_run
+    ///  use volga::App;
+    /// 
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    ///  let mut app = App::new();
+    ///  
+    ///  app.use_problem_details();
+    /// # app.run().await
+    /// # }
+    /// ```
+    #[inline]
+    pub fn use_problem_details(&mut self) -> &mut Self {
+        self.map_err(make_problem_details)
+    }
+}
+
+impl<'a> Route<'a> {
+    /// Adds an error handler for this route that produces error responses 
+    /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app
+    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_problem();
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    #[inline]
+    pub fn map_problem(self) -> Self {
+        self.map_err(make_problem_details)
+    }
+}
+
+impl<'a> RouteGroup<'a> {
+    /// Adds an error handler for this route group that produces error ressponses 
+    /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, error::Error};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.map_group("/positive")
+    ///     .map_problem()
+    ///     .map_get("/sum", |x: i32, y: i32| async move { 
+    ///         x + y
+    ///      });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    #[inline]
+    pub fn map_problem(self) -> Self {
+        self.map_err(make_problem_details)
+    }
+}
+
+/// Default error handler that creates problem details
+#[inline]
+async fn make_problem_details(err: Error) -> Problem {
+    Problem::from(err)
+}
+
 /// Returns a URL to the RFC 9110 section depending on status code
 #[inline]
 pub fn get_problem_type_url(status: u16) -> String {
@@ -242,8 +348,8 @@ pub fn get_problem_type_url(status: u16) -> String {
 #[cfg(test)]
 mod tests {
     use http_body_util::BodyExt;
-    use crate::error::{Problem, ProblemDetails};
-    use crate::http::IntoResponse;
+    use crate::error::{Error, Problem, ProblemDetails};
+    use crate::http::{StatusCode, IntoResponse};
     use serde::{Serialize, Deserialize};
     use serde_json::json;
 
@@ -338,6 +444,32 @@ mod tests {
                 "reason": "Must be a positive integer"
             }
         ]));
+    }
+
+    #[test]
+    fn it_creates_problem_details_from_status_code() {
+        let status = StatusCode::BAD_REQUEST;
+        let problem = ProblemDetails::from(status);
+
+        assert_eq!(problem.r#type, "https://tools.ietf.org/html/rfc9110#section-15.5.1");
+        assert_eq!(problem.title, "Bad Request");
+        assert_eq!(problem.status, 400);
+        assert_eq!(problem.detail, None);
+        assert_eq!(problem.instance, None);
+        assert_eq!(problem.extensions.len(), 0);
+    }
+
+        #[test]
+    fn it_creates_problem_details_from_error() {
+        let error = Error::client_error("some error");
+        let problem = ProblemDetails::from(error);
+
+        assert_eq!(problem.r#type, "https://tools.ietf.org/html/rfc9110#section-15.5.1");
+        assert_eq!(problem.title, "Bad Request");
+        assert_eq!(problem.status, 400);
+        assert_eq!(problem.detail, Some("some error".into()));
+        assert_eq!(problem.instance, None);
+        assert_eq!(problem.extensions.len(), 0);
     }
     
     #[tokio::test]

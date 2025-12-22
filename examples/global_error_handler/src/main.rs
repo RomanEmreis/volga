@@ -33,7 +33,7 @@ async fn main() -> std::io::Result<()> {
             "detail": (err.to_string()),
             "instance": instance,
         }
-    });
+    });   
 
     app.run().await
 }

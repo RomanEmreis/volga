@@ -201,7 +201,7 @@ impl App {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, error::Error, status};
+    ///  use volga::{App, error::Error, status};
     /// 
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
