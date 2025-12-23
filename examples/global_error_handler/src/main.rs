@@ -4,7 +4,7 @@
 //! cargo run -p global_error_handler
 //! ```
 
-use volga::{App, problem};
+use volga::{App, status};
 use std::io::Error;
 use tracing_subscriber::prelude::*;
 
@@ -27,12 +27,7 @@ async fn main() -> std::io::Result<()> {
     // Enabling global error handler
     app.map_err(|error: volga::error::Error| async move {
         tracing::error!("{:?}", error);
-        let (status, instance, err) = error.into_parts();
-        problem! {
-            "status": status.as_u16(),
-            "detail": (err.to_string()),
-            "instance": instance,
-        }
+        status!(error.status.as_u16(), "{error}")
     });   
 
     app.run().await
