@@ -25,7 +25,7 @@ pub use self::{
 };
 
 #[cfg(feature = "problem-details")]
-pub use self::problem::Problem;
+pub use self::problem::{Problem, ProblemDetails};
 
 pub mod handler;
 pub mod fallback;
@@ -201,7 +201,7 @@ impl App {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, error::Error, status};
+    ///  use volga::{App, error::Error, status};
     /// 
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {

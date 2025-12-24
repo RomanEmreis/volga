@@ -1,5 +1,5 @@
 [package]
-name = "global_error_handler"
+name = "problem_details"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -8,7 +8,8 @@ publish = false
 tokio = "1.46.1"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-volga = { path = "../../volga", features = ["tracing"] }
+volga = { path = "../../volga", features = ["tracing","problem-details"] }
+serde = { version = "1.0.219", features = ["serde_derive"] }
 
 [lints]
 workspace = true

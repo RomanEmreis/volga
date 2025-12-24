@@ -18,7 +18,7 @@ keywords = ["async", "server", "http", "web", "framework"]
 bytes = "1.11.0"
 futures-util = { version = "0.3.31", default-features = false, features = ["alloc"] }
 http-body-util = "0.1.3"
-itoa = "1.0.15"
+itoa = "1.0.16"
 indexmap = "2.12.1"
 memchr = "2.7.6"
 mime = "0.3.17"
@@ -96,7 +96,7 @@ di = ["dep:volga-di"]
 macros = ["dep:volga-macros"]
 middleware = []
 multipart = ["dep:multer"]
-problem-details = []
+problem-details = ["serde/derive"]
 static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]
