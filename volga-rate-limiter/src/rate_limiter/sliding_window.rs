@@ -138,61 +138,26 @@ mod tests {
             10, 
             Duration::from_secs(5));
 
-        println!("=== Starting test ===");
-
-        // Заполняем лимит полностью
         for i in 0..10 {
             assert!(limiter.check(1), "Request {} should pass", i + 1);
         }
 
-        // 11-й запрос должен быть отклонен
         assert!(!limiter.check(1), "Request 11 should be denied");
 
-        println!("Made 10 requests, limit reached. Sleeping 2.5 sec (half window)...");
         std::thread::sleep(Duration::from_millis(2500));
 
-        // Через половину окна:
-        // progress = 0.5, previous_weight = 0.5
-        // effective = 0 * 0.5 + 10 = 10.0 (все еще на лимите)
-        if let Some(entry) = limiter.storage.get(&1) {
-            println!("After 2.5 sec: prev={}, curr={}",
-                     entry.previous_count.load(Acquire),
-                     entry.current_count.load(Acquire));
-        }
         assert!(!limiter.check(1), "Should still be rate limited at 50% of window");
 
-        println!("Sleeping another 3 sec (total 5.5 sec, new window)...");
         std::thread::sleep(Duration::from_secs(3));
 
-        // Через 5.5+ секунд мы в новом окне
-        // previous = 10, current = 0, но мы уже 0.5 сек в новом окне
-        // progress = 0.1, previous_weight = 0.9
-        // effective = 10 * 0.9 + 0 = 9.0 < 10, должен пройти
-        if let Some(entry) = limiter.storage.get(&1) {
-            println!("After 5.5 sec (new window): prev={}, curr={}",
-                     entry.previous_count.load(Acquire),
-                     entry.current_count.load(Acquire));
-        }
         assert!(limiter.check(1), "Should allow request in new window");
 
-        println!("Sleeping 6 more sec (past 2 windows)...");
         std::thread::sleep(Duration::from_secs(6));
 
-        // Через 11+ секунд прошло 2+ окна, полный сброс
-        if let Some(entry) = limiter.storage.get(&1) {
-            println!("After 11+ sec: prev={}, curr={}",
-                     entry.previous_count.load(Acquire),
-                     entry.current_count.load(Acquire));
-        }
-
-        // Должны иметь свежий лимит
         for i in 0..10 {
             assert!(limiter.check(1), "Request {} in fresh window should pass", i + 1);
         }
         assert!(!limiter.check(1), "Request 11 should be denied again");
-
-        println!("=== Test completed ===");
-
     }
 
     #[test]
