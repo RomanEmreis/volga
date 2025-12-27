@@ -1,5 +1,5 @@
-# Volga Macros
-Macros library for Volga Web Framework
+# Volga Rate Limiter
+A Rust library for rate limiting HTTP requests
 
 [![latest](https://img.shields.io/badge/latest-0.7.4-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://crates.io/crates/volga)
@@ -9,9 +9,4 @@ Macros library for Volga Web Framework
 
 > 💡 **Note**: This project is currently in preview. Breaking changes can be introduced without prior notice.
 
-## Dependencies
-```toml
-[dependencies]
-volga = { version = "0.7.4", features = ["macros"] }
-```
 
