@@ -42,6 +42,9 @@ use crate::http::CorsConfig;
 #[cfg(feature = "jwt-auth")]
 use crate::auth::bearer::{BearerAuthConfig, BearerTokenService};
 
+#[cfg(feature = "rate-limiting")]
+use crate::rate_limiting::GlobalRateLimiter;
+
 #[cfg(feature = "static-files")]
 pub use self::env::HostEnv;
 
@@ -109,6 +112,10 @@ pub struct App {
     #[cfg(feature = "jwt-auth")]
     pub(super) auth_config: Option<BearerAuthConfig>,
     
+    /// Global rate limiter
+    #[cfg(feature = "rate-limiting")]
+    pub(super) rate_limiter: Option<GlobalRateLimiter>,
+
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
     
@@ -181,6 +188,10 @@ pub(crate) struct AppInstance {
     /// Service that validates/generates JWTs
     #[cfg(feature = "jwt-auth")]
     pub(super) bearer_token_service: Option<BearerTokenService>,
+
+    /// Global rate limiter
+    #[cfg(feature = "rate-limiting")]
+    pub(super) rate_limiter: Option<GlobalRateLimiter>,
     
     /// Graceful shutdown utilities
     pub(super) graceful_shutdown: GracefulShutdown,
@@ -215,6 +226,8 @@ impl TryFrom<App> for AppInstance {
             host_env: app.host_env,
             #[cfg(feature = "di")]
             container: app.container.build(),
+            #[cfg(feature = "rate-limiting")]
+            rate_limiter: app.rate_limiter,
             #[cfg(feature = "jwt-auth")]
             bearer_token_service,
             #[cfg(feature = "tls")]
@@ -271,6 +284,8 @@ impl App {
             host_env: HostEnv::default(),
             #[cfg(feature = "jwt-auth")]
             auth_config: None,
+            #[cfg(feature = "rate-limiting")]
+            rate_limiter: None,
             pipeline: PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),

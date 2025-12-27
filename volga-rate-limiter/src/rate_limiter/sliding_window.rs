@@ -1,7 +1,6 @@
 //! Tools and data structures for sliding window rate limiter
 
-use std::{sync::Arc};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering::*};
+use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering::*}};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use dashmap::DashMap;
 use super::RateLimiter;
