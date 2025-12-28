@@ -8,7 +8,9 @@ use crate::{
     App,
     ClientIp,
     HttpRequest,
-    http::StatusCode, 
+    http::StatusCode,
+    headers::FORWARDED,
+    error::Error,
     status
 };
 
@@ -18,14 +20,19 @@ pub use volga_rate_limiter::{
     RateLimiter
 };
 
-/// Rate limiting strategy
-#[derive(Debug, Clone, Copy)]
-pub enum RateLimitingStrategy {
-    /// Fixed window rate limiting strategy
-    FixedWindow,
+const X_FORWARDED_FOR: &str = "x-forwarded-for";
 
-    /// Sliding window rate limiting strategy
-    SlidingWindow
+/// Represents a source where the 
+/// rate limiting partition key calculated from
+#[derive(Debug, Clone, Copy)]
+pub enum PartitionKeySource {
+    /// Partition Key will be calculated from the "forwarded" header, 
+    /// if it's not present then from "x-forwarded-for". Fallback - the peer address.
+    Ip,
+    /// Partition Key will be calculated from the User Identity,
+    #[cfg(feature = "jwt-auth")]
+    User,
+    //Custom()
 }
 
 /// Global rate limiter
@@ -53,12 +60,10 @@ impl App {
     }
 
     /// Adds the global middleware that limits all requests
-    pub fn use_fixed_window(&mut self) -> &mut Self {
-        self.wrap(|ctx, next| async move {
+    pub fn use_fixed_window(&mut self, source: PartitionKeySource) -> &mut Self {
+        self.wrap(move |ctx, next| async move {
             if let Some(limiter) = ctx.fixed_window_rate_limiter() {
-                let ip = ctx.extract::<ClientIp>()?;
-                let client_ip = extract_client_ip(&ctx.request, ip.into_inner());
-                let key = stable_hash(&client_ip);
+                let key = extract_partition_key(&ctx.request, source)?;
                 if limiter.check(key) { 
                     status!(
                         StatusCode::TOO_MANY_REQUESTS.as_u16(), 
@@ -74,12 +79,10 @@ impl App {
     }
 
     /// Adds the global middleware that limits all requests
-    pub fn use_sliding_window(&mut self) -> &mut Self {
-        self.wrap(|ctx, next| async move {
+    pub fn use_sliding_window(&mut self, source: PartitionKeySource) -> &mut Self {
+        self.wrap(move |ctx, next| async move {
             if let Some(limiter) = ctx.sliding_window_rate_limiter() {
-                let ip = ctx.extract::<ClientIp>()?;
-                let client_ip = extract_client_ip(&ctx.request, ip.into_inner());
-                let key = stable_hash(&client_ip);
+                let key = extract_partition_key(&ctx.request, source)?;
                 if limiter.check(key) {
                     status!(
                         StatusCode::TOO_MANY_REQUESTS.as_u16(), 
@@ -93,6 +96,28 @@ impl App {
             }
         })
     }
+}
+
+#[inline]
+fn extract_partition_key(req: &HttpRequest, source: PartitionKeySource) -> Result<u64, Error> {
+    match source {
+        PartitionKeySource::Ip => extract_partition_key_from_ip(req),
+        //PartitionKeySource::Custom(extractor) => extractor(req).map(stable_hash),
+        #[cfg(feature = "jwt-auth")]
+        PartitionKeySource::User => extract_partition_key_from_auth(req)
+    }
+}
+
+#[inline]
+fn extract_partition_key_from_ip(req: &HttpRequest) -> Result<u64, Error> {
+    let ip = req.extract::<ClientIp>()?;
+    let client_ip = extract_client_ip(req, ip.into_inner());
+    Ok(stable_hash(&client_ip))
+}
+
+#[inline]
+fn extract_partition_key_from_auth(_req: &HttpRequest) -> Result<u64, Error> {
+    todo!()
 }
 
 #[inline]
@@ -120,7 +145,7 @@ fn extract_client_ip(req: &HttpRequest, remote_addr: SocketAddr) -> IpAddr {
 
 #[inline]
 fn forwarded_header(req: &HttpRequest) -> Option<IpAddr> {
-    let header = req.headers().get("forwarded")?.to_str().ok()?;
+    let header = req.headers().get(FORWARDED)?.to_str().ok()?;
     header.split(';')
         .find_map(|part| {
             let part = part.trim();
@@ -134,7 +159,7 @@ fn forwarded_header(req: &HttpRequest) -> Option<IpAddr> {
 
 #[inline]
 fn x_forwarded_for(req: &HttpRequest) -> Option<IpAddr> {
-    let header = req.headers().get("x-forwarded-for")?.to_str().ok()?;
+    let header = req.headers().get(X_FORWARDED_FOR)?.to_str().ok()?;
     header
         .split(',')
         .next()

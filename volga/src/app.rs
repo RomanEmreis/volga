@@ -528,6 +528,7 @@ impl App {
         let peer_addr = match stream.peer_addr() { 
             Ok(addr) => addr,
             Err(_err) => {
+                #[cfg(feature = "tracing")]
                 tracing::error!("failed to get peer address: {_err:#}");
                 return;
             }
