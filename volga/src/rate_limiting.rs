@@ -29,7 +29,7 @@ pub enum RateLimitingStrategy {
 }
 
 /// Global rate limiter
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct GlobalRateLimiter {
     pub(crate) fixed_window: Option<FixedWindowRateLimiter>,
     pub(crate) sliding_window: Option<SlidingWindowRateLimiter>
@@ -38,13 +38,17 @@ pub struct GlobalRateLimiter {
 impl App {
     /// Sets the fixed window rate limiter
     pub fn with_fixed_window(&mut self, max_requests: u32, window_size: Duration) -> &mut Self {
-        //self.rate_limiter.fixed_window = Some(FixedWindowRateLimiter::new(max_requests, window_size));
+        self.rate_limiter
+            .get_or_insert_default()
+            .fixed_window = Some(FixedWindowRateLimiter::new(max_requests, window_size));
         self
     }
 
     /// Sets the sliding window rate limiter
     pub fn with_sliding_window(&mut self, max_requests: u32, window_size: Duration) -> &mut Self {
-        //self.rate_limiter.sliding_window = Some(SlidingWindowRateLimiter::new(max_requests, window_size));
+        self.rate_limiter
+            .get_or_insert_default()
+            .sliding_window = Some(SlidingWindowRateLimiter::new(max_requests, window_size));
         self
     }
 
@@ -64,6 +68,27 @@ impl App {
                     next(ctx).await
                 }
             } else { 
+                next(ctx).await
+            }
+        })
+    }
+
+    /// Adds the global middleware that limits all requests
+    pub fn use_sliding_window(&mut self) -> &mut Self {
+        self.wrap(|ctx, next| async move {
+            if let Some(limiter) = ctx.sliding_window_rate_limiter() {
+                let ip = ctx.extract::<ClientIp>()?;
+                let client_ip = extract_client_ip(&ctx.request, ip.into_inner());
+                let key = stable_hash(&client_ip);
+                if limiter.check(key) {
+                    status!(
+                        StatusCode::TOO_MANY_REQUESTS.as_u16(), 
+                        "Rate limit exceeded. Try again later."
+                    )
+                } else {
+                    next(ctx).await
+                }
+            } else {
                 next(ctx).await
             }
         })

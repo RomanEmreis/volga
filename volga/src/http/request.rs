@@ -22,7 +22,12 @@ use crate::http::{
 };
 
 #[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::{GlobalRateLimiter, FixedWindowRateLimiter};
+use crate::rate_limiting::{
+    GlobalRateLimiter, 
+    FixedWindowRateLimiter,
+    SlidingWindowRateLimiter
+};
+
 #[cfg(feature = "di")]
 use crate::di::Container;
 #[cfg(any(feature = "di", feature = "rate-limiting"))]
@@ -137,13 +142,23 @@ impl HttpRequest {
             .expect("Global Rate Limiter must be provided")
     }
 
-    /// Returns a reference to the Global Rate Limiter
+    /// Returns a reference to a Fixed Window Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
     pub fn fixed_window_rate_limiter(&self) -> Option<&FixedWindowRateLimiter> {
         self.inner.extensions()
             .get::<Arc<GlobalRateLimiter>>()?
             .fixed_window
+            .as_ref()
+    }
+
+    /// Returns a reference to a Sliding Window Rate Limiter
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub fn sliding_window_rate_limiter(&self) -> Option<&SlidingWindowRateLimiter> {
+        self.inner.extensions()
+            .get::<Arc<GlobalRateLimiter>>()?
+            .sliding_window
             .as_ref()
     }
     

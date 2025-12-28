@@ -1,7 +1,7 @@
 //! Extractors for client IP address
 
 use std::{ops::Deref, net::SocketAddr};
-use std::fmt::{Display, Pointer};
+use std::fmt::Display;
 use futures_util::future::{ready, Ready};
 use hyper::http::{request::Parts, Extensions};
 use crate::{
@@ -110,7 +110,7 @@ mod tests {
     async fn it_reads_from_payload() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
         let req = Request::get("/")
-            .extension(ip.clone())
+            .extension(ip)
             .body(())
             .unwrap();
 
@@ -124,7 +124,7 @@ mod tests {
     fn it_gets_from_extensions() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
         let mut extensions = Extensions::new();
-        extensions.insert(ip.clone());
+        extensions.insert(ip);
 
         let client_ip = ClientIp::try_from(&extensions).unwrap();
 
@@ -144,7 +144,7 @@ mod tests {
     fn it_gets_from_request_parts() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
         let req = Request::get("/")
-            .extension(ip.clone())
+            .extension(ip)
             .body(())
             .unwrap();
 
@@ -158,7 +158,7 @@ mod tests {
     fn it_gets_from_request_ref() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
         let req = Request::get("/")
-            .extension(ip.clone())
+            .extension(ip)
             .body(HttpBody::empty())
             .unwrap();
 

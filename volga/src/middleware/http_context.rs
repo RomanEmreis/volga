@@ -25,7 +25,11 @@ use {
 use std::sync::Arc;
 
 #[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::{GlobalRateLimiter, FixedWindowRateLimiter};
+use crate::rate_limiting::{
+    GlobalRateLimiter, 
+    SlidingWindowRateLimiter, 
+    FixedWindowRateLimiter
+};
 
 /// Describes current HTTP context which consists of the current HTTP request data 
 /// and the reference to the method handler for this request
@@ -123,6 +127,13 @@ impl HttpContext {
     #[cfg(feature = "rate-limiting")]
     pub fn fixed_window_rate_limiter(&self) -> Option<&FixedWindowRateLimiter> {
         self.request.fixed_window_rate_limiter()
+    }
+
+    /// Returns a reference to a Fixed Window Rate Limiter
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub fn sliding_window_rate_limiter(&self) -> Option<&SlidingWindowRateLimiter> {
+        self.request.sliding_window_rate_limiter()
     }
 
     /// Returns iterator of URL path params
