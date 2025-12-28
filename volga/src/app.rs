@@ -191,7 +191,7 @@ pub(crate) struct AppInstance {
 
     /// Global rate limiter
     #[cfg(feature = "rate-limiting")]
-    pub(super) rate_limiter: Option<GlobalRateLimiter>,
+    pub(super) rate_limiter: Option<Arc<GlobalRateLimiter>>,
     
     /// Graceful shutdown utilities
     pub(super) graceful_shutdown: GracefulShutdown,
@@ -227,7 +227,7 @@ impl TryFrom<App> for AppInstance {
             #[cfg(feature = "di")]
             container: app.container.build(),
             #[cfg(feature = "rate-limiting")]
-            rate_limiter: app.rate_limiter,
+            rate_limiter: app.rate_limiter.map(Arc::new),
             #[cfg(feature = "jwt-auth")]
             bearer_token_service,
             #[cfg(feature = "tls")]
@@ -525,8 +525,16 @@ impl App {
 
     #[inline]
     async fn handle_connection(stream: TcpStream, app_instance: Weak<AppInstance>) {
+        let peer_addr = match stream.peer_addr() { 
+            Ok(addr) => addr,
+            Err(_err) => {
+                tracing::error!("failed to get peer address: {_err:#}");
+                return;
+            }
+        };
+        
         #[cfg(not(feature = "tls"))]
-        Server::new(TokioIo::new(stream)).serve(app_instance).await;
+        Server::new(TokioIo::new(stream), peer_addr).serve(app_instance).await;
         
         #[cfg(feature = "tls")]
         if let Some(acceptor) = app_instance.upgrade().and_then(|app| app.acceptor()) {
@@ -539,10 +547,10 @@ impl App {
                 }
             };
             let io = TokioIo::new(stream);
-            Server::new(io).serve(app_instance).await;
+            Server::new(io, peer_addr).serve(app_instance).await;
         } else {
             let io = TokioIo::new(stream);
-            Server::new(io).serve(app_instance).await;
+            Server::new(io, peer_addr).serve(app_instance).await;
         };
     }
 

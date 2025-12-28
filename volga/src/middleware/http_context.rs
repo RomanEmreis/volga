@@ -17,8 +17,15 @@ use {
     hyper::http::request::Parts
 };
 
-#[cfg(any(feature = "tls", feature = "tracing", feature = "di"))]
+#[cfg(any(
+    feature = "tls", 
+    feature = "tracing", 
+    feature = "di"
+))]
 use std::sync::Arc;
+
+#[cfg(feature = "rate-limiting")]
+use crate::rate_limiting::{GlobalRateLimiter, FixedWindowRateLimiter};
 
 /// Describes current HTTP context which consists of the current HTTP request data 
 /// and the reference to the method handler for this request
@@ -102,6 +109,20 @@ impl HttpContext {
     #[cfg(feature = "di")]
     pub fn resolve_shared<T: Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
         self.request.resolve_shared::<T>()
+    }
+    
+    /// Returns a reference to Global Rate Limiter
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub fn rate_limiter(&self) -> &GlobalRateLimiter {
+        self.request.rate_limiter()
+    }
+
+    /// Returns a reference to a Fixed Window Rate Limiter
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub fn fixed_window_rate_limiter(&self) -> Option<&FixedWindowRateLimiter> {
+        self.request.fixed_window_rate_limiter()
     }
 
     /// Returns iterator of URL path params

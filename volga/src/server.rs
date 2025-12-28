@@ -1,6 +1,7 @@
 ﻿//! HTTP Server tools
 
 use std::sync::Weak;
+use std::net::SocketAddr;
 use hyper::rt::{Read, Write};
 use crate::app::{AppInstance, scope::Scope};
 
@@ -13,19 +14,20 @@ pub(super) mod http1;
 pub(super) mod http2;
 
 pub(super) struct Server<I: Read + Write + Unpin> {
-    io: I
+    io: I,
+    peer_addr: SocketAddr,
 }
 
 impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     #[inline]
-    pub(super) fn new(io: I) -> Self {
-        Self { io }
+    pub(super) fn new(io: I, peer_addr: SocketAddr) -> Self {
+        Self { io, peer_addr }
     }
 
     #[inline]
     pub(super) async fn serve(self, app_instance: Weak<AppInstance>) {
         if let Some(instance) = app_instance.upgrade() {
-            let scope = Scope::new(app_instance);
+            let scope = Scope::new(app_instance, self.peer_addr);
             self.serve_core(scope, instance).await;
         } else {
             #[cfg(feature = "tracing")]

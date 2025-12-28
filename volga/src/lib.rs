@@ -65,6 +65,7 @@ pub use crate::http::{
         path::Path,
         query::Query,
         form::Form,
+        client_ip::ClientIp
     },
     BoxBody,
     UnsyncBoxBody,

@@ -25,6 +25,7 @@ pub mod sse;
 pub mod option;
 pub mod result;
 pub mod vec;
+pub mod client_ip;
 
 #[cfg(feature = "multipart")]
 pub mod multipart;

@@ -46,6 +46,7 @@ sha1 = { version = "0.10.6", optional = true }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["tls12", "ring"], optional = true }
 tokio-tungstenite = { version = "0.28.0", optional = true }
 tracing = { version = "0.1.44", default-features = false, optional = true }
+twox-hash = { version = "2.1.2", optional = true }
 
 # volga
 volga-dev-cert = { path = "../volga-dev-cert", version = "0.7.4", optional = true }
@@ -99,7 +100,7 @@ macros = ["dep:volga-macros"]
 middleware = []
 multipart = ["dep:multer"]
 problem-details = ["serde/derive"]
-rate-limiting = ["dep:volga-rate-limiter", "middleware"]
+rate-limiting = ["dep:twox-hash", "dep:volga-rate-limiter", "middleware"]
 static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]
 tls = ["middleware", "dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/ring"]
 tracing = ["middleware", "dep:tracing"]

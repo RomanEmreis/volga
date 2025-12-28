@@ -1,9 +1,9 @@
 //! Tools and data structures for fixed window rate limiter
 
 use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering::Relaxed}};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use dashmap::DashMap;
-use super::RateLimiter;
+use super::{SystemTimeSource, TimeSource, RateLimiter};
 
 /// Represents fixed window rate limiting strategy data
 #[derive(Debug)]
@@ -13,18 +13,19 @@ struct Entry {
 }
 
 /// Represents a fixed window rate limiter
-#[derive(Debug, Clone)]
-pub struct FixedWindowRateLimiter {
+#[derive(Debug)]
+pub struct FixedWindowRateLimiter<T: TimeSource = SystemTimeSource> {
     storage: Arc<DashMap<u64, Entry>>,
     max_requests: u32,
     window_size_secs: u64,
     eviction_grace_secs: u64,
+    time_source: T,
 }
 
-impl RateLimiter for FixedWindowRateLimiter {
+impl<T: TimeSource> RateLimiter for FixedWindowRateLimiter<T> {
     #[inline]
     fn check(&self, key: u64) -> bool {
-        let now = Self::now_secs();
+        let now = self.time_source.now_secs();
         let window = self.current_window(now);
 
         // Lazy eviction
@@ -59,22 +60,23 @@ impl FixedWindowRateLimiter {
     /// Creates a new fixed window rate limiter
     #[inline]
     pub fn new(max_requests: u32, window_size: Duration) -> Self {
+        Self::with_time_source(max_requests, window_size, SystemTimeSource)
+    }
+}
+
+impl<T: TimeSource> FixedWindowRateLimiter<T> {
+    /// Creates a [`FixedWindowRateLimiter`] with a specific [`TimeSource`]
+    #[inline]
+    pub fn with_time_source(max_requests: u32, window_size: Duration, time_source: T) -> Self {
         let window_size_secs = window_size.as_secs();
 
         Self {
-            storage: Arc::new(DashMap::with_capacity(1024)),
+            storage: Arc::new(DashMap::new()),
             max_requests,
             window_size_secs,
-            eviction_grace_secs: window_size_secs * 2, // lazy eviction threshold
+            eviction_grace_secs: window_size_secs * 2,
+            time_source,
         }
-    }
-
-    #[inline]
-    fn now_secs() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
     }
 
     #[inline]
@@ -86,6 +88,7 @@ impl FixedWindowRateLimiter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::test_utils::MockTimeSource;
 
     #[test]
     fn fixed_window_allows_within_limit() {
@@ -103,9 +106,11 @@ mod tests {
 
     #[test]
     fn fixed_window_resets_after_window() {
-        let limiter = FixedWindowRateLimiter::new(
+        let time = MockTimeSource::new(1000);
+        let limiter = FixedWindowRateLimiter::with_time_source(
             2, 
-            Duration::from_secs(1));
+            Duration::from_secs(1),
+            time.clone());
         
         let key = 1;
 
@@ -113,7 +118,7 @@ mod tests {
         assert!(limiter.check(key));
         assert!(!limiter.check(key));
 
-        std::thread::sleep(Duration::from_secs(1));
+        time.advance(1);
 
         assert!(limiter.check(key)); // new window
     }
