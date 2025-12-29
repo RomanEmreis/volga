@@ -71,11 +71,13 @@ impl App {
         let endpoints = self.pipeline.endpoints_mut();
         endpoints.map_route(Method::GET, pattern, handler.clone());
         
-        let head = Method::HEAD;
-        if !endpoints.contains(&head, pattern) { 
-            endpoints.map_route(head, pattern, handler.clone());
+        if self.implicit_head {
+            let head = Method::HEAD;
+            if !endpoints.contains(&head, pattern) { 
+                endpoints.map_route(head, pattern, handler.clone());
+            }
         }
-
+        
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         

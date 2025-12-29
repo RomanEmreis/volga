@@ -136,6 +136,16 @@ pub struct App {
     /// 
     /// Default: `true`
     show_greeter: bool,
+
+    /// Controls whether a `HEAD` route is automatically registered
+    /// for this `GET` handler.
+    ///
+    /// When enabled, `HEAD` requests follow the same routing,
+    /// validation, and authorization logic as `GET`, but must not
+    /// produce a response body.
+    ///
+    /// Default: `true`
+    implicit_head: bool
 }
 
 /// Wraps a socket
@@ -290,6 +300,7 @@ impl App {
             connection: Default::default(),
             body_limit: Default::default(),
             no_delay: false,
+            implicit_head: true,
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
@@ -342,6 +353,17 @@ impl App {
     /// Default: *enabled*
     pub fn without_greeter(mut self) -> Self {
         self.show_greeter = false;
+        self
+    }
+
+    /// Disables automatic registration of a `HEAD` route
+    /// for the `GET` handler.
+    ///
+    /// After calling this method, `HEAD` requests to the same
+    /// route will result in `405 Method Not Allowed` unless a
+    /// separate `HEAD` handler is explicitly registered.
+    pub fn without_implicit_head(mut self) -> Self {
+        self.implicit_head = false;
         self
     }
 
