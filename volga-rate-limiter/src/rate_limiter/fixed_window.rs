@@ -79,6 +79,12 @@ impl<T: TimeSource> FixedWindowRateLimiter<T> {
         }
     }
 
+    /// Sets the eviction period
+    #[inline]
+    pub fn set_eviction(&mut self, eviction: Duration) {
+        self.eviction_grace_secs = eviction.as_secs();
+    }
+
     #[inline]
     fn current_window(&self, now: u64) -> u64 {
         (now / self.window_size_secs) * self.window_size_secs

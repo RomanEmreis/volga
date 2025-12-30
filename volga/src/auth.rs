@@ -12,6 +12,7 @@ use {
 #[cfg(feature = "jwt-auth")]
 pub use {
     bearer::{BearerAuthConfig, Bearer, BearerTokenService},
+    authenticated::Authenticated,
     claims::AuthClaims,
     jsonwebtoken::{Algorithm, EncodingKey, DecodingKey, errors::{ErrorKind, Error as JwtError}},
     authorizer::{Authorizer, role, roles, permissions, predicate}
@@ -31,6 +32,8 @@ pub mod bearer;
 pub mod authorizer;
 #[cfg(feature = "jwt-auth")]
 pub mod claims;
+#[cfg(feature = "jwt-auth")]
+pub mod authenticated;
 
 #[cfg(feature = "jwt-auth")]
 impl From<JwtError> for Error {
@@ -219,7 +222,7 @@ impl<'a> RouteGroup<'a> {
 #[cfg(feature = "jwt-auth")]
 fn authorize_impl<C>(
     authorizer: Arc<Authorizer<C>>, 
-    ctx: HttpContext, 
+    mut ctx: HttpContext, 
     next: NextFn
 ) -> impl Future<Output = HttpResult>
 where
@@ -230,7 +233,13 @@ where
         let bearer: Bearer = ctx.extract()?;
         let bts: BearerTokenService = ctx.extract()?;
         let resp = match bts.decode(bearer) {
-            Ok(claims) if authorizer.validate(&claims) => next(ctx).await,
+            Ok(claims) if authorizer.validate(&claims) => {
+                ctx.request
+                    .extensions_mut()
+                    .insert(Authenticated(claims));
+                
+                next(ctx).await
+            },
             Ok(_) => status!(403, [
                 (WWW_AUTHENTICATE, authorizer::DEFAULT_ERROR_MSG)
             ]),

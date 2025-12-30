@@ -113,6 +113,12 @@ impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
             time_source,
         }
     }
+
+    /// Sets the eviction period
+    #[inline]
+    pub fn set_eviction(&mut self, eviction: Duration) {
+        self.eviction_grace_secs = eviction.as_secs();
+    }
 }
 
 #[cfg(test)]
