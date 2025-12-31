@@ -2,11 +2,17 @@
 
 use cookie::CookieJar;
 use futures_util::future::{ready, Ready};
-use crate::{
-    error::Error,
-    headers::{COOKIE, SET_COOKIE, HeaderMap}, 
-    http::{endpoints::args::{FromPayload, Payload, Source}},
-};
+use hyper::body::Incoming;
+use hyper::Request;
+use crate::{error::Error, headers::{COOKIE, SET_COOKIE, HeaderMap}, http::{endpoints::args::{
+    FromRequestRef,
+    FromRequestParts,
+    FromRawRequest,
+    FromPayload,
+    Payload,
+    Source
+}}, HttpRequest};
+use crate::http::Parts;
 
 #[cfg(feature = "signed-cookie")]
 pub mod signed;
@@ -100,13 +106,34 @@ pub(crate) fn set_cookies(jar: CookieJar, headers: &mut HeaderMap) {
     }
 }
 
+impl FromRequestRef for Cookies {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Ok(Cookies::from(req.headers()))
+    }
+}
+
+impl FromRequestParts for Cookies {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        Ok(Cookies::from(&parts.headers))
+    }
+}
+
+impl FromRawRequest for Cookies {
+    #[inline]
+    fn from_request(req: Request<Incoming>) -> impl Future<Output=Result<Self, Error>> + Send {
+        ready(Ok(Cookies::from(req.headers())))
+    }
+}
+
 impl FromPayload for Cookies {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
-        ready(Ok(Cookies::from(&parts.headers)))
+        ready(Cookies::from_parts(&parts))
     }
 
     #[inline]

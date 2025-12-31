@@ -22,6 +22,9 @@ use std::sync::Arc;
 use super::{extract_partition_key_from_ip, stable_hash, RateLimitKey};
 use crate::{HttpRequest, headers::{HeaderName, HeaderError}, error::Error};
 
+#[cfg(feature = "cookie")]
+use crate::http::Cookies;
+
 #[cfg(feature = "jwt-auth")]
 use crate::auth::{AuthClaims, Authenticated};
 
@@ -80,7 +83,6 @@ impl RateLimitKey for PartitionKey {
 /// This is the most common strategy for global or unauthenticated rate limiting.
 ///
 /// # Example
-///
 /// ```no_run
 /// use volga::{App, rate_limiting::by};
 /// 
@@ -98,7 +100,16 @@ pub fn ip() -> impl RateLimitKey {
 ///
 /// # Notes
 /// - Header names are case-insensitive.
-/// - If the header is missing, key extraction will fail.
+/// - If the header is missing, the key extraction will fail.
+///
+/// # Example
+/// ```no_run
+/// use volga::{App, rate_limiting::by};
+///
+/// let mut app = App::new();
+/// app.use_fixed_window(by::header("x-api-key"));
+/// ```
+#[inline]
 pub fn header(name: &'static str) -> impl RateLimitKey {
     let header = HeaderName::from_static(name);
 
@@ -114,6 +125,84 @@ pub fn header(name: &'static str) -> impl RateLimitKey {
     }))
 }
 
+/// Uses the value of an HTTP request query parameter as a rate limiting partition key.
+///
+/// The query parameter value is hashed into a stable `u64`.
+///
+/// # Notes
+/// - Query parameter names are case-insensitive.
+/// - If the parameter is missing, the key extraction will fail.
+///
+/// # Example
+/// ```no_run
+/// use volga::{App, rate_limiting::by};
+///
+/// let mut app = App::new();
+/// app.use_fixed_window(by::query("key"));
+/// ```
+#[inline]
+pub fn query(name: &'static str) -> impl RateLimitKey {
+    PartitionKey::Custom(Arc::new(move |req| {
+        let value = req.query_args()
+            .find_map(|(k, v)| if k == name { Some(v) } else { None })
+            .ok_or_else(|| Error::client_error(format!("Query parameter {name} not found", )))?;
+
+        Ok(stable_hash(value))
+    }))
+}
+
+/// Uses the value of an HTTP route path parameter as a rate limiting partition key.
+///
+/// The route path parameter value is hashed into a stable `u64`.
+///
+/// # Notes
+/// - Route path parameter names are case-insensitive.
+/// - If the parameter is missing, the key extraction will fail.
+///
+/// # Example
+/// ```no_run
+/// use volga::{App, rate_limiting::by};
+///
+/// let mut app = App::new();
+/// app.use_fixed_window(by::path("key"));
+/// ```
+#[inline]
+pub fn path(name: &'static str) -> impl RateLimitKey {
+    PartitionKey::Custom(Arc::new(move |req| {
+        let value = req.path_args()
+            .find_map(|(k, v)| if k == name { Some(v) } else { None })
+            .ok_or_else(|| Error::client_error(format!("Path parameter {name} not found", )))?;
+
+        Ok(stable_hash(value))
+    }))
+}
+
+/// Uses the value of an HTTP cookie as a rate limiting partition key.
+///
+/// The cookie hashed into a stable `u64`.
+///
+/// # Notes
+/// - Cookie names are case-insensitive.
+/// - If the cookie is missing, the key extraction will fail.
+///
+/// # Example
+/// ```no_run
+/// use volga::{App, rate_limiting::by};
+///
+/// let mut app = App::new();
+/// app.use_fixed_window(by::cookie("session-id"));
+/// ```
+#[cfg(feature = "cookie")]
+#[inline]
+pub fn cookie(name: &'static str) -> impl RateLimitKey {
+    PartitionKey::Custom(Arc::new(move |req| {
+        let cookies = req.extract::<Cookies>()?;
+        let cookie = cookies.get(name)
+            .ok_or_else(|| Error::client_error(format!("Cookie {name} not found", )))?;
+
+        Ok(stable_hash(cookie.value()))
+    }))
+}
 
 /// Uses an authenticated user identity as a rate limiting partition key.
 ///
