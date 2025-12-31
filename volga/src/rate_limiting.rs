@@ -2,7 +2,6 @@
 
 use std::time::Duration;
 use twox_hash::XxHash64;
-//use std::sync::Arc;
 use std::hash::{Hash, Hasher};
 use std::net::{IpAddr, SocketAddr};
 use crate::{
@@ -18,14 +17,13 @@ use crate::{
     status
 };
 
-//#[cfg(feature = "jwt-auth")]
-//use crate::auth::{AuthClaims, Authenticated};
-
 pub use volga_rate_limiter::{
     FixedWindowRateLimiter,
     SlidingWindowRateLimiter,
     RateLimiter
 };
+
+pub mod by;
 
 const X_FORWARDED_FOR: &str = "x-forwarded-for";
 
@@ -45,68 +43,21 @@ pub struct SlidingWindow {
     eviction: Option<Duration>
 }
 
-/// A trait that specifies how to extract a partition key
-pub trait RateLimitKey: Clone + Copy + Send + Sync {
-    /// Extracts partition key
+/// Defines how a rate-limiting partition key is extracted from an HTTP request.
+///
+/// Implementations of this trait determine how requests are grouped
+/// for the purposes of rate limiting.
+///
+/// The extracted key must be:
+/// - Stable for the same logical client
+/// - Fast to compute
+/// - Safe to use concurrently
+pub trait RateLimitKey: Clone + Send + Sync {
+    /// Extracts a partition key from the given HTTP request.
+    ///
+    /// Implementations should return a stable `u64` value that uniquely
+    /// identifies a client or logical request group.
     fn extract(&self, req: &HttpRequest) -> Result<u64, Error>;
-}
-
-/// Represents a source where the 
-/// rate limiting partition key calculated from
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum PartitionKey {
-    /// Partition Key will be calculated from the "forwarded" header, 
-    /// if it's not present then from "x-forwarded-for". Fallback - the peer address.
-    Ip,
-
-    ///// Partition Key will be calculated from the User Identity,
-    //#[cfg(feature = "jwt-auth")]
-    //User(UserPartitionKeyExtrator),
-}
-
-impl RateLimitKey for PartitionKey {
-    #[inline]
-    fn extract(&self, req: &HttpRequest) -> Result<u64, Error> {
-        match self {
-            PartitionKey::Ip => extract_partition_key_from_ip(req),
-            //#[cfg(feature = "jwt-auth")]
-            //PartitionKey::User => extract_partition_key_from_auth(req)
-        }
-    }
-}
-
-//#[cfg(feature = "jwt-auth")]
-//type UserPartitionKeyExtrator = Arc<
-//    dyn Fn(&dyn AuthClaims) -> String 
-//    + Send 
-//    + Sync 
-//    + 'static
-//>;
-
-pub mod by {
-    //! Partition key helpers
-
-    //use std::sync::Arc;
-    use super::{PartitionKey, RateLimitKey};
-
-    //#[cfg(feature = "jwt-auth")]
-    //use crate::auth::AuthClaims;
-
-    /// Specifies that the partition key will be calculated from the "forwarded" header, 
-    /// if it's not present then from "x-forwarded-for". Fallback - the peer address.
-    #[inline]
-    pub fn ip() -> impl RateLimitKey {
-        PartitionKey::Ip
-    }
-
-    //#[cfg(feature = "jwt-auth")]
-    //pub fn user<C, F>(f: F) -> impl RateLimitKey
-    //where
-    //    C: AuthClaims,
-    //    F: Fn(&C) -> String + Send + Sync + 'static
-    //{
-    //    PartitionKey::User(Arc::new(f))
-    //}
 }
 
 /// Global rate limiter
@@ -203,36 +154,36 @@ impl App {
 
     /// Adds the global middleware that limits all requests
     pub fn use_fixed_window(&mut self, source: impl RateLimitKey + 'static) -> &mut Self {
-        self.wrap(move |ctx, next| check_fixed_window(ctx, source, next))
+        self.wrap(move |ctx, next| check_fixed_window(ctx, source.clone(), next))
     }
 
     /// Adds the global middleware that limits all requests
     pub fn use_sliding_window(&mut self, source: impl RateLimitKey+ 'static) -> &mut Self {
-        self.wrap(move |ctx, next| check_sliding_window(ctx, source, next))
+        self.wrap(move |ctx, next| check_sliding_window(ctx, source.clone(), next))
     }
 }
 
 impl<'a> Route<'a> {
     /// Adds the middleware that limits all requests for this route
     pub fn fixed_window(self, source: impl RateLimitKey+ 'static) -> Self {
-        self.wrap(move |ctx, next| check_fixed_window(ctx, source, next))
+        self.wrap(move |ctx, next| check_fixed_window(ctx, source.clone(), next))
     }
 
     /// Adds the middleware that limits all requests for this route
     pub fn sliding_window(self, source: impl RateLimitKey+ 'static) -> Self {
-        self.wrap(move |ctx, next| check_sliding_window(ctx, source, next))
+        self.wrap(move |ctx, next| check_sliding_window(ctx, source.clone(), next))
     }
 }
 
 impl<'a> RouteGroup<'a> {
     /// Adds the middleware that limits all requests for this route group
     pub fn fixed_window(self, source: impl RateLimitKey+ 'static) -> Self {
-        self.wrap(move |ctx, next| check_fixed_window(ctx, source, next))
+        self.wrap(move |ctx, next| check_fixed_window(ctx, source.clone(), next))
     }
 
     /// Adds the middleware that limits all requests for this route group
     pub fn sliding_window(self, source: impl RateLimitKey + 'static) -> Self {
-        self.wrap(move |ctx, next| check_sliding_window(ctx, source, next))
+        self.wrap(move |ctx, next| check_sliding_window(ctx, source.clone(), next))
     }
 }
 
@@ -277,18 +228,12 @@ fn extract_partition_key_from_ip(req: &HttpRequest) -> Result<u64, Error> {
     Ok(stable_hash(&client_ip))
 }
 
-//#[inline]
-//fn extract_partition_key_from_auth(_req: &HttpRequest) -> Result<u64, Error> {
-//    todo!()
-//}
-
 #[inline]
-fn stable_hash<T: Hash>(value: &T) -> u64 {
+fn stable_hash<T: Hash + ?Sized>(value: &T) -> u64 {
     let mut hasher = XxHash64::with_seed(0);
     value.hash(&mut hasher);
     hasher.finish()
 }
-
 
 fn extract_client_ip(req: &HttpRequest, remote_addr: SocketAddr) -> IpAddr {
     // RFC 7239 Forwarded

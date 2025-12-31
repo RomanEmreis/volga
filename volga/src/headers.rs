@@ -65,24 +65,29 @@ pub trait FromHeaders {
     fn header_type() -> &'static str;
 }
 
-struct HeaderError;
+pub(crate) struct HeaderError;
 impl HeaderError {
     #[inline]
-    fn header_missing<T: FromHeaders>() -> Error {
+    pub(crate) fn header_missing<T: FromHeaders>() -> Error {
+        Self::header_missing_impl(T::header_type())
+    }
+
+    #[inline]
+    pub(crate) fn header_missing_impl(header: &str) -> Error {
         Error::from_parts(
-            StatusCode::NOT_FOUND, 
-            None, 
-            format!("Header: `{}` not found", T::header_type())
+            StatusCode::NOT_FOUND,
+            None,
+            format!("Header: `{}` not found", header)
         )
     }
 
     #[inline]
-    fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
+    pub(crate) fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
         Error::client_error(format!("Header: {error}"))
     }
 
     #[inline]
-    fn from_to_str_error(error: ToStrError) -> Error {
+    pub(crate) fn from_to_str_error(error: ToStrError) -> Error {
         Error::client_error(format!("Header: {error}"))
     }
 }

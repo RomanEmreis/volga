@@ -5,7 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-volga = { path = "../../volga", features = ["rate-limiting", "jwt-auth", "middleware"] }
+serde = "1.0.228"
+volga = { path = "../../volga", features = ["rate-limiting", "jwt-auth-full", "middleware"] }
 
 [lints]
 workspace = true

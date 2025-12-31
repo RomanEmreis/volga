@@ -58,7 +58,7 @@ volga-rate-limiter = { path = "../volga-rate-limiter", version = "0.7.4", option
 base64 = { version = "0.22.1" }
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 hyper = { version = "1.8.1", features = ["client"] }
-reqwest = { version = "0.12.26", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
+reqwest = { version = "0.13.1", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tokio-stream = "0.1.17"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
