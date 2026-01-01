@@ -133,7 +133,7 @@ impl FromPayload for Cookies {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
-        ready(Cookies::from_parts(&parts))
+        ready(Cookies::from_parts(parts))
     }
 
     #[inline]

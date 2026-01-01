@@ -43,7 +43,7 @@ hyper = { version = "1.8.1", features = ["server"], optional = true }
 hyper-util = { version = "0.1.19", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
 multer = { version = "3.1.0", optional = true }
 sha1 = { version = "0.10.6", optional = true }
-tokio-rustls = { version = "0.26.4", default-features = false, features = ["tls12", "ring"], optional = true }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["tls12", "aws-lc-rs"], optional = true }
 tokio-tungstenite = { version = "0.28.0", optional = true }
 tracing = { version = "0.1.44", default-features = false, optional = true }
 twox-hash = { version = "2.1.2", optional = true }
@@ -58,7 +58,7 @@ volga-rate-limiter = { path = "../volga-rate-limiter", version = "0.7.4", option
 base64 = { version = "0.22.1" }
 jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 hyper = { version = "1.8.1", features = ["client"] }
-reqwest = { version = "0.13.1", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "native-tls"] }
+reqwest = { version = "0.13.1", features = ["blocking", "multipart", "stream", "json", "http2", "brotli", "deflate", "gzip", "zstd", "rustls-no-provider"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tokio-stream = "0.1.17"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

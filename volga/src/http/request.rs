@@ -133,33 +133,22 @@ impl HttpRequest {
         Self { inner: request }
     }
 
-    /// Returns a reference to the Global Rate Limiter
-    #[inline]
-    #[cfg(feature = "rate-limiting")]
-    pub fn rate_limiter(&self) -> &GlobalRateLimiter {
-        self.inner.extensions()
-            .get::<Arc<GlobalRateLimiter>>()
-            .expect("Global Rate Limiter must be provided")
-    }
-
     /// Returns a reference to a Fixed Window Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
-    pub fn fixed_window_rate_limiter(&self) -> Option<&FixedWindowRateLimiter> {
+    pub fn fixed_window_rate_limiter(&self, policy: Option<&str>) -> Option<&FixedWindowRateLimiter> {
         self.inner.extensions()
             .get::<Arc<GlobalRateLimiter>>()?
-            .fixed_window
-            .as_ref()
+            .fixed_window(policy)
     }
 
     /// Returns a reference to a Sliding Window Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
-    pub fn sliding_window_rate_limiter(&self) -> Option<&SlidingWindowRateLimiter> {
+    pub fn sliding_window_rate_limiter(&self, policy: Option<&str>) -> Option<&SlidingWindowRateLimiter> {
         self.inner.extensions()
             .get::<Arc<GlobalRateLimiter>>()?
-            .sliding_window
-            .as_ref()
+            .sliding_window(policy)
     }
     
     /// Returns a reference to the DI container of the request scope
@@ -387,20 +376,6 @@ mod tests {
         let http_req = HttpRequest::from_parts(parts, body);
         
         _ = http_req.container();
-    }
-
-    #[test]
-    #[cfg(feature = "rate-limiting")]
-    #[should_panic]
-    fn it_panic_if_there_is_no_global_rate_limiter() {
-        let req = Request::get("http://localhost/")
-            .body(HttpBody::full("foo"))
-            .unwrap();
-
-        let (parts, body) = req.into_parts();
-        let http_req = HttpRequest::from_parts(parts, body);
-
-        _ = http_req.rate_limiter();
     }
 
     #[test]

@@ -14,8 +14,8 @@
 //! // Rate limit by client IP
 //! by::ip();
 //!
-//! // Rate limit by authenticated user
-//! by::user(|claims| claims.sub.as_str());
+//! // Rate limit by X-Api-Key HTTP header
+//! by::header("x-api-key");
 //! ```
 
 use std::sync::Arc;
@@ -221,8 +221,10 @@ pub fn cookie(name: &'static str) -> impl RateLimitKey {
 ///
 /// # Example
 /// ```no_run
-/// use volga::{App, auth::AuthClaims rate_limiting::by};
-///
+/// use volga::{App, auth::AuthClaims, rate_limiting::by};
+/// use serde::Deserialize;;
+/// 
+/// #[derive(Clone, Deserialize)]
 /// struct Claims {
 ///     sub: String,
 ///     email: String,
@@ -233,10 +235,10 @@ pub fn cookie(name: &'static str) -> impl RateLimitKey {
 /// let mut app = App::new();
 /// 
 /// // Rate limit per user subject
-/// app.use_fixed_window(by::user(|claims| claims.sub.as_str()));
+/// app.use_fixed_window(by::user(|claims: &Claims| claims.sub.as_str()));
 ///
 /// // Rate limit per email
-/// app.use_fixed_window(by::user(|claims| claims.email.as_str()));
+/// app.use_fixed_window(by::user(|claims: &Claims| claims.email.as_str()));
 /// ```
 ///
 /// # Notes
