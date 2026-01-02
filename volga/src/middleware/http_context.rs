@@ -25,10 +25,7 @@ use {
 use std::sync::Arc;
 
 #[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::{
-    SlidingWindowRateLimiter, 
-    FixedWindowRateLimiter
-};
+use crate::rate_limiting::RateLimiter;
 
 /// Describes current HTTP context which consists of the current HTTP request data 
 /// and the reference to the method handler for this request
@@ -117,14 +114,14 @@ impl HttpContext {
     /// Returns a reference to a Fixed Window Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
-    pub fn fixed_window_rate_limiter(&self, policy: Option<&str>) -> Option<&FixedWindowRateLimiter> {
+    pub fn fixed_window_rate_limiter<'a>(&'a self, policy: Option<&'a str>) -> Option<&'a impl RateLimiter> {
         self.request.fixed_window_rate_limiter(policy)
     }
 
     /// Returns a reference to a Fixed Window Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
-    pub fn sliding_window_rate_limiter(&self, policy: Option<&str>) -> Option<&SlidingWindowRateLimiter> {
+    pub fn sliding_window_rate_limiter<'a>(&'a self, policy: Option<&'a str>) -> Option<&'a impl RateLimiter> {
         self.request.sliding_window_rate_limiter(policy)
     }
 

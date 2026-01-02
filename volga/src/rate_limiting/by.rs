@@ -28,7 +28,7 @@ use crate::http::Cookies;
 #[cfg(feature = "jwt-auth")]
 use crate::auth::{AuthClaims, Authenticated};
 
-/// A function that extracts a rate limiting partition key from an HTTP request.
+/// A function that extracts a rate-limiting partition key from an HTTP request.
 ///
 /// The function must return a stable `u64` value that uniquely represents
 /// a logical client identity (e.g. IP address or user identifier).

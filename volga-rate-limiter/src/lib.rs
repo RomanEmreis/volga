@@ -1,6 +1,72 @@
-//! Volga Rate Limiter
+//! # Volga Rate Limiter
 //!
-//! A Rust library for rate limiting HTTP requests
+//! A lightweight and efficient rate-limiting library for Rust.
+//!
+//! This crate provides in-memory rate limiting algorithms designed
+//! for high-performance HTTP services and middleware.
+//!
+//! ## Overview
+//!
+//! Rate limiting is used to control the number of requests that a client
+//! (or a group of clients) can perform within a given time window.
+//! Typical use cases include:
+//!
+//! - Protecting APIs from abuse or accidental overload
+//! - Enforcing fair usage policies
+//! - Applying different limits for anonymous users, authenticated users,
+//!   tenants, or API keys
+//!
+//! This crate focuses on **per-node, in-memory** rate limiting.
+//! It is intentionally simple and fast, and does **not** attempt to
+//! synchronize state across multiple processes or machines.
+//!
+//! ## Algorithms
+//!
+//! The following rate-limiting algorithms are provided:
+//!
+//! - [`FixedWindowRateLimiter`]
+//!   - Counts requests in discrete, fixed-size time windows
+//!   - Very fast and simple
+//!   - May allow short bursts at window boundaries
+//!
+//! - [`SlidingWindowRateLimiter`]
+//!   - Uses a sliding time window with linear weighting
+//!   - Provides smoother request distribution
+//!   - Slightly more expensive than a fixed window
+//!
+//! ## Time Source Abstraction
+//!
+//! All rate limiters are built on top of a pluggable [`TimeSource`] abstraction.
+//! This allows:
+//!
+//! - Deterministic and fast unit testing
+//! - Custom time implementations if needed
+//!
+//! The default implementation, [`SystemTimeSource`], is based on
+//! `std::time::SystemTime`.
+//!
+//! ## Concurrency Model
+//!
+//! The rate limiters are designed to be:
+//!
+//! - Thread-safe
+//! - Lock-free or minimally locking on the hot path
+//! - Safe to share between async tasks and threads
+//!
+//! Internal state is optimized for frequent reads and updates under
+//! high contention.
+//!
+//! ## Scope and Limitations
+//!
+//! - This crate implements **in-memory** rate limiting only
+//! - It does **not** provide distributed coordination
+//! - For multi-node systems, rate limiting should be combined with
+//!   external storage or coordination mechanisms (e.g. Redis, gateways)
+//!
+//! ## Usage
+//!
+//! The rate limiters are intended to be embedded into higher-level
+//! frameworks or middleware layers.
 
 mod rate_limiter;
 

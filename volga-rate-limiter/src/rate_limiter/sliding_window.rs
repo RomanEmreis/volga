@@ -1,29 +1,104 @@
-//! Tools and data structures for sliding window rate limiter
+//! Tools and data structures for a sliding-window rate limiter.
 
 use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering::*}};
 use std::time::Duration;
 use dashmap::DashMap;
 use super::{SystemTimeSource, TimeSource, RateLimiter};
 
-/// Represents sliding window rate limiting strategy data
+/// Internal per-key state for the sliding window algorithm.
+///
+/// The algorithm maintains counters for two adjacent windows:
+///
+/// - `previous_count`: number of requests in the previous window,
+/// - `current_count`: number of requests in the current window.
+///
+/// The effective request count is calculated as a weighted sum
+/// of these two counters, where the weight of the previous window
+/// decreases linearly as the current window progresses.
 #[derive(Debug)]
 struct Entry {
+    /// Number of requests in the previous window.
     previous_count: AtomicU32,
+
+    /// Number of requests in the current window.
     current_count: AtomicU32,
+
+    /// A start timestamp (seconds since UNIX_EPOCH) of the current window.
     window_start: AtomicU64,
 }
 
-/// Represents a sliding window rate limiter
+/// A sliding-window rate limiter.
+///
+/// Unlike a fixed window, the sliding window algorithm provides a smoother
+/// and more accurate rate limiting behavior by accounting for requests
+/// from the previous window with a time-based weight.
+///
+/// ## Characteristics
+///
+/// - **More accurate** than fixed window rate limiting.
+/// - **Reduces boundary bursts** by smoothing request counts.
+/// - **Lock-free hot path** using atomic counters.
+/// - **Higher computational cost** due to floating-point arithmetic.
+///
+/// ## Algorithm
+///
+/// For a given `key`:
+///
+/// 1. The current fixed window is calculated from the current timestamp.
+/// 2. If the window has advanced:
+///    - If two or more windows have passed, counters are fully reset.
+///    - If exactly one window has passed, the current counter becomes the
+///      previous counter.
+/// 3. The effective request count is computed as:
+///
+/// ```text
+/// effective = previous_count * (1 - progress) + current_count
+/// ```
+///
+/// where `progress` is the fraction of the current window elapsed
+/// in the range `[0.0, 1.0]`.
+///
+/// 4. The request is allowed if `effective < max_requests`.
+///
+/// ## Eviction
+///
+/// Like the fixed window limiter, entries are evicted lazily during `check`
+/// calls when they exceed `eviction_grace_secs`.
+///
+/// ## When to use
+///
+/// This limiter is appropriate when:
+///
+/// - burstiness at window boundaries must be minimized,
+/// - fairer distribution of requests over time is required,
+/// - slightly higher CPU cost is acceptable.
+///
+/// For maximum throughput and simplicity, consider a fixed window limiter.
 #[derive(Debug)]
 pub struct SlidingWindowRateLimiter<T: TimeSource = SystemTimeSource> {
+    /// Per-key rate limiting state.
     storage: Arc<DashMap<u64, Entry>>,
+
+    /// Maximum allowed number of requests per window.
     max_requests: u32,
+
+    /// Size of the logical window in seconds.
     window_size_secs: u64,
+
+    /// Time after which inactive entries are eligible for eviction.
     eviction_grace_secs: u64,
+
+    /// Time source used to determine the current time.
     time_source: T,
 }
 
 impl<T: TimeSource> RateLimiter for SlidingWindowRateLimiter<T> {
+    /// Checks whether the rate limit has been exceeded for the given `key`.
+    ///
+    /// Returns `true` if the request is allowed, or `false` if the rate
+    /// limit has been reached.
+    ///
+    /// This method is safe for concurrent use and performs no global locking.
     #[inline]
     fn check(&self, key: u64) -> bool {
         let now = self.time_source.now_secs();
@@ -92,7 +167,12 @@ impl<T: TimeSource> RateLimiter for SlidingWindowRateLimiter<T> {
 }
 
 impl SlidingWindowRateLimiter {
-    /// Creates a new sliding window rate limiter
+    /// Creates a new sliding window rate limiter using the system clock.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_requests`: maximum number of requests allowed per window.
+    /// - `window_size`: logical duration of the sliding window.
     #[inline]
     pub fn new(max_requests: u32, window_size: Duration) -> Self {
         Self::with_time_source(max_requests, window_size, SystemTimeSource)
@@ -100,7 +180,9 @@ impl SlidingWindowRateLimiter {
 }
 
 impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
-    /// Creates a [`SlidingWindowRateLimiter`] with a specific [`TimeSource`]
+    /// Creates a [`SlidingWindowRateLimiter`] with a custom [`TimeSource`].
+    ///
+    /// This is primarily useful for testing and deterministic scenarios.
     #[inline]
     pub fn with_time_source(max_requests: u32, window_size: Duration, time_source: T) -> Self {
         let window_size_secs = window_size.as_secs();
@@ -113,8 +195,11 @@ impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
             time_source,
         }
     }
-
-    /// Sets the eviction period
+    
+    /// Sets the eviction grace period for inactive entries.
+    ///
+    /// Entries that have not been accessed for longer than this duration
+    /// may be removed during subsequent `check` calls.
     #[inline]
     pub fn set_eviction(&mut self, eviction: Duration) {
         self.eviction_grace_secs = eviction.as_secs();

@@ -66,12 +66,14 @@ async fn it_returns_brotli_compressed_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7966");
         
-        app.map_group("/tests")
-            .with_compression()
-            .map_get("/compressed", || async {
-                let values= get_test_data();
-                ok!(values)
-            });
+        app.group("/tests", |api| {
+            api
+                .with_compression()
+                .map_get("/compressed", || async {
+                    let values= get_test_data();
+                    ok!(values)
+                });
+        });
             
         app.run().await
     });

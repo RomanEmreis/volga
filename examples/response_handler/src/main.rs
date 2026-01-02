@@ -10,10 +10,10 @@ use volga::{App, HttpResponse, headers::HeaderValue};
 async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
-    app
-        .map_group("/positive")
-        .map_ok(handler_group_response)
-        .map_get("/sum/{x}/{y}", sum);
+    app.group("/positive", |api| {
+        api.map_ok(handler_group_response);
+        api.map_get("/sum/{x}/{y}", sum);        
+    });
 
     app
         .map_get("/negative/sum/{x}/{y}", sum)

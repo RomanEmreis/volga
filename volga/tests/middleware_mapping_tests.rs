@@ -164,14 +164,16 @@ async fn it_adds_map_ok_middleware_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7946");
 
-        app.map_group("/tests")
-            .map_ok(|mut resp: HttpResponse| async move {
-                resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
-                resp
-            })
-            .map_get("/test", || async {
-                Results::text("Pass!")
-            });
+        app.group("/tests", |api| {
+            api
+                .map_ok(|mut resp: HttpResponse| async move {
+                    resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
+                    resp
+                })
+                .map_get("/test", || async {
+                    Results::text("Pass!")
+                });
+        });
 
         app.run().await
     });
@@ -195,15 +197,17 @@ async fn it_adds_map_req_middleware_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7947");
 
-        app.map_group("/tests")
-            .tap_req(|mut req: HttpRequest| async move {
-                req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
-                req
-            })
-            .map_get("/test", |headers: HttpHeaders| async move {
-                let val = headers.get("X-Test").unwrap().to_str().unwrap();
-                Results::text(val)
-            });
+        app.group("/tests", |api| {
+            api            
+                .tap_req(|mut req: HttpRequest| async move {
+                    req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
+                    req
+                })
+                .map_get("/test", |headers: HttpHeaders| async move {
+                    let val = headers.get("X-Test").unwrap().to_str().unwrap();
+                    Results::text(val)
+                });
+        });
 
         app.run().await
     });
@@ -256,15 +260,17 @@ async fn it_adds_map_err_middleware_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7949");
 
-        app.map_group("/tests")
-            .map_err(|err: Error| async move {
-                let mut err_str = err.to_string();
-                err_str.push_str(" occurred!");
-                Error::server_error(err_str)
-            })
-            .map_get("/test", || async {
-                Err::<String, Error>(Error::server_error("Some Error"))
-            });
+        app.group("/tests", |api| {
+            api
+                .map_err(|err: Error| async move {
+                    let mut err_str = err.to_string();
+                    err_str.push_str(" occurred!");
+                    Error::server_error(err_str)
+                })
+                .map_get("/test", || async {
+                    Err::<String, Error>(Error::server_error("Some Error"))
+                });
+        });
 
         app.run().await
     });
@@ -337,9 +343,11 @@ async fn it_adds_invalid_filter_middleware_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7952");
 
-        app.map_group("/tests")
-            .filter(|| async move { false })
-            .map_get("/test", || async {});
+        app.group("/tests", |api| {
+            api
+                .filter(|| async move { false })
+                .map_get("/test", || async {});
+        });
 
         app.run().await
     });
@@ -362,9 +370,11 @@ async fn it_adds_valid_filter_middleware_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7953");
 
-        app.map_group("/tests")
-            .filter(|| async move { true })
-            .map_get("/test", || async { "Pass!" });
+        app.group("/tests", |api| {
+            api
+                .filter(|| async move { true })
+                .map_get("/test", || async { "Pass!" });
+        });
 
         app.run().await
     });
@@ -491,10 +501,12 @@ async fn it_adds_with_middleware_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7958");
 
-        app.map_group("/tests")
-            .map_get("/test", || async { "Pass!" })
-            .wrap(|ctx, next| async move { next(ctx).await })
-            .with(|next| next);
+        app.group("/tests", |api| {
+            api            
+                .map_get("/test", || async { "Pass!" })
+                .wrap(|ctx, next| async move { next(ctx).await })
+                .with(|next| next);
+        });
 
         app.run().await
     });
@@ -517,11 +529,13 @@ async fn it_adds_shortcut_with_middleware_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7959");
 
-        app.map_group("/tests")
-            .wrap(|ctx, next| async move { next(ctx).await })
-            .with(|_| async move { volga::bad_request!("Error!") })
-            .with(|next| next)
-            .map_get("/test", || async { "Pass!" });
+        app.group("/tests", |api| {
+            api            
+                .wrap(|ctx, next| async move { next(ctx).await })
+                .with(|_| async move { volga::bad_request!("Error!") })
+                .with(|next| next)
+                .map_get("/test", || async { "Pass!" });
+        });
 
         app.run().await
     });

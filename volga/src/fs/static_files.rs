@@ -151,18 +151,19 @@ impl RouteGroup<'_> {
     /// let mut app = App::new();
     ///  
     /// // Enables static file server
-    /// app.map_group("/static")
-    ///     .map_static_assets();
+    /// app.group("/static", |g| {
+    ///     g.map_static_assets();
+    /// });
     /// # app.run().await
     /// # }
     /// ```
-    pub fn map_static_assets(mut self) -> Self {
+    pub fn map_static_assets(&mut self) -> &mut Self {
         // Configure routes depending on root folder depth
         let folder_depth = max_folder_depth(self.app.host_env.content_root());
         let mut segment = String::new();
         for i in 0..folder_depth {
             segment.push_str(&format!("/{{path_{i}}}"));
-            self = self.map_get(&segment, respond_with_file);
+            self.map_get(&segment, respond_with_file);
         }
         self.map_get("/", index)
     }
@@ -181,13 +182,13 @@ impl RouteGroup<'_> {
     /// let mut app = App::new();
     ///  
     /// // Enables static file server
-    /// app
-    ///     .map_group("/static")
-    ///     .use_static_files();
+    /// app.group("/static", |g| {
+    ///     g.use_static_files();
+    /// });
     /// # app.run().await
     /// # }
     /// ```
-    pub fn use_static_files(self) -> Self {
+    pub fn use_static_files(&mut self) -> &mut Self {
         // Enable fallback to file if it's provided
         if self.app.host_env.fallback_path().is_some() {
             self.app.map_fallback_to_file();

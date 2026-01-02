@@ -1,28 +1,93 @@
-//! Tools and data structures for fixed window rate limiter
+//! Tools and data structures for a fixed-window rate limiter.
 
 use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering::Relaxed}};
 use std::time::Duration;
 use dashmap::DashMap;
 use super::{SystemTimeSource, TimeSource, RateLimiter};
 
-/// Represents fixed window rate limiting strategy data
+/// Internal per-key state for the fixed window algorithm.
+///
+/// Each entry tracks:
+/// - the start timestamp of the current window (in seconds),
+/// - the number of requests observed within that window.
+///
+/// Atomic fields allow concurrent access without global locking.
 #[derive(Debug)]
 struct Entry {
+    /// Number of requests in the current window.
     count: AtomicU32,
+
+    /// A start timestamp (seconds since UNIX_EPOCH) of the current window.
     window_start: AtomicU64,
 }
 
-/// Represents a fixed window rate limiter
+/// A fixed-window rate limiter.
+///
+/// The fixed window algorithm groups requests into discrete, non-overlapping
+/// time windows of a fixed size. For each partition key, a counter is maintained
+/// per window and reset when the window changes.
+///
+/// ## Characteristics
+///
+/// - **Fast and simple**: O(1) operations with minimal bookkeeping.
+/// - **Approximate**: allows bursts at window boundaries.
+/// - **Lock-free hot path**: uses atomic counters and concurrent storage.
+/// - **Lazy eviction**: stale entries are removed opportunistically.
+///
+/// ## Algorithm
+///
+/// For a given `key`:
+///
+/// 1. The current window is calculated as:
+///    `floor(now / window_size) * window_size`.
+/// 2. If the stored window differs from the current one, the counter is reset.
+/// 3. The request counter is incremented atomically.
+/// 4. The request is allowed if the previous counter value was below
+///    `max_requests`.
+///
+/// ## Eviction
+///
+/// Entries are evicted lazily during `check` calls if they have not been
+/// accessed for longer than `eviction_grace_secs`. No background cleanup task
+/// is used.
+///
+/// ## When to use
+///
+/// This limiter is suitable when:
+///
+/// - Performance and simplicity are more important than strict accuracy,
+/// - occasional bursts at window boundaries are acceptable,
+/// - a large number of independent keys is expected.
+///
+/// For stricter enforcement, consider a sliding window implementation.
 #[derive(Debug)]
 pub struct FixedWindowRateLimiter<T: TimeSource = SystemTimeSource> {
+    /// Per-key rate limiting state.
     storage: Arc<DashMap<u64, Entry>>,
+
+    /// Maximum number of allowed requests per window.
     max_requests: u32,
+
+    /// Size of the fixed window in seconds.
     window_size_secs: u64,
+
+    /// Time after which inactive entries are eligible for eviction.
+    ///
+    /// This value is independent of `window_size_secs` and is used
+    /// solely to limit memory growth.
     eviction_grace_secs: u64,
+
+    /// Time source used to determine the current window.
     time_source: T,
 }
 
 impl<T: TimeSource> RateLimiter for FixedWindowRateLimiter<T> {
+    /// Checks whether the rate limit has been exceeded for the given `key`.
+    ///
+    /// Returns `true` if the request is allowed, or `false` if the rate
+    /// limit has been reached.
+    ///
+    /// This operation is lock-free on the hot path and safe for concurrent use.
     #[inline]
     fn check(&self, key: u64) -> bool {
         let now = self.time_source.now_secs();
@@ -57,7 +122,12 @@ impl<T: TimeSource> RateLimiter for FixedWindowRateLimiter<T> {
 }
 
 impl FixedWindowRateLimiter {
-    /// Creates a new fixed window rate limiter
+    /// Creates a new fixed window rate limiter using the system clock.
+    ///
+    /// # Parameters
+    ///
+    /// - `max_requests`: maximum number of requests allowed per window.
+    /// - `window_size`: duration of a single fixed window.
     #[inline]
     pub fn new(max_requests: u32, window_size: Duration) -> Self {
         Self::with_time_source(max_requests, window_size, SystemTimeSource)
@@ -65,7 +135,9 @@ impl FixedWindowRateLimiter {
 }
 
 impl<T: TimeSource> FixedWindowRateLimiter<T> {
-    /// Creates a [`FixedWindowRateLimiter`] with a specific [`TimeSource`]
+    /// Creates a [`FixedWindowRateLimiter`] with a custom [`TimeSource`].
+    ///
+    /// This is primarily useful for testing or deterministic simulations.
     #[inline]
     pub fn with_time_source(max_requests: u32, window_size: Duration, time_source: T) -> Self {
         let window_size_secs = window_size.as_secs();
@@ -79,12 +151,18 @@ impl<T: TimeSource> FixedWindowRateLimiter<T> {
         }
     }
 
-    /// Sets the eviction period
+    /// Sets the eviction grace period for inactive entries.
+    ///
+    /// Entries that have not been accessed for longer than this duration
+    /// may be removed during subsequent `check` calls.
+    ///
+    /// This method does not perform immediate eviction.
     #[inline]
     pub fn set_eviction(&mut self, eviction: Duration) {
         self.eviction_grace_secs = eviction.as_secs();
     }
 
+    /// Computes the start timestamp of the current window.
     #[inline]
     fn current_window(&self, now: u64) -> u64 {
         (now / self.window_size_secs) * self.window_size_secs

@@ -5,10 +5,8 @@ use smallvec::SmallVec;
 use std::{
     hash::{Hash, Hasher}, 
     net::{IpAddr, SocketAddr}, 
-    sync::Arc, 
-    time::Duration
 };
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 use crate::{
     App,
     ClientIp,
@@ -22,141 +20,24 @@ use crate::{
     status
 };
 
+pub use fixed_window::FixedWindow;
+pub use sliding_window::SlidingWindow;
+pub use key::{RateLimitKey, RateLimitKeyExt, PolicyName, RateLimitBinding};
+
 pub use volga_rate_limiter::{
     FixedWindowRateLimiter,
     SlidingWindowRateLimiter,
     RateLimiter
 };
 
+mod fixed_window;
+mod sliding_window;
+mod key;
 pub mod by;
 
 const X_FORWARDED_FOR: &str = "x-forwarded-for";
 const DEFAULT_POLICIES_COUNT: usize = 4;
-
-/// Defines how a rate-limiting partition key is extracted from an HTTP request.
-///
-/// Implementations of this trait determine how requests are grouped
-/// for the purposes of rate limiting.
-///
-/// The extracted key must be:
-/// - Stable for the same logical client
-/// - Fast to compute
-/// - Safe to use concurrently
-pub trait RateLimitKey: Send + Sync {
-    /// Extracts a partition key from the given HTTP request.
-    ///
-    /// Implementations should return a stable `u64` value that uniquely
-    /// identifies a client or logical request group.
-    fn extract(&self, req: &HttpRequest) -> Result<u64, Error>;
-}
-
-/// Extension methods for rate-limiting partition keys.
-///
-/// This trait provides a fluent API for attaching additional
-/// rate-limiting configuration to a [`RateLimitKey`], such as selecting
-/// a specific policy.
-///
-/// It is automatically implemented for all types that implement
-/// [`RateLimitKey`], and is intended to be used through the routing DSL.
-///
-/// # Examples
-///
-/// ```no_run
-/// use volga::{App, rate_limiting::{RateLimitKeyExt, SlidingWindow, by}};
-/// use std::time::Duration;
-/// 
-/// let mut app = App::new()
-///     .with_sliding_window(SlidingWindow::new(10, Duration::from_secs(10)))
-///     .with_sliding_window(SlidingWindow::new(10, Duration::from_secs(10)));
-/// 
-/// app.map_get("/api", || async {})
-///     .sliding_window(by::ip())
-///     .sliding_window(by::header("x-tenant-id").using("burst"));
-/// ```
-///
-/// The example above applies two independent rate-limiting policies:
-/// one partitioned by IP address and another partitioned by user identity
-/// using the `"burst"` policy.
-pub trait RateLimitKeyExt: Sized + RateLimitKey + 'static {
-    /// Associates this partition key with a named rate-limiting policy.
-    ///
-    /// The policy name must refer to a configuration that was previously
-    /// registered on the application using `with_fixed_window` or
-    /// `with_sliding_window`.
-    ///
-    /// If the specified policy does not exist, the behavior is framework-
-    /// specific and may result in a runtime error.
-    #[inline]
-    fn using(self, policy: impl Into<PolicyName>) -> impl RateLimitKey {
-        RateLimitBinding {
-            key: Arc::new(self),
-            policy: Some(policy.into()),
-        }
-    }
-
-    /// Converts this partition key into a rate-limiting binding
-    /// using the default policy for the selected algorithm.
-    ///
-    /// This method is typically called implicitly by the routing DSL
-    /// and does not need to be invoked directly by users.
-    #[inline]
-    fn bind(self) -> RateLimitBinding {
-        RateLimitBinding {
-            key: Arc::new(self),
-            policy: None,
-        }
-    }
-}
-
-impl<T> RateLimitKeyExt for T
-where
-    T: RateLimitKey + 'static
-{}
-
-impl RateLimitKey for RateLimitBinding {
-    #[inline]
-    fn extract(&self, req: &HttpRequest) -> Result<u64, Error> {
-        self.key.extract(req)
-    }
-}
-
-/// A symbolic name of a rate-limiting policy.
-///
-/// Policy names are used to select a concrete rate-limiting configuration
-/// (e.g. limits, window size, eviction behavior) that was previously
-/// registered on the application.
-///
-/// Internally, this type is reference-counted to allow cheap cloning
-/// when rate-limiting bindings are shared across routes or middleware.
-///
-/// Typical examples include `"default"`, `"burst"`, or `"strict"`.
-pub type PolicyName = Arc<str>;
-
-/// A fully configured rate-limiting binding.
-///
-/// A binding combines:
-/// - a [`RateLimitKey`] that defines how requests are partitioned
-/// - an optional policy name that selects a rate-limiting configuration
-///
-/// Bindings are created implicitly by the routing DSL and are not meant
-#[derive(Clone)]
-pub struct RateLimitBinding {
-    /// The partition key extractor used to group requests.
-    key: Arc<dyn RateLimitKey>,
-
-    /// Optional policy name selecting a specific rate-limiting configuration.
-    ///
-    /// If `None`, the default policy for the given rate-limiting algorithm
-    /// is used.
-    policy: Option<PolicyName>,
-}
-
-impl Debug for RateLimitBinding {
-    #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RateLimitBinding(...)").finish()
-    }
-}
+const RATE_LIMIT_ERROR_MSG: &str = "Rate limit exceeded. Try again later.";
 
 /// A tuple representing a named policy entry: `(policy_name, limiter)`.
 ///
@@ -183,50 +64,6 @@ pub(crate) struct GlobalRateLimiter {
     default_sliding_window: Option<SlidingWindowRateLimiter>,
     /// Named sliding window rate limiters
     named_sliding_window: SmallVec<[PolicyEntry<SlidingWindowRateLimiter>; DEFAULT_POLICIES_COUNT]>,
-}
-
-/// Configuration for a **fixed window** rate limiting policy.
-///
-/// This struct defines the policy parameters:
-/// - `max_requests` — maximum number of requests allowed per window
-/// - `window_size` — duration of a single fixed window
-/// - `eviction` — optional duration after which the data for inactive clients is cleaned up
-/// - `name` — optional name to identify a named policy
-#[derive(Debug, Clone)]
-pub struct FixedWindow {
-    /// Optional name of the policy
-    name: Option<String>,
-    
-    /// Maximum number of requests allowed in the window
-    max_requests: u32,
-    
-    /// Duration of the window
-    window_size: Duration,
-    
-    /// Optional eviction period
-    eviction: Option<Duration>,
-}
-
-/// Configuration for a **sliding window** rate limiting policy.
-///
-/// This struct defines the policy parameters:
-/// - `max_requests` — maximum number of requests allowed per window
-/// - `window_size` — duration of a single sliding window
-/// - `eviction` — optional duration after which the data for inactive clients is cleaned up
-/// - `name` — optional name to identify a named policy
-#[derive(Debug, Clone)]
-pub struct SlidingWindow {
-    /// Optional name of the policy
-    name: Option<String>,
-    
-    /// Maximum number of requests allowed in the window
-    max_requests: u32,
-    
-    /// Duration of the window
-    window_size: Duration,
-    
-    /// Optional eviction period
-    eviction: Option<Duration>,
 }
 
 impl GlobalRateLimiter {
@@ -287,100 +124,56 @@ impl GlobalRateLimiter {
     }
 }
 
-impl FixedWindow {
-    /// Creates a new fixed window rate limiting policy.
-    ///
-    /// # Arguments
-    /// * `max_requests` - Maximum number of requests allowed in one window.
-    /// * `window_size` - Duration of the window.
-    #[inline]
-    pub fn new(max_requests: u32, window_size: Duration) -> Self {
-        Self {
-            name: None,
-            eviction: None,
-            max_requests,
-            window_size,
-        }
-    }
-
-    /// Sets an optional eviction period for cleaning up old client state.
-    #[inline]
-    pub fn with_eviction(mut self, eviction: Duration) -> Self {
-        self.eviction = Some(eviction);
-        self
-    }
-
-    /// Sets the optional name of this policy.
-    #[inline]
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Builds a `FixedWindowRateLimiter` instance based on this policy.
-    #[inline]
-    fn build(&self) -> FixedWindowRateLimiter {
-        let mut limiter = FixedWindowRateLimiter::new(
-            self.max_requests,
-            self.window_size
-        );
-
-        if let Some(eviction) = self.eviction {
-            limiter.set_eviction(eviction);
-        }
-
-        limiter
-    }
-}
-
-impl SlidingWindow {
-    /// Creates a new sliding window rate limiting policy.
-    ///
-    /// # Arguments
-    /// * `max_requests` - Maximum number of requests allowed in one window.
-    /// * `window_size` - Duration of the window.
-    #[inline]
-    pub fn new(max_requests: u32, window_size: Duration) -> Self {
-        Self {
-            name: None,
-            eviction: None,
-            max_requests,
-            window_size
-        }
-    }
-
-    /// Sets an optional eviction period for cleaning up old client state.
-    #[inline]
-    pub fn with_eviction(mut self, eviction: Duration) -> Self {
-        self.eviction = Some(eviction);
-        self
-    }
-
-    /// Sets the optional name of this policy.
-    #[inline]
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Builds a `SlidingWindowRateLimiter` instance based on this policy.
-    #[inline]
-    fn build(&self) -> SlidingWindowRateLimiter {
-        let mut limiter = SlidingWindowRateLimiter::new(
-            self.max_requests,
-            self.window_size
-        );
-
-        if let Some(eviction) = self.eviction {
-            limiter.set_eviction(eviction);
-        }
-
-        limiter
-    }
-}
-
 impl App {
-    /// Sets the fixed window rate limiter
+    /// Registers a fixed-window rate limiting policy.
+    ///
+    /// This method defines **how** rate limiting should work (limits, window size,
+    /// eviction behavior), but does **not** enable rate limiting by itself.
+    /// To actually apply the policy to incoming requests, it must be referenced
+    /// from rate-limiting middleware (see [`App::use_fixed_window`] or [`Route::fixed_window`]).
+    ///
+    /// ## Named vs. default policy
+    ///
+    /// - If the policy has a name (`FixedWindow::with_name`), it is registered
+    ///   as a **named policy** and can be referenced explicitly by name.
+    /// - If no name is provided, the policy becomes the **default fixed-window
+    ///   policy**, used when no policy name is specified in middleware.
+    ///
+    /// Registering a policy with the same name multiple times will override
+    /// the previously registered policy.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{
+    ///     App,
+    ///     rate_limiting::{by, FixedWindow, RateLimitKeyExt},
+    /// };
+    ///
+    /// # fn main() {
+    /// // Define a fixed window rate-limiting policy
+    /// let fixed_window = FixedWindow::new(100, Duration::from_secs(30))
+    ///     .with_name("burst");
+    ///
+    /// // Register the policy in the application
+    /// let mut app = App::new()
+    ///     .with_fixed_window(fixed_window);
+    ///
+    /// // Enable fixed-window rate limiting using the "burst" policy,
+    /// // partitioned by the client IP address
+    /// app.use_fixed_window(by::ip().using("burst"));
+    ///
+    /// # app.run_blocking();
+    /// # }
+    /// ```
+    ///
+    /// ## See also
+    ///
+    /// - [`FixedWindow`] - fixed window policy definition
+    /// - [`App::use_fixed_window`] - enabling fixed-window rate limiting middleware
+    /// - [`Route::fixed_window`] - enabling fixed-window rate limiting middleware for a particular route
+    /// - [`RouteGroup::fixed_window`] - enabling fixed-window rate limiting middleware for a route group
     pub fn with_fixed_window(mut self, policy: FixedWindow) -> Self {
         self.rate_limiter
             .get_or_insert_default()
@@ -388,7 +181,55 @@ impl App {
         self
     }
 
-    /// Sets the sliding window rate limiter
+    /// Registers a sliding-window rate limiting policy.
+    ///
+    /// This method defines **how** rate limiting should work (limits, window size,
+    /// eviction behavior), but does **not** enable rate limiting by itself.
+    /// To actually apply the policy to incoming requests, it must be referenced
+    /// from rate-limiting middleware (see [`App::use_sliding_window`] or [`Route::sliding_window`]).
+    ///
+    /// ## Named vs. default policy
+    ///
+    /// - If the policy has a name (`SlidingWindow::with_name`), it is registered
+    ///   as a **named policy** and can be referenced explicitly by name.
+    /// - If no name is provided, the policy becomes the **default sliding-window
+    ///   policy**, used when no policy name is specified in middleware.
+    ///
+    /// Registering a policy with the same name multiple times will override
+    /// the previously registered policy.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{
+    ///     App,
+    ///     rate_limiting::{by, SlidingWindow, RateLimitKeyExt},
+    /// };
+    ///
+    /// # fn main() {
+    /// // Define a sliding window rate-limiting policy
+    /// let sliding_window = SlidingWindow::new(100, Duration::from_secs(30))
+    ///     .with_name("burst");
+    ///
+    /// // Register the policy in the application
+    /// let mut app = App::new()
+    ///     .with_sliding_window(sliding_window);
+    ///
+    /// // Enable sliding-window rate limiting using the "burst" policy,
+    /// // partitioned by the client IP address
+    /// app.use_sliding_window(by::ip().using("burst"));
+    ///
+    /// # app.run_blocking();
+    /// # }
+    /// ```
+    ///
+    /// ## See also
+    ///
+    /// - [`SlidingWindow`] - fixed window policy definition
+    /// - [`App::use_sliding_window`] - enabling fixed-window rate limiting middleware
+    /// - [`Route::sliding_window`] - enabling fixed-window rate limiting middleware for a particular route
+    /// - [`RouteGroup::sliding_window`] - enabling fixed-window rate limiting middleware for a route group
     pub fn with_sliding_window(mut self, policy: SlidingWindow) -> Self {
         self.rate_limiter
             .get_or_insert_default()
@@ -396,13 +237,157 @@ impl App {
         self
     }
 
-    /// Adds the global middleware that limits all requests
+    /// Enables fixed-window rate limiting for incoming requests.
+    ///
+    /// This method installs a **global middleware** that applies a fixed-window
+    /// rate limiter to all requests passing through the application.
+    ///
+    /// The provided `source` defines:
+    /// - **How requests are partitioned** (e.g. by IP, user, header, path)
+    /// - **Which rate-limiting policy is used** (default or named)
+    ///
+    /// The middleware will look up a previously registered [`FixedWindow`]
+    /// policy and apply it to each request. If no matching policy is found,
+    /// the middleware is a no-op.
+    ///
+    /// ## Partition keys
+    ///
+    /// The partition key determines how requests are grouped for rate limiting.
+    /// Common examples include:
+    /// - Client IP address
+    /// - Authenticated user ID
+    /// - API key or header value
+    /// - Route or tenant identifier
+    ///
+    /// ## Policy selection
+    ///
+    /// - If the key is bound **without** a policy name, the **default fixed-window
+    ///   policy** is used.
+    /// - If the key is bound **with** `.using(name)`, the named policy with the
+    ///   corresponding name is applied.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{
+    ///     App,
+    ///     rate_limiting::{by, FixedWindow, RateLimitKeyExt},
+    /// };
+    ///
+    /// # fn main() {
+    /// let mut app = App::new()
+    ///     // Register a default fixed-window policy
+    ///     .with_fixed_window(
+    ///         FixedWindow::new(60, Duration::from_secs(60))
+    ///     )
+    ///     // Register a named policy for burst traffic
+    ///     .with_fixed_window(
+    ///         FixedWindow::new(100, Duration::from_secs(30))
+    ///             .with_name("burst")
+    ///     );
+    ///
+    /// // Apply rate limiting by client IP using the default policy
+    /// app.use_fixed_window(by::ip());
+    ///
+    /// // Apply rate limiting by user ID using the "burst" policy
+    /// app.use_fixed_window(by::header("x-tenant-id").using("burst"));
+    ///
+    /// # app.run_blocking()
+    /// # }
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - This middleware is **global** and affects all routes registered
+    ///   after it is applied.
+    /// - Multiple rate-limiting middlewares may be installed, each with
+    ///   its own partition key and policy.
+    /// - Rate limiting failures result in an HTTP `429 Too Many Requests` response.
+    ///
+    /// ## See also
+    ///
+    /// - [`FixedWindow`] — fixed window policy definition
+    /// - [`App::with_fixed_window`] — registering fixed-window policies
+    /// - [`RateLimitKeyExt`] — binding partition keys to policies
     pub fn use_fixed_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_fixed_window(ctx, binding.clone(), next))
     }
 
-    /// Adds the global middleware that limits all requests
+    /// Enables sliding-window rate limiting for incoming requests.
+    ///
+    /// This method installs a **global middleware** that applies a sliding-window
+    /// rate limiter to all requests passing through the application.
+    ///
+    /// The provided `source` defines:
+    /// - **How requests are partitioned** (e.g. by IP, user, header, path)
+    /// - **Which rate-limiting policy is used** (default or named)
+    ///
+    /// The middleware will look up a previously registered [`SlidingWindow`]
+    /// policy and apply it to each request. If no matching policy is found,
+    /// the middleware is a no-op.
+    ///
+    /// ## Partition keys
+    ///
+    /// The partition key determines how requests are grouped for rate limiting.
+    /// Common examples include:
+    /// - Client IP address
+    /// - Authenticated user ID
+    /// - API key or header value
+    /// - Route or tenant identifier
+    ///
+    /// ## Policy selection
+    ///
+    /// - If the key is bound **without** a policy name, the **default sliding-window
+    ///   policy** is used.
+    /// - If the key is bound **with** `.using(name)`, the named policy with the
+    ///   corresponding name is applied.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{
+    ///     App,
+    ///     rate_limiting::{by, SlidingWindow, RateLimitKeyExt},
+    /// };
+    ///
+    /// # fn main() {
+    /// let mut app = App::new()
+    ///     // Register a default sliding-window policy
+    ///     .with_sliding_window(
+    ///         SlidingWindow::new(60, Duration::from_secs(60))
+    ///     )
+    ///     // Register a named policy for burst traffic
+    ///     .with_sliding_window(
+    ///         SlidingWindow::new(100, Duration::from_secs(30))
+    ///             .with_name("burst")
+    ///     );
+    ///
+    /// // Apply rate limiting by client IP using the default policy
+    /// app.use_sliding_window(by::ip());
+    ///
+    /// // Apply rate limiting by user ID using the "burst" policy
+    /// app.use_sliding_window(by::header("x-tenant-id").using("burst"));
+    ///
+    /// # app.run_blocking()
+    /// # }
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - This middleware is **global** and affects all routes registered
+    ///   after it is applied.
+    /// - Multiple rate-limiting middlewares may be installed, each with
+    ///   its own partition key and policy.
+    /// - Rate limiting failures result in an HTTP `429 Too Many Requests` response.
+    ///
+    /// ## See also
+    ///
+    /// - [`SlidingWindow`] — fixed window policy definition
+    /// - [`App::with_sliding_window`] — registering fixed-window policies
+    /// - [`RateLimitKeyExt`] — binding partition keys to policies
     pub fn use_sliding_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
@@ -410,13 +395,91 @@ impl App {
 }
 
 impl<'a> Route<'a> {
-    /// Adds the middleware that limits all requests for this route
+    /// Enables fixed-window rate limiting for this route.
+    ///
+    /// This method installs a **route-scoped middleware** that applies a
+    /// fixed-window rate limiter **only** to requests handled by this route.
+    ///
+    /// The provided `source` defines:
+    /// - How requests are partitioned (e.g. by IP, user, header, path)
+    /// - Which fixed-window policy is used (default or named)
+    ///
+    /// ## Policy resolution
+    ///
+    /// - If the partition key is bound **without** a policy name, the
+    ///   default fixed-window policy is used.
+    /// - If `using(name)` is specified, the named policy with the
+    ///   corresponding name is applied.
+    ///
+    /// ## Middleware order
+    ///
+    /// Route-level rate limiting is executed:
+    /// - **after global middleware**
+    /// - **after route group middleware**
+    /// - **before the route handler**
+    ///
+    /// This allows route-specific limits to refine or override
+    /// broader rate-limiting rules.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use volga::rate_limiting::{by, RateLimitKeyExt};
+    ///
+    /// # let mut app = volga::App::new();
+    /// app.map_get("/api/private", || async { /*...*/ })
+    ///     .fixed_window(by::ip().using("burst"));
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - Multiple rate-limiting middlewares may be attached to the same route.
+    /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
     pub fn fixed_window<K: RateLimitKeyExt>(self, source: K) -> Self {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_fixed_window(ctx, binding.clone(), next))
     }
 
-    /// Adds the middleware that limits all requests for this route
+    /// Enables sliding-window rate limiting for this route.
+    ///
+    /// This method installs a **route-scoped middleware** that applies a
+    /// sliding-window rate limiter **only** to requests handled by this route.
+    ///
+    /// The provided `source` defines:
+    /// - How requests are partitioned (e.g. by IP, user, header, path)
+    /// - Which sliding-window policy is used (default or named)
+    ///
+    /// ## Policy resolution
+    ///
+    /// - If the partition key is bound **without** a policy name, the
+    ///   default sliding-window policy is used.
+    /// - If `using(name)` is specified, the named policy with the
+    ///   corresponding name is applied.
+    ///
+    /// ## Middleware order
+    ///
+    /// Route-level rate limiting is executed:
+    /// - **after global middleware**
+    /// - **after route group middleware**
+    /// - **before the route handler**
+    ///
+    /// This allows route-specific limits to refine or override
+    /// broader rate-limiting rules.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use volga::rate_limiting::{by, RateLimitKeyExt};
+    ///
+    /// # let mut app = volga::App::new();
+    /// app.map_get("/api/private", || async { /*...*/ })
+    ///     .sliding_window(by::ip().using("burst"));
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - Multiple rate-limiting middlewares may be attached to the same route.
+    /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
     pub fn sliding_window<K: RateLimitKeyExt>(self, source: K) -> Self {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
@@ -424,14 +487,78 @@ impl<'a> Route<'a> {
 }
 
 impl<'a> RouteGroup<'a> {
-    /// Adds the middleware that limits all requests for this route group
-    pub fn fixed_window<K: RateLimitKeyExt>(self, source: K) -> Self {
+    /// Enables fixed-window rate limiting for all routes in this group.
+    ///
+    /// This method installs a **group-scoped middleware** that applies a
+    /// fixed-window rate limiter to every route contained within the group.
+    ///
+    /// Group-level rate limiting allows sharing a common rate-limiting
+    /// strategy across multiple related routes.
+    ///
+    /// ## Policy resolution
+    ///
+    /// - Uses the default fixed-window policy unless overridden with `using(name)`.
+    /// - Named policies must be registered via [`App::with_fixed_window`].
+    ///
+    /// ## Middleware order
+    ///
+    /// Group-level rate limiting is executed:
+    /// - **after global middleware**
+    /// - **before route-level middleware**
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use volga::rate_limiting::{by, RateLimitKeyExt};
+    ///
+    /// # let mut app = volga::App::new();
+    /// app.group("/api", |api| {
+    ///     api.fixed_window(by::ip());
+    /// 
+    ///     api.map_get("/status", || async { /*...*/ });
+    ///     api.map_post("/upload", || async { /*...*/ })
+    ///         .fixed_window(by::header("x-tenant-id").using("burst"));
+    /// });
+    /// ```
+    pub fn fixed_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_fixed_window(ctx, binding.clone(), next))
     }
 
-    /// Adds the middleware that limits all requests for this route group
-    pub fn sliding_window<K: RateLimitKeyExt>(self, source: K) -> Self {
+    /// Enables sliding-window rate limiting for all routes in this group.
+    ///
+    /// This method installs a **group-scoped middleware** that applies a
+    /// sliding-window rate limiter to every route contained within the group.
+    ///
+    /// Group-level rate limiting allows sharing a common rate-limiting
+    /// strategy across multiple related routes.
+    ///
+    /// ## Policy resolution
+    ///
+    /// - Uses the default fixed-window policy unless overridden with `using(name)`.
+    /// - Named policies must be registered via [`App::with_sliding_window`].
+    ///
+    /// ## Middleware order
+    ///
+    /// Group-level rate limiting is executed:
+    /// - **after global middleware**
+    /// - **before route-level middleware**
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use volga::rate_limiting::{by, RateLimitKeyExt};
+    ///
+    /// # let mut app = volga::App::new();
+    /// app.group("/api", |api| {
+    ///     api.sliding_window(by::ip());
+    ///
+    ///     api.map_get("/status", || async { /*...*/ });
+    ///     api.map_post("/upload", || async { /*...*/ })
+    ///         .sliding_window(by::header("x-tenant-id").using("burst"));
+    /// });
+    /// ```
+    pub fn sliding_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
     }
@@ -448,7 +575,7 @@ async fn check_fixed_window(
         if !limiter.check(key) { 
             status!(
                 StatusCode::TOO_MANY_REQUESTS.as_u16(), 
-                "Rate limit exceeded. Try again later."
+                RATE_LIMIT_ERROR_MSG
             )
         } else {
             next(ctx).await
@@ -469,7 +596,7 @@ async fn check_sliding_window(
         if !limiter.check(key) { 
             status!(
                 StatusCode::TOO_MANY_REQUESTS.as_u16(), 
-                "Rate limit exceeded. Try again later."
+                RATE_LIMIT_ERROR_MSG
             )
         } else {
             next(ctx).await
@@ -525,8 +652,7 @@ fn forwarded_header(req: &HttpRequest) -> Option<IpAddr> {
 #[inline]
 fn x_forwarded_for(req: &HttpRequest) -> Option<IpAddr> {
     let header = req.headers().get(X_FORWARDED_FOR)?.to_str().ok()?;
-    header
-        .split(',')
+    header.split(',')
         .next()
         .map(str::trim)
         .and_then(|ip| ip.parse::<IpAddr>().ok())

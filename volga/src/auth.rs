@@ -208,11 +208,12 @@ impl<'a> RouteGroup<'a> {
     /// let mut app = App::new()
     ///     .with_bearer_auth(|auth| auth);
     ///
-    /// app.map_group("/greet")
-    ///     .authorize::<MyClaims>(roles(["admin", "user"]))
-    ///     .map_get("/hello", || async { "Hello, World!" });
+    /// app.group("/api", |api| {
+    ///     api.authorize::<MyClaims>(roles(["admin", "user"]));
+    ///     api.map_get("/hello", || async { "Hello, World!" });
+    /// });
     /// ```
-    pub fn authorize<C: AuthClaims + Send +  Sync + 'static>(self, authorizer: Authorizer<C>) -> Self {
+    pub fn authorize<C: AuthClaims + Send +  Sync + 'static>(&mut self, authorizer: Authorizer<C>) -> &mut Self {
         self.app.ensure_bearer_auth_configured();
         let authorizer = Arc::new(authorizer);
         self.wrap(move |ctx, next| authorize_impl(authorizer.clone(), ctx, next))

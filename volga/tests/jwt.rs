@@ -98,9 +98,10 @@ async fn it_generates_jwt_and_failed_to_authenticates_it() {
                 .with_aud(["test"])
                 .with_iss(["test"]));
 
-        app.map_group("/tests")
-            .authorize(predicate(|claims: &Claims| claims.roles.iter().any(|role| role == "admin")))
-            .map_get("/test", || async { "Pass!" });
+        app.group("/tests", |api| {
+            api.authorize(predicate(|claims: &Claims| claims.roles.iter().any(|role| role == "admin")));
+            api.map_get("/test", || async { "Pass!" });
+        });
 
         app.map_post("/login", |bts: BearerTokenService| async move {
             let exp = SystemTime::now()
