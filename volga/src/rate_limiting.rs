@@ -23,6 +23,7 @@ use crate::{
 pub use fixed_window::FixedWindow;
 pub use sliding_window::SlidingWindow;
 pub use key::{RateLimitKey, RateLimitKeyExt, PolicyName, RateLimitBinding};
+pub use by::RateLimitKeySource;
 
 pub use volga_rate_limiter::{
     FixedWindowRateLimiter,
@@ -656,4 +657,77 @@ fn x_forwarded_for(req: &HttpRequest) -> Option<IpAddr> {
         .next()
         .map(str::trim)
         .and_then(|ip| ip.parse::<IpAddr>().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+    use hyper::http::HeaderName;
+    use hyper::Request;
+    use crate::HttpBody;
+    use super::*;
+    
+    fn create_request() -> HttpRequest {
+        let (parts, body) = Request::get("/")
+            .extension(ClientIp(SocketAddr::new(IpAddr::V4(127_u32.into()), 8080)))
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+        
+        HttpRequest::from_parts(parts, body)
+    }
+    
+    #[test]
+    fn it_extracts_partition_key_from_ip() {
+        let req = create_request();
+        
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        
+        assert_eq!(key, stable_hash(&IpAddr::V4(127_u32.into())));
+    }
+    
+    #[test]
+    fn it_extracts_forwarded_ip() {
+        let mut req = create_request();
+        req.inner
+            .headers_mut()
+            .insert(HeaderName::from_static("forwarded"), "for=192.168.1.1".parse().unwrap());
+        
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn it_extracts_x_forwarded_for_ip() {
+        let mut req = create_request();
+        req.inner
+            .headers_mut()
+            .insert(HeaderName::from_static("x-forwarded-for"), "192.168.1.1".parse().unwrap());
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn it_extracts_prioritized_forwarded_ip() {
+        let mut req = create_request();
+        req.inner
+            .headers_mut()
+            .insert(HeaderName::from_static("forwarded"), "for=10.24.1.101".parse().unwrap());
+        req.inner
+            .headers_mut()
+            .insert(HeaderName::from_static("x-forwarded-for"), "192.168.1.1".parse().unwrap());
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(10, 24, 1, 101))));
+    }
+    
+    #[test]
+    fn it_tests_stable_hash() {
+        let key = stable_hash(&IpAddr::V4(127_u32.into()));
+        assert_eq!(key, stable_hash(&IpAddr::V4(127_u32.into())));
+    }
 }

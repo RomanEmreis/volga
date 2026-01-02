@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use volga::{
     auth::{Claims, roles, DecodingKey}, 
-    rate_limiting::{FixedWindow, SlidingWindow, RateLimitKeyExt, by},
+    rate_limiting::{FixedWindow, SlidingWindow, by},
     App
 };
 

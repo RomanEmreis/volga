@@ -204,6 +204,26 @@ impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
     pub fn set_eviction(&mut self, eviction: Duration) {
         self.eviction_grace_secs = eviction.as_secs();
     }
+
+    /// Maximum number of allowed requests per window.
+    #[inline(always)]
+    pub fn max_requests(&self) -> u32 {
+        self.max_requests
+    }
+
+    /// Size of the fixed window in seconds.
+    #[inline(always)]
+    pub fn window_size_secs(&self) -> u64 {
+        self.window_size_secs
+    }
+
+    /// Time after which inactive entries are eligible for eviction.
+    ///
+    /// This value is independent of `window_size_secs` and is used solely to limit memory growth.
+    #[inline(always)]
+    pub fn eviction_grace_secs(&self) -> u64 {
+        self.eviction_grace_secs
+    }
 }
 
 #[cfg(test)]
