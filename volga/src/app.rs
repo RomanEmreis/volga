@@ -155,6 +155,7 @@ pub struct Connection {
 }
 
 impl Default for Connection {
+    #[inline]
     fn default() -> Self {
         #[cfg(target_os = "windows")]
         let ip = [127, 0, 0, 1];
@@ -166,6 +167,7 @@ impl Default for Connection {
 }
 
 impl From<&str> for Connection {
+    #[inline]
     fn from(s: &str) -> Self {
         if let Ok(socket) = s.parse::<SocketAddr>() {
             Self { socket }
@@ -175,7 +177,19 @@ impl From<&str> for Connection {
     }
 }
 
+impl From<String> for Connection {
+    #[inline]
+    fn from(s: String) -> Self {
+        if let Ok(socket) = s.parse::<SocketAddr>() {
+            Self { socket }
+        } else {
+            Self::default()
+        }
+    }
+}
+
 impl<I: Into<IpAddr>> From<(I, u16)> for Connection {
+    #[inline]
     fn from(value: (I, u16)) -> Self {
         Self { socket: SocketAddr::from(value) }
     }

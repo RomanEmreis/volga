@@ -1,70 +1,75 @@
 ﻿#![allow(missing_docs)]
 
-use volga::{App, File, HttpBody, ok};
+use volga::{File, HttpBody, ok};
+mod common;
+use common::TestServer;
 
 #[tokio::test]
 async fn it_saves_uploaded_file() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7899");
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let upload_path = temp_dir.path().join("uploaded.txt");
+    let path_for_handler = upload_path.clone();
 
-        app.map_post("/upload", |file: File| async move {
-            file.save_as("tests/resources/test_file_saved.txt").await?;
-            ok!()
+    let server = TestServer::spawn(move |app| {
+        app.map_post("/upload", move |file: File| {
+            let path = path_for_handler.clone();
+            async move {
+                file.save_as(&path).await?;
+                ok!()
+            }
         });
+    }).await;
 
-        app.run().await
-    });
+    let file = tokio::fs::File::open("tests/resources/test_file.txt")
+        .await
+        .unwrap();
+    let body = HttpBody::file(file);
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        let file = tokio::fs::File::open("tests/resources/test_file.txt").await.unwrap();
-        let body = HttpBody::file(file);
-        
-        client.post("http://127.0.0.1:7899/upload").body(reqwest::Body::wrap(body)).send().await.unwrap()
-    }).await.unwrap();
-
+    let response = server.client()
+        .post(server.url("/upload"))
+        .body(reqwest::Body::wrap(body))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
+    assert!(upload_path.exists());
+
+    server.shutdown().await;
 }
 
 #[tokio::test]
 #[cfg(feature = "multipart")]
 async fn it_saves_uploaded_multipart() {
     use volga::Multipart;
+
+    let temp_dir = tempfile::TempDir::new().unwrap();
+    let upload_path = temp_dir.path().to_path_buf();
+    let path_for_handler = upload_path.clone();
     
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7938");
-
-        app.map_post("/upload", |files: Multipart| async move {
-            files.save_all("tests/resources").await
+    let server = TestServer::spawn(move |app| {
+        app.map_post("/upload", move |files: Multipart| {
+            let path = path_for_handler.clone();
+            async move {
+                files.save_all(path).await
+            }
         });
+    }).await;
 
-        app.run().await
-    });
+    let form = reqwest::multipart::Form::new()
+        .file("test_file", "tests/resources/test_file.txt")
+        .await
+        .unwrap();
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        
-        let form = reqwest::multipart::Form::new()
-            .file("test_file", "tests/resources/test_file.txt")
-            .await
-            .unwrap();
-        
-        client.post("http://127.0.0.1:7938/upload")
-            .multipart(form)
-            .send()
-            .await
-            .unwrap()
-    }).await.unwrap();
-
+    let response = server.client()
+        .post(server.url("/upload"))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
+    assert!(upload_path.exists());
+
+    server.shutdown().await;
 }

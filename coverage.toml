@@ -1,5 +1,3 @@
-# coverage.toml
-
 [config]
 exclude-files = [
     "examples/*",
