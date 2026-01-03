@@ -50,6 +50,8 @@ pub mod tracing;
 pub mod ws;
 #[cfg(any(feature = "basic-auth", feature = "jwt-auth"))]
 pub mod auth;
+#[cfg(feature = "rate-limiting")]
+pub mod rate_limiting;
 #[cfg(test)]
 pub mod test_utils;
 
@@ -63,6 +65,7 @@ pub use crate::http::{
         path::Path,
         query::Query,
         form::Form,
+        client_ip::ClientIp
     },
     BoxBody,
     UnsyncBoxBody,

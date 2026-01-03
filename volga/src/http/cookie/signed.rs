@@ -3,15 +3,19 @@
 use std::{io::Read, fs::File, path::Path};
 use cookie::{CookieJar, SignedJar, Key};
 use futures_util::future::{ready, Ready};
-use crate::{
-    error::Error,
-    di::Container,
-    headers::{HeaderMap},
-    http::{
-        endpoints::args::{FromPayload, Payload, Source}, 
-        cookie::{get_cookies}
-    },
-};
+use crate::{error::Error, di::Container, headers::{HeaderMap}, http::{
+    Parts, Extensions, Request,
+    body::Incoming,
+    cookie::get_cookies,
+    endpoints::args::{
+        FromPayload,
+        FromRequestParts,
+        FromRawRequest,
+        FromRequestRef,
+        Payload,
+        Source
+    }
+}, HttpRequest};
 
 /// Represents a cryptographic pass key for [`SignedCookies`]
 #[derive(Clone)]
@@ -153,19 +157,58 @@ impl SignedCookies {
     }
 }
 
+impl TryFrom<&Parts> for SignedCookies {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
+        Container::try_from(parts)?
+            .resolve::<SignedKey>()
+            .map(|key| SignedCookies::from_headers(key, &parts.headers))
+            .map_err(Into::into)
+    }
+}
+
+impl TryFrom<(&Extensions, &HeaderMap)> for SignedCookies {
+    type Error = Error;
+
+    #[inline]
+    fn try_from((extensions, headers): (&Extensions, &HeaderMap)) -> Result<Self, Self::Error> {
+        Container::try_from(extensions)?
+            .resolve::<SignedKey>()
+            .map(|key| SignedCookies::from_headers(key, headers))
+            .map_err(Into::into)
+    }
+}
+
+impl FromRequestRef for SignedCookies {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Self::try_from((req.extensions(), req.headers()))
+    }
+}
+
+impl FromRawRequest for SignedCookies {
+    #[inline]
+    fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send {
+        ready(Self::try_from((req.extensions(), req.headers())))
+    }
+}
+
+impl FromRequestParts for SignedCookies {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        parts.try_into()
+    }
+}
+
 impl FromPayload for SignedCookies {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
-        let container = Container::try_from(parts)
-            .expect("DI Container must be provided");
-
-        ready(container
-            .resolve::<SignedKey>()
-            .map(|key| SignedCookies::from_headers(key, &parts.headers))
-            .map_err(Into::into))
+        ready(Self::from_parts(parts))
     }
 
     #[inline]
@@ -179,7 +222,7 @@ mod tests {
     use crate::di::ContainerBuilder;
     use super::*;
     use crate::headers::{COOKIE, SET_COOKIE};
-    use crate::http::cookie::set_cookies;
+    use crate::http::{Request, HttpRequest, HttpBody, cookie::set_cookies};
 
     #[test]
     fn it_creates_cookies_from_empty_headers() {
@@ -252,8 +295,6 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_from_payload() {
-        use hyper::Request;
-
         let key = SignedKey::generate();
         let cookies = SignedCookies::new(key.clone());
         let cookies = cookies.add(("test", "value"));
@@ -276,6 +317,115 @@ mod tests {
         let payload = Payload::Parts(&parts);
 
         let cookies = SignedCookies::from_payload(payload).await.unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+
+    #[test]
+    fn it_extracts_from_request_ref() {
+        let key = SignedKey::generate();
+        let cookies = SignedCookies::new(key.clone());
+        let cookies = cookies.add(("test", "value"));
+
+        let mut headers = HeaderMap::new();
+        set_cookies_for_request(cookies.1, &mut headers);
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(key);
+        let container = container.build();
+
+        let mut request = Request::builder()
+            .extension(container.create_scope())
+            .body(HttpBody::empty())
+            .unwrap();
+
+        request.headers_mut().extend(headers);
+
+        let (parts, body) = request.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let cookies = <SignedCookies as FromRequestRef>::from_request(&req).unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+
+    #[test]
+    fn it_extracts_from_parts() {
+        let key = SignedKey::generate();
+        let cookies = SignedCookies::new(key.clone());
+        let cookies = cookies.add(("test", "value"));
+
+        let mut headers = HeaderMap::new();
+        set_cookies_for_request(cookies.1, &mut headers);
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(key);
+        let container = container.build();
+
+        let mut request = Request::builder()
+            .extension(container.create_scope())
+            .body(())
+            .unwrap();
+
+        request.headers_mut().extend(headers);
+
+        let (parts, _) = request.into_parts();
+
+        let cookies = SignedCookies::from_parts(&parts).unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+
+    #[test]
+    fn it_tries_extracts_from_parts() {
+        let key = SignedKey::generate();
+        let cookies = SignedCookies::new(key.clone());
+        let cookies = cookies.add(("test", "value"));
+
+        let mut headers = HeaderMap::new();
+        set_cookies_for_request(cookies.1, &mut headers);
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(key);
+        let container = container.build();
+
+        let mut request = Request::builder()
+            .extension(container.create_scope())
+            .body(())
+            .unwrap();
+
+        request.headers_mut().extend(headers);
+
+        let (parts, _) = request.into_parts();
+
+        let cookies = SignedCookies::try_from(&parts).unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+
+    #[test]
+    fn it_tries_extracts_from_extensions_and_headers() {
+        let key = SignedKey::generate();
+        let cookies = SignedCookies::new(key.clone());
+        let cookies = cookies.add(("test", "value"));
+
+        let mut headers = HeaderMap::new();
+        set_cookies_for_request(cookies.1, &mut headers);
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(key);
+        let container = container.build();
+
+        let mut request = Request::builder()
+            .extension(container.create_scope())
+            .body(())
+            .unwrap();
+
+        request.headers_mut().extend(headers);
+
+        let cookies = SignedCookies::try_from(
+            (request.extensions(), request.headers())
+        ).unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }
@@ -306,5 +456,4 @@ mod tests {
             }
         }
     }
-
 }

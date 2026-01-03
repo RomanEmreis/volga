@@ -362,18 +362,19 @@ impl<'a> RouteGroup<'a> {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_group("/greeting")
-    ///     .with_cache_control(|cache_control| 
+    /// app.group("/greeting", |api| {
+    ///     api.with_cache_control(|cache_control| 
     ///         cache_control
     ///             .with_max_age(60)
     ///             .with_immutable()
-    ///             .with_public())
-    ///     .map_get("/hello", || async move { "Hello, World!" });
+    ///             .with_public());
     /// 
+    ///     api.map_get("/hello", || async move { "Hello, World!" });    
+    /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn with_cache_control<F>(self, config: F) -> Self
+    pub fn with_cache_control<F>(&mut self, config: F) -> &mut Self
     where
         F: Fn(CacheControl) -> CacheControl + Clone + Send + Sync + 'static,
     {

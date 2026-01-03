@@ -1,19 +1,13 @@
 ﻿//! HTTP Body utilities
 
 use bytes::Bytes;
+use hyper::body::Frame;
 use pin_project_lite::pin_project;
 use serde::Serialize;
 use tokio_util::io::ReaderStream;
 use tokio::fs::File;
 use crate::error::{BoxError, Error};
 use futures_util::{TryStream, TryStreamExt};
-
-use hyper::body::{
-    Body, 
-    Frame, 
-    Incoming, 
-    SizeHint
-};
 
 use http_body_util::{
     BodyExt,
@@ -29,6 +23,8 @@ use std::{
     task::{Context, Poll},
     pin::Pin,
 };
+
+pub use hyper::body::{Body, Incoming, SizeHint};
 
 /// A boxed body
 pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, Error>;

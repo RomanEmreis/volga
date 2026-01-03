@@ -42,4 +42,4 @@ jobs:
         run: cargo install cargo-tarpaulin
       - name: Code coverage check
         run: |
-          cargo tarpaulin --all-features --workspace --fail-under 80
+          cargo tarpaulin --all-features --workspace --config coverage.toml --fail-under 80

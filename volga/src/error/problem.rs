@@ -323,17 +323,15 @@ impl<'a> RouteGroup<'a> {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_group("/positive")
-    ///     .map_problem()
-    ///     .map_get("/sum", |x: i32, y: i32| async move { 
-    ///         x + y
-    ///      });
-    /// 
+    /// app.group("/positive", |api| {
+    ///     api.map_problem();
+    ///     api.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    /// });
     ///# app.run().await
     ///# }
     /// ```
     #[inline]
-    pub fn map_problem(self) -> Self {
+    pub fn map_problem(&mut self) -> &mut Self {
         self.map_err(make_problem_details)
     }
 }

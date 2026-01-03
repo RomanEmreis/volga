@@ -25,24 +25,29 @@ impl App {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_group("/user")
-    ///     .map_get("/{id}", |id: i32| async move {
+    /// app.group("/user", |api| {
+    ///     api.map_get("/{id}", |id: i32| async move {
     ///         // get the user from somewhere
     ///         let user: User = get_user();
     ///         ok!(user)
-    ///     })
-    ///     .map_post("/create", |user: Json<User>| async move {
+    ///     });
+    ///     api.map_post("/create", |user: Json<User>| async move {
     ///         // create a user somewhere
     ///         let user_id = create_user(user);
     ///         ok!(user_id)
     ///     });
+    /// });
     ///# app.run().await
     ///# }
     ///# fn get_user() -> User { unimplemented!() }
     ///# fn create_user(user: Json<User>) -> i32 { unimplemented!() }
     /// ```
-    pub fn map_group<'a>(&'a mut self, prefix: &'a str) -> RouteGroup<'a> {
-        RouteGroup::new(self, prefix)
+    pub fn group<'a, F>(&'a mut self, prefix: &'a str, f: F)
+    where 
+        F: FnOnce(&mut RouteGroup<'a>)
+    {
+        let mut group = RouteGroup::new(self, prefix);
+        f(&mut group);
     }
     
     /// Adds a request handler that matches HTTP GET requests for the specified pattern.
@@ -71,11 +76,13 @@ impl App {
         let endpoints = self.pipeline.endpoints_mut();
         endpoints.map_route(Method::GET, pattern, handler.clone());
         
-        let head = Method::HEAD;
-        if !endpoints.contains(&head, pattern) { 
-            endpoints.map_route(head, pattern, handler.clone());
+        if self.implicit_head {
+            let head = Method::HEAD;
+            if !endpoints.contains(&head, pattern) { 
+                endpoints.map_route(head, pattern, handler.clone());
+            }
         }
-
+        
         #[cfg(feature = "middleware")]
         self.map_preflight_handler(pattern);
         
@@ -470,7 +477,7 @@ macro_rules! define_route_group_methods({$($method:ident)*} => {
             
         $(
         #[doc = concat!("See [`App::", stringify!($method), "`] for more details.")]
-        pub fn $method<F, R, Args>(self, pattern: &str, handler: F) -> Self
+        pub fn $method<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
         where
             F: GenericHandler<Args, Output = R>,
             R: IntoResponse + 'static,

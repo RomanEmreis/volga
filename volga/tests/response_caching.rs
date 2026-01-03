@@ -7,12 +7,14 @@ async fn it_configures_cache_control_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7962");
 
-        app.map_group("/testing")
-            .with_cache_control(|c| c
-                .with_max_age(60)
-                .with_immutable()
-                .with_public())
-            .map_get("/test", || async { "Pass!" });
+        app.group("/testing", |api| {
+            api
+                .with_cache_control(|c| c
+                    .with_max_age(60)
+                    .with_immutable()
+                    .with_public())
+                .map_get("/test", || async { "Pass!" });
+        });
 
         app.run().await
     });

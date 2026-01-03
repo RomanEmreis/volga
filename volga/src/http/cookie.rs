@@ -3,10 +3,21 @@
 use cookie::CookieJar;
 use futures_util::future::{ready, Ready};
 use crate::{
-    error::Error,
+    error::Error, 
     headers::{COOKIE, SET_COOKIE, HeaderMap}, 
-    http::{endpoints::args::{FromPayload, Payload, Source}},
+    http::{
+        HttpRequest, Request,
+        body::Incoming,
+        endpoints::args::{
+        FromRequestRef,
+        FromRequestParts,
+        FromRawRequest,
+        FromPayload,
+        Payload,
+        Source
+    }},
 };
+use crate::http::Parts;
 
 #[cfg(feature = "signed-cookie")]
 pub mod signed;
@@ -100,13 +111,34 @@ pub(crate) fn set_cookies(jar: CookieJar, headers: &mut HeaderMap) {
     }
 }
 
+impl FromRequestRef for Cookies {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Ok(Cookies::from(req.headers()))
+    }
+}
+
+impl FromRequestParts for Cookies {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        Ok(Cookies::from(&parts.headers))
+    }
+}
+
+impl FromRawRequest for Cookies {
+    #[inline]
+    fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send {
+        ready(Ok(Cookies::from(req.headers())))
+    }
+}
+
 impl FromPayload for Cookies {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
-        ready(Ok(Cookies::from(&parts.headers)))
+        ready(Self::from_parts(parts))
     }
 
     #[inline]
@@ -119,6 +151,8 @@ impl FromPayload for Cookies {
 mod tests {
     use super::*;
     use crate::headers::HeaderValue;
+    use hyper::Request;
+    use crate::HttpBody;
 
     #[test]
     fn it_creates_cookies_from_empty_headers() {
@@ -181,8 +215,6 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_from_payload() {
-        use hyper::Request;
-
         let request = Request::builder()
             .header(COOKIE, "test=value")
             .body(())
@@ -192,6 +224,35 @@ mod tests {
         let payload = Payload::Parts(&parts);
 
         let cookies = Cookies::from_payload(payload).await.unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+    
+    #[test]
+    fn it_extracts_from_parts() {
+        let request = Request::builder()
+            .header(COOKIE, "test=value")
+            .body(())
+            .unwrap();
+
+        let (parts, _) = request.into_parts();
+        
+        let cookies = Cookies::from_parts(&parts).unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+
+    #[test]
+    fn it_extracts_from_request_ref() {
+        let request = Request::builder()
+            .header(COOKIE, "test=value")
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = request.into_parts();
+        let request = HttpRequest::from_parts(parts, body);
+
+        let cookies = <Cookies as FromRequestRef>::from_request(&request).unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }

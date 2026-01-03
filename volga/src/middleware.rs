@@ -452,16 +452,14 @@ impl<'a> RouteGroup<'a> {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_group("/hello")
-    ///     .wrap(|ctx, next| async move {
-    ///         next(ctx).await
-    ///     })
-    ///     .map_get("/world", || async { "Hello, World!" });
-    /// 
+    /// app.group("/hello", |api| {
+    ///     api.wrap(|ctx, next| async move { next(ctx).await });
+    ///     api.map_get("/world", || async { "Hello, World!" });
+    /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn wrap<F, Fut>(mut self, middleware: F) -> Self
+    pub fn wrap<F, Fut>(&mut self, middleware: F) -> &mut Self
     where
         F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
@@ -482,15 +480,16 @@ impl<'a> RouteGroup<'a> {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_group("/positive")
-    ///     .filter(|x: i32, y: i32| async move { x > 0 && y > 0 })
-    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
-    ///     .map_get("/mul", |x: i32, y: i32| async move { x * y });
+    /// app.group("/positive", |api| {
+    ///     api.filter(|x: i32, y: i32| async move { x > 0 && y > 0 });
     /// 
+    ///     api.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    ///     api.map_get("/mul", |x: i32, y: i32| async move { x * y });
+    /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn filter<F, R, Args>(mut self, filter: F) -> Self
+    pub fn filter<F, R, Args>(&mut self, filter: F) -> &mut Self
     where
         F: GenericHandler<Args, Output = R>,
         R: Into<FilterResult> + 'static,
@@ -501,7 +500,7 @@ impl<'a> RouteGroup<'a> {
         self
     }
 
-    /// Adds a middleware called for this group of routes when [`HttpResult`] is [`Ok`]
+    /// Adds middleware called for this group of routes when [`HttpResult`] is [`Ok`]
     /// 
     /// # Example
     /// ```no_run
@@ -511,20 +510,20 @@ impl<'a> RouteGroup<'a> {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_group("/positive")
-    ///     .map_ok(|mut resp: HttpResponse| async move { 
+    /// app.group("/positive", |api| {
+    ///     api.map_ok(|mut resp: HttpResponse| async move { 
     ///         resp.headers_mut()
     ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
     ///         resp
-    ///     })
-    ///     .map_get("/sum", |x: i32, y: i32| async move { 
+    ///     });
+    ///     api.map_get("/sum", |x: i32, y: i32| async move { 
     ///         x + y
     ///     });
-    /// 
+    /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_ok<F, R, Args>(mut self, map: F) -> Self
+    pub fn map_ok<F, R, Args>(&mut self, map: F) -> &mut Self
     where
         F: MapOkHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -545,19 +544,19 @@ impl<'a> RouteGroup<'a> {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_group("/positive")
-    ///     .map_err(|err: Error| async move { 
+    /// app.group("/positive", |api| {
+    ///     api.map_err(|err: Error| async move { 
     ///         println!("{err:?}");
     ///         err
-    ///     })
-    ///     .map_get("/sum", |x: i32, y: i32| async move { 
+    ///     });
+    ///     api.map_get("/sum", |x: i32, y: i32| async move { 
     ///         x + y
-    ///      });
-    /// 
+    ///     });
+    /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_err<F, R, Args>(mut self, map: F) -> Self
+    pub fn map_err<F, R, Args>(&mut self, map: F) -> &mut Self
     where
         F: MapErrHandler<Args, Output = R>,
         R: IntoResponse + 'static,
@@ -578,20 +577,20 @@ impl<'a> RouteGroup<'a> {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.map_group("/positive")
-    ///     .tap_req(|mut req: HttpRequest| async move { 
+    /// app.group("/positive", |api| {
+    ///     api.tap_req(|mut req: HttpRequest| async move { 
     ///         req.headers_mut()
     ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
     ///         req
-    ///     })
-    ///     .map_get("/sum", |x: i32, y: i32| async move { 
+    ///     });
+    ///     api.map_get("/sum", |x: i32, y: i32| async move { 
     ///         x + y
-    ///      });
-    /// 
+    ///     });
+    /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn tap_req<F, Args>(mut self, map: F) -> Self
+    pub fn tap_req<F, Args>(&mut self, map: F) -> &mut Self
     where
         F: TapReqHandler<Args, Output = HttpRequest>,
         Args: FromRequestRef + Send + Sync + 'static,
@@ -615,15 +614,19 @@ impl<'a> RouteGroup<'a> {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.with(|headers: HttpHeaders, next| async move {
-    ///     // do something with headers
-    ///     // ...
-    ///     next.await
+    /// app.group("/hello", |api| {
+    ///     api.with(|headers: HttpHeaders, next| async move {
+    ///         // do something with headers
+    ///         // ...
+    ///         next.await
+    ///     });
+    /// 
+    ///     api.map_get("/world", || async { "Hello, World!" });
     /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn with<F, R, Args>(mut self, middleware: F) -> Self
+    pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
     where
         F: MiddlewareHandler<Args, Output = R>,
         R: IntoResponse + 'static,

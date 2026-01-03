@@ -1,4 +1,5 @@
-﻿use tokio_util::sync::CancellationToken;
+﻿use std::net::SocketAddr;
+use tokio_util::sync::CancellationToken;
 use futures_util::future::BoxFuture;
 use std::sync::Weak;
 
@@ -15,7 +16,7 @@ use crate::{
     app::AppInstance, 
     error::{Error, handler::call_weak_err_handler}, 
     http::endpoints::FindResult,
-    HttpResponse, HttpRequest, HttpBody, HttpResult,
+    HttpResponse, HttpRequest, HttpBody, HttpResult, ClientIp,
     status
 };
 
@@ -29,7 +30,8 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub(crate) struct Scope {
     pub(crate) shared: Weak<AppInstance>,
-    pub(crate) cancellation_token: CancellationToken
+    pub(crate) cancellation_token: CancellationToken,
+    peer_addr: SocketAddr
 }
 
 impl Service<Request<Incoming>> for Scope {
@@ -40,7 +42,8 @@ impl Service<Request<Incoming>> for Scope {
     #[inline]
     fn call(&self, request: Request<Incoming>) -> Self::Future {
         Box::pin(Self::handle_request(
-            request, 
+            request,
+            self.peer_addr,
             self.shared.clone(),
             self.cancellation_token.clone()
         ))
@@ -48,15 +51,17 @@ impl Service<Request<Incoming>> for Scope {
 }
 
 impl Scope {
-    pub(crate) fn new(shared: Weak<AppInstance>) -> Self {
+    pub(crate) fn new(shared: Weak<AppInstance>, peer_addr: SocketAddr) -> Self {
         Self {
             cancellation_token: CancellationToken::new(),
+            peer_addr,
             shared
         }
     }
     
     pub(super) async fn handle_request(
         request: Request<Incoming>,
+        peer_addr: SocketAddr,
         shared: Weak<AppInstance>,
         cancellation_token: CancellationToken
     ) -> HttpResult {
@@ -96,6 +101,7 @@ impl Scope {
                 
                 {
                     let extensions = &mut parts.extensions;
+                    extensions.insert(ClientIp(peer_addr));
                     extensions.insert(cancellation_token);
                     extensions.insert(shared.body_limit);
                     extensions.insert(params);
@@ -104,7 +110,12 @@ impl Scope {
                     #[cfg(feature = "jwt-auth")]
                     if let Some(bts) = &shared.bearer_token_service {
                         extensions.insert(bts.clone());
-                    } 
+                    }
+
+                    #[cfg(feature = "rate-limiting")]
+                    if let Some(rate_limiter) = &shared.rate_limiter {
+                        extensions.insert(rate_limiter.clone());
+                    }
                 }
 
                 let request = HttpRequest::new(Request::from_parts(parts.clone(), body))

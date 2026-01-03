@@ -42,6 +42,9 @@ use crate::http::CorsConfig;
 #[cfg(feature = "jwt-auth")]
 use crate::auth::bearer::{BearerAuthConfig, BearerTokenService};
 
+#[cfg(feature = "rate-limiting")]
+use crate::rate_limiting::GlobalRateLimiter;
+
 #[cfg(feature = "static-files")]
 pub use self::env::HostEnv;
 
@@ -109,6 +112,10 @@ pub struct App {
     #[cfg(feature = "jwt-auth")]
     pub(super) auth_config: Option<BearerAuthConfig>,
     
+    /// Global rate limiter
+    #[cfg(feature = "rate-limiting")]
+    pub(super) rate_limiter: Option<GlobalRateLimiter>,
+
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
     
@@ -129,6 +136,16 @@ pub struct App {
     /// 
     /// Default: `true`
     show_greeter: bool,
+
+    /// Controls whether a `HEAD` route is automatically registered
+    /// for this `GET` handler.
+    ///
+    /// When enabled, `HEAD` requests follow the same routing,
+    /// validation, and authorization logic as `GET`, but must not
+    /// produce a response body.
+    ///
+    /// Default: `true`
+    implicit_head: bool
 }
 
 /// Wraps a socket
@@ -138,6 +155,7 @@ pub struct Connection {
 }
 
 impl Default for Connection {
+    #[inline]
     fn default() -> Self {
         #[cfg(target_os = "windows")]
         let ip = [127, 0, 0, 1];
@@ -149,6 +167,7 @@ impl Default for Connection {
 }
 
 impl From<&str> for Connection {
+    #[inline]
     fn from(s: &str) -> Self {
         if let Ok(socket) = s.parse::<SocketAddr>() {
             Self { socket }
@@ -158,7 +177,19 @@ impl From<&str> for Connection {
     }
 }
 
+impl From<String> for Connection {
+    #[inline]
+    fn from(s: String) -> Self {
+        if let Ok(socket) = s.parse::<SocketAddr>() {
+            Self { socket }
+        } else {
+            Self::default()
+        }
+    }
+}
+
 impl<I: Into<IpAddr>> From<(I, u16)> for Connection {
+    #[inline]
     fn from(value: (I, u16)) -> Self {
         Self { socket: SocketAddr::from(value) }
     }
@@ -181,6 +212,10 @@ pub(crate) struct AppInstance {
     /// Service that validates/generates JWTs
     #[cfg(feature = "jwt-auth")]
     pub(super) bearer_token_service: Option<BearerTokenService>,
+
+    /// Global rate limiter
+    #[cfg(feature = "rate-limiting")]
+    pub(super) rate_limiter: Option<Arc<GlobalRateLimiter>>,
     
     /// Graceful shutdown utilities
     pub(super) graceful_shutdown: GracefulShutdown,
@@ -215,6 +250,8 @@ impl TryFrom<App> for AppInstance {
             host_env: app.host_env,
             #[cfg(feature = "di")]
             container: app.container.build(),
+            #[cfg(feature = "rate-limiting")]
+            rate_limiter: app.rate_limiter.map(Arc::new),
             #[cfg(feature = "jwt-auth")]
             bearer_token_service,
             #[cfg(feature = "tls")]
@@ -271,10 +308,13 @@ impl App {
             host_env: HostEnv::default(),
             #[cfg(feature = "jwt-auth")]
             auth_config: None,
+            #[cfg(feature = "rate-limiting")]
+            rate_limiter: None,
             pipeline: PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),
             no_delay: false,
+            implicit_head: true,
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
@@ -327,6 +367,17 @@ impl App {
     /// Default: *enabled*
     pub fn without_greeter(mut self) -> Self {
         self.show_greeter = false;
+        self
+    }
+
+    /// Disables automatic registration of a `HEAD` route
+    /// for the `GET` handler.
+    ///
+    /// After calling this method, `HEAD` requests to the same
+    /// route will result in `405 Method Not Allowed` unless a
+    /// separate `HEAD` handler is explicitly registered.
+    pub fn without_implicit_head(mut self) -> Self {
+        self.implicit_head = false;
         self
     }
 
@@ -510,8 +561,17 @@ impl App {
 
     #[inline]
     async fn handle_connection(stream: TcpStream, app_instance: Weak<AppInstance>) {
+        let peer_addr = match stream.peer_addr() { 
+            Ok(addr) => addr,
+            Err(_err) => {
+                #[cfg(feature = "tracing")]
+                tracing::error!("failed to get peer address: {_err:#}");
+                return;
+            }
+        };
+        
         #[cfg(not(feature = "tls"))]
-        Server::new(TokioIo::new(stream)).serve(app_instance).await;
+        Server::new(TokioIo::new(stream), peer_addr).serve(app_instance).await;
         
         #[cfg(feature = "tls")]
         if let Some(acceptor) = app_instance.upgrade().and_then(|app| app.acceptor()) {
@@ -524,10 +584,10 @@ impl App {
                 }
             };
             let io = TokioIo::new(stream);
-            Server::new(io).serve(app_instance).await;
+            Server::new(io, peer_addr).serve(app_instance).await;
         } else {
             let io = TokioIo::new(stream);
-            Server::new(io).serve(app_instance).await;
+            Server::new(io, peer_addr).serve(app_instance).await;
         };
     }
 

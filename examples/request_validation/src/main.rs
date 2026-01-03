@@ -11,10 +11,10 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     // Sums only positive numbers
-    app
-        .map_group("/positive")
-        .filter(is_pos)
-        .map_get("/sum/{x}/{y}", sum);
+    app.group("/positive", |api| {
+        api.filter(is_pos);
+        api.map_get("/sum/{x}/{y}", sum);
+    });
 
     // Sums only even negative numbers
     app

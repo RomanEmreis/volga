@@ -34,7 +34,9 @@ async fn it_responds_with_fallback_file() {
             .with_host_env(|env| env
                 .with_content_root("tests/static")
                 .with_fallback_file("index.html"));
-        app.map_group("/static").use_static_files();
+        app.group("/static", |g| {
+            g.use_static_files();
+        });
         app.run().await
     });
 

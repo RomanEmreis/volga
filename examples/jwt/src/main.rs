@@ -8,7 +8,14 @@ use std::{ops::Add, time::{SystemTime, UNIX_EPOCH, Duration}};
 use serde::{Serialize, Deserialize};
 use volga::{
     App, Json, HttpResult,
-    auth::{Claims, BearerTokenService, DecodingKey, EncodingKey, roles},
+    auth::{
+        Authenticated,
+        BearerTokenService, 
+        DecodingKey, 
+        EncodingKey,
+        Claims,
+        roles
+    },
     ok, status, bad_request
 };
 
@@ -55,8 +62,8 @@ async fn login(payload: Json<Payload>, bts: BearerTokenService) -> HttpResult {
     ok!(AuthData { access_token })
 }
 
-async fn me() -> &'static str {
-    "Hello from protected area"
+async fn me(auth: Authenticated<Claims>) -> String {
+    format!("Hello from protected area {}!", auth.sub)
 }
 
 #[derive(Claims, Clone, Serialize, Deserialize)]

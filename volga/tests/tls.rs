@@ -7,8 +7,22 @@ use volga::headers::{STRICT_TRANSPORT_SECURITY, LOCATION};
 use volga::tls::TlsConfig;
 use reqwest::{Certificate, Identity, redirect::Policy};
 
+use std::sync::Once;
+
+static INIT: Once = Once::new();
+
+fn init_crypto() {
+    INIT.call_once(|| {
+        tokio_rustls::rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to install crypto provider");
+    });
+}
+
 #[tokio::test]
 async fn it_works_with_tls_with_no_auth() {
+    init_crypto();
+        
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7921")
@@ -44,6 +58,8 @@ async fn it_works_with_tls_with_no_auth() {
 
 #[tokio::test]
 async fn it_works_with_tls_with_required_auth_authenticated() {
+    init_crypto();
+    
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7922")
@@ -59,11 +75,12 @@ async fn it_works_with_tls_with_required_auth_authenticated() {
     });
 
     let response = tokio::spawn(async {
-        let cert = include_bytes!("tls/client.pem");
-        let key = include_bytes!("tls/client.key");
-        
-        let identity = Identity::from_pkcs8_pem(cert, key).unwrap();
+        let cert = std::fs::read_to_string("tests/tls/client.pem").unwrap();
+        let key = std::fs::read_to_string("tests/tls/client.key").unwrap();
+        let combined = format!("{}\n{}", cert, key);
 
+        let identity = Identity::from_pem(combined.as_bytes()).unwrap();
+        
         let ca_cert = include_bytes!("tls/ca.pem");
         let ca_certificate = Certificate::from_pem(ca_cert).unwrap();
         
@@ -95,6 +112,8 @@ async fn it_works_with_tls_with_required_auth_authenticated() {
 
 #[tokio::test]
 async fn it_works_with_tls_with_required_auth_unauthenticated() {
+    init_crypto();
+    
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7923")
@@ -139,6 +158,8 @@ async fn it_works_with_tls_with_required_auth_unauthenticated() {
 
 #[tokio::test]
 async fn it_works_with_tls_with_optional_auth_authenticated() {
+    init_crypto();
+    
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7924")
@@ -154,10 +175,11 @@ async fn it_works_with_tls_with_optional_auth_authenticated() {
     });
 
     let response = tokio::spawn(async {
-        let cert = include_bytes!("tls/client.pem");
-        let key = include_bytes!("tls/client.key");
+        let cert = std::fs::read_to_string("tests/tls/client.pem").unwrap();
+        let key = std::fs::read_to_string("tests/tls/client.key").unwrap();
+        let combined = format!("{}\n{}", cert, key);
 
-        let identity = Identity::from_pkcs8_pem(cert, key).unwrap();
+        let identity = Identity::from_pem(combined.as_bytes()).unwrap();
 
         let ca_cert = include_bytes!("tls/ca.pem");
         let ca_certificate = Certificate::from_pem(ca_cert).unwrap();
@@ -190,6 +212,8 @@ async fn it_works_with_tls_with_optional_auth_authenticated() {
 
 #[tokio::test]
 async fn it_works_with_tls_with_optional_auth_unauthenticated() {
+    init_crypto();
+    
     tokio::spawn(async {
         let mut app = App::new()
             .bind("127.0.0.1:7925")
@@ -234,6 +258,8 @@ async fn it_works_with_tls_with_optional_auth_unauthenticated() {
 
 #[tokio::test]
 async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirection() {
+    init_crypto();
+    
     tokio::spawn(async {
         let mut app = App::new()
             .bind(([127,0,0,1], 7926))
@@ -292,6 +318,8 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
 
 #[tokio::test]
 async fn it_works_with_tls_with_https_redirection() {
+    init_crypto();
+    
     tokio::spawn(async {
         let mut app = App::new()
             .bind(([127,0,0,1], 7940))
@@ -352,6 +380,8 @@ async fn it_works_with_tls_with_https_redirection() {
 
 #[tokio::test]
 async fn it_returns_404_if_no_host() {
+    init_crypto();
+    
     tokio::spawn(async {
         let mut app = App::new()
             .bind(([127,0,0,1], 7942))

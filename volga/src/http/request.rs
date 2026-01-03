@@ -21,9 +21,15 @@ use crate::http::{
     request::request_body_limit::RequestBodyLimit
 };
 
+#[cfg(feature = "rate-limiting")]
+use crate::rate_limiting::{
+    GlobalRateLimiter,
+    RateLimiter
+};
+
 #[cfg(feature = "di")]
 use crate::di::Container;
-#[cfg(feature = "di")]
+#[cfg(any(feature = "di", feature = "rate-limiting"))]
 use std::sync::Arc;
 
 pub mod request_body_limit;
@@ -125,6 +131,24 @@ impl HttpRequest {
         let request = Request::from_parts(parts.clone(), HttpBody::empty());
         Self { inner: request }
     }
+
+    /// Returns a reference to a Fixed Window Rate Limiter
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub fn fixed_window_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
+        self.inner.extensions()
+            .get::<Arc<GlobalRateLimiter>>()?
+            .fixed_window(policy)
+    }
+
+    /// Returns a reference to a Sliding Window Rate Limiter
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub fn sliding_window_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
+        self.inner.extensions()
+            .get::<Arc<GlobalRateLimiter>>()?
+            .sliding_window(policy)
+    }
     
     /// Returns a reference to the DI container of the request scope
     #[inline]
@@ -133,7 +157,7 @@ impl HttpRequest {
         self.inner.extensions()
             .get::<Container>()
             .expect("DI Container must be provided")
-    } 
+    }
 
     /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
     #[inline]

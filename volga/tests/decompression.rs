@@ -90,11 +90,12 @@ async fn it_decompress_brotli_for_group() {
     tokio::spawn(async {
         let mut app = App::new().bind("127.0.0.1:7968");
         
-        app.map_group("/tests")
-            .with_decompression()
-            .map_post("/decompress", |Json(value): Json<Value>| async move {
+        app.group("/tests", |api| {
+            api.with_decompression();
+            api.map_post("/decompress", |Json(value): Json<Value>| async move {
                 ok!(value)
             });
+        });
 
         app.run().await
     });

@@ -23,7 +23,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
             let connection = app_instance.graceful_shutdown.watch(connection);
-
+            
             drop(app_instance);
 
             if let Err(_err) = connection.await {

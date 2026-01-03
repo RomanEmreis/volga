@@ -23,13 +23,14 @@ async fn main() -> std::io::Result<()> {
 
     app.use_hsts();
 
-    app.map_group("/user")
-        .map_get("/{name}", |name: String| async move {
-            ok!("Hello {name}!")
-        })
-        .map_post("/create", |user: Json<serde_json::Value>| async move {
-            user
-        });
+    app.group("/user", |api| {
+       api.map_get("/{name}", |name: String| async move {
+        ok!("Hello {name}!")
+       });
+       api.map_post("/create", |user: Json<serde_json::Value>| async move { 
+           user
+       }); 
+    });
 
     app.run().await
 }

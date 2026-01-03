@@ -1,0 +1,12 @@
+[package]
+name = "rate_limiting"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = "1.0.228"
+volga = { path = "../../volga", features = ["rate-limiting", "jwt-auth-full", "middleware"] }
+
+[lints]
+workspace = true
