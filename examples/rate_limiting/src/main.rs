@@ -20,19 +20,27 @@ fn main() {
         .with_bearer_auth(|auth| auth
             .validate_exp(false)
             .set_decoding_key(DecodingKey::from_secret(secret.as_bytes())))
-        .with_fixed_window(FixedWindow::new(100, Duration::from_secs(30)))
-        .with_sliding_window(SlidingWindow::new(100, Duration::from_secs(15)))
-        .with_sliding_window(SlidingWindow::new(100, Duration::from_secs(30))
-            .with_name("burst"));
+        .with_fixed_window(
+            FixedWindow::new(100, Duration::from_secs(30))
+        )
+        .with_sliding_window(
+            SlidingWindow::new(100, Duration::from_secs(15))
+        )
+        .with_sliding_window(
+            SlidingWindow::new(100, Duration::from_secs(30))
+                .with_name("burst")
+        );
 
     app.use_fixed_window(by::ip());
     
-    app.map_get("/fixed", async || "Hello from fixed window!")
-        .sliding_window(by::header("x-api-key"));
-
-    app.map_get("/sliding", async || "Hello from sliding window!")
-        .authorize::<Claims>(roles(["admin", "user"]))
-        .sliding_window(by::user(|c: &Claims| c.sub.as_str()).using("burst"));
+    app.group("/api", |api| {
+        api.sliding_window(by::header("x-api-key"));
+        
+        api.map_get("/fixed", async || "Hello from fixed window!");
+        api.map_get("/sliding", async || "Hello from sliding window!")
+            .authorize::<Claims>(roles(["admin", "user"]))
+            .sliding_window(by::user(|c: &Claims| c.sub.as_str()).using("burst")); 
+    });
 
     app.run_blocking();
 }
