@@ -18,8 +18,8 @@ proc-macro = true
 
 [dependencies]
 quote = "1.0.42"
-syn = { version = "2.0.111", features = ["full"] }
-proc-macro2 = "1.0.103"
+syn = { version = "2.0.112", features = ["full"] }
+proc-macro2 = "1.0.104"
 
 [features]
 default = []

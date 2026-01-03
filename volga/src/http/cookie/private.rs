@@ -3,15 +3,19 @@
 use std::{io::Read, fs::File, path::Path};
 use cookie::{CookieJar, PrivateJar, Key};
 use futures_util::future::{ready, Ready};
-use crate::{
-    error::Error,
-    di::Container,
-    headers::{HeaderMap},
-    http::{
-        endpoints::args::{FromPayload, Payload, Source},
-        cookie::{get_cookies}
-    },
-};
+use crate::{error::Error, di::Container, headers::{HeaderMap}, http::{
+    Parts, Extensions, Request,
+    body::Incoming,
+    cookie::{get_cookies},
+    endpoints::args::{
+        FromPayload,
+        FromRequestParts,
+        FromRawRequest,
+        FromRequestRef,
+        Payload,
+        Source
+    }
+}, HttpRequest};
 
 /// Represents a cryptographic pass key for [`PrivateCookies`]
 #[derive(Clone)]
@@ -152,19 +156,58 @@ impl PrivateCookies {
     }
 }
 
+impl TryFrom<&Parts> for PrivateCookies {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
+        Container::try_from(parts)?
+            .resolve::<PrivateKey>()
+            .map(|key| PrivateCookies::from_headers(key, &parts.headers))
+            .map_err(Into::into)
+    }
+}
+
+impl TryFrom<(&Extensions, &HeaderMap)> for PrivateCookies {
+    type Error = Error;
+
+    #[inline]
+    fn try_from((extensions, headers): (&Extensions, &HeaderMap)) -> Result<Self, Self::Error> {
+        Container::try_from(extensions)?
+            .resolve::<PrivateKey>()
+            .map(|key| PrivateCookies::from_headers(key, headers))
+            .map_err(Into::into)
+    }
+}
+
+impl FromRequestRef for PrivateCookies {
+    #[inline]
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        Self::try_from((req.extensions(), req.headers()))
+    }
+}
+
+impl FromRawRequest for PrivateCookies {
+    #[inline]
+    fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send {
+        ready(Self::try_from((req.extensions(), req.headers())))
+    }
+}
+
+impl FromRequestParts for PrivateCookies {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        parts.try_into()
+    }
+}
+
 impl FromPayload for PrivateCookies {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
-        let container = Container::try_from(parts)
-            .expect("DI Container must be provided");
-
-        ready(container
-            .resolve::<PrivateKey>()
-            .map(|key| PrivateCookies::from_headers(key, &parts.headers))
-            .map_err(Into::into))
+        ready(Self::from_parts(parts))
     }
 
     #[inline]
@@ -178,7 +221,7 @@ mod tests {
     use crate::di::ContainerBuilder;
     use super::*;
     use crate::headers::{COOKIE, SET_COOKIE};
-    use crate::http::cookie::set_cookies;
+    use crate::http::{HttpRequest, HttpBody, Request, cookie::set_cookies};
 
     #[test]
     fn it_creates_cookies_from_empty_headers() {
@@ -251,8 +294,6 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_from_payload() {
-        use hyper::Request;
-
         let key = PrivateKey::generate();
         let cookies = PrivateCookies::new(key.clone());
         let cookies = cookies.add(("test", "value"));
@@ -279,6 +320,115 @@ mod tests {
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }
 
+    #[test]
+    fn it_extracts_from_request_ref() {
+        let key = PrivateKey::generate();
+        let cookies = PrivateCookies::new(key.clone());
+        let cookies = cookies.add(("test", "value"));
+
+        let mut headers = HeaderMap::new();
+        set_cookies_for_request(cookies.1, &mut headers);
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(key);
+        let container = container.build();
+
+        let mut request = Request::builder()
+            .extension(container.create_scope())
+            .body(HttpBody::empty())
+            .unwrap();
+
+        request.headers_mut().extend(headers);
+
+        let (parts, body) = request.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let cookies = <PrivateCookies as FromRequestRef>::from_request(&req).unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+
+    #[test]
+    fn it_extracts_from_parts() {
+        let key = PrivateKey::generate();
+        let cookies = PrivateCookies::new(key.clone());
+        let cookies = cookies.add(("test", "value"));
+
+        let mut headers = HeaderMap::new();
+        set_cookies_for_request(cookies.1, &mut headers);
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(key);
+        let container = container.build();
+
+        let mut request = Request::builder()
+            .extension(container.create_scope())
+            .body(())
+            .unwrap();
+
+        request.headers_mut().extend(headers);
+
+        let (parts, _) = request.into_parts();
+
+        let cookies = PrivateCookies::from_parts(&parts).unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+
+    #[test]
+    fn it_tries_extracts_from_parts() {
+        let key = PrivateKey::generate();
+        let cookies = PrivateCookies::new(key.clone());
+        let cookies = cookies.add(("test", "value"));
+
+        let mut headers = HeaderMap::new();
+        set_cookies_for_request(cookies.1, &mut headers);
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(key);
+        let container = container.build();
+
+        let mut request = Request::builder()
+            .extension(container.create_scope())
+            .body(())
+            .unwrap();
+
+        request.headers_mut().extend(headers);
+
+        let (parts, _) = request.into_parts();
+
+        let cookies = PrivateCookies::try_from(&parts).unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+
+    #[test]
+    fn it_tries_extracts_from_extensions_and_headers() {
+        let key = PrivateKey::generate();
+        let cookies = PrivateCookies::new(key.clone());
+        let cookies = cookies.add(("test", "value"));
+
+        let mut headers = HeaderMap::new();
+        set_cookies_for_request(cookies.1, &mut headers);
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(key);
+        let container = container.build();
+
+        let mut request = Request::builder()
+            .extension(container.create_scope())
+            .body(())
+            .unwrap();
+
+        request.headers_mut().extend(headers);
+
+        let cookies = PrivateCookies::try_from(
+            (request.extensions(), request.headers())
+        ).unwrap();
+
+        assert_eq!(cookies.get("test").unwrap().value(), "value");
+    }
+    
     #[test]
     fn if_return_parts_source() {
         assert_eq!(PrivateCookies::source(), Source::Parts);

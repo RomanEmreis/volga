@@ -1,0 +1,17 @@
+# coverage.toml
+
+[config]
+exclude-files = [
+    "examples/*",
+    "target/*",
+    "volga/tests/*",
+    "volga/benches/*",
+    "volga-macros/src/*",
+
+    # These are covered implicitly in integration tests
+    "volga/src/server/http1.rs",
+    "volga/src/server/http2.rs",
+]
+
+ignore-tests = true
+ignore-panics = true

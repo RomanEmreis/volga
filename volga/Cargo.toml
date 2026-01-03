@@ -188,3 +188,10 @@ required-features = ["jwt-auth-full", "middleware"]
 [[test]]
 name = "response_caching"
 required-features = ["middleware"]
+
+[[test]]
+name = "auth_claims"
+required-features = ["jwt-auth-full"]
+
+[[test]]
+name = "http_header_macro"

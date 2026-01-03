@@ -662,6 +662,7 @@ fn x_forwarded_for(req: &HttpRequest) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use std::net::Ipv4Addr;
+    use std::time::Duration;
     use hyper::http::HeaderName;
     use hyper::Request;
     use crate::HttpBody;
@@ -729,5 +730,75 @@ mod tests {
     fn it_tests_stable_hash() {
         let key = stable_hash(&IpAddr::V4(127_u32.into()));
         assert_eq!(key, stable_hash(&IpAddr::V4(127_u32.into())));
+    }
+    
+    #[test]
+    fn it_adds_default_fixed_window_policy() {
+        let mut global_limiter = GlobalRateLimiter {
+            ..Default::default()
+        };
+        
+        global_limiter.add_fixed_window(
+            FixedWindow::new(10, Duration::from_secs(10))
+        );
+        
+        let default = global_limiter.fixed_window(None).unwrap();
+        
+        assert_eq!(default.max_requests(), 10);
+        assert_eq!(default.window_size_secs(), 10);
+    }
+
+    #[test]
+    fn it_adds_default_sliding_window_policy() {
+        let mut global_limiter = GlobalRateLimiter {
+            ..Default::default()
+        };
+
+        global_limiter.add_sliding_window(
+            SlidingWindow::new(10, Duration::from_secs(10))
+        );
+
+        let default = global_limiter.sliding_window(None).unwrap();
+
+        assert_eq!(default.max_requests(), 10);
+        assert_eq!(default.window_size_secs(), 10);
+    }
+
+    #[test]
+    fn it_adds_named_fixed_window_policy() {
+        let mut global_limiter = GlobalRateLimiter {
+            ..Default::default()
+        };
+
+        global_limiter.add_fixed_window(
+            FixedWindow::new(10, Duration::from_secs(10))
+                .with_name("burst")
+        );
+
+        assert!(global_limiter.default_fixed_window.is_none());
+
+        let default = global_limiter.fixed_window(Some("burst")).unwrap();
+        
+        assert_eq!(default.max_requests(), 10);
+        assert_eq!(default.window_size_secs(), 10);
+    }
+
+    #[test]
+    fn it_adds_named_sliding_window_policy() {
+        let mut global_limiter = GlobalRateLimiter {
+            ..Default::default()
+        };
+
+        global_limiter.add_sliding_window(
+            SlidingWindow::new(10, Duration::from_secs(10))
+                .with_name("burst")
+        );
+
+        assert!(global_limiter.default_sliding_window.is_none());
+
+        let default = global_limiter.sliding_window(Some("burst")).unwrap();
+
+        assert_eq!(default.max_requests(), 10);
+        assert_eq!(default.window_size_secs(), 10);
     }
 }
