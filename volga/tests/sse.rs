@@ -1,35 +1,31 @@
 ﻿#![allow(missing_docs)]
+#![cfg(feature = "test")]
 
-use volga::{App, sse};
 use futures_util::stream::{repeat_with};
 use tokio_stream::StreamExt;
+use volga::sse;
 use volga::error::Error;
+use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_adds_access_control_allow_origin_header() {
-    tokio::spawn(async {
-        let mut app = App::new()
-            .bind("127.0.0.1:7944");
+    let server = TestServer::spawn(|app| {
         app.map_get("/events", || async {
             let stream = repeat_with(|| "data: Pass!\n\n")
                 .map(Ok::<&str, Error>)
                 .take(2);
             sse!(stream)
         });
-        app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.get("http://127.0.0.1:7944/events")
-            .send()
-            .await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .get(server.url("/events"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "data: Pass!\n\ndata: Pass!\n\n")
+    assert_eq!(response.text().await.unwrap(), "data: Pass!\n\ndata: Pass!\n\n");
+    
+    server.shutdown().await;
 }

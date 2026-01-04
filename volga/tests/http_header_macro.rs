@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![cfg(feature = "macros")]
 
 use volga_macros::http_header;
 use volga::headers::FromHeaders;

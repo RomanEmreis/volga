@@ -1,4 +1,5 @@
 ﻿#![allow(missing_docs)]
+#![cfg(all(feature = "test", feature = "decompression-full"))]
 
 use volga::{Json, ok};
 use serde_json::{Value, json};
@@ -10,9 +11,7 @@ use async_compression::tokio::write::{
     ZstdEncoder
 };
 use tokio::io::AsyncWriteExt;
-
-mod common;
-use common::TestServer;
+use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_decompress_brotli() {

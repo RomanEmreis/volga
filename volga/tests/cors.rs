@@ -1,4 +1,5 @@
 ﻿#![allow(missing_docs)]
+#![cfg(all(feature = "test", feature = "middleware"))]
 
 use volga::headers::{
     ACCESS_CONTROL_ALLOW_ORIGIN,
@@ -7,9 +8,7 @@ use volga::headers::{
     ORIGIN,
 };
 use volga::http::{Method, StatusCode};
-
-mod common;
-use common::TestServer;
+use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_adds_access_control_allow_origin_header() {

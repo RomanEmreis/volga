@@ -5,10 +5,13 @@ exclude-files = [
     "volga/tests/*",
     "volga/benches/*",
     "volga-macros/src/*",
+    
+    # This is covered implicitly in integration tests
+    "volga/src/server/*",
 
-    # These are covered implicitly in integration tests
-    "volga/src/server/http1.rs",
-    "volga/src/server/http2.rs",
+    # This is test utilities that used in integration tests
+    "volga/src/test/*",
+    "volga/src/test.rs",
 ]
 
 ignore-tests = true
