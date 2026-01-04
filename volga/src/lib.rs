@@ -54,6 +54,8 @@ pub mod auth;
 pub mod rate_limiting;
 #[cfg(test)]
 pub mod test_utils;
+#[cfg(any(test, feature = "test"))]
+pub mod test;
 
 pub use crate::app::App;
 pub use crate::http::{

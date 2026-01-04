@@ -1,9 +1,8 @@
 ﻿#![allow(missing_docs)]
+#![cfg(all(feature = "test", feature = "compression-full"))]
 
 use volga::ok;
-
-mod common;
-use common::TestServer;
+use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_returns_brotli_compressed() {

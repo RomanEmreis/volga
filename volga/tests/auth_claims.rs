@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![cfg(all(feature = "macros", feature = "jwt-auth-full"))]
 
 use volga::auth::AuthClaims;
 use volga_macros::Claims;

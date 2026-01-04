@@ -435,9 +435,12 @@ mod tests {
         assert_eq!(SignedCookies::source(), Source::Parts);
     }
     
-    #[test]
-    fn it_reads_signed_key_from_bytes() {
-        let _ = SignedKey::from_file("tests/resources/key");
+    #[tokio::test]
+    async fn it_reads_signed_key_from_bytes() {
+        let temp_file = crate::test::TempFile::new(
+            "f3d9e2a44c6b172a1ea9b9d05e5fe1bcaa8679d032ccae271c503af9618bb2ef7c4e51452dbfcd96f6e9c9d09166a3de77e"
+        ).await;
+        let _ = SignedKey::from_file(&temp_file.path);
     }
 
     #[test]

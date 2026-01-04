@@ -1,13 +1,13 @@
 ﻿#![allow(missing_docs)]
+#![cfg(feature = "test")]
 
 use volga::{File, HttpBody, ok};
-mod common;
-use common::TestServer;
+use volga::test::{TestServer, TempFile};
 
 #[tokio::test]
 async fn it_saves_uploaded_file() {
-    let temp_dir = tempfile::TempDir::new().unwrap();
-    let upload_path = temp_dir.path().join("uploaded.txt");
+    let temp_file = TempFile::empty();
+    let upload_path = temp_file.path;
     let path_for_handler = upload_path.clone();
 
     let server = TestServer::spawn(move |app| {
@@ -20,7 +20,8 @@ async fn it_saves_uploaded_file() {
         });
     }).await;
 
-    let file = tokio::fs::File::open("tests/resources/test_file.txt")
+    let temp_file = TempFile::new("Hello, this is some file content!").await;
+    let file = tokio::fs::File::open(temp_file.path)
         .await
         .unwrap();
     let body = HttpBody::file(file);
@@ -43,8 +44,8 @@ async fn it_saves_uploaded_file() {
 async fn it_saves_uploaded_multipart() {
     use volga::Multipart;
 
-    let temp_dir = tempfile::TempDir::new().unwrap();
-    let upload_path = temp_dir.path().to_path_buf();
+    let temp_file = TempFile::empty();
+    let upload_path = temp_file.dir_path().to_owned();
     let path_for_handler = upload_path.clone();
     
     let server = TestServer::spawn(move |app| {
@@ -56,8 +57,10 @@ async fn it_saves_uploaded_multipart() {
         });
     }).await;
 
+    let temp_file = TempFile::new("Hello, this is some file content!").await;
+    let file_name = temp_file.file_name().to_owned();
     let form = reqwest::multipart::Form::new()
-        .file("test_file", "tests/resources/test_file.txt")
+        .file(file_name, temp_file.path.as_path())
         .await
         .unwrap();
 

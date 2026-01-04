@@ -1,91 +1,76 @@
 #![allow(missing_docs)]
+#![cfg(all(feature = "test", feature = "middleware"))]
 
-use volga::App;
+use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_configures_cache_control_for_group() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7962");
-
+    let server = TestServer::spawn(|app| {
         app.group("/testing", |api| {
-            api
-                .with_cache_control(|c| c
-                    .with_max_age(60)
-                    .with_immutable()
-                    .with_public())
-                .map_get("/test", || async { "Pass!" });
+            api.with_cache_control(|c| c
+                .with_max_age(60)
+                .with_immutable()
+                .with_public());
+            api.map_get("/test", || async { "Pass!" });
         });
-
-        app.run().await
-    });
-
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.get("http://127.0.0.1:7962/testing/test").send().await
-    }).await.unwrap().unwrap();
+    }).await;
+    
+    let response = server.client()
+        .get(server.url("/testing/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("Cache-Control").unwrap(), "max-age=60, public, immutable");
     assert_eq!(response.text().await.unwrap(), "Pass!");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_configures_cache_control_for_route() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7963");
-
+    let server = TestServer::spawn(|app| {
         app.map_get("/test", || async { "Pass!" })
             .with_cache_control(|c| c
                 .with_max_age(60)
                 .with_immutable()
                 .with_public());
+    }).await;
 
-        app.run().await
-    });
-
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.get("http://127.0.0.1:7963/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .get(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("Cache-Control").unwrap(), "max-age=60, public, immutable");
     assert_eq!(response.text().await.unwrap(), "Pass!");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_configures_cache_control() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7964");
-
+    let server = TestServer::spawn(|app| {
         app.use_cache_control(|c| c
             .with_max_age(60)
             .with_immutable()
             .with_public());
-        
+
         app.map_get("/test", || async { "Pass!" });
+    }).await;
 
-        app.run().await
-    });
-
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.get("http://127.0.0.1:7964/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .get(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("Cache-Control").unwrap(), "max-age=60, public, immutable");
     assert_eq!(response.text().await.unwrap(), "Pass!");
+    
+    server.shutdown().await;
 }

@@ -1,221 +1,219 @@
 ﻿#![allow(missing_docs)]
+#![cfg(feature = "test")]
 
 use reqwest::Method;
-use volga::{App, HttpRequest, Results};
+use volga::{HttpRequest, Results};
+use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_maps_to_get_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7877");
+    let server = TestServer::spawn(|app| {
         app.map_get("/test", || async {
             Results::text("Pass!")
         });
-       app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.get("http://127.0.0.1:7877/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .get(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_maps_to_post_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7876");
+    let server = TestServer::spawn(|app| {
         app.map_post("/test", || async {
             Results::text("Pass!")
         });
-       app.run().await
-    });
-
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.post("http://127.0.0.1:7876/test").send().await
-    }).await.unwrap().unwrap();
+    }).await;
+    
+    let response = server.client()
+        .post(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_maps_to_put_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7875");
+    let server = TestServer::spawn(|app| {
         app.map_put("/test", || async {
             Results::text("Pass!")
         });
-       app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.put("http://127.0.0.1:7875/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .put(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_maps_to_patch_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7874");
+    let server = TestServer::spawn(|app| {
         app.map_patch("/test", || async {
             Results::text("Pass!")
         });
-       app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.patch("http://127.0.0.1:7874/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .patch(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_maps_to_delete_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7873");
+    let server = TestServer::spawn(|app| {
         app.map_delete("/test", || async {
             Results::text("Pass!")
         });
-       app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.delete("http://127.0.0.1:7873/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .delete(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_maps_to_head_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7903");
+    let server = TestServer::spawn(|app| {
         app.map_head("/test", || async {
             Results::ok()
         });
-        app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.head("http://127.0.0.1:7903/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .head(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_maps_to_options_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7904");
+    let server = TestServer::spawn(|app| {
         app.map_options("/test", || async {
             Results::ok()
         });
-        app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.request(Method::OPTIONS, "http://127.0.0.1:7904/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .request(Method::OPTIONS, server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_maps_to_trace_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7905");
+    let server = TestServer::spawn(|app| {
         app.map_trace("/test", |req: HttpRequest| async {
             let boxed_body = req.into_boxed_body();
             Results::stream(boxed_body)
         });
-        app.run().await
-    });
-    
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.request(Method::TRACE, "http://127.0.0.1:7905/test").send().await
-    }).await.unwrap().unwrap();
+    }).await;
 
+    let response = server.client()
+        .request(Method::TRACE, server.url("/test"))
+        .send()
+        .await
+        .unwrap();
+    
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "");
+    
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_maps_to_head_along_with_get_request() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7906");
+    let server = TestServer::spawn(|app| {
         app.map_get("/test", || async {
             Results::text("Pass!")
         });
-        app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.head("http://127.0.0.1:7906/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .head(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("Content-Length").unwrap(), "5");
     assert_eq!(response.text().await.unwrap(), "");
+    
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_ignores_head_along_with_get_request_if_disabled_explicitly() {
+    let server = TestServer::builder()
+        .with_app(|app| app.without_implicit_head())
+        .setup(|app| {
+            app.map_get("/test", || async {
+                Results::text("Pass!")
+            });
+        })
+        .build()
+        .await;
+
+    let response = server.client()
+        .head(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_client_error());
+    assert_eq!(response.status(), 405);
+
+    server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_overrides_default_head_map() {
-    tokio::spawn(async {
-        let mut app = App::new().bind("127.0.0.1:7907");
+    let server = TestServer::spawn(|app| {
         app.map_head("/test", || async {
             volga::ok!([
                 ("x-header", "Hello from HEAD")
@@ -226,19 +224,17 @@ async fn it_overrides_default_head_map() {
                 ("x-header", "Hello from GET")
             ])
         });
-        app.run().await
-    });
+    }).await;
 
-    let response = tokio::spawn(async {
-        let client = if cfg!(all(feature = "http1", not(feature = "http2"))) {
-            reqwest::Client::builder().http1_only().build().unwrap()
-        } else {
-            reqwest::Client::builder().http2_prior_knowledge().build().unwrap()
-        };
-        client.head("http://127.0.0.1:7907/test").send().await
-    }).await.unwrap().unwrap();
+    let response = server.client()
+        .head(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("x-header").unwrap(), "Hello from HEAD");
     assert_eq!(response.text().await.unwrap(), "");
+    
+    server.shutdown().await;
 }
