@@ -785,7 +785,7 @@ mod tests {
     fn it_disables_implicit_head() {
         let app = App::new().without_implicit_head();
 
-        assert_eq!(app.implicit_head, false)
+        assert!(!app.implicit_head)
     }
     
     #[test]
