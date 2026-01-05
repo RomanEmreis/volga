@@ -145,7 +145,41 @@ pub struct App {
     /// produce a response body.
     ///
     /// Default: `true`
-    implicit_head: bool
+    implicit_head: bool,
+
+    /// Maximum total size of all HTTP request headers, in bytes.
+    ///
+    /// This limit is enforced in a protocol-aware manner:
+    ///
+    /// - For HTTP/2, the limit is applied at the protocol level via
+    ///   `SETTINGS_MAX_HEADER_LIST_SIZE`, allowing the request to be
+    ///   rejected early during header decoding.
+    /// 
+    /// - For HTTP/1, the limit is validated after headers are parsed,
+    ///   using a middleware check.
+    ///
+    /// When exceeded, the request is rejected with `431 Request Header Fields Too Large`.
+    ///
+    /// If not set, the framework relies on the underlying HTTP implementation
+    /// defaults.
+    max_header_size: Option<usize>,
+
+    /// Maximum number of HTTP request headers.
+    ///
+    /// This limit is enforced in a protocol-aware manner:
+    ///
+    /// - For HTTP/1, the limit is applied by the HTTP/1 parser,
+    ///   rejecting the request before it reaches application code.
+    /// 
+    /// - For HTTP/2, the limit is validated after headers are decoded,
+    ///   using a middleware check.
+    ///
+    /// When exceeded, the request is rejected with
+    /// `431 Request Header Fields Too Large`.
+    ///
+    /// If not set, the framework relies on the underlying HTTP implementation
+    /// defaults.
+    max_header_count: Option<usize>
 }
 
 /// Wraps a socket
@@ -223,6 +257,12 @@ pub(crate) struct AppInstance {
     /// Request body limit
     pub(super) body_limit: RequestBodyLimit,
     
+    /// Maximum total size (in bytes) of HTTP headers per request.
+    pub(super) max_header_size: Option<usize>,
+
+    /// Maximum number of HTTP headers per request.
+    pub(super) max_header_count: Option<usize>,
+
     /// Request/Middleware pipeline
     pipeline: Pipeline,
 }
@@ -246,6 +286,8 @@ impl TryFrom<App> for AppInstance {
             body_limit: app.body_limit,
             pipeline: app.pipeline.build(),
             graceful_shutdown: GracefulShutdown::new(),
+            max_header_count: app.max_header_count,
+            max_header_size: app.max_header_size,
             #[cfg(feature = "static-files")]
             host_env: app.host_env,
             #[cfg(feature = "di")]
@@ -315,6 +357,8 @@ impl App {
             body_limit: Default::default(),
             no_delay: false,
             implicit_head: true,
+            max_header_count: None,
+            max_header_size: None,
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
@@ -380,6 +424,24 @@ impl App {
         self.implicit_head = false;
         self
     }
+
+    /// Sets the maximum total size of all HTTP request headers, in bytes.
+    ///
+    /// See [`App::max_header_size`] for details on how this limit is enforced
+    /// for different HTTP protocol versions.
+    pub fn with_max_header_size(mut self, size: usize) -> Self { 
+        self.max_header_size = Some(size);
+        self
+    }
+
+    /// Sets the maximum allowed number of HTTP request headers.
+    ///
+    /// See [`App::max_header_count`] for details on how this limit is enforced
+    /// for different HTTP protocol versions.
+    pub fn with_max_header_count(mut self, count: usize) -> Self { 
+        self.max_header_count = Some(count);
+        self
+     }
 
     /// Starts the [`App`] with its own Tokio runtime.
     ///
@@ -701,6 +763,29 @@ mod tests {
         let app = App::new().without_body_limit();
 
         let RequestBodyLimit::Disabled = app.body_limit else { panic!() };
+    }
+
+    #[test]
+    fn it_sets_max_headers_size_limit() {
+        let app = App::new().with_max_header_size(1024);
+        let Some(limit) = app.max_header_size else { unreachable!() };
+
+        assert_eq!(limit, 1024)
+    }
+
+    #[test]
+    fn it_sets_max_headers_count_limit() {
+        let app = App::new().with_max_header_count(10);
+        let Some(limit) = app.max_header_count else { unreachable!() };
+
+        assert_eq!(limit, 10)
+    }
+
+    #[test]
+    fn it_disables_implicit_head() {
+        let app = App::new().without_implicit_head();
+
+        assert_eq!(app.implicit_head, false)
     }
     
     #[test]

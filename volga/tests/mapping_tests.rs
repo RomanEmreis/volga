@@ -190,7 +190,7 @@ async fn it_maps_to_head_along_with_get_request() {
 #[tokio::test]
 async fn it_ignores_head_along_with_get_request_if_disabled_explicitly() {
     let server = TestServer::builder()
-        .with_app(|app| app.without_implicit_head())
+        .configure(|app| app.without_implicit_head())
         .setup(|app| {
             app.map_get("/test", || async {
                 Results::text("Pass!")

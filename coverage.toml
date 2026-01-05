@@ -10,8 +10,8 @@ exclude-files = [
     "volga/src/server/*",
 
     # This is test utilities that used in integration tests
-    "volga/src/test/*",
-    "volga/src/test.rs",
+    #"volga/src/test/*",
+    #"volga/src/test.rs",
 ]
 
 ignore-tests = true

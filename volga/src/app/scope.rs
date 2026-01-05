@@ -70,9 +70,32 @@ impl Scope {
             None => {
                 #[cfg(feature = "tracing")]
                 tracing::warn!("app instance could not be upgraded; aborting...");
+
                 return status!(500)
             }
         };
+
+        {
+            let headers = request.headers();
+
+            #[cfg(feature = "http1")]
+            if shared.max_header_size
+                .is_some_and(|size| !check_max_header_size(headers, size)) {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("Request rejected due to headers exceeding configured limits");
+
+                return status!(431, "Request headers too large");
+            }
+
+            #[cfg(feature = "http2")]
+            if shared.max_header_count
+                .is_some_and(|count| !check_max_header_count(headers, count)) {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("Request rejected due to headers exceeding configured limits");
+
+                return status!(431, "Request headers too large");
+            }
+        }
         
         #[cfg(feature = "static-files")]
         let request = {
@@ -142,7 +165,7 @@ impl Scope {
                 match response {
                     Ok(response) if parts.method != Method::HEAD => Ok(response),
                     Ok(mut response) => {
-                        Self::keep_content_length(response.size_hint(), response.headers_mut());
+                        keep_content_length(response.size_hint(), response.headers_mut());
                         *response.body_mut() = HttpBody::empty();
                         Ok(response)
                     },
@@ -151,20 +174,36 @@ impl Scope {
             }
         }
     }
-    
-    fn keep_content_length(size_hint: SizeHint, headers: &mut HeaderMap) {
-        if headers.contains_key(CONTENT_LENGTH) { 
-            return;
-        }
-        
-        if let Some(size) = size_hint.exact() { 
-            let content_length = if size == 0 { 
-                HeaderValue::from_static("0")
-            } else {
-                let mut buffer = itoa::Buffer::new();
-                HeaderValue::from_str(buffer.format(size)).unwrap()
-            };
-            headers.insert(CONTENT_LENGTH, content_length);
-        } 
+}
+
+fn keep_content_length(size_hint: SizeHint, headers: &mut HeaderMap) {
+    if headers.contains_key(CONTENT_LENGTH) { 
+        return;
     }
+    
+    if let Some(size) = size_hint.exact() { 
+        let content_length = if size == 0 { 
+            HeaderValue::from_static("0")
+        } else {
+            let mut buffer = itoa::Buffer::new();
+            HeaderValue::from_str(buffer.format(size)).unwrap()
+        };
+        headers.insert(CONTENT_LENGTH, content_length);
+    } 
+}
+
+#[inline(always)]
+#[cfg(feature = "http2")]
+fn check_max_header_count(headers: &HeaderMap, max_header_count: usize) -> bool {
+    headers.len() < max_header_count
+}
+
+#[inline(always)]
+#[cfg(feature = "http1")]
+fn check_max_header_size(headers: &HeaderMap, max_header_size: usize) -> bool {
+    let total_size: usize = headers.iter()
+        .map(|(name, value)| name.as_str().len() + value.as_bytes().len())
+        .sum();
+
+    total_size < max_header_size
 }

@@ -24,7 +24,7 @@ async fn it_works_with_tls_with_no_auth() {
         
     let server = TestServer::builder()
         .with_https()
-        .with_app(|app| app
+        .configure(|app| app
             .set_tls(TlsConfig::from_pem_files(
                 "tests/tls/server.pem",
                 "tests/tls/server.key")))
@@ -59,7 +59,7 @@ async fn it_works_with_tls_with_required_auth_authenticated() {
 
     let server = TestServer::builder()
         .with_https()
-        .with_app(|app| app
+        .configure(|app| app
             .with_tls(|tls| tls
                 .with_cert_path("tests/tls/server.pem")
                 .with_key_path("tests/tls/server.key")
@@ -102,7 +102,7 @@ async fn it_works_with_tls_with_required_auth_unauthenticated() {
 
     let server = TestServer::builder()
         .with_https()
-        .with_app(|app| app
+        .configure(|app| app
             .with_tls(|tls| tls
                 .with_cert_path("tests/tls/server.pem")
                 .with_key_path("tests/tls/server.key")
@@ -137,7 +137,7 @@ async fn it_works_with_tls_with_optional_auth_authenticated() {
 
     let server = TestServer::builder()
         .with_https()
-        .with_app(|app| app
+        .configure(|app| app
             .with_tls(|tls| tls
                 .with_cert_path("tests/tls/server.pem")
                 .with_key_path("tests/tls/server.key")
@@ -180,7 +180,7 @@ async fn it_works_with_tls_with_optional_auth_unauthenticated() {
 
     let server = TestServer::builder()
         .with_https()
-        .with_app(|app| app
+        .configure(|app| app
             .with_tls(|tls| tls
                 .with_cert_path("tests/tls/server.pem")
                 .with_key_path("tests/tls/server.key")
@@ -216,7 +216,7 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
 
     let http_port = TestServer::get_free_port();
     let server = TestServer::builder()
-        .with_app(move |app| app
+        .configure(move |app| app
             .set_tls(TlsConfig::from_pem_files(
                 "tests/tls/server.pem",
                 "tests/tls/server.key"))
@@ -270,7 +270,7 @@ async fn it_works_with_tls_with_https_redirection() {
 
     let http_port = TestServer::get_free_port();
     let server = TestServer::builder()
-        .with_app(move |app| app
+        .configure(move |app| app
             .set_tls(TlsConfig::from_pem_files(
                 "tests/tls/server.pem",
                 "tests/tls/server.key"))
@@ -320,7 +320,7 @@ async fn it_returns_404_if_no_host() {
 
     let http_port = TestServer::get_free_port();
     let server = TestServer::builder()
-        .with_app(move |app| app
+        .configure(move |app| app
             .set_tls(TlsConfig::from_pem_files(
                 "tests/tls/server.pem",
                 "tests/tls/server.key"))

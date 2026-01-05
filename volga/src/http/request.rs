@@ -66,9 +66,19 @@ impl HttpRequest {
     pub fn new(request: Request<Incoming>) -> Self {
         Self { inner: request.map(HttpBody::incoming) }
     }
-    
-    /// Turns [`HttpRequest's`] body into a limited body if it's specified
-    pub fn into_limited(self, body_limit: RequestBodyLimit) -> Self {
+
+    /// Returns this [`HttpRequest`] body limit.
+    pub fn body_limit(&self) -> Option<usize> {
+        self.extensions()
+            .get::<RequestBodyLimit>()
+            .and_then(|l| match l {
+                RequestBodyLimit::Enabled(size) => Some(*size),
+                RequestBodyLimit::Disabled => None,
+            })
+    }
+
+    #[inline]
+    pub(crate) fn into_limited(self, body_limit: RequestBodyLimit) -> Self {
         match body_limit {
             RequestBodyLimit::Disabled => self,
             RequestBodyLimit::Enabled(limit) => {
@@ -515,5 +525,18 @@ mod tests {
         req.insert_header::<Foo>(Header::from("x-foo"));
 
         assert_eq!(req.extract::<Header<Foo>>().unwrap().into_inner(), "x-foo");
+    }
+
+    #[test]
+    fn it_gets_body_limit() {
+        let (parts, body) = Request::get("/test")
+            .extension(RequestBodyLimit::Enabled(100))
+            .body(HttpBody::full("Hello, World!"))
+            .unwrap()
+            .into_parts();
+
+        let req = HttpRequest::from_parts(parts, body);
+
+        assert_eq!(req.body_limit(), Some(100))
     }
 }

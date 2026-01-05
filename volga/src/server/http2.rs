@@ -21,6 +21,10 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             let mut connection_builder = Builder::new(TokioExecutor::new());
             connection_builder.http2().enable_connect_protocol();
             
+            if let Some(max_header_size) = app_instance.max_header_size {
+                connection_builder.http2().max_header_list_size(max_header_size as u32);
+            }
+            
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
             let connection = app_instance.graceful_shutdown.watch(connection);
             
@@ -34,7 +38,11 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         }
         #[cfg(not(feature = "ws"))]
         {
-            let connection_builder = Builder::new(TokioExecutor::new());
+            let mut connection_builder = Builder::new(TokioExecutor::new());
+            if let Some(max_header_size) = app_instance.max_header_size {
+                connection_builder.max_header_list_size(max_header_size as u32);
+            }
+
             let connection = connection_builder.serve_connection(self.io, scope);
             let connection = app_instance.graceful_shutdown.watch(connection);
 
