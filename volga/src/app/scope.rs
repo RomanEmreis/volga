@@ -17,6 +17,7 @@ use crate::{
     error::{Error, handler::call_weak_err_handler}, 
     http::endpoints::FindResult,
     HttpResponse, HttpRequest, HttpBody, HttpResult, ClientIp,
+    Limit,
     status
 };
 
@@ -79,8 +80,8 @@ impl Scope {
             let headers = request.headers();
 
             #[cfg(feature = "http1")]
-            if shared.max_header_size
-                .is_some_and(|size| !check_max_header_size(headers, size)) {
+            if let Limit::Limited(max_header_size) = shared.max_header_size 
+                && !check_max_header_size(headers, max_header_size) {
                 #[cfg(feature = "tracing")]
                 tracing::warn!("Request rejected due to headers exceeding configured limits");
 
@@ -88,8 +89,8 @@ impl Scope {
             }
 
             #[cfg(feature = "http2")]
-            if shared.max_header_count
-                .is_some_and(|count| !check_max_header_count(headers, count)) {
+            if let Limit::Limited(max_header_count) = shared.max_header_count 
+                && !check_max_header_count(headers, max_header_count) {
                 #[cfg(feature = "tracing")]
                 tracing::warn!("Request rejected due to headers exceeding configured limits");
 

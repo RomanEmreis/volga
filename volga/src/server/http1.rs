@@ -1,4 +1,5 @@
 ﻿use super::Server;
+use crate::Limit;
 use crate::app::{AppInstance, scope::Scope};
 use std::sync::Arc;
 use hyper::rt::{Read, Write};
@@ -21,10 +22,10 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         #[cfg(feature = "ws")]
         {
             let mut connection_builder = Builder::new(TokioExecutor::new());
-            if let Some(max_header_count) = app_instance.max_header_count {
+            if let Limit::Limited(max_header_count) = app_instance.max_header_count {
                 connection_builder.http1().max_headers(max_header_count);
             }
-
+            
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
             let connection = app_instance.graceful_shutdown.watch(connection);
             
@@ -39,7 +40,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         #[cfg(not(feature = "ws"))]
         {
             let mut connection_builder = Builder::new();
-            if let Some(max_header_count) = app_instance.max_header_count {
+            if let Limit::Limited(max_header_count) = app_instance.max_header_count {
                 connection_builder.max_headers(max_header_count);
             }
 
