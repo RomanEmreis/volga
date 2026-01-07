@@ -41,7 +41,7 @@ async fn it_adds_middleware_request() {
 async fn it_adds_map_ok_middleware() {
     let server = TestServer::spawn(|app| {
         app.map_ok(|mut resp: HttpResponse| async move {
-            resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
+            resp.insert_header(Header::<XTest>::try_from("Test").unwrap());
             resp
         });
         app.map_get("/test", || async {
@@ -93,9 +93,7 @@ async fn it_adds_map_ok_middleware_for_route() {
         app
             .map_get("/test", async || "Pass!")
             .map_ok(|mut resp: HttpResponse| async move {
-                resp
-                    .headers_mut()
-                    .insert("X-Test", "Test".parse().unwrap());
+                resp.try_insert_header::<XTest>("Test").unwrap();
                 resp
             });
     }).await;
@@ -144,7 +142,7 @@ async fn it_adds_map_ok_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
             api.map_ok(|mut resp: HttpResponse| async move {
-                    resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
+                    resp.try_insert_header::<XTest>("Test").unwrap();
                     resp
                 });
             api.map_get("/test", async || "Pass!");

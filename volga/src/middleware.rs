@@ -146,15 +146,18 @@ impl App {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    /// use volga::{App, HttpResponse, headers::{Header, custom_headers}};
     ///
+    /// custom_headers! {
+    ///     (CustomHeader, "x-custom-header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.map_ok(|mut resp: HttpResponse| async move { 
-    ///     resp.headers_mut()
-    ///         .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///     resp.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///     resp
     /// });
     /// 
@@ -311,12 +314,16 @@ impl<'a> Route<'a> {
         self.map_middleware(filter_fn)
     }
     
-    /// Adds a middleware called for this route when [`HttpResult`] is [`Ok`]
+    /// Adds middleware called for this route when [`HttpResult`] is [`Ok`]
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    /// use volga::{App, HttpResponse, headers::{Header, custom_headers}};
     ///
+    /// custom_headers! {
+    ///     (CustomHeader, "x-custom-header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
@@ -324,8 +331,7 @@ impl<'a> Route<'a> {
     /// app
     ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
     ///     .map_ok(|mut resp: HttpResponse| async move { 
-    ///         resp.headers_mut()
-    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         resp.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         resp
     ///     });
     /// 
@@ -510,16 +516,19 @@ impl<'a> RouteGroup<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    /// use volga::{App, HttpResponse, headers::{Header, custom_headers}};
     ///
+    /// custom_headers! {
+    ///     (CustomHeader, "x-custom-header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.group("/positive", |api| {
     ///     api.map_ok(|mut resp: HttpResponse| async move { 
-    ///         resp.headers_mut()
-    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         resp.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         resp
     ///     });
     ///     api.map_get("/sum", |x: i32, y: i32| async move { 

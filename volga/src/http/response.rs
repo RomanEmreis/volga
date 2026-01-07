@@ -1,21 +1,43 @@
 ﻿//! HTTP response utilities
  
-use crate::{builder, response, RESPONSE_ERROR};
+use crate::response;
 use crate::error::Error;
-use crate::http::body::{BoxBody, HttpBody};
+use crate::http::{
+    body::{BoxBody, HttpBody},
+    Extensions,
+    StatusCode,
+    Version
+};
 
 use std::collections::HashMap;
 use tokio::fs::File;
 use serde::Serialize;
 
-use hyper::{header::{HeaderName, HeaderValue}, http, http::response::Builder, Response, StatusCode};
-use hyper::header::{IntoHeaderName, CONTENT_DISPOSITION, CONTENT_TYPE, TRANSFER_ENCODING};
+use hyper::{
+    header::{
+        IntoHeaderName,
+        HeaderMap,
+        HeaderName, 
+        HeaderValue,
+        CONTENT_DISPOSITION, 
+        CONTENT_TYPE, 
+        TRANSFER_ENCODING
+    }, 
+    http, 
+    body::{Body, SizeHint},
+    http::response::Parts, 
+    Response,
+};
 
 use mime::{
     APPLICATION_JSON,
     APPLICATION_OCTET_STREAM,
     TEXT_PLAIN
 };
+
+use crate::headers::{FromHeaders, Header, HeaderError};
+
+pub use builder::HttpResponseBuilder;
 
 pub mod builder;
 pub mod macros;
@@ -77,13 +99,240 @@ pub struct ResponseContext<T: Serialize> {
 /// Represents an HTTP response
 /// 
 /// See [`Response`]
-pub type HttpResponse = Response<HttpBody>;
+pub struct HttpResponse {
+    inner: Response<HttpBody>
+}
+
+impl std::fmt::Debug for HttpResponse {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HttpResponse(..)")
+    }
+}
 
 /// Represents a result of HTTP request that could be 
 /// either [`HttpResponse`] or [`Error`]
 pub type HttpResult = Result<HttpResponse, Error>;
 
-/// s
+impl From<HttpResponse> for Response<HttpBody> {
+    #[inline]
+    fn from(resp: HttpResponse) -> Self {
+        resp.into_inner()
+    }
+}
+
+impl HttpResponse {
+    /// Creates a new [`HttpResponseBuilder`] with default settings.
+    ///
+    /// By default:
+    /// - status is set to `200 OK`
+    /// - no headers are set
+    #[inline]
+    pub fn builder() -> HttpResponseBuilder {
+        HttpResponseBuilder {
+            status: StatusCode::OK,
+            headers: HeaderMap::new(),
+        }
+    }
+    
+    /// Returns a reference to the associated HTTP header map.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest};
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert!(req.headers().is_empty());
+    /// });
+    /// ```
+    #[inline]
+    pub fn headers(&self) -> &HeaderMap {
+        self.inner.headers()
+    }
+
+    /// Returns a mutable reference to the associated extensions.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
+        self.inner.headers_mut()
+    }
+
+    /// Returns a reference to the associated HTTP method.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest, http::Method};
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert_eq!(*req.method(), Method::GET);
+    /// });
+    /// ```
+    #[inline]
+    pub fn status(&self) -> StatusCode {
+        self.inner.status()
+    }
+
+    /// Represents a version of the HTTP spec.
+    #[inline]
+    pub fn version(&self) -> Version {
+        self.inner.version()
+    }
+
+    /// Returns a reference to the associated extensions.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn extensions(&self) -> &Extensions {
+        self.inner.extensions()
+    }
+
+    /// Returns a mutable reference to the associated extensions.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn extensions_mut(&mut self) -> &mut Extensions {
+        self.inner.extensions_mut()
+    }
+
+    /// Returns a reference to the associated HTTP body.
+    #[inline]
+    pub fn body(&self) -> &HttpBody {
+        self.inner.body()
+    }
+
+    /// Returns the bounds on the remaining length of the stream.
+    /// 
+    /// When the exact remaining length of the stream is known, 
+    /// the upper bound will be set and will equal the lower bound.
+    #[inline]
+    pub fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+
+    /// Attempts to insert the header into the request, replacing any existing
+    /// values with the same header name.
+    ///
+    /// Returns an error if the header cannot be constructed.
+    #[inline]
+    pub fn try_insert_header<T>(
+        &mut self,
+        header: impl TryInto<Header<T>, Error = Error>
+    ) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        let header = header.try_into()?;
+        Ok(self.insert_header(header))
+    }
+
+    /// Inserts the header into the request, replacing any existing values
+    /// with the same header name.
+    ///
+    /// This method always overwrites previous values.
+    #[inline]
+    pub fn insert_header<T>(&mut self, header: Header<T>) -> Header<T>
+    where
+        T: FromHeaders,
+    {
+        self.inner.headers_mut().insert(
+            header.name(),
+            header.value().clone()
+        );
+        header
+    }
+
+    /// Appends a new value for the given header name.
+    ///
+    /// Existing values with the same name are preserved.
+    /// Multiple values for the same header may be present.
+    #[inline]
+    pub fn append_header<T>(&mut self, header: Header<T>) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        self.inner.headers_mut().append(
+            header.name(),
+            header.value().clone()
+        );
+        Ok(header)
+    }
+
+    /// Attempts to append a new value for the given header name.
+    ///
+    /// Returns an error if the header cannot be constructed or appended.
+    #[inline]
+    pub fn try_append_header<T>(
+        &mut self,
+        header: impl TryInto<Header<T>, Error = Error>
+    ) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        let header = header.try_into()?;
+        self.append_header(header)
+    }
+
+    /// Removes all values for the given header name.
+    ///
+    /// Returns `true` if at least one header value was removed.
+    #[inline]
+    pub fn remove_header<T>(&mut self) -> bool
+    where
+        T: FromHeaders,
+    {
+        self.inner
+            .headers_mut()
+            .remove(&T::NAME)
+            .is_some()
+    }
+
+    /// Attempts to remove all values for the given header name.
+    ///
+    /// Returns `true` if at least one value was removed.
+    #[inline]
+    pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(HeaderError::from_invalid_header_name)?;
+
+        Ok(self.inner.headers_mut().remove(name).is_some())
+    }
+
+    /// Returns a mutable reference to the associated HTTP body.
+    #[inline]
+    pub(crate) fn body_mut(&mut self) -> &mut HttpBody {
+        self.inner.body_mut()
+    }
+    
+    /// Unwraps the inner request
+    #[inline]
+    pub(crate) fn into_inner(self) -> Response<HttpBody> {
+        self.inner
+    }
+    
+    /// Consumes the response returning the head and body parts.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
+        self.inner.into_parts()
+    }
+
+    /// Creates a new [`HttpResponse`] with the given head and body
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
+        Self { inner: Response::from_parts(parts, body) }
+    }
+
+    /// Creates a new [`HttpResponse`] from [`Response<HttpBody>`] 
+    #[inline]
+    pub(crate) fn from_inner(inner: Response<HttpBody>) -> Self {
+        Self { inner }
+    }
+}
+
+/// Results helpers
 #[allow(missing_debug_implementations)]
 pub struct Results;
 
@@ -219,32 +468,6 @@ impl Results {
             HttpBody::empty(),
             [(CONTENT_TYPE, TEXT_PLAIN.as_ref())])
     }
-
-    #[inline]
-    fn create_custom_builder(status: StatusCode, headers: HashMap<String, String>) -> Builder {
-        let mut builder = builder!(status);
-        if let Some(headers_ref) = builder.headers_mut() {
-            for (name, value) in &headers {
-                if let (Ok(header_name), Ok(header_value)) = (
-                    HeaderName::from_bytes(name.as_bytes()),
-                    HeaderValue::from_bytes(value.as_bytes()),
-                ) {
-                    headers_ref.insert(header_name, header_value);
-                }
-            }
-            // if the content type is not provided - using the application/json by default
-            if headers_ref.get(&CONTENT_TYPE).is_none() {
-                headers_ref.insert(
-                    CONTENT_TYPE, 
-                    HeaderValue::from_static(APPLICATION_JSON.as_ref())
-                );
-            }
-        } else if cfg!(debug_assertions) {
-            #[cfg(feature = "tracing")]
-            tracing::error!("failed to write to HTTP headers");
-        }
-        builder
-    }
 }
 
 impl<T: Serialize> From<ResponseContext<T>> for HttpResult {
@@ -254,9 +477,29 @@ impl<T: Serialize> From<ResponseContext<T>> for HttpResult {
         let content = serde_json::to_vec(&content)?;
         let status = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
 
-        Results::create_custom_builder(status, headers)
-            .body(HttpBody::full(content))
-            .map_err(|_| Error::server_error(RESPONSE_ERROR))
+        let mut resp = HttpResponse::builder()
+            .status(status)?
+            .body(HttpBody::full(content))?;
+        
+        let header_map = resp.headers_mut();
+        headers.into_iter().for_each(|(key, value)| {
+            if let (Ok(header_name), Ok(header_value)) = (
+                HeaderName::from_bytes(key.as_bytes()),
+                HeaderValue::from_bytes(value.as_bytes()),
+            ) {
+                header_map.insert(header_name, header_value);
+            }
+        });
+
+        // if the content type is not provided - using the application/json by default
+        if header_map.get(&CONTENT_TYPE).is_none() {
+            header_map.insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static(APPLICATION_JSON.as_ref())
+            );
+        }
+        
+        Ok(resp)
     }
 }
 

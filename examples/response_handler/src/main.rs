@@ -4,7 +4,11 @@
 //! cargo run -p response_handler
 //! ```
 
-use volga::{App, HttpResponse, headers::HeaderValue};
+use volga::{App, HttpResponse, headers::custom_headers};
+
+custom_headers! {
+    (CustomHeader, "x-custom-header")
+}
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -23,12 +27,12 @@ async fn main() -> std::io::Result<()> {
 }
 
 async fn handler_group_response(mut resp: HttpResponse) -> HttpResponse {
-    resp.headers_mut().insert("x-custom-header", HeaderValue::from_static("for-group"));
+    resp.try_insert_header::<CustomHeader>("for-group").unwrap();
     resp
 }
 
 async fn handler_response(mut resp: HttpResponse) -> HttpResponse {
-    resp.headers_mut().insert("x-custom-header", HeaderValue::from_static("for-route"));
+    resp.try_insert_header::<CustomHeader>("for-route").unwrap();
     resp
 }
 

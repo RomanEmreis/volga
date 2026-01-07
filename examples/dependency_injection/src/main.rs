@@ -9,7 +9,7 @@ use volga::{
     App, Json,
     di::{Inject, Container, Dc, error::Error as DiError},
     error::Error,
-    headers::{HeaderValue, custom_headers},
+    headers::custom_headers,
     HttpRequest, HttpResponse, HttpResult, status
 };
 use std::{
@@ -49,8 +49,7 @@ async fn set_req_id(mut req: HttpRequest, log: Dc<RequestLog>) -> HttpRequest {
 
 async fn set_resp_id(mut resp: HttpResponse, log: Dc<RequestLog>) -> HttpResponse {
     log.append("ended");
-    let req_id = HeaderValue::from_str(log.request_id.as_str()).unwrap();
-    resp.headers_mut().insert("x-req-id", req_id);
+    resp.try_insert_header::<RequestId>(log.request_id.as_str()).unwrap();
     log.write();
     resp
 }

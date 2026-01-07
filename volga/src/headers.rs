@@ -7,6 +7,7 @@ pub use hyper::{
     header::{
         InvalidHeaderName,
         InvalidHeaderValue,
+        MaxSizeReached,
         ToStrError,
         ACCEPT_ENCODING, ACCEPT_RANGES,
         ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -94,6 +95,11 @@ impl HeaderError {
 
     #[inline]
     pub(crate) fn from_to_str_error(error: ToStrError) -> Error {
+        Error::client_error(format!("Header: {error}"))
+    }
+
+    #[inline]
+    pub(crate) fn from_max_size_reached(error: MaxSizeReached) -> Error {
         Error::client_error(format!("Header: {error}"))
     }
 }

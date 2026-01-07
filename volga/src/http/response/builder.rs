@@ -1,23 +1,104 @@
 ﻿//! HTTP response builder macro definition
 
+use std::fmt::{Debug, Formatter};
+use crate::{
+    error::Error,
+    headers::{HeaderName, HeaderValue, HeaderMap, HeaderError},
+    http::{HttpBody, HttpResponse, Response, StatusCode}
+};
+
 /// Default server name
 pub const SERVER_NAME: &str = "Volga";
 /// Default resource builder error
 pub const RESPONSE_ERROR: &str = "HTTP Response: Unable to create a response";
 
+/// Builder for [`HttpResponse`].
+///
+/// This type provides a controlled way to construct HTTP responses
+/// while preserving framework-level invariants.
+pub struct HttpResponseBuilder {
+    pub(super) status: StatusCode,
+    pub(super) headers: HeaderMap,
+}
+
+impl Debug for HttpResponseBuilder {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpResponseBuilder(...)").finish()
+    }
+}
+
+impl HttpResponseBuilder {
+    /// Sets the HTTP status code.
+    #[inline]
+    pub fn status<T>(mut self, status: T) -> Result<Self, Error>
+    where
+        T: TryInto<StatusCode>,
+        <T as TryInto<StatusCode>>::Error: Into<hyper::http::Error>,
+    {
+        self.status = status
+            .try_into()
+            .map_err(|err| Error::from(err.into()))?;
+        
+        Ok(self)
+    }
+
+    /// Appends an HTTP header value.
+    ///
+    /// If a header with the same name already exists, the value is appended
+    ///
+    /// Note: This may result in multiple values for the same header.
+    pub fn header<K, V>(mut self, key: K, value: V) -> Result<Self, Error>
+    where
+        K: TryInto<HeaderName>,
+        <K as TryInto<HeaderName>>::Error: Into<hyper::http::Error>,
+        V: TryInto<HeaderValue>,
+        <V as TryInto<HeaderValue>>::Error: Into<hyper::http::Error>,
+    {
+        let name = key
+            .try_into()
+            .map_err(|err| Error::from(err.into()))?;
+        let value = value
+            .try_into()
+            .map_err(|err| Error::from(err.into()))?;
+        
+        self
+            .headers
+            .try_append(name, value)
+            .map_err(HeaderError::from_max_size_reached)?;
+        
+        Ok(self)
+    }
+
+    /// Finalizes the response with the given body.
+    ///
+    /// # Errors
+    /// Returns an error if the response cannot be constructed.
+    pub fn body(self, body: HttpBody) -> Result<HttpResponse, Error> {
+        let mut response = Response::builder()
+            .status(self.status)
+            .body(body)
+            .map_err(|_| Error::server_error(RESPONSE_ERROR))?;
+
+        *response.headers_mut() = self.headers;
+        
+        Ok(HttpResponse::from_inner(response))
+    }
+}
+
 /// Creates a response builder
 #[inline]
 #[cfg(debug_assertions)]
-pub fn make_builder() -> crate::http::response::Builder {
-    crate::http::Response::builder()
+pub fn make_builder() -> Result<HttpResponseBuilder, Error> {
+    HttpResponse::builder()
         .header(crate::headers::SERVER, SERVER_NAME)
 }
 
 /// Creates a response builder
 #[inline]
 #[cfg(not(debug_assertions))]
-pub fn make_builder() -> crate::http::response::Builder {
-    crate::http::Response::builder()
+pub fn make_builder() -> Result<HttpResponseBuilder, Error> {
+    Ok(HttpResponse::builder())
 }
 
 /// Creates a default HTTP response builder
@@ -28,7 +109,7 @@ macro_rules! builder {
     };
     ($status:expr) => {
         $crate::builder!()
-            .status($status)
+            .and_then(|b| b.status($status))
     };
 }
 
@@ -41,9 +122,8 @@ macro_rules! response {
     ($status:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::builder!($status)
         $(
-            .header($key, $value)
+            .and_then(|b| b.header($key, $value))
         )*
-            .body($body)
-            .map_err(|_| $crate::error::Error::server_error($crate::RESPONSE_ERROR))
+            .and_then(|b| b.body($body))
     };
 }

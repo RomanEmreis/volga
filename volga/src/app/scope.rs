@@ -1,12 +1,13 @@
 ﻿use std::net::SocketAddr;
 use tokio_util::sync::CancellationToken;
-use futures_util::future::BoxFuture;
+use futures_util::{TryFutureExt, future::BoxFuture};
 use std::sync::Weak;
 
 use hyper::{
     header::{HeaderValue, CONTENT_LENGTH, ALLOW}, 
-    body::{Body, SizeHint, Incoming}, 
-    Request, 
+    body::{SizeHint, Incoming}, 
+    Request,
+    Response,
     service::Service, 
     Method, 
     HeaderMap
@@ -16,7 +17,7 @@ use crate::{
     app::AppInstance, 
     error::{Error, handler::call_weak_err_handler}, 
     http::endpoints::FindResult,
-    HttpResponse, HttpRequest, HttpBody, HttpResult, ClientIp,
+    HttpRequest, HttpBody, HttpResult, ClientIp,
     Limit,
     status
 };
@@ -36,18 +37,21 @@ pub(crate) struct Scope {
 }
 
 impl Service<Request<Incoming>> for Scope {
-    type Response = HttpResponse;
+    type Response = Response<HttpBody>;
     type Error = Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     #[inline]
     fn call(&self, request: Request<Incoming>) -> Self::Future {
-        Box::pin(Self::handle_request(
-            request,
-            self.peer_addr,
-            self.shared.clone(),
-            self.cancellation_token.clone()
-        ))
+        Box::pin(
+            Self::handle_request(
+                request,
+                self.peer_addr,
+                self.shared.clone(),
+                self.cancellation_token.clone()
+            )
+            .map_ok(Into::into)
+        )
     }
 }
 
