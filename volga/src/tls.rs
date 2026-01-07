@@ -643,7 +643,7 @@ impl App {
                         .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
                         .await;
 
-                    if !is_excluded(host.to_str().ok()) {
+                    if !is_excluded(host.as_str().ok()) {
                         http_result.map(|mut response| {
                             response
                                 .headers_mut()

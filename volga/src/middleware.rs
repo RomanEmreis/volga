@@ -179,15 +179,18 @@ impl App {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    /// use volga::{App, HttpRequest, headers::{Header, custom_headers}};
     ///
+    /// custom_headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.tap_req(|mut req: HttpRequest| async move { 
-    ///     req.headers_mut()
-    ///         .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///     req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///     req
     /// });
     /// 
@@ -373,8 +376,12 @@ impl<'a> Route<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    /// use volga::{App, HttpRequest, headers::{Header, custom_headers}};
     ///
+    /// custom_headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
@@ -382,8 +389,7 @@ impl<'a> Route<'a> {
     /// app
     ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
     ///     .tap_req(|mut req: HttpRequest| async move { 
-    ///         req.headers_mut()
-    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         req
     ///     });
     /// 
@@ -571,16 +577,19 @@ impl<'a> RouteGroup<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    /// use volga::{App, HttpRequest, headers::{Header, custom_headers}};
     ///
+    /// custom_headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.group("/positive", |api| {
     ///     api.tap_req(|mut req: HttpRequest| async move { 
-    ///         req.headers_mut()
-    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         req
     ///     });
     ///     api.map_get("/sum", |x: i32, y: i32| async move { 

@@ -42,7 +42,7 @@ async fn it_reads_specific_header() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "\"text/plain\"");
+    assert_eq!(response.text().await.unwrap(), "\"content-type: text/plain\"");
     
     server.shutdown().await;
 }

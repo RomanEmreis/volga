@@ -1,16 +1,13 @@
 ﻿//! HTTP request utilities
 
-use std::ops::{Deref, DerefMut};
 use http_body_util::BodyDataStream;
 use hyper::{
     body::Incoming,
-    http::request::Parts,
-    Request
 };
 
 use crate::{
     error::Error,
-    headers::{FromHeaders, Header},
+    headers::{FromHeaders, Header, HeaderName, HeaderError},
     HttpBody,
     UnsyncBoxBody,
     BoxBody
@@ -18,7 +15,13 @@ use crate::{
 
 use crate::http::{
     endpoints::{args::FromRequestRef, route::PathArgs}, 
-    request::request_body_limit::RequestBodyLimit
+    request::request_body_limit::RequestBodyLimit,
+    Request,
+    Parts,
+    Extensions,
+    Method,
+    Uri,
+    Version
 };
 
 #[cfg(feature = "rate-limiting")]
@@ -31,13 +34,14 @@ use crate::rate_limiting::{
 use crate::di::Container;
 #[cfg(any(feature = "di", feature = "rate-limiting"))]
 use std::sync::Arc;
+use crate::headers::HeaderMap;
 
 pub mod request_body_limit;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
     /// Inner [`Request`]
-    pub inner: Request<HttpBody>
+    inner: Request<HttpBody>
 }
 
 impl std::fmt::Debug for HttpRequest {
@@ -47,29 +51,92 @@ impl std::fmt::Debug for HttpRequest {
     }
 }
 
-impl Deref for HttpRequest {
-    type Target = Request<HttpBody>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for HttpRequest {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
 impl HttpRequest {
     /// Creates a new [`HttpRequest`]
-    pub fn new(request: Request<Incoming>) -> Self {
+    pub(crate) fn new(request: Request<Incoming>) -> Self {
         Self { inner: request.map(HttpBody::incoming) }
+    }
+
+    /// Returns a reference to the associated URI.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest};
+    /// 
+    /// let mut app = App::new();
+    /// 
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert_eq!(req.uri(), "/");
+    /// });
+    /// ```
+    #[inline]
+    pub fn uri(&self) -> &Uri {
+        self.inner.uri()
+    }
+    
+    /// Returns a reference to the associated HTTP header map.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest};
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert!(req.headers().is_empty());
+    /// });
+    /// ```
+    #[inline]
+    pub fn headers(&self) -> &HeaderMap {
+        self.inner.headers()
+    }
+
+    /// Returns a mutable reference to the associated extensions.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
+        self.inner.headers_mut()
+    }
+    
+    /// Returns a reference to the associated HTTP method.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest, http::Method};
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert_eq!(*req.method(), Method::GET);
+    /// });
+    /// ```
+    #[inline]
+    pub fn method(&self) -> &Method {
+        self.inner.method()
+    }
+
+    /// Represents a version of the HTTP spec.
+    #[inline]
+    pub fn version(&self) -> Version {
+        self.inner.version()
+    }
+    
+    /// Returns a reference to the associated extensions.
+    #[inline]
+    pub(crate) fn extensions(&self) -> &Extensions {
+        self.inner.extensions()
+    }
+
+    /// Returns a mutable reference to the associated extensions.
+    #[inline]
+    #[cfg(any(feature = "tls", feature = "tracing", feature = "auth"))]
+    pub(crate) fn extensions_mut(&mut self) -> &mut Extensions {
+        self.inner.extensions_mut()
     }
 
     /// Returns this [`HttpRequest`] body limit.
     pub fn body_limit(&self) -> Option<usize> {
-        self.extensions()
+        self.inner.extensions()
             .get::<RequestBodyLimit>()
             .and_then(|l| match l {
                 RequestBodyLimit::Enabled(size) => Some(*size),
@@ -87,12 +154,6 @@ impl HttpRequest {
                 Self::from_parts(parts, body)
             }
         }
-    }
-    
-    /// Unwraps the inner request
-    #[inline]
-    pub fn into_inner(self) -> Request<HttpBody> {
-        self.inner
     }
 
     /// Consumes the request and returns just the body
@@ -126,18 +187,18 @@ impl HttpRequest {
     }
     
     /// Consumes the request and returns request head and body
-    pub fn into_parts(self) -> (Parts, HttpBody) {
+    pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
         self.inner.into_parts()
     }
 
     /// Creates a new `HttpRequest` with the given head and body
-    pub fn from_parts(parts: Parts, body: HttpBody) -> Self {
+    pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
         let request = Request::from_parts(parts, body);
         Self { inner: request }
     }
 
     /// Creates a new `HttpRequest` with the given head and empty body
-    pub fn slim(parts: &Parts) -> Self {
+    pub(crate) fn slim(parts: &Parts) -> Self {
         let request = Request::from_parts(parts.clone(), HttpBody::empty());
         Self { inner: request }
     }
@@ -231,7 +292,7 @@ impl HttpRequest {
     /// # }
     /// ```
     pub fn path_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.extensions()
+        self.inner.extensions()
             .get::<PathArgs>()
             .map(|args| args
                 .iter()
@@ -256,7 +317,7 @@ impl HttpRequest {
     /// # }
     /// ```
     pub fn query_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.uri()
+        self.inner.uri()
             .query()
             .map(|query| query.split('&')
                 .map(|arg| {
@@ -269,11 +330,92 @@ impl HttpRequest {
             .flatten()
     }
 
-    /// Inserts the [`Header<T>`] to HTTP request headers
+    /// Attempts to insert the header into the request, replacing any existing
+    /// values with the same header name.
+    ///
+    /// Returns an error if the header cannot be constructed.
     #[inline]
-    pub fn insert_header<T: FromHeaders>(&mut self, header: Header<T>) {
-        let (name, value) = header.into_parts();
-        self.headers_mut().insert(name, value);
+    pub fn try_insert_header<T>(
+        &mut self, 
+        header: impl TryInto<Header<T>, Error = Error>
+    ) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        let header = header.try_into()?;
+        Ok(self.insert_header(header))
+    }
+
+    /// Inserts the header into the request, replacing any existing values
+    /// with the same header name.
+    ///
+    /// This method always overwrites previous values.
+    #[inline]
+    pub fn insert_header<T>(&mut self, header: Header<T>) -> Header<T>
+    where
+        T: FromHeaders,
+    {
+        self.inner.headers_mut().insert(
+            header.name(),
+            header.value().clone()
+        );
+        header
+    }
+
+    /// Appends a new value for the given header name.
+    ///
+    /// Existing values with the same name are preserved.
+    /// Multiple values for the same header may be present.
+    #[inline]
+    pub fn append_header<T>(&mut self, header: Header<T>) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        self.inner.headers_mut().append(
+            header.name(),
+            header.value().clone()
+        );
+        Ok(header)
+    }
+
+    /// Attempts to append a new value for the given header name.
+    ///
+    /// Returns an error if the header cannot be constructed or appended.
+    #[inline]
+    pub fn try_append_header<T>(
+        &mut self, 
+        header: impl TryInto<Header<T>, Error = Error>
+    ) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        let header = header.try_into()?;
+        self.append_header(header)
+    }
+
+    /// Removes all values for the given header name.
+    ///
+    /// Returns `true` if at least one header value was removed.
+    #[inline]
+    pub fn remove_header<T>(&mut self) -> bool
+    where
+        T: FromHeaders,
+    {
+        self.inner
+            .headers_mut()
+            .remove(&T::NAME)
+            .is_some()
+    }
+
+    /// Attempts to remove all values for the given header name.
+    ///
+    /// Returns `true` if at least one value was removed.
+    #[inline]
+    pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(HeaderError::from_invalid_header_name)?;
+
+        Ok(self.inner.headers_mut().remove(name).is_some())
     }
 }
 
@@ -312,7 +454,7 @@ mod tests {
         
         let (parts, body) = req.into_parts();
         let mut http_req = HttpRequest::from_parts(parts, body);
-        let header = Header::<Vary>::from("foo");
+        let header = Header::<Vary>::from_static("foo");
         
         http_req.insert_header(header);
         
@@ -331,7 +473,7 @@ mod tests {
         
         let header = http_req.extract::<Header<Vary>>().unwrap();
         
-        assert_eq!(*header, "foo");
+        assert_eq!(header.value(), "foo");
     }
     
     #[tokio::test]
@@ -363,7 +505,6 @@ mod tests {
         let http_req = HttpRequest::from_parts(parts, body);
 
         let body = http_req
-            .into_inner()
             .into_body()
             .collect()
             .await
@@ -522,7 +663,7 @@ mod tests {
             .into_parts();
 
         let mut req = HttpRequest::from_parts(parts, body);
-        req.insert_header::<Foo>(Header::from("x-foo"));
+        req.insert_header::<Foo>(Header::from_static("x-foo"));
 
         assert_eq!(req.extract::<Header<Foo>>().unwrap().into_inner(), "x-foo");
     }

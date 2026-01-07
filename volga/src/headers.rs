@@ -5,6 +5,7 @@ use crate::error::Error;
 // Re-exporting HeaderMap, HeaderValue and some headers from hyper
 pub use hyper::{
     header::{
+        InvalidHeaderName,
         InvalidHeaderValue,
         ToStrError,
         ACCEPT_ENCODING, ACCEPT_RANGES,
@@ -57,19 +58,19 @@ pub mod etag;
 pub mod cache_control;
 
 /// Describes a way to extract a specific HTTP header
-pub trait FromHeaders {
+pub trait FromHeaders: Clone {
+    /// Returns current [`HeaderName`]
+    const NAME: HeaderName;
+    
     /// Reads a [`HeaderValue`] from [`HeaderMap`]
     fn from_headers(headers: &HeaderMap) -> Option<&HeaderValue>;
-
-    /// Returns a header type as `&str`
-    fn header_type() -> &'static str;
 }
 
 pub(crate) struct HeaderError;
 impl HeaderError {
     #[inline]
     pub(crate) fn header_missing<T: FromHeaders>() -> Error {
-        Self::header_missing_impl(T::header_type())
+        Self::header_missing_impl(T::NAME.as_str())
     }
 
     #[inline]
@@ -77,12 +78,17 @@ impl HeaderError {
         Error::from_parts(
             StatusCode::NOT_FOUND,
             None,
-            format!("Header: `{}` not found", header)
+            format!("Header: `{header}` not found")
         )
     }
 
     #[inline]
     pub(crate) fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
+        Error::client_error(format!("Header: {error}"))
+    }
+
+    #[inline]
+    pub(crate) fn from_invalid_header_name(error: InvalidHeaderName) -> Error {
         Error::client_error(format!("Header: {error}"))
     }
 

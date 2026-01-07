@@ -16,17 +16,15 @@ macro_rules! custom_headers {
     ($(($struct_name:ident, $header_name:expr)),* $(,)?) => {
         $(
             /// Custom HTTP header
+            #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
             pub struct $struct_name;
 
             impl $crate::headers::FromHeaders for $struct_name {
+                const NAME: $crate::headers::HeaderName = $crate::headers::HeaderName::from_static($header_name);
+                
                 #[inline]
                 fn from_headers(headers: &$crate::headers::HeaderMap) -> Option<&$crate::headers::HeaderValue> {
                     headers.get($header_name)
-                }
-                
-                #[inline]
-                fn header_type() -> &'static str {
-                    $header_name
                 }
             }
         )*
@@ -51,8 +49,8 @@ mod test {
         let api_key = HeaderValue::from_str("some-api-key").unwrap();
         let api_key_header = Header::<ApiKey>::new(&api_key);
         
-        assert_eq!(*api_key_header, "some-api-key");
-        assert_eq!(ApiKey::header_type(), "x-api-key");
+        assert_eq!(api_key_header.value(), "some-api-key");
+        assert_eq!(ApiKey::NAME, "x-api-key");
     }
 
     #[test]
@@ -64,7 +62,7 @@ mod test {
         
         let api_key_header = Header::<ApiKey>::from_headers_map(&map).unwrap();
 
-        assert_eq!(*api_key_header, "some-api-key");
-        assert_eq!(ApiKey::header_type(), "x-api-key");
+        assert_eq!(api_key_header.as_ref(), "some-api-key");
+        assert_eq!(ApiKey::NAME, "x-api-key");
     }
 }

@@ -4,12 +4,7 @@ use futures_util::future::{Ready, ready};
 use hyper::http::request::Parts;
 use crate::{HttpRequest, error::Error};
 
-use super::{
-    FromHeaders, 
-    HeaderMap, 
-    HeaderValue, 
-    HeaderError
-};
+use super::{FromHeaders, HeaderMap, HeaderValue, HeaderError, HeaderName};
 
 use crate::http::endpoints::args::{
     FromPayload, 
@@ -129,6 +124,13 @@ pub struct Header<T: FromHeaders> {
     _marker: PhantomData<T>
 }
 
+impl<T: FromHeaders> AsRef<HeaderValue> for Header<T> {
+    #[inline]
+    fn as_ref(&self) -> &HeaderValue {
+        self.value()
+    }
+}
+
 impl<T: FromHeaders> From<HeaderValue> for Header<T> {
     #[inline]
     fn from(value: HeaderValue) -> Self {
@@ -139,12 +141,23 @@ impl<T: FromHeaders> From<HeaderValue> for Header<T> {
     }
 }
 
-impl<T: FromHeaders> From<&'static str> for Header<T> {
+impl<T: FromHeaders> TryFrom<&str> for Header<T> {
+    type Error = Error;
+    
     #[inline]
-    fn from(value: &'static str) -> Self {
-        Self { 
-            value: HeaderValue::from_static(value), 
-            _marker: PhantomData
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let header_value = HeaderValue::from_str(value)
+            .map_err(HeaderError::from_invalid_header_value)?;
+        Ok(Self { value: header_value, _marker: PhantomData })
+    }
+}
+
+impl<T: FromHeaders> Display for Header<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.value.to_str() {
+            Ok(v) => write!(f, "{}: {}", self.name(), v),
+            Err(_) => write!(f, "{}: <binary>", self.name()),
         }
     }
 }
@@ -155,29 +168,23 @@ impl<T: FromHeaders> Header<T> {
         header_value.clone().into()
     }
 
-    /// Creates a new instance of [`Header<T>`] from `&str`
+    /// Creates a new instance of [`Header<T>`] from a `static str`
     ///
     /// # Examples
     /// ```no_run
     /// use volga::headers::{ContentType, Header};
     ///
-    /// let content_type_header = Header::<ContentType>::try_from("text/plain").unwrap();
-    /// assert_eq!(*content_type_header, "text/plain");
-    /// ```
-    /// An invalid value
-    /// ```no_run
-    /// use volga::headers::{ContentType, Header};
-    ///
-    /// let content_type_header = Header::<ContentType>::try_from("\n");
-    /// assert!(content_type_header.is_err())
+    /// let content_type_header = Header::<ContentType>::from_static("text/plain");
+    /// assert_eq!(content_type_header.as_ref(), "text/plain");
     /// ```
     #[inline]
-    pub fn try_from(str: &str) -> Result<Self, Error> {
-        let header_value = HeaderValue::from_str(str)
-            .map_err(HeaderError::from_invalid_header_value)?;
-        Ok(Self { value: header_value, _marker: PhantomData })
+    pub const fn from_static(value: &'static str) -> Self {
+        Self {
+            value: HeaderValue::from_static(value),
+            _marker: PhantomData
+        }
     }
-
+    
     /// Creates a new instance of [`Header<T>`] from a byte slice
     ///
     /// # Examples
@@ -185,7 +192,7 @@ impl<T: FromHeaders> Header<T> {
     /// use volga::headers::{ContentType, Header};
     ///
     /// let content_type_header = Header::<ContentType>::from_bytes(b"text/plain").unwrap();
-    /// assert_eq!(*content_type_header, "text/plain");
+    /// assert_eq!(content_type_header.as_ref(), "text/plain");
     /// ```
     /// An invalid value
     /// ```no_run
@@ -202,19 +209,37 @@ impl<T: FromHeaders> Header<T> {
     }
 
     /// Unwraps the inner [`HeaderValue`]
-    pub fn into_inner(self) -> HeaderValue {
+    #[allow(unused)]
+    pub(crate) fn into_inner(self) -> HeaderValue {
         self.value
     }
 
-    /// Unwraps to the [`HeaderName`] as `&str` and inner [`HeaderValue`]
-    pub fn into_parts(self) -> (&'static str, HeaderValue) {
-        (T::header_type(), self.value)
+    /// Returns the canonical header name.
+    #[inline]
+    pub fn name(&self) -> HeaderName {
+        T::NAME
     }
 
-    /// Unwraps to the [`HeaderName`] as a string tuple of header name and value
-    pub fn into_string_parts(self) -> Result<(String, String), Error> {
-        let value = self.value.to_str().map_err(HeaderError::from_to_str_error)?;
-        Ok((T::header_type().into(), value.into()))
+    /// Returns the raw header value.
+    #[inline]
+    pub fn value(&self) -> &HeaderValue {
+        &self.value
+    }
+
+    /// Returns the header value as a string slice.
+    ///
+    /// Fails if the value is not valid ASCII.
+    #[inline]
+    pub fn as_str(&self) -> Result<&str, Error> {
+        self.value
+            .to_str()
+            .map_err(HeaderError::from_to_str_error)
+    }
+
+    /// Returns the header value as raw bytes.
+    #[inline]
+    pub fn as_bytes(&self) -> &[u8] {
+        self.value.as_bytes()
     }
 
     /// Parses specific [`Header<T>`] from ['HeaderMap']
@@ -223,29 +248,6 @@ impl<T: FromHeaders> Header<T> {
         T::from_headers(headers)
             .ok_or_else(HeaderError::header_missing::<T>)
             .map(Self::new)
-    }
-}
-
-impl<T: FromHeaders> Deref for Header<T> {
-    type Target = HeaderValue;
-
-    #[inline]
-    fn deref(&self) -> &HeaderValue {
-        &self.value
-    }
-}
-
-impl<T: FromHeaders> DerefMut for Header<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut HeaderValue {
-        &mut self.value
-    }
-}
-
-impl<T: FromHeaders> Display for Header<T>  {
-    #[inline]
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.value.to_str().map_err(|_| std::fmt::Error)?.fmt(f)
     }
 }
 
@@ -286,7 +288,6 @@ impl<T: FromHeaders + Send> FromPayload for Header<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
     use hyper::{HeaderMap, Request};
     use hyper::http::HeaderValue;
     use crate::headers::{ContentType, Header, HttpHeaders};
@@ -317,7 +318,7 @@ mod tests {
 
         let header: Header<ContentType> = Header::from_payload(Payload::Parts(&parts)).await.unwrap();
 
-        assert_eq!(header.deref(), "text/plain");
+        assert_eq!(header.as_ref(), "text/plain");
     }
 
     #[test]
@@ -327,7 +328,7 @@ mod tests {
 
         let header: Header<ContentType> = Header::from_headers_map(&headers).unwrap();
 
-        assert_eq!(header.deref(), "text/plain");
+        assert_eq!(header.as_ref(), "text/plain");
     }
 
     #[test]
@@ -346,7 +347,7 @@ mod tests {
 
         let header = Header::<ContentType>::from_bytes(header_value_bytes).unwrap();
 
-        assert_eq!(*header, "text/plain");
+        assert_eq!(header.value(), "text/plain");
     }
 
     #[test]
@@ -355,31 +356,21 @@ mod tests {
 
         let header = Header::<ContentType>::try_from(header_value).unwrap();
 
-        assert_eq!(*header, "text/plain");
+        assert_eq!(header.value(), "text/plain");
     }
 
     #[test]
     fn i_creates_header_from_static() {
-        let header = Header::<ContentType>::from("text/plain");
+        let header = Header::<ContentType>::from_static("text/plain");
 
-        assert_eq!(*header, "text/plain");
+        assert_eq!(header.value(), "text/plain");
     }
 
     #[test]
     fn it_creates_parts() {
-        let header = Header::<ContentType>::from("text/plain");
+        let header = Header::<ContentType>::from_static("text/plain");
 
-        let (name, value) = header.into_parts();
-
-        assert_eq!(name, "content-type");
-        assert_eq!(value, "text/plain");
-    }
-
-    #[test]
-    fn it_creates_string_parts() {
-        let header = Header::<ContentType>::from("text/plain");
-
-        let (name, value) = header.into_string_parts().unwrap();
+        let (name, value) = (header.name(), header.value());
 
         assert_eq!(name, "content-type");
         assert_eq!(value, "text/plain");
@@ -391,14 +382,5 @@ mod tests {
 
         assert!(header.is_err());
         assert_eq!(header.err().unwrap().to_string(), "Header: failed to parse header value");
-    }
-
-    #[test]
-    fn it_can_change_header_value_via_deref_mut() {
-        let mut header = Header::<ContentType>::try_from("text/plan").unwrap();
-
-        *header = HeaderValue::from_static("text/json");
-        
-        assert_eq!(*header, "text/json");
     }
 }

@@ -2,9 +2,7 @@
 
 use super::FromHeaders;
 
-use hyper::HeaderMap;
 use hyper::header::{
-    HeaderValue,
     ACCEPT, ACCEPT_CHARSET, ACCEPT_ENCODING, ACCEPT_LANGUAGE, ACCEPT_RANGES,
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
     ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE,
@@ -27,17 +25,15 @@ macro_rules! define_header {
         $(
             #[doc = concat!("See [`", stringify!($header_name), "`] for more details.")]
             #[allow(missing_debug_implementations)]
+            #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub struct $struct_name;
 
             impl FromHeaders for $struct_name {
-                #[inline]
-                fn from_headers(headers: &HeaderMap) -> Option<&HeaderValue> {
-                    headers.get($header_name)
-                }
+                const NAME: $crate::headers::HeaderName = $header_name;
                 
                 #[inline]
-                fn header_type() -> &'static str {
-                    $header_name.as_str()
+                fn from_headers(headers: &$crate::headers::HeaderMap) -> Option<&$crate::headers::HeaderValue> {
+                    headers.get($header_name)
                 }
             }
         )*

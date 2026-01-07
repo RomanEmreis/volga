@@ -10,7 +10,7 @@ fn it_implements_from_headers_for_struct_with_string_literal() {
     struct ApiKey;
 
     // Test that header_type() returns correct value
-    assert_eq!(ApiKey::header_type(), "x-api-key");
+    assert_eq!(ApiKey::NAME, "x-api-key");
 }
 
 #[test]
@@ -20,7 +20,7 @@ fn it_implements_from_headers_for_struct_with_constant() {
     #[http_header(X_AUTH_TOKEN)]
     struct AuthToken;
 
-    assert_eq!(AuthToken::header_type(), "x-auth-token");
+    assert_eq!(AuthToken::NAME, "x-auth-token");
 }
 
 #[test]
@@ -31,8 +31,8 @@ fn it_implements_from_headers_for_multiple_structs() {
     #[http_header("x-correlation-id")]
     struct CorrelationId;
 
-    assert_eq!(RequestId::header_type(), "x-request-id");
-    assert_eq!(CorrelationId::header_type(), "x-correlation-id");
+    assert_eq!(RequestId::NAME, "x-request-id");
+    assert_eq!(CorrelationId::NAME, "x-correlation-id");
 }
 
 #[test]
@@ -46,9 +46,9 @@ fn it_handles_standard_http_headers() {
     #[http_header("accept")]
     struct Accept;
 
-    assert_eq!(Authorization::header_type(), "authorization");
-    assert_eq!(ContentType::header_type(), "content-type");
-    assert_eq!(Accept::header_type(), "accept");
+    assert_eq!(Authorization::NAME, "authorization");
+    assert_eq!(ContentType::NAME, "content-type");
+    assert_eq!(Accept::NAME, "accept");
 }
 
 #[test]
@@ -59,8 +59,8 @@ fn it_handles_custom_headers_with_special_characters() {
     #[http_header("x_underscore_header")]
     struct CustomHeader2;
 
-    assert_eq!(CustomHeader1::header_type(), "x-custom-header-123");
-    assert_eq!(CustomHeader2::header_type(), "x_underscore_header");
+    assert_eq!(CustomHeader1::NAME, "x-custom-header-123");
+    assert_eq!(CustomHeader2::NAME, "x_underscore_header");
 }
 
 #[test]
@@ -72,8 +72,8 @@ fn it_preserves_struct_visibility() {
     struct PrivateHeader;
 
     // Both should work regardless of visibility
-    assert_eq!(PublicHeader::header_type(), "x-public-header");
-    assert_eq!(PrivateHeader::header_type(), "x-private-header");
+    assert_eq!(PublicHeader::NAME, "x-public-header");
+    assert_eq!(PrivateHeader::NAME, "x-private-header");
 }
 
 #[test]
@@ -83,15 +83,7 @@ fn it_works_with_uppercase_constant() {
     #[http_header(API_KEY_HEADER)]
     struct ApiKey;
 
-    assert_eq!(ApiKey::header_type(), "x-api-key");
-}
-
-#[test]
-fn it_works_with_empty_string() {
-    #[http_header("")]
-    struct EmptyHeader;
-
-    assert_eq!(EmptyHeader::header_type(), "");
+    assert_eq!(ApiKey::NAME, "x-api-key");
 }
 
 #[test]
@@ -103,5 +95,5 @@ fn it_generates_unique_implementations() {
     struct Header2;
 
     // Each struct should have its own implementation
-    assert_ne!(Header1::header_type(), Header2::header_type());
+    assert_ne!(Header1::NAME, Header2::NAME);
 }

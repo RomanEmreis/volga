@@ -25,9 +25,9 @@ mime = "0.3.17"
 mime_guess = "2.0.5"
 pin-project-lite = "0.2.16"
 tokio = { version = "1.49.0", features = ["full"] }
-tokio-util = "0.7.17"
+tokio-util = "0.7.18"
 serde = "1.0.228"
-serde_json = "1.0.148"
+serde_json = "1.0.149"
 serde_urlencoded = "0.7.1"
 smallvec = "1.15.1"
 
@@ -63,7 +63,7 @@ jsonwebtoken = { version = "10.2.0", features = ["rust_crypto"] }
 hyper = { version = "1.8.1", features = ["client"] }
 reqwest = { version = "0.13.1", features = ["rustls-no-provider"] }
 serde = { version = "1.0.228", features = ["derive"] }
-tokio-stream = "0.1.17"
+tokio-stream = "0.1.18"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 uuid = { version = "1.19.0", features = ["v4"] }
 criterion = { version = "0.8.1", features = ["async_tokio"] }

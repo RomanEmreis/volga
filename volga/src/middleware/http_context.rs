@@ -165,11 +165,74 @@ impl HttpContext {
     pub fn query_args(&self) -> impl Iterator<Item = (&str, &str)> {
         self.request.query_args()
     }
-    
-    /// Inserts the [`Header<T>`] to HTTP request headers
+
+    /// Inserts the header into the request, replacing any existing values
+    /// with the same header name.
+    ///
+    /// This method always overwrites previous values.
     #[inline]
-    pub fn insert_header<T: FromHeaders>(&mut self, header: Header<T>) {
+    pub fn insert_header<T: FromHeaders>(&mut self, header: Header<T>) -> Header<T> {
         self.request.insert_header(header)
+    }
+
+    /// Attempts to insert the header into the request, replacing any existing
+    /// values with the same header name.
+    ///
+    /// Returns an error if the header cannot be constructed.
+    #[inline]
+    pub fn try_insert_header<T>(
+        &mut self, 
+        header: impl TryInto<Header<T>, Error = Error>
+    ) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        self.request.try_insert_header(header)
+    }
+
+    /// Appends a new value for the given header name.
+    ///
+    /// Existing values with the same name are preserved.
+    /// Multiple values for the same header may be present.
+    #[inline]
+    pub fn append_header<T>(&mut self, header: Header<T>) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        self.request.append_header(header)
+    }
+
+    /// Attempts to append a new value for the given header name.
+    ///
+    /// Returns an error if the header cannot be constructed or appended.
+    #[inline]
+    pub fn try_append_header<T>(
+        &mut self, 
+        header: impl TryInto<Header<T>, Error = Error>
+    ) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        self.request.try_append_header(header)
+    }
+
+    /// Removes all values for the given header name.
+    ///
+    /// Returns `true` if at least one header value was removed.
+    #[inline]
+    pub fn remove_header<T>(&mut self) -> bool
+    where
+        T: FromHeaders,
+    {
+        self.request.remove_header::<T>()
+    }
+
+    /// Attempts to remove all values for the given header name.
+    ///
+    /// Returns `true` if at least one value was removed.
+    #[inline]
+    pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
+        self.request.try_remove_header(name)
     }
 
     /// Executes the request handler for the current HTTP request
@@ -240,7 +303,7 @@ mod tests {
 
         let (parts, _) = ctx.into_parts();
         
-        assert_eq!(parts.inner.uri(), "/test")
+        assert_eq!(parts.uri(), "/test")
     }
 
     #[test]
@@ -251,7 +314,7 @@ mod tests {
             .into_parts();
 
         let mut ctx = HttpContext::slim(HttpRequest::from_parts(parts, body));
-        ctx.insert_header::<Foo>(Header::from("x-foo"));
+        ctx.insert_header::<Foo>(Header::from_static("x-foo"));
 
         assert_eq!(ctx.extract::<Header<Foo>>().unwrap().into_inner(), "x-foo");
     }

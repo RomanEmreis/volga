@@ -690,7 +690,7 @@ mod tests {
     #[test]
     fn it_extracts_forwarded_ip() {
         let mut req = create_request();
-        req.inner
+        req
             .headers_mut()
             .insert(HeaderName::from_static("forwarded"), "for=192.168.1.1".parse().unwrap());
         
@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn it_extracts_x_forwarded_for_ip() {
         let mut req = create_request();
-        req.inner
+        req
             .headers_mut()
             .insert(HeaderName::from_static("x-forwarded-for"), "192.168.1.1".parse().unwrap());
 
@@ -714,10 +714,10 @@ mod tests {
     #[test]
     fn it_extracts_prioritized_forwarded_ip() {
         let mut req = create_request();
-        req.inner
+        req
             .headers_mut()
             .insert(HeaderName::from_static("forwarded"), "for=10.24.1.101".parse().unwrap());
-        req.inner
+        req
             .headers_mut()
             .insert(HeaderName::from_static("x-forwarded-for"), "192.168.1.1".parse().unwrap());
 

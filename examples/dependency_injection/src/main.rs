@@ -9,7 +9,7 @@ use volga::{
     App, Json,
     di::{Inject, Container, Dc, error::Error as DiError},
     error::Error,
-    headers::HeaderValue,
+    headers::{HeaderValue, custom_headers},
     HttpRequest, HttpResponse, HttpResult, status
 };
 use std::{
@@ -42,8 +42,7 @@ async fn main() -> std::io::Result<()> {
 }
 
 async fn set_req_id(mut req: HttpRequest, log: Dc<RequestLog>) -> HttpRequest {
-    let req_id = HeaderValue::from_str(log.request_id.as_str()).unwrap();
-    req.headers_mut().insert("x-req-id", req_id.clone());
+    req.try_insert_header::<RequestId>(log.request_id.as_str()).unwrap();
     log.append("started");
     req
 }
@@ -69,6 +68,10 @@ async fn error_handler(log: Dc<RequestLog>, error: Error) -> HttpResult {
     status!(500, "Internal Server Error", [
         ("x-req-id", &log.request_id)
     ])
+}
+
+custom_headers! {
+    (RequestId, "x-req-id")
 }
 
 trait RequestIdGenerator: Send + Sync {
