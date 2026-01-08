@@ -70,8 +70,8 @@ async fn it_adds_map_req_middleware() {
             req
         });
         app.map_get("/test", |headers: HttpHeaders| async move {
-            let val = headers.get("X-Test").unwrap().to_str().unwrap();
-            Results::text(val)
+            let val = headers.try_get::<XTest>()?;
+            Results::text(&val.to_string())
         });
     }).await;
 
@@ -82,7 +82,7 @@ async fn it_adds_map_req_middleware() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
     
     server.shutdown().await;
 }
@@ -116,8 +116,8 @@ async fn it_adds_map_req_middleware_for_route() {
     let server = TestServer::spawn(|app| {
         app
             .map_get("/test", |headers: HttpHeaders| async move {
-                let val = headers.get("X-Test").unwrap().to_str().unwrap();
-                Results::text(val)
+                let val = headers.try_get::<XTest>()?;
+                Results::text(&val.to_string())
             })
             .tap_req(|mut req: HttpRequest| async move {
                 req.insert_header(Header::<XTest>::try_from("Pass!").unwrap());
@@ -132,7 +132,7 @@ async fn it_adds_map_req_middleware_for_route() {
         .unwrap();
     
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
     
     server.shutdown().await;
 }
@@ -171,8 +171,8 @@ async fn it_adds_map_req_middleware_for_group() {
                 req
             });
             api.map_get("/test", |headers: HttpHeaders| async move {
-                let val = headers.get("X-Test").unwrap().to_str().unwrap();
-                Results::text(val)
+                let val = headers.try_get::<XTest>()?;
+                Results::text(&val.to_string())
             });
         });
     }).await;
@@ -184,7 +184,7 @@ async fn it_adds_map_req_middleware_for_group() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
     
     server.shutdown().await;
 }

@@ -191,3 +191,37 @@ impl App {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_sets_http2_limits() {
+        let app = App::new()
+            .with_http2_limits(|limits| limits
+                .with_max_concurrent_streams(Limit::Limited(100))
+                .with_max_frame_size(Limit::Default)
+                .with_max_pending_reset_streams(Limit::Limited(1024))
+                .with_max_local_error_reset_streams(Limit::Unlimited));
+
+        assert_eq!(app.http2_limits.max_concurrent_streams, Limit::Limited(100));
+        assert_eq!(app.http2_limits.max_pending_reset_streams, Limit::Limited(1024));
+        assert_eq!(app.http2_limits.max_frame_size, Limit::Default);
+        assert_eq!(app.http2_limits.max_local_error_reset_streams, Limit::Unlimited);
+    }
+
+        #[test]
+    fn it_creates_and_configures_http2_limits() {
+        let limits = Http2Limits::new()
+            .with_max_concurrent_streams(Limit::Limited(100))
+            .with_max_frame_size(Limit::Default)
+            .with_max_pending_reset_streams(Limit::Limited(1024))
+            .with_max_local_error_reset_streams(Limit::Unlimited);
+
+        assert_eq!(limits.max_concurrent_streams, Limit::Limited(100));
+        assert_eq!(limits.max_pending_reset_streams, Limit::Limited(1024));
+        assert_eq!(limits.max_frame_size, Limit::Default);
+        assert_eq!(limits.max_local_error_reset_streams, Limit::Unlimited);
+    }
+}

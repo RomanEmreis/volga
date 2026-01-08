@@ -4,7 +4,7 @@
 //! cargo run -p headers
 //! ```
 
-use volga::{App, ResponseContext, headers, ok};
+use volga::{App, HttpResponse, HttpBody, ok};
 use volga::headers::{
     Header,
     HttpHeaders,
@@ -17,7 +17,7 @@ async fn main() -> std::io::Result<()> {
 
     // Read request headers with Headers
     app.map_get("/api-key", |headers: HttpHeaders| async move {
-        let api_key = headers.get("x-api-key")
+        let api_key = headers.get_raw("x-api-key")
             .unwrap()
             .to_str()
             .unwrap();
@@ -37,18 +37,13 @@ async fn main() -> std::io::Result<()> {
        ])
     });
 
-    // Respond with headers using headers! macro
+    // Respond with headers using HttpResponse builder
     app.map_get("/hello-again", || async {
-        let headers = headers![
-            ("x-api-key", "some api key"),
-            ("Content-Type", "text/plain")
-        ];
-
-        ResponseContext {
-            content: "Hello World!",
-            status: 200,
-            headers
-        }
+        HttpResponse::builder()
+            .status(200)
+            .header("x-api-key", "some api key")
+            .header("Content-Type", "text/plain")
+            .body(HttpBody::full("Hello World!"))
     });
 
     app.run().await

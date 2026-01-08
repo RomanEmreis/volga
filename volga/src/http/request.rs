@@ -7,7 +7,7 @@ use hyper::{
 
 use crate::{
     error::Error,
-    headers::{FromHeaders, Header, HeaderName, HeaderError},
+    headers::{FromHeaders, Header, HeaderName},
     HttpBody,
     UnsyncBoxBody,
     BoxBody
@@ -413,7 +413,7 @@ impl HttpRequest {
     #[inline]
     pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
         let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(HeaderError::from_invalid_header_name)?;
+            .map_err(Error::from)?;
 
         Ok(self.inner.headers_mut().remove(name).is_some())
     }

@@ -9,7 +9,6 @@ use crate::http::{
     Version
 };
 
-use std::collections::HashMap;
 use tokio::fs::File;
 use serde::Serialize;
 
@@ -35,7 +34,7 @@ use mime::{
     TEXT_PLAIN
 };
 
-use crate::headers::{FromHeaders, Header, HeaderError};
+use crate::headers::{FromHeaders, Header};
 
 pub use builder::HttpResponseBuilder;
 
@@ -52,49 +51,6 @@ pub mod html;
 pub mod sse;
 #[cfg(feature = "middleware")]
 pub mod filter_result;
-
-/// A customized response context with custom response `headers` and `content_type`
-/// > NOTE: This is not suitable for file response use the `file!` or `Results::file()` instead
-/// # Example
-/// ```no_run
-/// use volga::{Results, ResponseContext};
-/// use std::collections::HashMap;
-/// use std::result;
-///
-/// let mut headers = HashMap::new();
-/// headers.insert(String::from("x-api-key"), String::from("some api key"));
-///
-/// let result = Results::from(ResponseContext {
-///     content: "Hello World!",
-///     status: 200,
-///     headers
-/// });
-/// ```
-/// or alternative way by using `From` trait
-/// ```no_run
-/// use volga::{ResponseContext, HttpResult};
-/// use std::collections::HashMap;
-///
-/// let mut headers = HashMap::new();
-/// headers.insert(String::from("x-api-key"), String::from("some api key"));
-///
-/// let result = HttpResult::from(ResponseContext {
-///     content: "Hello World!",
-///     status: 200,
-///     headers
-/// });
-/// ```
-#[derive(Debug)]
-pub struct ResponseContext<T: Serialize> {
-    /// Response content
-    pub content: T,
-
-    /// HTTP response status code
-    pub status: u16,
-
-    /// HTTP response headers
-    pub headers: HashMap<String, String>
-}
 
 /// Represents an HTTP response
 /// 
@@ -129,10 +85,7 @@ impl HttpResponse {
     /// - no headers are set
     #[inline]
     pub fn builder() -> HttpResponseBuilder {
-        HttpResponseBuilder {
-            status: StatusCode::OK,
-            headers: HeaderMap::new(),
-        }
+        HttpResponseBuilder::new()
     }
     
     /// Returns a reference to the associated HTTP header map.
@@ -294,7 +247,7 @@ impl HttpResponse {
     #[inline]
     pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
         let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(HeaderError::from_invalid_header_name)?;
+            .map_err(Error::from)?;
 
         Ok(self.inner.headers_mut().remove(name).is_some())
     }
@@ -383,12 +336,6 @@ impl Results {
             },
         }
     }
-    
-    /// Produces a customized `OK 200` response
-    #[inline]
-    pub fn from<T: Serialize>(context: ResponseContext<T>) -> HttpResult {
-        HttpResult::from(context)
-    }
 
     /// Produces an `OK 200` response with the `JSON` body.
     #[inline]
@@ -470,48 +417,14 @@ impl Results {
     }
 }
 
-impl<T: Serialize> From<ResponseContext<T>> for HttpResult {
-    #[inline]
-    fn from(value: ResponseContext<T>) -> Self {
-        let ResponseContext { content, headers, status } = value;
-        let content = serde_json::to_vec(&content)?;
-        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
-
-        let mut resp = HttpResponse::builder()
-            .status(status)?
-            .body(HttpBody::full(content))?;
-        
-        let header_map = resp.headers_mut();
-        headers.into_iter().for_each(|(key, value)| {
-            if let (Ok(header_name), Ok(header_value)) = (
-                HeaderName::from_bytes(key.as_bytes()),
-                HeaderValue::from_bytes(value.as_bytes()),
-            ) {
-                header_map.insert(header_name, header_value);
-            }
-        });
-
-        // if the content type is not provided - using the application/json by default
-        if header_map.get(&CONTENT_TYPE).is_none() {
-            header_map.insert(
-                CONTENT_TYPE,
-                HeaderValue::from_static(APPLICATION_JSON.as_ref())
-            );
-        }
-        
-        Ok(resp)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::path::Path;
     use hyper::StatusCode;
     use http_body_util::BodyExt;
     use serde::Serialize;
     use tokio::fs::File;
-    use crate::{response, HttpResult, ResponseContext, Results};
+    use crate::{response, HttpResponse, Results};
     use crate::http::body::HttpBody;
     use crate::test_utils::read_file_bytes;
 
@@ -521,57 +434,49 @@ mod tests {
     }
     
     #[tokio::test]
-    async fn in_creates_text_response_with_custom_headers() {
-        let mut headers = HashMap::new();
-        headers.insert(String::from("x-api-key"), String::from("some api key"));
-        
-        let mut response = HttpResult::from(ResponseContext {
-            status: 400,
-            content: String::from("Hello World!"),
-            headers
-        }).unwrap();
+    async fn in_creates_text_response_with_custom_headers() {       
+        let mut response = HttpResponse::builder()
+            .status(400)
+            .header("x-api-key", "some api key")
+            .header("Content-Type", "text/plain")
+            .body(HttpBody::full(String::from("Hello World!")))
+            .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
         
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(String::from_utf8_lossy(body), "\"Hello World!\"");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(String::from_utf8_lossy(body), "Hello World!");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
     #[tokio::test]
     async fn in_creates_str_text_response_with_custom_headers() {
-        let mut headers = HashMap::new();
-        headers.insert(String::from("x-api-key"), String::from("some api key"));
-        headers.insert(String::from("Content-Type"), String::from("text/plain"));
-
-        let mut response = HttpResult::from(ResponseContext {
-            status: 200,
-            content: "Hello World!",
-            headers,
-        }).unwrap();
+        let mut response = HttpResponse::builder()
+            .status(200)
+            .header("x-api-key", "some api key")
+            .header("Content-Type", "text/plain")
+            .body(HttpBody::full("Hello World!"))
+            .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(String::from_utf8_lossy(body), "\"Hello World!\"");
+        assert_eq!(String::from_utf8_lossy(body), "Hello World!");
         assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
     #[tokio::test]
     async fn in_creates_json_response_with_custom_headers() {
-        let mut headers = HashMap::new();
-        headers.insert(String::from("x-api-key"), String::from("some api key"));
-        headers.insert(String::from("Content-Type"), String::from("application/json"));
-
         let content = TestPayload { name: "test".into() };
         
-        let mut response = HttpResult::from(ResponseContext {
-            status: 200,
-            content,
-            headers,
-        }).unwrap();
+        let mut response = HttpResponse::builder()
+            .status(200)
+            .header("x-api-key", "some api key")
+            .header("Content-Type", "application/json")
+            .body(HttpBody::json(content))
+            .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 

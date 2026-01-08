@@ -84,23 +84,27 @@ impl HeaderError {
     }
 
     #[inline]
-    pub(crate) fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
+    fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
         Error::client_error(format!("Header: {error}"))
     }
 
     #[inline]
-    pub(crate) fn from_invalid_header_name(error: InvalidHeaderName) -> Error {
+    fn from_invalid_header_name(error: InvalidHeaderName) -> Error {
         Error::client_error(format!("Header: {error}"))
     }
 
     #[inline]
-    pub(crate) fn from_to_str_error(error: ToStrError) -> Error {
+    fn from_to_str_error(error: ToStrError) -> Error {
         Error::client_error(format!("Header: {error}"))
     }
 
     #[inline]
-    pub(crate) fn from_max_size_reached(error: MaxSizeReached) -> Error {
-        Error::client_error(format!("Header: {error}"))
+    fn from_max_size_reached(error: MaxSizeReached) -> Error {
+        Error {
+            status: StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+            inner: format!("Header: {error}").into(),
+            instance: None,
+        }
     }
 }
 
@@ -108,6 +112,20 @@ impl core::convert::From<InvalidHeaderValue> for Error {
     #[inline]
     fn from(error: InvalidHeaderValue) -> Self {
         HeaderError::from_invalid_header_value(error)
+    }
+}
+
+impl core::convert::From<InvalidHeaderName> for Error {
+    #[inline]
+    fn from(error: InvalidHeaderName) -> Self {
+        HeaderError::from_invalid_header_name(error)
+    }
+}
+
+impl core::convert::From<MaxSizeReached> for Error {
+    #[inline]
+    fn from(error: MaxSizeReached) -> Self {
+        HeaderError::from_max_size_reached(error)
     }
 }
 

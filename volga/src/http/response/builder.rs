@@ -3,7 +3,7 @@
 use std::fmt::{Debug, Formatter};
 use crate::{
     error::Error,
-    headers::{HeaderName, HeaderValue, HeaderMap, HeaderError},
+    headers::{HeaderName, HeaderValue, HeaderMap},
     http::{HttpBody, HttpResponse, Response, StatusCode}
 };
 
@@ -17,8 +17,13 @@ pub const RESPONSE_ERROR: &str = "HTTP Response: Unable to create a response";
 /// This type provides a controlled way to construct HTTP responses
 /// while preserving framework-level invariants.
 pub struct HttpResponseBuilder {
-    pub(super) status: StatusCode,
-    pub(super) headers: HeaderMap,
+    inner: Result<InnerBuilder, Error>
+}
+
+/// The inner builder representation
+struct InnerBuilder {
+    status: StatusCode,
+    headers: HeaderMap,
 }
 
 impl Debug for HttpResponseBuilder {
@@ -29,67 +34,91 @@ impl Debug for HttpResponseBuilder {
 }
 
 impl HttpResponseBuilder {
+    /// Creates a new [`HttpResponseBuilder`]
+    #[inline]
+    pub(super) fn new() -> Self {
+        Self {
+            inner: Ok(InnerBuilder {
+                status: StatusCode::OK,
+                headers: HeaderMap::new(),
+            })
+        }
+    }
+
     /// Sets the HTTP status code.
     #[inline]
-    pub fn status<T>(mut self, status: T) -> Result<Self, Error>
+    pub fn status<T>(self, status: T) -> Self
     where
-        T: TryInto<StatusCode>,
-        <T as TryInto<StatusCode>>::Error: Into<hyper::http::Error>,
+        StatusCode: TryFrom<T>,
+        Error: From<<StatusCode as TryFrom<T>>::Error>,
     {
-        self.status = status
-            .try_into()
-            .map_err(|err| Error::from(err.into()))?;
+        self.and_then(|mut inner| {
+            inner.status = status
+                .try_into()
+                .map_err(Error::from)?;
         
-        Ok(self)
+            Ok(inner)
+        })
     }
 
     /// Appends an HTTP header value.
     ///
     /// If a header with the same name already exists, the value is appended
     ///
-    /// Note: This may result in multiple values for the same header.
-    pub fn header<K, V>(mut self, key: K, value: V) -> Result<Self, Error>
+    /// > **Note:** This may result in multiple values for the same header.
+    #[inline]
+    pub fn header<K, V>(self, key: K, value: V) -> Self
     where
-        K: TryInto<HeaderName>,
-        <K as TryInto<HeaderName>>::Error: Into<hyper::http::Error>,
-        V: TryInto<HeaderValue>,
-        <V as TryInto<HeaderValue>>::Error: Into<hyper::http::Error>,
+        HeaderName: TryFrom<K>,
+        HeaderValue: TryFrom<V>,
+        Error: From<<HeaderName as TryFrom<K>>::Error>,
+        Error: From<<HeaderValue as TryFrom<V>>::Error>,
     {
-        let name = key
-            .try_into()
-            .map_err(|err| Error::from(err.into()))?;
-        let value = value
-            .try_into()
-            .map_err(|err| Error::from(err.into()))?;
-        
-        self
-            .headers
-            .try_append(name, value)
-            .map_err(HeaderError::from_max_size_reached)?;
-        
-        Ok(self)
+        self.and_then(|mut inner| {
+            let name = HeaderName::try_from(key).map_err(Error::from)?;
+            let value = HeaderValue::try_from(value).map_err(Error::from)?;
+            
+            inner.headers
+                .try_append(name, value)
+                .map_err(Error::from)?;
+            
+            Ok(inner)
+        })
     }
 
     /// Finalizes the response with the given body.
     ///
     /// # Errors
     /// Returns an error if the response cannot be constructed.
+    #[inline]
     pub fn body(self, body: HttpBody) -> Result<HttpResponse, Error> {
-        let mut response = Response::builder()
-            .status(self.status)
-            .body(body)
-            .map_err(|_| Error::server_error(RESPONSE_ERROR))?;
+        self.inner.and_then(|inner| {
+            let mut response = Response::builder()
+                .status(inner.status)
+                .body(body)
+                .map_err(|_| Error::server_error(RESPONSE_ERROR))?;
 
-        *response.headers_mut() = self.headers;
+            *response.headers_mut() = inner.headers;
         
-        Ok(HttpResponse::from_inner(response))
+            Ok(HttpResponse::from_inner(response))
+        })
+    }
+
+    #[inline]
+    fn and_then<F>(self, func: F) -> Self
+    where
+        F: FnOnce(InnerBuilder) -> Result<InnerBuilder, Error>,
+    {
+        Self {
+            inner: self.inner.and_then(func),
+        }
     }
 }
 
 /// Creates a response builder
 #[inline]
 #[cfg(debug_assertions)]
-pub fn make_builder() -> Result<HttpResponseBuilder, Error> {
+pub fn make_builder() -> HttpResponseBuilder {
     HttpResponse::builder()
         .header(crate::headers::SERVER, SERVER_NAME)
 }
@@ -97,8 +126,8 @@ pub fn make_builder() -> Result<HttpResponseBuilder, Error> {
 /// Creates a response builder
 #[inline]
 #[cfg(not(debug_assertions))]
-pub fn make_builder() -> Result<HttpResponseBuilder, Error> {
-    Ok(HttpResponse::builder())
+pub fn make_builder() -> HttpResponseBuilder {
+    HttpResponse::builder()
 }
 
 /// Creates a default HTTP response builder
@@ -109,7 +138,7 @@ macro_rules! builder {
     };
     ($status:expr) => {
         $crate::builder!()
-            .and_then(|b| b.status($status))
+            .status($status)
     };
 }
 
@@ -122,8 +151,8 @@ macro_rules! response {
     ($status:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::builder!($status)
         $(
-            .and_then(|b| b.header($key, $value))
+            .header($key, $value)
         )*
-            .and_then(|b| b.body($body))
+            .body($body)
     };
 }

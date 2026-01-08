@@ -1,7 +1,7 @@
 //! Extractors for HTTP headers
 
 use futures_util::future::{Ready, ready};
-use hyper::http::request::Parts;
+use hyper::{http::request::Parts, header::AsHeaderName};
 use crate::{HttpRequest, error::Error};
 
 use super::{FromHeaders, HeaderMap, HeaderValue, HeaderError, HeaderName};
@@ -17,46 +17,47 @@ use crate::http::endpoints::args::{
 use std::{
     fmt::{Display, Formatter},
     marker::PhantomData,
-    ops::{Deref, DerefMut}
 };
 
-/// Wraps the [`HeaderMap`] extracted from the request
+/// Represents a snapshot of HTTP request headers.
 ///
+/// This type is intended for read-only access and does not allow
+/// mutating the underlying request headers. 
+/// For mutating headers, use [`HttpRequest`] extractor instead.
+/// 
 /// # Example
 /// ```no_run
 /// use volga::{HttpResult, ok};
-/// use volga::headers::HttpHeaders;
+/// use volga::headers::{HttpHeaders, Header, ContentLength};
 ///
 /// async fn handle(headers: HttpHeaders) -> HttpResult {
-///     let content_length = headers.get("content-length").unwrap().to_str().unwrap();
+///     let content_length: Header<ContentLength> = headers.try_get()?;
 ///     ok!("Content-Length: {content_length}")
 /// }
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpHeaders {
     inner: HeaderMap<HeaderValue>
 }
 
-impl Deref for HttpHeaders {
-    type Target = HeaderMap<HeaderValue>;
-
-    #[inline]
-    fn deref(&self) -> &HeaderMap<HeaderValue> {
-        &self.inner
-    }
-}
-
-impl DerefMut for HttpHeaders {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut HeaderMap<HeaderValue> {
-        &mut self.inner
-    }
-}
-
 impl HttpHeaders {
-    /// Unwraps the inner hash map of HTTP headers
-    pub fn into_inner(self) -> HeaderMap<HeaderValue> {
-        self.inner
+    /// Returns a raw HTTP header value by name
+    #[inline]
+    pub fn get_raw(&self, name: impl AsHeaderName) -> Option<&HeaderValue> {
+        self.inner.get(name)
+    }
+
+    /// Returns a typed HTTP header value
+    #[inline]
+    pub fn get<T: FromHeaders>(&self) -> Option<Header<T>> {
+        T::from_headers(&self.inner).map(Header::new)
+    }
+
+    /// Returns a typed HTTP header value or an error
+    #[inline]
+    pub fn try_get<T: FromHeaders>(&self) -> Result<Header<T>, Error> {
+        self.get::<T>()
+        .ok_or_else(HeaderError::header_missing::<T>)
     }
 }
 
@@ -70,7 +71,9 @@ impl From<HeaderMap<HeaderValue>> for HttpHeaders {
 impl From<&Parts> for HttpHeaders {
     #[inline]
     fn from(parts: &Parts) -> Self {
-        parts.headers.clone().into()
+        parts.headers
+            .clone()
+            .into()
     }
 }
 
@@ -304,7 +307,7 @@ mod tests {
 
         let headers = HttpHeaders::from_payload(Payload::Parts(&parts)).await.unwrap();
 
-        assert_eq!(headers.get("content-type").unwrap(), "text/plain");
+        assert_eq!(headers.get_raw("content-type").unwrap(), "text/plain");
     }
 
     #[tokio::test]

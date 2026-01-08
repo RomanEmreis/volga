@@ -9,7 +9,7 @@ use volga::test::TestServer;
 async fn it_reads_headers() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", |headers: HttpHeaders| async move {
-            ok!("{}", headers.get("x-api-key").unwrap().to_str().unwrap())
+            ok!("{}", headers.get_raw("x-api-key").unwrap().to_str().unwrap())
         });
     }).await;
 
