@@ -21,7 +21,6 @@ pub use response::{
     into_response::IntoResponse,
     HttpResponse,
     HttpResult,
-    Results
 };
 
 #[cfg(feature = "middleware")]

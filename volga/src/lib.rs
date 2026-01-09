@@ -76,7 +76,6 @@ pub use crate::http::{
     HttpRequest,
     HttpResponse,
     HttpResult,
-    Results
 };
 
 pub use limits::Limit;

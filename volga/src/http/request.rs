@@ -1,16 +1,13 @@
 ﻿//! HTTP request utilities
 
-use http_body_util::BodyDataStream;
 use hyper::{
     body::Incoming,
 };
 
 use crate::{
     error::Error,
-    headers::{FromHeaders, Header, HeaderName},
+    headers::{FromHeaders, Header},
     HttpBody,
-    UnsyncBoxBody,
-    BoxBody
 };
 
 use crate::http::{
@@ -161,30 +158,6 @@ impl HttpRequest {
     pub fn into_body(self) -> HttpBody {
         self.inner.into_body()
     }
-
-    /// Consumes the request and returns the body as a boxed trait object
-    #[inline]
-    pub fn into_boxed_body(self) -> BoxBody {
-        self.inner
-            .into_body()
-            .into_boxed()
-    }
-
-    /// Consumes the request body into [`BodyDataStream`]
-    #[inline]
-    pub fn into_body_stream(self) -> BodyDataStream<HttpBody> {
-        self.inner
-            .into_body()
-            .into_data_stream()
-    }
-
-    /// Consumes the request and returns the body as a boxed trait object that is !Sync
-    #[inline]
-    pub fn into_boxed_unsync_body(self) -> UnsyncBoxBody {
-        self.inner
-            .into_body()
-            .into_boxed_unsync()
-    }
     
     /// Consumes the request and returns request head and body
     pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
@@ -330,92 +303,21 @@ impl HttpRequest {
             .flatten()
     }
 
-    /// Attempts to insert the header into the request, replacing any existing
-    /// values with the same header name.
-    ///
-    /// Returns an error if the header cannot be constructed.
+    /// Returns a typed HTTP header value
     #[inline]
-    pub fn try_insert_header<T>(
-        &mut self, 
-        header: impl TryInto<Header<T>, Error = Error>
-    ) -> Result<Header<T>, Error>
-    where
-        T: FromHeaders,
-    {
-        let header = header.try_into()?;
-        Ok(self.insert_header(header))
+    pub fn get_header<T: FromHeaders>(&self) -> Option<Header<T>> {
+        self.headers()
+            .get(T::NAME)
+            .map(Header::new)
     }
 
-    /// Inserts the header into the request, replacing any existing values
-    /// with the same header name.
-    ///
-    /// This method always overwrites previous values.
+    /// Returns a view of all values associated with this HTTP header.
     #[inline]
-    pub fn insert_header<T>(&mut self, header: Header<T>) -> Header<T>
-    where
-        T: FromHeaders,
-    {
-        self.inner.headers_mut().insert(
-            header.name(),
-            header.value().clone()
-        );
-        header
-    }
-
-    /// Appends a new value for the given header name.
-    ///
-    /// Existing values with the same name are preserved.
-    /// Multiple values for the same header may be present.
-    #[inline]
-    pub fn append_header<T>(&mut self, header: Header<T>) -> Result<Header<T>, Error>
-    where
-        T: FromHeaders,
-    {
-        self.inner.headers_mut().append(
-            header.name(),
-            header.value().clone()
-        );
-        Ok(header)
-    }
-
-    /// Attempts to append a new value for the given header name.
-    ///
-    /// Returns an error if the header cannot be constructed or appended.
-    #[inline]
-    pub fn try_append_header<T>(
-        &mut self, 
-        header: impl TryInto<Header<T>, Error = Error>
-    ) -> Result<Header<T>, Error>
-    where
-        T: FromHeaders,
-    {
-        let header = header.try_into()?;
-        self.append_header(header)
-    }
-
-    /// Removes all values for the given header name.
-    ///
-    /// Returns `true` if at least one header value was removed.
-    #[inline]
-    pub fn remove_header<T>(&mut self) -> bool
-    where
-        T: FromHeaders,
-    {
-        self.inner
-            .headers_mut()
-            .remove(&T::NAME)
-            .is_some()
-    }
-
-    /// Attempts to remove all values for the given header name.
-    ///
-    /// Returns `true` if at least one value was removed.
-    #[inline]
-    pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(Error::from)?;
-
-        Ok(self.inner.headers_mut().remove(name).is_some())
+    pub fn get_all_headers<T: FromHeaders>(&self) -> impl Iterator<Item = Header<T>> {
+        self.headers()
+            .get_all(T::NAME)
+            .iter()
+            .map(Header::new)
     }
 }
 
@@ -454,9 +356,8 @@ mod tests {
         
         let (parts, body) = req.into_parts();
         let mut http_req = HttpRequest::from_parts(parts, body);
-        let header = Header::<Vary>::from_static("foo");
         
-        http_req.insert_header(header);
+        http_req.headers_mut().insert("vary", "foo".parse().unwrap());
         
         assert_eq!(http_req.headers().get("vary").unwrap(), "foo");
     }
@@ -656,16 +557,30 @@ mod tests {
     }
 
     #[test]
-    fn it_inserts_and_header() {
+    fn it_gets_header() {
         let (parts, body) = Request::get("/test")
             .body(HttpBody::empty())
             .unwrap()
             .into_parts();
 
         let mut req = HttpRequest::from_parts(parts, body);
-        req.insert_header::<Foo>(Header::from_static("x-foo"));
+        req.headers_mut().insert("x-foo", "val".parse().unwrap());
 
-        assert_eq!(req.extract::<Header<Foo>>().unwrap().into_inner(), "x-foo");
+        assert_eq!(req.get_header::<Foo>().unwrap().value(), "val");
+    }
+
+    #[test]
+    fn it_gets_many_headers() {
+        let (parts, body) = Request::get("/test")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let mut req = HttpRequest::from_parts(parts, body);
+        req.headers_mut().append("x-foo", "1".parse().unwrap());
+        req.headers_mut().append("x-foo", "21".parse().unwrap());
+
+        assert_eq!(req.get_all_headers::<Foo>().map(|h| h.value().clone()).collect::<Vec<_>>(), ["1", "2"]);
     }
 
     #[test]

@@ -2,15 +2,13 @@
 #![cfg(feature = "test")]
 
 use reqwest::Method;
-use volga::{HttpRequest, Results};
+use volga::{stream, HttpRequest};
 use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_maps_to_get_request() {
     let server = TestServer::spawn(|app| {
-        app.map_get("/test", || async {
-            Results::text("Pass!")
-        });
+        app.map_get("/test", async || "Pass!");
     }).await;
 
     let response = server.client()
@@ -28,9 +26,7 @@ async fn it_maps_to_get_request() {
 #[tokio::test]
 async fn it_maps_to_post_request() {
     let server = TestServer::spawn(|app| {
-        app.map_post("/test", || async {
-            Results::text("Pass!")
-        });
+        app.map_post("/test", async || "Pass!");
     }).await;
     
     let response = server.client()
@@ -48,9 +44,7 @@ async fn it_maps_to_post_request() {
 #[tokio::test]
 async fn it_maps_to_put_request() {
     let server = TestServer::spawn(|app| {
-        app.map_put("/test", || async {
-            Results::text("Pass!")
-        });
+        app.map_put("/test", async || "Pass!");
     }).await;
 
     let response = server.client()
@@ -68,9 +62,7 @@ async fn it_maps_to_put_request() {
 #[tokio::test]
 async fn it_maps_to_patch_request() {
     let server = TestServer::spawn(|app| {
-        app.map_patch("/test", || async {
-            Results::text("Pass!")
-        });
+        app.map_patch("/test", async || "Pass!");
     }).await;
 
     let response = server.client()
@@ -88,9 +80,7 @@ async fn it_maps_to_patch_request() {
 #[tokio::test]
 async fn it_maps_to_delete_request() {
     let server = TestServer::spawn(|app| {
-        app.map_delete("/test", || async {
-            Results::text("Pass!")
-        });
+        app.map_delete("/test", async || "Pass!");
     }).await;
 
     let response = server.client()
@@ -108,9 +98,7 @@ async fn it_maps_to_delete_request() {
 #[tokio::test]
 async fn it_maps_to_head_request() {
     let server = TestServer::spawn(|app| {
-        app.map_head("/test", || async {
-            Results::ok()
-        });
+        app.map_head("/test", async || "Pass!");
     }).await;
 
     let response = server.client()
@@ -128,9 +116,7 @@ async fn it_maps_to_head_request() {
 #[tokio::test]
 async fn it_maps_to_options_request() {
     let server = TestServer::spawn(|app| {
-        app.map_options("/test", || async {
-            Results::ok()
-        });
+        app.map_options("/test", async || {});
     }).await;
 
     let response = server.client()
@@ -149,8 +135,7 @@ async fn it_maps_to_options_request() {
 async fn it_maps_to_trace_request() {
     let server = TestServer::spawn(|app| {
         app.map_trace("/test", |req: HttpRequest| async {
-            let boxed_body = req.into_boxed_body();
-            Results::stream(boxed_body)
+            stream!(req.into_body_stream())
         });
     }).await;
 
@@ -169,9 +154,7 @@ async fn it_maps_to_trace_request() {
 #[tokio::test]
 async fn it_maps_to_head_along_with_get_request() {
     let server = TestServer::spawn(|app| {
-        app.map_get("/test", || async {
-            Results::text("Pass!")
-        });
+        app.map_get("/test", async || "Pass!");
     }).await;
 
     let response = server.client()
@@ -192,9 +175,7 @@ async fn it_ignores_head_along_with_get_request_if_disabled_explicitly() {
     let server = TestServer::builder()
         .configure(|app| app.without_implicit_head())
         .setup(|app| {
-            app.map_get("/test", || async {
-                Results::text("Pass!")
-            });
+            app.map_get("/test", async || "Pass!");
         })
         .build()
         .await;

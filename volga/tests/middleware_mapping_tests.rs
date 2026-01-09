@@ -2,7 +2,7 @@
 #![cfg(all(feature = "test", feature = "middleware"))]
 
 use hyper::StatusCode;
-use volga::{HttpRequest, HttpResponse, Results};
+use volga::{HttpRequest, HttpResponse, ok};
 use volga::error::Error;
 use volga::headers::{HttpHeaders, custom_headers, Header};
 use volga::test::TestServer;
@@ -18,10 +18,10 @@ async fn it_adds_middleware_request() {
             next(context).await
         });
         app.wrap(|_, _| async move {
-            Results::text("Pass!")
+            ok!("Pass!")
         });
         app.map_get("/test", || async {
-            Results::text("Unreachable!")
+            ok!("Unreachable!")
         });
     }).await;
     
@@ -32,7 +32,7 @@ async fn it_adds_middleware_request() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "\"Pass!\"");
     
     server.shutdown().await;
 }
@@ -45,7 +45,7 @@ async fn it_adds_map_ok_middleware() {
             resp
         });
         app.map_get("/test", || async {
-            Results::text("Pass!")
+            ok!("Pass!")
         });
     }).await;
 
@@ -57,7 +57,7 @@ async fn it_adds_map_ok_middleware() {
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("X-Test").unwrap(), "Test");
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "\"Pass!\"");
     
     server.shutdown().await;
 }
@@ -71,7 +71,7 @@ async fn it_adds_map_req_middleware() {
         });
         app.map_get("/test", |headers: HttpHeaders| async move {
             let val = headers.try_get::<XTest>()?;
-            Results::text(&val.to_string())
+            Ok::<_, Error>(val.to_string())
         });
     }).await;
 
@@ -117,7 +117,7 @@ async fn it_adds_map_req_middleware_for_route() {
         app
             .map_get("/test", |headers: HttpHeaders| async move {
                 let val = headers.try_get::<XTest>()?;
-                Results::text(&val.to_string())
+                Ok::<_, Error>(val.to_string())
             })
             .tap_req(|mut req: HttpRequest| async move {
                 req.insert_header(Header::<XTest>::try_from("Pass!").unwrap());
@@ -142,9 +142,9 @@ async fn it_adds_map_ok_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
             api.map_ok(|mut resp: HttpResponse| async move {
-                    resp.try_insert_header::<XTest>("Test").unwrap();
-                    resp
-                });
+                resp.try_insert_header::<XTest>("Test").unwrap();
+                resp
+            });
             api.map_get("/test", async || "Pass!");
         });
     }).await;
@@ -172,7 +172,7 @@ async fn it_adds_map_req_middleware_for_group() {
             });
             api.map_get("/test", |headers: HttpHeaders| async move {
                 let val = headers.try_get::<XTest>()?;
-                Results::text(&val.to_string())
+                Ok::<_, Error>(val.to_string())
             });
         });
     }).await;

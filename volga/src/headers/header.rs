@@ -57,7 +57,22 @@ impl HttpHeaders {
     #[inline]
     pub fn try_get<T: FromHeaders>(&self) -> Result<Header<T>, Error> {
         self.get::<T>()
-        .ok_or_else(HeaderError::header_missing::<T>)
+            .ok_or_else(HeaderError::header_missing::<T>)
+    }
+
+    /// Returns a view of all values associated with this HTTP header.
+    #[inline]
+    pub fn get_all<T: FromHeaders>(&self) -> impl Iterator<Item = Header<T>> {
+        self.inner
+            .get_all(T::NAME)
+            .iter()
+            .map(Header::new)
+    }
+
+    /// Returns a view of all rawvalues associated with this HTTP header.
+    #[inline]
+    pub fn get_all_raw<T: FromHeaders>(&self) -> impl Iterator<Item = &HeaderValue> {
+        self.inner.get_all(T::NAME).iter()
     }
 }
 
