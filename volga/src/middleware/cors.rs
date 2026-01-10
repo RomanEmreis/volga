@@ -51,8 +51,8 @@ impl App {
         self.wrap(move |ctx, next| {
             let cors_config = cors_config.clone();
             async move {
-                let origin = ctx.request.headers().get(&ORIGIN);
-                let method = ctx.request.method();
+                let origin = ctx.request().headers().get(&ORIGIN);
+                let method = ctx.request().method();
 
                 let mut headers = HeaderMap::new();
 

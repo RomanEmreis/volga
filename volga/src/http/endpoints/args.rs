@@ -14,6 +14,9 @@ use crate::{
     HttpRequest
 };
 
+#[cfg(feature = "di")]
+use crate::di::{FromContainer, Container};
+
 pub mod path;
 pub mod query;
 pub mod json;
@@ -77,6 +80,18 @@ pub trait FromRequestRef: Sized {
 pub trait FromRequestParts: Sized {
     /// Extracts data from HTTP request parts
     fn from_parts(parts: &Parts) -> Result<Self, Error>;
+}
+
+/// Specifies extractor to read data from path arguments
+pub(crate) trait FromPathArgs: Sized {
+    /// Extracts data from path arguments
+    fn from_path_args(args: &PathArgs) -> Result<Self, Error>;
+}
+
+/// Specifies extractor to read data from a path argument
+pub(crate) trait FromPathArg: Sized {
+    /// Extracts data from a path argument
+    fn from_path_arg(arg: &PathArg) -> Result<Self, Error>;
 }
 
 /// Specifies extractor to read data from an HTTP request 
@@ -152,6 +167,18 @@ macro_rules! define_generic_from_request {
                 let tuple = (
                     $(
                     $T::from_parts(parts)?,
+                    )*    
+                );
+                Ok(tuple)
+            }
+        }
+        #[cfg(feature = "di")]
+        impl<$($T: FromContainer),+> FromContainer for ($($T,)+) {
+            #[inline]
+            fn from_container(container: &Container) -> Result<Self, Error> {
+                let tuple = (
+                    $(
+                    $T::from_container(container)?,
                     )*    
                 );
                 Ok(tuple)

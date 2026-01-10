@@ -159,10 +159,10 @@ impl Scope {
                 
                 #[cfg(feature = "middleware")]
                 let response = if pipeline.has_middleware_pipeline() {
-                    let ctx = HttpContext::with_pipeline(request, route_pipeline);
+                    let ctx = HttpContext::new(request, Some(route_pipeline));
                     pipeline.execute(ctx).await
                 } else {
-                    route_pipeline.call(HttpContext::slim(request)).await
+                    route_pipeline.call(HttpContext::new(request, None)).await
                 };
                 #[cfg(not(feature = "middleware"))]
                 let response = route_pipeline.call(request).await;

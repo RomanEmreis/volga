@@ -5,7 +5,7 @@
 //! ```
 
 use volga::{
-    headers::{Header, custom_headers, http_header},
+    headers::{Header, headers, http_header},
     App,
     ok
 };
@@ -18,7 +18,7 @@ const API_KEY_HEADER: &str = "x-api-key";
 struct CorrelationId;
 
 // Define one or multiple headers if the "macros" feature is disabled
-custom_headers! {
+headers! {
     (ApiKey, API_KEY_HEADER),
     (SomeHeader, "x-some-header")
 }
@@ -31,15 +31,15 @@ async fn main() -> std::io::Result<()> {
     app.wrap(|mut ctx, next| async move {
         if ctx.extract::<Header<CorrelationId>>().is_err() {
             let correlation_id = Header::<CorrelationId>::from_static("123-321-456");
-            ctx.insert_header(correlation_id);
+            ctx.request_mut().insert_header(correlation_id);
         }
         if ctx.extract::<Header<ApiKey>>().is_err() {
             let correlation_id = Header::<ApiKey>::from_static("secret");
-            ctx.insert_header(correlation_id);
+            ctx.request_mut().insert_header(correlation_id);
         }
         if ctx.extract::<Header<SomeHeader>>().is_err() {
             let correlation_id = Header::<SomeHeader>::from_static("some value");
-            ctx.insert_header(correlation_id);
+            ctx.request_mut().insert_header(correlation_id);
         }
         next(ctx).await
     });

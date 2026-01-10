@@ -572,7 +572,7 @@ async fn check_fixed_window(
     next: NextFn
 ) -> HttpResult {
     if let Some(limiter) = ctx.fixed_window_rate_limiter(binding.policy.as_deref()) {
-        let key = binding.key.extract(&ctx.request)?;
+        let key = binding.key.extract(ctx.request())?;
         if !limiter.check(key) { 
             status!(
                 StatusCode::TOO_MANY_REQUESTS.as_u16(), 
@@ -593,7 +593,7 @@ async fn check_sliding_window(
     next: NextFn
 ) -> HttpResult {
     if let Some(limiter) = ctx.sliding_window_rate_limiter(binding.policy.as_deref()) {
-        let key = binding.key.extract(&ctx.request)?;
+        let key = binding.key.extract(ctx.request())?;
         if !limiter.check(key) { 
             status!(
                 StatusCode::TOO_MANY_REQUESTS.as_u16(), 

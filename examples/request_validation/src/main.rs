@@ -9,7 +9,7 @@ use volga::App;
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut app = App::new();
-
+    
     // Sums only positive numbers
     app.group("/positive", |api| {
         api.filter(is_pos);

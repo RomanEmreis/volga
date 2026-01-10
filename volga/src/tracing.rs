@@ -139,8 +139,8 @@ async fn wrap_tracing(
     ctx: HttpContext, 
     next: NextFn
 ) -> HttpResult {
-    let method = ctx.request.method();
-    let uri = ctx.request.uri();
+    let method = ctx.request().method();
+    let uri = ctx.request().uri();
 
     let span = trace_span!("request", %method, %uri);
     let span_id = span.id();

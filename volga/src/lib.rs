@@ -78,6 +78,9 @@ pub use crate::http::{
     HttpResult,
 };
 
+#[cfg(feature = "middleware")]
+pub use http::HttpRequestMut;
+
 pub use limits::Limit;
 
 #[cfg(feature = "multipart")]

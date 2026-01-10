@@ -2,12 +2,12 @@
 #![cfg(all(feature = "test", feature = "middleware"))]
 
 use hyper::StatusCode;
-use volga::{HttpRequest, HttpResponse, ok};
+use volga::{HttpRequestMut, HttpResponse, ok};
 use volga::error::Error;
-use volga::headers::{HttpHeaders, custom_headers, Header};
+use volga::headers::{HttpHeaders, headers, Header};
 use volga::test::TestServer;
 
-custom_headers! {
+headers! {
     (XTest, "x-test")
 }
 
@@ -65,7 +65,7 @@ async fn it_adds_map_ok_middleware() {
 #[tokio::test]
 async fn it_adds_map_req_middleware() {
     let server = TestServer::spawn(|app| {
-        app.tap_req(|mut req: HttpRequest| async move {
+        app.tap_req(|mut req: HttpRequestMut| async move {
             req.insert_header(Header::<XTest>::try_from("Pass!").unwrap());
             req
         });
@@ -119,7 +119,7 @@ async fn it_adds_map_req_middleware_for_route() {
                 let val = headers.try_get::<XTest>()?;
                 Ok::<_, Error>(val.to_string())
             })
-            .tap_req(|mut req: HttpRequest| async move {
+            .tap_req(|mut req: HttpRequestMut| async move {
                 req.insert_header(Header::<XTest>::try_from("Pass!").unwrap());
                 req
             });
@@ -166,7 +166,7 @@ async fn it_adds_map_ok_middleware_for_group() {
 async fn it_adds_map_req_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
-            api.tap_req(|mut req: HttpRequest| async move {
+            api.tap_req(|mut req: HttpRequestMut| async move {
                 req.try_insert_header::<XTest>("Pass!").unwrap();
                 req
             });

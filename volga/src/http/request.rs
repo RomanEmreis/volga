@@ -21,18 +21,13 @@ use crate::http::{
     Version
 };
 
-#[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::{
-    GlobalRateLimiter,
-    RateLimiter
-};
-
-#[cfg(feature = "di")]
-use crate::di::Container;
-#[cfg(any(feature = "di", feature = "rate-limiting"))]
-use std::sync::Arc;
 use crate::headers::HeaderMap;
 
+#[cfg(feature = "middleware")]
+pub use request_mut::{HttpRequestMut, IntoTapResult};
+
+#[cfg(feature = "middleware")]
+mod request_mut;
 pub mod request_body_limit;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
@@ -169,57 +164,6 @@ impl HttpRequest {
         let request = Request::from_parts(parts, body);
         Self { inner: request }
     }
-
-    /// Creates a new `HttpRequest` with the given head and empty body
-    pub(crate) fn slim(parts: &Parts) -> Self {
-        let request = Request::from_parts(parts.clone(), HttpBody::empty());
-        Self { inner: request }
-    }
-
-    /// Returns a reference to a Fixed Window Rate Limiter
-    #[inline]
-    #[cfg(feature = "rate-limiting")]
-    pub fn fixed_window_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.inner.extensions()
-            .get::<Arc<GlobalRateLimiter>>()?
-            .fixed_window(policy)
-    }
-
-    /// Returns a reference to a Sliding Window Rate Limiter
-    #[inline]
-    #[cfg(feature = "rate-limiting")]
-    pub fn sliding_window_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.inner.extensions()
-            .get::<Arc<GlobalRateLimiter>>()?
-            .sliding_window(policy)
-    }
-    
-    /// Returns a reference to the DI container of the request scope
-    #[inline]
-    #[cfg(feature = "di")]
-    pub fn container(&self) -> &Container {
-        self.inner.extensions()
-            .get::<Container>()
-            .expect("DI Container must be provided")
-    }
-
-    /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
-    #[inline]
-    #[cfg(feature = "di")]
-    pub fn resolve<T: Send + Sync + Clone + 'static>(&self) -> Result<T, Error> {
-        self.container()
-            .resolve::<T>()
-            .map_err(Into::into)
-    }
-
-    /// Resolves a service from Dependency Container
-    #[inline]
-    #[cfg(feature = "di")]
-    pub fn resolve_shared<T: Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
-        self.container()
-            .resolve_shared::<T>()
-            .map_err(Into::into)
-    }
     
     /// Extracts a payload from request parts
     ///
@@ -325,27 +269,12 @@ impl HttpRequest {
 #[allow(unreachable_pub)]
 mod tests {
     use http_body_util::BodyExt;
-    use crate::headers::{Header, Vary, custom_headers};
+    use crate::headers::{Header, Vary, headers};
     use crate::http::endpoints::route::PathArg;
     use super::*;
-    
-    #[cfg(feature = "di")]
-    use std::collections::HashMap;
-    #[cfg(feature = "di")]
-    use std::sync::Mutex;
-    
-    #[cfg(feature = "di")]
-    use crate::di::ContainerBuilder;
 
-    custom_headers! {
+    headers! {
         (Foo, "x-foo")
-    }
-    
-    #[cfg(feature = "di")]
-    #[allow(dead_code)]
-    #[derive(Clone, Default)]
-    struct InMemoryCache {
-        inner: Arc<Mutex<HashMap<String, String>>>
     }
     
     #[test]
@@ -413,58 +342,6 @@ mod tests {
             .to_bytes();
 
         assert_eq!(String::from_utf8_lossy(&body), "foo");
-    }
-    
-    #[test]
-    #[cfg(feature = "di")]
-    #[should_panic]
-    fn it_panic_if_there_is_no_di_container() {
-        let req = Request::get("http://localhost/")
-            .body(HttpBody::full("foo"))
-            .unwrap();
-
-        let (parts, body) = req.into_parts();
-        let http_req = HttpRequest::from_parts(parts, body);
-        
-        _ = http_req.container();
-    }
-
-    #[test]
-    #[cfg(feature = "di")]
-    fn it_resolves_from_di_container() {
-        let mut container = ContainerBuilder::new();
-        container.register_singleton(InMemoryCache::default());
-        
-        let req = Request::get("http://localhost/")
-            .extension(container.build())
-            .body(HttpBody::full("foo"))
-            .unwrap();
-
-        let (parts, body) = req.into_parts();
-        let http_req = HttpRequest::from_parts(parts, body);
-
-        let cache = http_req.resolve::<InMemoryCache>();
-        
-        assert!(cache.is_ok());
-    }
-
-    #[test]
-    #[cfg(feature = "di")]
-    fn it_resolves_shared_from_di_container() {
-        let mut container = ContainerBuilder::new();
-        container.register_singleton(InMemoryCache::default());
-
-        let req = Request::get("http://localhost/")
-            .extension(container.build())
-            .body(HttpBody::full("foo"))
-            .unwrap();
-
-        let (parts, body) = req.into_parts();
-        let http_req = HttpRequest::from_parts(parts, body);
-
-        let cache = http_req.resolve_shared::<InMemoryCache>();
-
-        assert!(cache.is_ok());
     }
 
     #[test]
@@ -578,7 +455,7 @@ mod tests {
 
         let mut req = HttpRequest::from_parts(parts, body);
         req.headers_mut().append("x-foo", "1".parse().unwrap());
-        req.headers_mut().append("x-foo", "21".parse().unwrap());
+        req.headers_mut().append("x-foo", "2".parse().unwrap());
 
         assert_eq!(req.get_all_headers::<Foo>().map(|h| h.value().clone()).collect::<Vec<_>>(), ["1", "2"]);
     }

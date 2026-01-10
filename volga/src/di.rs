@@ -18,6 +18,19 @@ pub mod error {
     pub use volga_di::error::Error;
 }
 
+/// Specifies extractors to read data from a borrowed DI container
+pub trait FromContainer: Sized {
+    /// Extracts data from DI container
+    fn from_container(container: &Container) -> Result<Self, Error>;
+}
+
+impl FromContainer for () {
+    #[inline]
+    fn from_container(_: &Container) -> Result<Self, Error> {
+        Ok(())
+    }
+}
+
 impl From<error::Error> for Error {
     #[inline]
     fn from(err: error::Error) -> Self {

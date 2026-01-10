@@ -4,9 +4,9 @@
 //! cargo run -p response_handler
 //! ```
 
-use volga::{App, HttpResponse, headers::custom_headers};
+use volga::{App, HttpResponse, headers::headers};
 
-custom_headers! {
+headers! {
     (CustomHeader, "x-custom-header")
 }
 

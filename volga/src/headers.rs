@@ -43,7 +43,7 @@ pub use self::{
     extract::*,
     header::{Header, HttpHeaders},
     quality::Quality,
-    macros::custom_headers
+    macros::headers
 };
 
 #[cfg(feature = "macros")]

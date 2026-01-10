@@ -9,8 +9,8 @@ use volga::{
     App, Json,
     di::{Inject, Container, Dc, error::Error as DiError},
     error::Error,
-    headers::custom_headers,
-    HttpRequest, HttpResponse, HttpResult, status
+    headers::headers,
+    HttpRequestMut, HttpResponse, HttpResult, status
 };
 use std::{
     collections::HashMap,
@@ -41,10 +41,10 @@ async fn main() -> std::io::Result<()> {
     app.run().await
 }
 
-async fn set_req_id(mut req: HttpRequest, log: Dc<RequestLog>) -> HttpRequest {
-    req.try_insert_header::<RequestId>(log.request_id.as_str()).unwrap();
+async fn set_req_id(mut req: HttpRequestMut, log: Dc<RequestLog>) -> Result<HttpRequestMut, Error> {
+    req.try_insert_header::<RequestId>(log.request_id.as_str())?;
     log.append("started");
-    req
+    Ok(req)
 }
 
 async fn set_resp_id(mut resp: HttpResponse, log: Dc<RequestLog>) -> HttpResponse {
@@ -69,7 +69,7 @@ async fn error_handler(log: Dc<RequestLog>, error: Error) -> HttpResult {
     ])
 }
 
-custom_headers! {
+headers! {
     (RequestId, "x-req-id")
 }
 

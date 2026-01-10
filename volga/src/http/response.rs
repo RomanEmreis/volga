@@ -334,11 +334,11 @@ mod tests {
     use serde::Serialize;
     use tokio::fs::File;
     use crate::{response, HttpResponse};
-    use crate::headers::{Header, HeaderValue, HeaderName, custom_headers};
+    use crate::headers::{Header, HeaderValue, HeaderName, headers};
     use crate::http::body::HttpBody;
     use crate::test_utils::read_file_bytes;
     
-    custom_headers! {
+    headers! {
         (ApiKey, "x-api-key")
     }
 

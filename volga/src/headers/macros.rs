@@ -4,15 +4,15 @@
 ///
 /// # Example
 /// ```rust
-/// use volga::headers::custom_headers;
+/// use volga::headers::headers;
 ///
 /// // The `x-api-key` header
-/// custom_headers! {
+/// headers! {
 ///     (ApiKey, "x-api-key")
 /// }
 /// ```
 #[macro_export]
-macro_rules! custom_headers {
+macro_rules! headers {
     ($(($struct_name:ident, $header_name:expr)),* $(,)?) => {
         $(
             /// Custom HTTP header
@@ -31,7 +31,7 @@ macro_rules! custom_headers {
     };
 }
 
-pub use custom_headers;
+pub use headers;
 
 #[cfg(test)]
 #[allow(unreachable_pub)]
@@ -40,7 +40,7 @@ mod test {
     use hyper::HeaderMap;
     use crate::headers::{Header, FromHeaders};
 
-    custom_headers! {
+    headers! {
         (ApiKey, "x-api-key")
     }
     

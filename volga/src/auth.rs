@@ -234,7 +234,7 @@ where
         let bts: BearerTokenService = ctx.extract()?;
         let resp = match bts.decode(bearer) {
             Ok(claims) if authorizer.validate(&claims) => {
-                ctx.request
+                ctx.request_mut()
                     .extensions_mut()
                     .insert(Authenticated(claims));
                 
@@ -254,12 +254,12 @@ where
                 ])
             }
         };
-        resp.and_then(|mut resp| {
+        resp.map(|mut resp| {
             resp.headers_mut().insert(
                 CACHE_CONTROL, 
                 HeaderValue::from_static(NO_STORE)
             );
-            Ok(resp)
+            resp
         })
     }
 }

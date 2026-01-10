@@ -135,7 +135,7 @@ async fn it_maps_to_options_request() {
 async fn it_maps_to_trace_request() {
     let server = TestServer::spawn(|app| {
         app.map_trace("/test", |req: HttpRequest| async {
-            stream!(req.into_body_stream())
+            stream!(req.into_body().into_data_stream())
         });
     }).await;
 
