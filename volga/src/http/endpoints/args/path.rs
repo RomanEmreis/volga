@@ -20,12 +20,20 @@ use crate::http::endpoints::{
     args::{
         FromPayload, 
         FromRequestParts, 
-        FromRequestRef, 
+        FromRequestRef,
+        FromPathArgs,
+        FromPathArg,
         Payload, Source
     }
 };
 
-/// Wraps typed data extracted from path args
+/// `Path<T>` performs non-destructive extraction of route parameters.
+///
+/// This extractor operates on a snapshot of path arguments and does not
+/// consume them.
+///
+/// ⚠️ Do not mix `Path<T>` with positional path parameters
+/// (e.g. `x: i32`) in the same handler.
 /// 
 /// # Example
 /// ```no_run
@@ -117,12 +125,23 @@ impl<T: DeserializeOwned + Send> FromRequestParts for Path<T> {
     }
 }
 
-/// Extracts path args from request into `Path<T>`
-/// where T is deserializable `struct`
-impl<T: DeserializeOwned + Send> FromRequestRef for Path<T> {
+impl<T: FromPathArgs + Send> FromRequestRef for Path<T> {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        req.extensions().try_into()
+        let args = req
+            .extensions()
+            .get::<PathArgs>()
+            .ok_or_else(PathError::args_missing)?;
+        T::from_path_args(args).map(Path)
+    }
+}
+
+impl<T: DeserializeOwned> FromPathArgs for T {
+    #[inline]
+    fn from_path_args(args: &PathArgs) -> Result<Self, Error> {
+        let route_str = PathArg::make_query_str(args)?;
+        serde_urlencoded::from_str(&route_str)
+            .map_err(PathError::from_serde_error)
     }
 }
 
@@ -158,6 +177,13 @@ impl FromPayload for String {
     }
 }
 
+impl FromPathArg for String {
+    #[inline]
+    fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+        Ok(arg.value.to_string())
+    }
+}
+
 impl FromPayload for Cow<'static, str> {
     type Future = Ready<Result<Self, Error>>;
 
@@ -170,6 +196,13 @@ impl FromPayload for Cow<'static, str> {
     #[inline]
     fn source() -> Source {
         Source::Path
+    }
+}
+
+impl FromPathArg for Cow<'static, str> {
+    #[inline]
+    fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+        Ok(Cow::Owned(arg.value.to_string()))
     }
 }
 
@@ -188,6 +221,13 @@ impl FromPayload for Box<str> {
     }
 }
 
+impl FromPathArg for Box<str> {
+    #[inline]
+    fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+        Ok(arg.value.clone())
+    }
+}
+
 impl FromPayload for Box<[u8]> {
     type Future = Ready<Result<Self, Error>>;
 
@@ -203,8 +243,22 @@ impl FromPayload for Box<[u8]> {
     }
 }
 
+impl FromPathArg for Box<[u8]> {
+    #[inline]
+    fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+        Ok(arg.value.clone().into_boxed_bytes())
+    }
+}
+
 macro_rules! impl_from_payload {
     { $($type:ty),* $(,)? } => {
+        $(impl FromPathArg for $type {
+            #[inline]
+            fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+                arg.value.parse::<$type>()
+                    .map_err(|_| PathError::type_mismatch(arg.name.as_ref()))
+            }
+        })*
         $(impl FromPayload for $type {
             type Future = Ready<Result<Self, Error>>;
             #[inline]
@@ -234,6 +288,29 @@ impl_from_payload! {
     CString, OsString,
     PathBuf
 }
+
+macro_rules! impl_tuple_path {
+    ($($T:ident),+) => {
+        impl<$($T),+> FromPathArgs for ($($T,)+)
+        where
+            $($T: FromPathArg),+
+        {
+            #[inline]
+            fn from_path_args(args: &PathArgs) -> Result<Self, Error> {
+                let mut it = args.iter();
+                $(
+                    let arg = it.next().ok_or_else(PathError::args_len_mismatch)?;
+                    let $T = <$T as FromPathArg>::from_path_arg(arg)?;
+                )+
+                Ok(($($T,)+))
+            }
+        }
+    };
+}
+
+impl_tuple_path!(A);
+impl_tuple_path!(A, B);
+impl_tuple_path!(A, B, C);
 
 /// Describes errors of path extractor
 struct PathError;

@@ -5,7 +5,9 @@ use crate::error::Error;
 // Re-exporting HeaderMap, HeaderValue and some headers from hyper
 pub use hyper::{
     header::{
+        InvalidHeaderName,
         InvalidHeaderValue,
+        MaxSizeReached,
         ToStrError,
         ACCEPT_ENCODING, ACCEPT_RANGES,
         ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -41,7 +43,7 @@ pub use self::{
     extract::*,
     header::{Header, HttpHeaders},
     quality::Quality,
-    macros::custom_headers
+    macros::headers
 };
 
 #[cfg(feature = "macros")]
@@ -57,19 +59,19 @@ pub mod etag;
 pub mod cache_control;
 
 /// Describes a way to extract a specific HTTP header
-pub trait FromHeaders {
+pub trait FromHeaders: Clone {
+    /// Returns current [`HeaderName`]
+    const NAME: HeaderName;
+    
     /// Reads a [`HeaderValue`] from [`HeaderMap`]
     fn from_headers(headers: &HeaderMap) -> Option<&HeaderValue>;
-
-    /// Returns a header type as `&str`
-    fn header_type() -> &'static str;
 }
 
 pub(crate) struct HeaderError;
 impl HeaderError {
     #[inline]
     pub(crate) fn header_missing<T: FromHeaders>() -> Error {
-        Self::header_missing_impl(T::header_type())
+        Self::header_missing_impl(T::NAME.as_str())
     }
 
     #[inline]
@@ -77,18 +79,32 @@ impl HeaderError {
         Error::from_parts(
             StatusCode::NOT_FOUND,
             None,
-            format!("Header: `{}` not found", header)
+            format!("Header: `{header}` not found")
         )
     }
 
     #[inline]
-    pub(crate) fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
+    fn from_invalid_header_value(error: InvalidHeaderValue) -> Error {
         Error::client_error(format!("Header: {error}"))
     }
 
     #[inline]
-    pub(crate) fn from_to_str_error(error: ToStrError) -> Error {
+    fn from_invalid_header_name(error: InvalidHeaderName) -> Error {
         Error::client_error(format!("Header: {error}"))
+    }
+
+    #[inline]
+    fn from_to_str_error(error: ToStrError) -> Error {
+        Error::client_error(format!("Header: {error}"))
+    }
+
+    #[inline]
+    fn from_max_size_reached(error: MaxSizeReached) -> Error {
+        Error {
+            status: StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+            inner: format!("Header: {error}").into(),
+            instance: None,
+        }
     }
 }
 
@@ -96,6 +112,20 @@ impl core::convert::From<InvalidHeaderValue> for Error {
     #[inline]
     fn from(error: InvalidHeaderValue) -> Self {
         HeaderError::from_invalid_header_value(error)
+    }
+}
+
+impl core::convert::From<InvalidHeaderName> for Error {
+    #[inline]
+    fn from(error: InvalidHeaderName) -> Self {
+        HeaderError::from_invalid_header_name(error)
+    }
+}
+
+impl core::convert::From<MaxSizeReached> for Error {
+    #[inline]
+    fn from(error: MaxSizeReached) -> Self {
+        HeaderError::from_max_size_reached(error)
     }
 }
 

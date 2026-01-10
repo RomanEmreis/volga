@@ -572,7 +572,7 @@ async fn check_fixed_window(
     next: NextFn
 ) -> HttpResult {
     if let Some(limiter) = ctx.fixed_window_rate_limiter(binding.policy.as_deref()) {
-        let key = binding.key.extract(&ctx.request)?;
+        let key = binding.key.extract(ctx.request())?;
         if !limiter.check(key) { 
             status!(
                 StatusCode::TOO_MANY_REQUESTS.as_u16(), 
@@ -593,7 +593,7 @@ async fn check_sliding_window(
     next: NextFn
 ) -> HttpResult {
     if let Some(limiter) = ctx.sliding_window_rate_limiter(binding.policy.as_deref()) {
-        let key = binding.key.extract(&ctx.request)?;
+        let key = binding.key.extract(ctx.request())?;
         if !limiter.check(key) { 
             status!(
                 StatusCode::TOO_MANY_REQUESTS.as_u16(), 
@@ -690,7 +690,7 @@ mod tests {
     #[test]
     fn it_extracts_forwarded_ip() {
         let mut req = create_request();
-        req.inner
+        req
             .headers_mut()
             .insert(HeaderName::from_static("forwarded"), "for=192.168.1.1".parse().unwrap());
         
@@ -702,7 +702,7 @@ mod tests {
     #[test]
     fn it_extracts_x_forwarded_for_ip() {
         let mut req = create_request();
-        req.inner
+        req
             .headers_mut()
             .insert(HeaderName::from_static("x-forwarded-for"), "192.168.1.1".parse().unwrap());
 
@@ -714,10 +714,10 @@ mod tests {
     #[test]
     fn it_extracts_prioritized_forwarded_ip() {
         let mut req = create_request();
-        req.inner
+        req
             .headers_mut()
             .insert(HeaderName::from_static("forwarded"), "for=10.24.1.101".parse().unwrap());
-        req.inner
+        req
             .headers_mut()
             .insert(HeaderName::from_static("x-forwarded-for"), "192.168.1.1".parse().unwrap());
 

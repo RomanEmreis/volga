@@ -2,10 +2,14 @@
 #![cfg(all(feature = "test", feature = "middleware"))]
 
 use hyper::StatusCode;
-use volga::{HttpRequest, HttpResponse, Results};
+use volga::{HttpRequestMut, HttpResponse, ok};
 use volga::error::Error;
-use volga::headers::HttpHeaders;
+use volga::headers::{HttpHeaders, headers, Header};
 use volga::test::TestServer;
+
+headers! {
+    (XTest, "x-test")
+}
 
 #[tokio::test]
 async fn it_adds_middleware_request() {
@@ -14,10 +18,10 @@ async fn it_adds_middleware_request() {
             next(context).await
         });
         app.wrap(|_, _| async move {
-            Results::text("Pass!")
+            ok!("Pass!")
         });
         app.map_get("/test", || async {
-            Results::text("Unreachable!")
+            ok!("Unreachable!")
         });
     }).await;
     
@@ -28,7 +32,7 @@ async fn it_adds_middleware_request() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "\"Pass!\"");
     
     server.shutdown().await;
 }
@@ -37,11 +41,11 @@ async fn it_adds_middleware_request() {
 async fn it_adds_map_ok_middleware() {
     let server = TestServer::spawn(|app| {
         app.map_ok(|mut resp: HttpResponse| async move {
-            resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
+            resp.insert_header(Header::<XTest>::try_from("Test").unwrap());
             resp
         });
         app.map_get("/test", || async {
-            Results::text("Pass!")
+            ok!("Pass!")
         });
     }).await;
 
@@ -53,7 +57,7 @@ async fn it_adds_map_ok_middleware() {
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("X-Test").unwrap(), "Test");
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "\"Pass!\"");
     
     server.shutdown().await;
 }
@@ -61,13 +65,13 @@ async fn it_adds_map_ok_middleware() {
 #[tokio::test]
 async fn it_adds_map_req_middleware() {
     let server = TestServer::spawn(|app| {
-        app.tap_req(|mut req: HttpRequest| async move {
-            req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
+        app.tap_req(|mut req: HttpRequestMut| async move {
+            req.insert_header(Header::<XTest>::try_from("Pass!").unwrap());
             req
         });
         app.map_get("/test", |headers: HttpHeaders| async move {
-            let val = headers.get("X-Test").unwrap().to_str().unwrap();
-            Results::text(val)
+            let val = headers.try_get::<XTest>()?;
+            Ok::<_, Error>(val.to_string())
         });
     }).await;
 
@@ -78,7 +82,7 @@ async fn it_adds_map_req_middleware() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
     
     server.shutdown().await;
 }
@@ -89,9 +93,7 @@ async fn it_adds_map_ok_middleware_for_route() {
         app
             .map_get("/test", async || "Pass!")
             .map_ok(|mut resp: HttpResponse| async move {
-                resp
-                    .headers_mut()
-                    .insert("X-Test", "Test".parse().unwrap());
+                resp.try_insert_header::<XTest>("Test").unwrap();
                 resp
             });
     }).await;
@@ -114,11 +116,11 @@ async fn it_adds_map_req_middleware_for_route() {
     let server = TestServer::spawn(|app| {
         app
             .map_get("/test", |headers: HttpHeaders| async move {
-                let val = headers.get("X-Test").unwrap().to_str().unwrap();
-                Results::text(val)
+                let val = headers.try_get::<XTest>()?;
+                Ok::<_, Error>(val.to_string())
             })
-            .tap_req(|mut req: HttpRequest| async move {
-                req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
+            .tap_req(|mut req: HttpRequestMut| async move {
+                req.insert_header(Header::<XTest>::try_from("Pass!").unwrap());
                 req
             });
     }).await;
@@ -130,7 +132,7 @@ async fn it_adds_map_req_middleware_for_route() {
         .unwrap();
     
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
     
     server.shutdown().await;
 }
@@ -140,9 +142,9 @@ async fn it_adds_map_ok_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
             api.map_ok(|mut resp: HttpResponse| async move {
-                    resp.headers_mut().insert("X-Test", "Test".parse().unwrap());
-                    resp
-                });
+                resp.try_insert_header::<XTest>("Test").unwrap();
+                resp
+            });
             api.map_get("/test", async || "Pass!");
         });
     }).await;
@@ -164,13 +166,13 @@ async fn it_adds_map_ok_middleware_for_group() {
 async fn it_adds_map_req_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
-            api.tap_req(|mut req: HttpRequest| async move {
-                req.headers_mut().insert("X-Test", "Pass!".parse().unwrap());
+            api.tap_req(|mut req: HttpRequestMut| async move {
+                req.try_insert_header::<XTest>("Pass!").unwrap();
                 req
             });
             api.map_get("/test", |headers: HttpHeaders| async move {
-                let val = headers.get("X-Test").unwrap().to_str().unwrap();
-                Results::text(val)
+                let val = headers.try_get::<XTest>()?;
+                Ok::<_, Error>(val.to_string())
             });
         });
     }).await;
@@ -182,7 +184,7 @@ async fn it_adds_map_req_middleware_for_group() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "Pass!");
+    assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
     
     server.shutdown().await;
 }

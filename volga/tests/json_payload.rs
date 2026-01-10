@@ -2,7 +2,7 @@
 #![cfg(feature = "test")]
 
 use serde::{Deserialize, Serialize};
-use volga::{ok, Results, Json};
+use volga::{ok, Json};
 use volga::test::TestServer;
 
 #[derive(Deserialize, Serialize)]
@@ -15,9 +15,7 @@ struct User {
 async fn it_reads_json_payload() {
     let server = TestServer::spawn(|app| {
         app.map_post("/test", |user: Json<User>| async move {
-            let response = format!("My name is: {}, I'm {} years old", user.name, user.age);
-            
-            Results::text(&response)
+            ok!("My name is: {}, I'm {} years old", user.name, user.age)
         });
     }).await;
 
@@ -31,7 +29,7 @@ async fn it_reads_json_payload() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "My name is: John, I'm 35 years old");
+    assert_eq!(response.text().await.unwrap(), "\"My name is: John, I'm 35 years old\"");
     
     server.shutdown().await;
 }
@@ -42,7 +40,7 @@ async fn it_writes_json_response() {
         app.map_get("/test", || async move {
             let user = User { name: String::from("John"), age: 35 };
             
-            Results::json(&user)
+            ok!(&user)
         });
     }).await;
     

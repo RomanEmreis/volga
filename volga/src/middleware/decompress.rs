@@ -19,15 +19,27 @@ use tokio_util::io::{
     StreamReader
 };
 
-use crate::{App, routing::{Route, RouteGroup}, error::Error, headers::{
-    ContentEncoding,
-    Header,
-    Encoding,
-    ACCEPT_ENCODING,
-    CONTENT_ENCODING,
-    CONTENT_LENGTH,
-    VARY
-}, http::request::request_body_limit::RequestBodyLimit, middleware::{HttpContext, NextFn}, HttpRequest, HttpBody, status, HttpResult};
+use crate::{
+    App, 
+    routing::{Route, RouteGroup}, 
+    error::Error, 
+    headers::{
+        ContentEncoding,
+        Header,
+        Encoding,
+        ACCEPT_ENCODING,
+        CONTENT_ENCODING,
+        CONTENT_LENGTH,
+        VARY
+    }, 
+    http::request::request_body_limit::RequestBodyLimit, 
+    middleware::{HttpContext, NextFn}, 
+    HttpRequestMut,
+    HttpRequest,
+    HttpResult,
+    HttpBody, 
+    status, 
+};
 
 static SUPPORTED_ENCODINGS: &[Encoding] = &[
     Encoding::Identity,
@@ -98,7 +110,7 @@ async fn make_decompression_fn(mut ctx: HttpContext, next: NextFn) -> HttpResult
             Ok(encoding) => {
                 let (req, handler) = ctx.into_parts();
                 let req = decompress(encoding, req);
-                ctx = HttpContext::new(req, handler);
+                ctx = HttpContext::from_parts(req, handler);
             }
             Err(error) if error.is_client_error() => (),
             Err(_) => {
@@ -112,19 +124,21 @@ async fn make_decompression_fn(mut ctx: HttpContext, next: NextFn) -> HttpResult
     next(ctx).await
 }
 
-fn decompress(encoding: Encoding, request: HttpRequest) -> HttpRequest {
+fn decompress(encoding: Encoding, request: HttpRequestMut) -> HttpRequestMut {
     let (mut parts, body) = request.into_parts();
 
     parts.headers.remove(CONTENT_LENGTH);
     parts.headers.remove(CONTENT_ENCODING);
 
-    let body = decompress_body(encoding, body);
     let body_limit = parts.extensions.get::<RequestBodyLimit>()
         .cloned()
         .unwrap_or_default();
-
-    HttpRequest::from_parts(parts, body)
-        .into_limited(body_limit)
+    
+    let body = decompress_body(encoding, body);
+    
+    HttpRequestMut::new(
+        HttpRequest::from_parts(parts, body).into_limited(body_limit)
+    )
 }
 
 #[inline]

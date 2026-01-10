@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use serde::Deserialize;
-use volga::{Results, Query};
+use volga::Query;
 use volga::test::TestServer;
 
 #[derive(Deserialize)]
@@ -16,8 +16,7 @@ struct User {
 async fn it_reads_route_params() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test/{name}/{age}", |name: String, age: u32| async move {
-            let response = format!("My name is: {name}, I'm {age} years old");
-            Results::text(&response)
+            format!("My name is: {name}, I'm {age} years old")
         });
     }).await;
     
@@ -37,8 +36,7 @@ async fn it_reads_route_params() {
 async fn it_reads_query_params() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", |user: Query<User>| async move {
-            let response = format!("My name is: {}, I'm {} years old", user.name, user.age);
-            Results::text(&response)
+            format!("My name is: {}, I'm {} years old", user.name, user.age)
         });
     }).await;
     
@@ -60,8 +58,8 @@ async fn it_reads_query_as_hash_map_params() {
         app.map_get("/test", |query: Query<HashMap<String, String>>| async move {
             let name = query.get("name").unwrap();
             let age = query.get("age").unwrap();
-            let response = format!("My name is: {name}, I'm {age} years old");
-            Results::text(&response)
+            
+            format!("My name is: {name}, I'm {age} years old")
         });
     }).await;
 

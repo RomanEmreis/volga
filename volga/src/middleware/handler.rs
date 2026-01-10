@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use crate::error::Error;
-use crate::{HttpRequest, HttpResponse, HttpResult};
+use crate::{HttpRequestMut, HttpResponse, HttpResult};
 use super::{HttpContext, NextFn};
 
 /// Represents the [`Future`] that wraps the next middleware in the chain,
@@ -69,15 +69,15 @@ pub trait MiddlewareHandler<Args>: Clone + Send + Sync + 'static {
     fn call(&self, args: Args, next: Next) -> Self::Future;
 }
 
-/// Describes a generic [`tap_req`] middleware handler that could take 0 or N parameters and [`HttpRequest`]
-pub trait TapReqHandler<Args>: Clone + Send + Sync + 'static {
+/// Describes a generic [`tap_req`] middleware handler that could take 0 or N parameters and [`HttpRequestMut`]
+pub trait TapReqHandler<Args = ()>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
     /// Tap handler future
     type Future: Future<Output = Self::Output> + Send;
 
     /// Calls the [`tap_req`] handler
-    fn call(&self, req: HttpRequest, args: Args) -> Self::Future;
+    fn call(&self, req: HttpRequestMut, args: Args) -> Self::Future;
 }
 
 /// Describes a generic [`map_ok`] middleware handler that could take 0 or N parameters and [`HttpResponse`]
@@ -89,6 +89,21 @@ pub trait MapOkHandler<Args>: Clone + Send + Sync + 'static {
 
     /// Calls the [`map_ok`] handler
     fn call(&self, resp: HttpResponse, args: Args) -> Self::Future;
+}
+
+#[cfg(not(feature = "di"))]
+impl<Func, Fut: Send> TapReqHandler for Func
+where
+    Func: Fn(HttpRequestMut) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future,
+{
+    type Output = Fut::Output;
+    type Future = Fut;
+    
+    #[inline]
+    fn call(&self, req: HttpRequestMut, _args: ()) -> Self::Future {
+        self(req)
+    }
 }
 
 macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
@@ -106,9 +121,10 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
             (self)($($param,)* next)
         }
     }
+    #[cfg(feature = "di")]
     impl<Func, Fut: Send, $($param,)*> TapReqHandler<($($param,)*)> for Func
     where
-        Func: Fn(HttpRequest,$($param,)*) -> Fut + Send + Sync + Clone + 'static,
+        Func: Fn(HttpRequestMut,$($param,)*) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
     {
         type Output = Fut::Output;
@@ -116,7 +132,7 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, req: HttpRequest, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn call(&self, req: HttpRequestMut, ($($param,)*): ($($param,)*)) -> Self::Future {
             (self)(req, $($param,)*)
         }
     }

@@ -1,13 +1,14 @@
 ﻿//! HTTP to HTTPS redirection middleware
 
-use crate::{HttpResponse, error::Error, status};
+use crate::{error::Error, status, HttpBody};
 use futures_util::future::BoxFuture;
 
 use hyper::{
     header::HOST, 
     http::uri::Scheme, 
     body::Incoming, 
-    Request, 
+    Request,
+    Response,
     service::Service, 
     Uri
 };
@@ -30,7 +31,7 @@ impl HttpsRedirectionMiddleware {
 }
 
 impl Service<Request<Incoming>> for HttpsRedirectionMiddleware {
-    type Response = HttpResponse;
+    type Response = Response<HttpBody>;
     type Error = Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -68,9 +69,10 @@ impl Service<Request<Incoming>> for HttpsRedirectionMiddleware {
                 let response = temp_redirect!(uri.to_string());
                 #[cfg(not(debug_assertions))]
                 let response = permanent_redirect!(uri.to_string());
-                response
+                
+                response.map(Into::into)
             } else {
-                status!(404)
+                status!(404).map(Into::into)
             }
         })
     }

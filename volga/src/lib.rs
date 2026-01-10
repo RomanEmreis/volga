@@ -38,6 +38,7 @@ pub mod headers;
 pub mod json;
 pub mod error;
 pub mod fs;
+pub mod limits;
 #[cfg(feature = "di")]
 pub mod di;
 #[cfg(feature = "middleware")]
@@ -75,9 +76,12 @@ pub use crate::http::{
     HttpRequest,
     HttpResponse,
     HttpResult,
-    ResponseContext,
-    Results
 };
+
+#[cfg(feature = "middleware")]
+pub use http::HttpRequestMut;
+
+pub use limits::Limit;
 
 #[cfg(feature = "multipart")]
 pub use crate::http::endpoints::args::multipart::Multipart;

@@ -28,7 +28,7 @@ struct Claims {
 #[tokio::test]
 async fn it_generates_jwt_and_authenticates_it() {
     let server = TestServer::builder()
-        .with_app(|app| app
+        .configure(|app| app
             .with_bearer_auth(|auth| auth
                 .set_encoding_key(EncodingKey::from_secret(b"test secret"))
                 .set_decoding_key(DecodingKey::from_secret(b"test secret"))
@@ -92,7 +92,7 @@ async fn it_generates_jwt_and_authenticates_it() {
 #[tokio::test]
 async fn it_generates_jwt_and_failed_to_authenticates_it() {
     let server = TestServer::builder()
-        .with_app(|app| app
+        .configure(|app| app
             .with_bearer_auth(|auth| auth
                 .set_encoding_key(EncodingKey::from_secret(b"test secret"))
                 .set_decoding_key(DecodingKey::from_secret(b"test secret"))

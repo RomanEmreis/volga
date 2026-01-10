@@ -7,7 +7,7 @@ use volga::test::TestServer;
 #[tokio::test]
 async fn it_responds_with_index_file() {
     let server = TestServer::builder()
-        .with_app(|app| {
+        .configure(|app| {
             app.set_host_env(HostEnv::new("tests/static"))
         })
         .setup(|app| {
@@ -31,7 +31,7 @@ async fn it_responds_with_index_file() {
 #[tokio::test]
 async fn it_responds_with_fallback_file() {
     let server = TestServer::builder()
-        .with_app(|app| {
+        .configure(|app| {
             app.with_host_env(|env| env
                 .with_content_root("tests/static")
                 .with_fallback_file("index.html"))
@@ -59,7 +59,7 @@ async fn it_responds_with_fallback_file() {
 #[tokio::test]
 async fn it_responds_with_files_listing() {
     let server = TestServer::builder()
-        .with_app(|app| {
+        .configure(|app| {
             app.with_host_env(|env| env
                 .with_content_root("tests/static")
                 .with_files_listing())

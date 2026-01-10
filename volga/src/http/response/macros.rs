@@ -172,27 +172,6 @@ macro_rules! accepted {
     };
 }
 
-/// Creates HTTP Request/Response headers
-/// # Examples
-///```no_run
-///use volga::headers;
-///
-///let headers = headers![
-///    ("header 1", "value 1"),
-///    ("header 2", "value 2"),
-///];
-/// ```
-#[macro_export]
-macro_rules! headers {
-    ( $( ($key:expr, $value:expr) ),* $(,)? ) => {{
-        let mut headers = std::collections::HashMap::new();
-        $(
-            headers.insert($key.to_string(), $value.to_string());
-        )*
-        headers
-    }};
-}
-
 #[cfg(test)]
 mod tests {
     use http_body_util::BodyExt;
@@ -656,16 +635,5 @@ mod tests {
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
         assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
         assert_eq!(response.status(), 202);
-    }
-
-    #[tokio::test]
-    async fn it_creates_headers() {
-        let headers = headers![
-            ("header 1", "value 1"),
-            ("header 2", "value 2")
-        ];
-        
-        assert_eq!(headers.get("header 1").unwrap(), "value 1");
-        assert_eq!(headers.get("header 2").unwrap(), "value 2")
     }
 }

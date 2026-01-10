@@ -1,6 +1,6 @@
 ﻿//! Extractors for Dependency Injection
 
-use super::{Container, Inject, error::Error as DiError};
+use super::{Container, Inject, FromContainer, error::Error as DiError};
 use futures_util::future::{ready, Ready};
 use hyper::http::{request::Parts, Extensions};
 use crate::{
@@ -96,10 +96,8 @@ impl<T: Send + Sync + 'static> TryFrom<&Extensions> for Dc<T> {
     
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
-        Container::try_from(extensions)?
-            .resolve_shared::<T>()
-            .map_err(Into::into)
-            .map(Dc)
+        let container = Container::try_from(extensions)?;
+        Self::from_container(&container)
     }
 }
 
@@ -115,6 +113,16 @@ impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         let ext = &parts.extensions;
         ext.try_into()
+    }
+}
+
+impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
+    #[inline]
+    fn from_container(container: &Container) -> Result<Self, Error> {
+        container
+            .resolve_shared::<T>()
+            .map_err(Into::into)
+            .map(Dc)
     }
 }
 

@@ -9,8 +9,8 @@ use volga::{
     App, Json,
     di::{Inject, Container, Dc, error::Error as DiError},
     error::Error,
-    headers::HeaderValue,
-    HttpRequest, HttpResponse, HttpResult, status
+    headers::headers,
+    HttpRequestMut, HttpResponse, HttpResult, status
 };
 use std::{
     collections::HashMap,
@@ -41,17 +41,15 @@ async fn main() -> std::io::Result<()> {
     app.run().await
 }
 
-async fn set_req_id(mut req: HttpRequest, log: Dc<RequestLog>) -> HttpRequest {
-    let req_id = HeaderValue::from_str(log.request_id.as_str()).unwrap();
-    req.headers_mut().insert("x-req-id", req_id.clone());
+async fn set_req_id(mut req: HttpRequestMut, log: Dc<RequestLog>) -> Result<HttpRequestMut, Error> {
+    req.try_insert_header::<RequestId>(log.request_id.as_str())?;
     log.append("started");
-    req
+    Ok(req)
 }
 
 async fn set_resp_id(mut resp: HttpResponse, log: Dc<RequestLog>) -> HttpResponse {
     log.append("ended");
-    let req_id = HeaderValue::from_str(log.request_id.as_str()).unwrap();
-    resp.headers_mut().insert("x-req-id", req_id);
+    resp.try_insert_header::<RequestId>(log.request_id.as_str()).unwrap();
     log.write();
     resp
 }
@@ -69,6 +67,10 @@ async fn error_handler(log: Dc<RequestLog>, error: Error) -> HttpResult {
     status!(500, "Internal Server Error", [
         ("x-req-id", &log.request_id)
     ])
+}
+
+headers! {
+    (RequestId, "x-req-id")
 }
 
 trait RequestIdGenerator: Send + Sync {

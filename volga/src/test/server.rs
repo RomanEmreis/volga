@@ -24,7 +24,7 @@ type ServerSetupFn = Box<dyn FnOnce(&mut App) + Send>;
 ///
 /// Configuration is split into two phases:
 ///
-/// 1. Application-level configuration using [`with_app`]
+/// 1. Application-level configuration using [`configure`]
 /// 2. Route and middleware setup using [`setup`]
 ///
 /// This separation mirrors the lifecycle of a typical Volga application
@@ -121,7 +121,7 @@ impl TestServerBuilder {
     ///
     /// The provided function receives ownership of the [`App`] and must
     /// return the modified instance.
-    pub fn with_app<F>(mut self, config: F) -> Self
+    pub fn configure<F>(mut self, config: F) -> Self
     where
         F: FnOnce(App) -> App + Send + 'static,
     {
@@ -164,6 +164,7 @@ impl TestServerBuilder {
         let server_handle = tokio::spawn(async move {
             let mut app = App::new()
                 .bind(format!("127.0.0.1:{}", port))
+                .with_no_delay()
                 .without_greeter();
 
             if let Some(config) = app_config {
@@ -371,5 +372,39 @@ impl Drop for TestServer {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn it_starts_server_and_shuts_down() {
+        let server = TestServer::builder().build().await;
+        server.shutdown().await;
+    }
+
+
+    #[tokio::test]
+    async fn it_binds_server_to_free_port() {
+        let server = TestServer::builder().build().await;
+        let resp = server.client()
+            .get(server.url("/"))
+            .send()
+            .await
+            .unwrap();
+        
+        assert_eq!(resp.status(), 404);
+    }
+
+
+    #[tokio::test]
+    async fn it_drops_server_gracefully() {
+        {
+            let _server = TestServer::builder().build().await;
+        } // drop here
+
+        // test must finish
     }
 }

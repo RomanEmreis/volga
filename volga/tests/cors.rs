@@ -13,7 +13,7 @@ use volga::test::TestServer;
 #[tokio::test]
 async fn it_adds_access_control_allow_origin_header() {
     let server = TestServer::builder()
-        .with_app(|app| app
+        .configure(|app| app
             .with_cors(|cors| cors.with_origins(["http://127.0.0.1"])))
         .setup(|app| {
             app.use_cors();
@@ -38,7 +38,7 @@ async fn it_adds_access_control_allow_origin_header() {
 #[tokio::test]
 async fn it_adds_access_control_headers() {
     let server = TestServer::builder()
-        .with_app(|app| app
+        .configure(|app| app
             .with_cors(|cors| cors
             .with_origins(["http://127.0.0.1"])
             .with_methods([Method::PUT])

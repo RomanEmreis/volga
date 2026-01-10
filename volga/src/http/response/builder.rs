@@ -1,23 +1,133 @@
 ﻿//! HTTP response builder macro definition
 
+use std::fmt::{Debug, Formatter};
+use crate::{
+    error::Error,
+    headers::{HeaderName, HeaderValue, HeaderMap},
+    http::{HttpBody, HttpResponse, Response, StatusCode}
+};
+
 /// Default server name
 pub const SERVER_NAME: &str = "Volga";
 /// Default resource builder error
 pub const RESPONSE_ERROR: &str = "HTTP Response: Unable to create a response";
 
+/// Builder for [`HttpResponse`].
+///
+/// This type provides a controlled way to construct HTTP responses
+/// while preserving framework-level invariants.
+pub struct HttpResponseBuilder {
+    inner: Result<InnerBuilder, Error>
+}
+
+/// The inner builder representation
+struct InnerBuilder {
+    status: StatusCode,
+    headers: HeaderMap,
+}
+
+impl Debug for HttpResponseBuilder {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpResponseBuilder(...)").finish()
+    }
+}
+
+impl HttpResponseBuilder {
+    /// Creates a new [`HttpResponseBuilder`]
+    #[inline]
+    pub(super) fn new() -> Self {
+        Self {
+            inner: Ok(InnerBuilder {
+                status: StatusCode::OK,
+                headers: HeaderMap::new(),
+            })
+        }
+    }
+
+    /// Sets the HTTP status code.
+    #[inline]
+    pub fn status<T>(self, status: T) -> Self
+    where
+        StatusCode: TryFrom<T>,
+        Error: From<<StatusCode as TryFrom<T>>::Error>,
+    {
+        self.and_then(|mut inner| {
+            inner.status = status
+                .try_into()
+                .map_err(Error::from)?;
+        
+            Ok(inner)
+        })
+    }
+
+    /// Appends an HTTP header value.
+    ///
+    /// If a header with the same name already exists, the value is appended
+    ///
+    /// > **Note:** This may result in multiple values for the same header.
+    #[inline]
+    pub fn header<K, V>(self, key: K, value: V) -> Self
+    where
+        HeaderName: TryFrom<K>,
+        HeaderValue: TryFrom<V>,
+        Error: From<<HeaderName as TryFrom<K>>::Error>,
+        Error: From<<HeaderValue as TryFrom<V>>::Error>,
+    {
+        self.and_then(|mut inner| {
+            let name = HeaderName::try_from(key).map_err(Error::from)?;
+            let value = HeaderValue::try_from(value).map_err(Error::from)?;
+            
+            inner.headers
+                .try_append(name, value)
+                .map_err(Error::from)?;
+            
+            Ok(inner)
+        })
+    }
+
+    /// Finalizes the response with the given body.
+    ///
+    /// # Errors
+    /// Returns an error if the response cannot be constructed.
+    #[inline]
+    pub fn body(self, body: HttpBody) -> Result<HttpResponse, Error> {
+        self.inner.and_then(|inner| {
+            let mut response = Response::builder()
+                .status(inner.status)
+                .body(body)
+                .map_err(|_| Error::server_error(RESPONSE_ERROR))?;
+
+            *response.headers_mut() = inner.headers;
+        
+            Ok(HttpResponse::from_inner(response))
+        })
+    }
+
+    #[inline]
+    fn and_then<F>(self, func: F) -> Self
+    where
+        F: FnOnce(InnerBuilder) -> Result<InnerBuilder, Error>,
+    {
+        Self {
+            inner: self.inner.and_then(func),
+        }
+    }
+}
+
 /// Creates a response builder
 #[inline]
 #[cfg(debug_assertions)]
-pub fn make_builder() -> crate::http::response::Builder {
-    crate::http::Response::builder()
+pub fn make_builder() -> HttpResponseBuilder {
+    HttpResponse::builder()
         .header(crate::headers::SERVER, SERVER_NAME)
 }
 
 /// Creates a response builder
 #[inline]
 #[cfg(not(debug_assertions))]
-pub fn make_builder() -> crate::http::response::Builder {
-    crate::http::Response::builder()
+pub fn make_builder() -> HttpResponseBuilder {
+    HttpResponse::builder()
 }
 
 /// Creates a default HTTP response builder
@@ -44,6 +154,5 @@ macro_rules! response {
             .header($key, $value)
         )*
             .body($body)
-            .map_err(|_| $crate::error::Error::server_error($crate::RESPONSE_ERROR))
     };
 }

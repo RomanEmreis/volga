@@ -11,7 +11,7 @@ use crate::headers::{
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn validate_etag(etag: &ETag, headers: &HttpHeaders) -> bool {
-    headers.get(&IF_NONE_MATCH)
+    headers.get_raw(&IF_NONE_MATCH)
         .and_then(|if_none_match| if_none_match.to_str().ok())
         .is_some_and(|value| value.split(',').any(|v| v.trim() == etag.as_ref()))
 }
@@ -19,7 +19,7 @@ pub(crate) fn validate_etag(etag: &ETag, headers: &HttpHeaders) -> bool {
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn validate_last_modified(last_modified: SystemTime, headers: &HttpHeaders) -> bool {
-    headers.get(&IF_MODIFIED_SINCE)
+    headers.get_raw(&IF_MODIFIED_SINCE)
         .and_then(|if_modified_since| if_modified_since.to_str().ok())
         .and_then(|if_modified_since| parse_http_date(if_modified_since).ok())
         .is_some_and(|value| last_modified <= value)

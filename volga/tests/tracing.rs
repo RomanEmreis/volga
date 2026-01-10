@@ -7,7 +7,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 #[tokio::test]
 async fn it_adds_request_id() {
     let server = TestServer::builder()
-        .with_app(|app| {
+        .configure(|app| {
             tracing_subscriber::registry().init();
             app.with_tracing(|tracing| tracing.with_header())
         })

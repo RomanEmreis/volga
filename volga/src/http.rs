@@ -1,11 +1,14 @@
 ﻿//! Base HTTP tools
 
-// Re-exporting HTTP status codes, Response and some headers from hyper/http
+// Re-exporting HTTP status codes, headers, method and etc. from hyper/http
 pub use hyper::{
-    http::{request::Parts, Extensions, Method, Uri},
-    Request,
-    Response,
+    http::{Method, Uri, Version},
     StatusCode,
+};
+
+pub(crate) use hyper::{
+    http::{request::Parts, Extensions},
+    Request, Response
 };
 
 pub use body::{BoxBody, HttpBody, UnsyncBoxBody};
@@ -14,12 +17,13 @@ pub use endpoints::{
     handlers::{GenericHandler, MapErrHandler}
 };
 pub use request::HttpRequest;
+#[cfg(feature = "middleware")]
+pub use request::HttpRequestMut;
+
 pub use response::{
     into_response::IntoResponse,
     HttpResponse,
     HttpResult,
-    ResponseContext,
-    Results
 };
 
 #[cfg(feature = "middleware")]

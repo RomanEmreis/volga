@@ -225,7 +225,7 @@ pub fn header(name: &'static str) -> RateLimitKeySource {
             .ok_or_else(|| HeaderError::header_missing_impl(name))?;
 
         let value = value.to_str()
-            .map_err(HeaderError::from_to_str_error)?;
+            .map_err(Error::from)?;
 
         Ok(stable_hash(value))
     }));

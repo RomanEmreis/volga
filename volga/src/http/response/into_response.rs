@@ -1,6 +1,6 @@
 ﻿//! [`From ] trait implementations from various types into HTTP response
 
-use super::{HttpResponse, HttpResult, HttpBody, Results, ResponseContext};
+use super::{HttpResponse, HttpResult, HttpBody};
 use crate::{Json, Form, ok, status, form, response};
 use crate::error::Error;
 use crate::http::StatusCode;
@@ -132,13 +132,6 @@ impl<T: Serialize> IntoResponse for Form<T> {
     }
 }
 
-impl<T: Serialize> IntoResponse for ResponseContext<T> {
-    #[inline]
-    fn into_response(self) -> HttpResult {
-        Results::from(self)
-    }
-}
-
 impl IntoResponse for StatusCode {
     #[inline]
     fn into_response(self) -> HttpResult {
@@ -251,12 +244,10 @@ impl_into_response! {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::io::{Error as IoError, ErrorKind};
     use http_body_util::BodyExt;
     use hyper::StatusCode;
     use serde::Serialize;
-    use crate::ResponseContext;
     use crate::error::Error;
     use crate::headers::HeaderMap;
     use super::IntoResponse;
@@ -399,28 +390,6 @@ mod tests {
         assert_eq!(body.len(), 0);
         assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
         assert_eq!(response.status(), 404);
-    }
-
-    #[tokio::test]
-    async fn it_converts_response_context_into_response() {
-        let response = ResponseContext {
-            content: "test",
-            status: 200,
-            headers: HashMap::from([
-                ("x-api-key".to_string(), "some api key".to_string())
-            ])
-        };
-        
-        let response = response.into_response();
-
-        assert!(response.is_ok());
-        let mut response = response.unwrap();
-        let body = &response.body_mut().collect().await.unwrap().to_bytes();
-
-        assert_eq!(String::from_utf8_lossy(body), "\"test\"");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
-        assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
-        assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
