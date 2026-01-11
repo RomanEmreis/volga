@@ -65,7 +65,7 @@ pub use crate::http::{
         cancellation_token::CancellationToken,
         file::File,
         json::Json,
-        path::Path,
+        path::{Path, NamedPath},
         query::Query,
         form::Form,
         client_ip::ClientIp

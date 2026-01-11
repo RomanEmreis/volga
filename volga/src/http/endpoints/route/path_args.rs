@@ -11,9 +11,13 @@ const DEFAULT_PARAM_SIZE: usize = 6;
 /// Route path arguments
 pub(crate) type PathArgs = SmallVec<[PathArg; DEFAULT_DEPTH]>;
 
-/// A single path argument
-#[derive(Clone)]
-pub(crate) struct PathArg {
+/// A single matched path argument.
+///
+/// This type is part of Volga's public API but is primarily intended
+/// for framework-level extractors and middleware. It should not be
+/// constructed manually.
+#[derive(Debug, Clone)]
+pub struct PathArg {
     /// Argument name
     pub(crate) name: Box<str>,
 

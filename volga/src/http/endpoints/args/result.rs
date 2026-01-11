@@ -7,8 +7,15 @@ use std::{
     pin::Pin
 };
 use crate::{
-    http::endpoints::args::{FromPayload, Payload, Source},
-    error::Error
+    error::Error,
+    http::Parts,
+    http::endpoints::args::{
+        FromRequestParts,
+        FromRequestRef,
+        FromPayload,
+        Payload,
+        Source
+    }
 };
 
 pin_project! {
@@ -32,6 +39,26 @@ where
             Poll::Ready(Ok(value)) => Poll::Ready(Ok(Ok(value))),
             Poll::Ready(Err(err)) => Poll::Ready(Ok(Err(err))),
             Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<T: FromRequestRef> FromRequestRef for Result<T, Error> {
+    #[inline]
+    fn from_request(req: &crate::HttpRequest) -> Result<Self, Error> {
+        match T::from_request(req) {
+            Ok(value) => Ok(Ok(value)),
+            Err(err) => Ok(Err(err))
+        }
+    }
+}
+
+impl<T: FromRequestParts> FromRequestParts for Result<T, Error> {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        match T::from_parts(parts) {
+            Ok(value) => Ok(Ok(value)),
+            Err(err) => Ok(Err(err))
         }
     }
 }
@@ -327,7 +354,7 @@ mod tests {
     #[tokio::test]
     async fn it_extracts_result_integration_with_real_extractors() {
         // Test with the existing Path extractor
-        use crate::Path;
+        use crate::NamedPath;
         use serde::Deserialize;
 
         #[derive(Deserialize)]
@@ -340,16 +367,42 @@ mod tests {
         ];
 
         // Valid path should return Ok(Ok(value))
-        let result = Result::<Path<Params>, Error>::from_payload(Payload::PathArgs(args)).await;
+        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(args)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
         assert_eq!(inner_result.unwrap().id, 123);
 
-        let result = Result::<Path<Params>, Error>::from_payload(Payload::PathArgs(PathArgs::new())).await;
+        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(PathArgs::new())).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_err());
+    }
+
+    #[tokio::test]
+    async fn it_extracts_result_integration_with_path_extractor() {
+        // Test with the existing Path extractor
+        use crate::Path;
+
+        let args: PathArgs = smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
+        ];
+
+        // Valid path should return Some
+        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(args)).await;
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert!(result.is_ok());
+
+        let result = result.unwrap();
+
+        assert_eq!(result.0.0, 123);
+        assert_eq!(result.0.1, "John");
+
+        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(PathArgs::new())).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_err());
     }
 
     #[tokio::test]

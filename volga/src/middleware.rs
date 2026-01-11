@@ -349,7 +349,7 @@ impl<'a> Route<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::App;
+    /// use volga::{App, Path};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -357,7 +357,7 @@ impl<'a> Route<'a> {
     /// 
     /// app
     ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
-    ///     .filter(|x: i32, y: i32| async move { x > 0 && y > 0 });
+    ///     .filter(|Path((x, y)): Path<(i32, i32)>| async move { x > 0 && y > 0 });
     /// 
     ///# app.run().await
     ///# }
@@ -598,14 +598,14 @@ impl<'a> RouteGroup<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::App;
+    /// use volga::{App, Path};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.group("/positive", |api| {
-    ///     api.filter(|x: i32, y: i32| async move { x > 0 && y > 0 });
+    ///     api.filter(|Path((x, y)): Path<(i32, i32)>| async move { x > 0 && y > 0 });
     /// 
     ///     api.map_get("/sum", |x: i32, y: i32| async move { x + y });
     ///     api.map_get("/mul", |x: i32, y: i32| async move { x * y });

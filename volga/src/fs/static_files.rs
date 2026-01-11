@@ -7,7 +7,7 @@ use std::{
 };
 use crate::{
     App,
-    Path as RoutePath,
+    NamedPath as RoutePath,
     HttpResult,
     app::HostEnv,
     http::StatusCode,

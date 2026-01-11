@@ -4,7 +4,7 @@
 //! cargo run -p request_validation
 //! ```
 
-use volga::App;
+use volga::{App, Path};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -25,15 +25,15 @@ async fn main() -> std::io::Result<()> {
     app.run().await
 }
 
-async fn is_pos(x: i32, y: i32) -> bool {
+async fn is_pos(Path((x, y)): Path<(i32, i32)>) -> bool {
     x >= 0 && y >= 0
 }
 
-async fn is_neg(x: i32, y: i32) -> bool {
+async fn is_neg(Path((x, y)): Path<(i32, i32)>) -> bool {
     x < 0 && y < 0
 }
 
-async fn is_even(x: i32, y: i32) -> Result<(), String> {
+async fn is_even(Path((x, y)): Path<(i32, i32)>) -> Result<(), String> {
     let mut err_str = Vec::new();
     if x % 2 != 0 {
         err_str.push(format!("{x} is not even"));

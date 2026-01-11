@@ -83,7 +83,7 @@ pub trait FromRequestParts: Sized {
 }
 
 /// Specifies extractor to read data from path arguments
-pub(crate) trait FromPathArgs: Sized {
+pub trait FromPathArgs: Sized {
     /// Extracts data from path arguments
     fn from_path_args(args: &PathArgs) -> Result<Self, Error>;
 }

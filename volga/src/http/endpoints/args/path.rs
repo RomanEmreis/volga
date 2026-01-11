@@ -27,32 +27,66 @@ use crate::http::endpoints::{
     }
 };
 
-/// `Path<T>` performs non-destructive extraction of route parameters.
+/// `Path<T>` extracts route parameters into a positional tuple `T`
+/// without consuming the underlying path arguments.
 ///
-/// This extractor operates on a snapshot of path arguments and does not
-/// consume them.
+/// This extractor operates on a snapshot of the matched path arguments.
+/// The original path state remains available to other extractors.
 ///
-/// ⚠️ Do not mix `Path<T>` with positional path parameters
-/// (e.g. `x: i32`) in the same handler.
+/// ⚠️ This extractor must not be mixed with `NamedPath<T>` or
+/// positional path parameters (e.g. `x: i32`) within the same handler.
 /// 
 /// # Example
 /// ```no_run
 /// use volga::{HttpResult, Path, ok};
-/// use serde::Deserialize;
 /// 
+/// // https://www.example.com/api/hello/{name}/{age}
+/// async fn handle(Path((name, age)): Path<(String, u32)>) -> HttpResult {
+///     ok!("Hello {name}, you are {age} years name.")
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Path<T>(pub T);
+
+/// Unlike `Path<T>`, this extractor deserializes parameters into a named
+/// struct, preserving parameter names.
+///
+/// This extractor operates on a snapshot of the matched path arguments.
+/// The original path state remains available to other extractors.
+///
+/// ⚠️ This extractor must not be mixed with `Path<T>` or
+/// positional path parameters (e.g. `x: i32`) within the same handler.
+///
+/// # Example
+/// ```no_run
+/// use volga::{HttpResult, NamedPath, ok};
+/// use serde::Deserialize;
+///
 /// #[derive(Deserialize)]
 /// struct Params {
 ///     name: String,
+///     age: u32
 /// }
-/// 
-/// async fn handle(params: Path<Params>) -> HttpResult {
-///     ok!("Hello {}", params.name)
+///
+/// // https://www.example.com/api/hello/{name}/{age}
+/// async fn handle(
+///     NamedPath(Params { name, age }): NamedPath<Params>
+/// ) -> HttpResult {
+///     ok!("Hello {name}, you are {age} years name.")
 /// }
 /// ```
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Path<T>(pub T);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NamedPath<T: DeserializeOwned>(pub T);
 
 impl<T> Path<T> {
+    /// Unwraps the inner `T`
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T: DeserializeOwned> NamedPath<T> {
     /// Unwraps the inner `T`
     #[inline]
     pub fn into_inner(self) -> T {
@@ -76,6 +110,22 @@ impl<T> DerefMut for Path<T> {
     }
 }
 
+impl<T: DeserializeOwned> Deref for NamedPath<T> {
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: DeserializeOwned> DerefMut for NamedPath<T> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
+
 impl<T: Display> Display for Path<T> {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -83,18 +133,45 @@ impl<T: Display> Display for Path<T> {
     }
 }
 
-impl<T: DeserializeOwned> Path<T> {
+impl<T: DeserializeOwned + Display> Display for NamedPath<T> {
+    #[inline]
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<T: FromPathArgs> Path<T>  {
+    /// Parses the slice of tuples `(String, String)` into [`Path<T>`]
+    #[inline]
+    pub(crate) fn from_slice(route_params: &PathArgs) -> Result<Self, Error> {
+        T::from_path_args(route_params).map(Self)
+    }
+}
+
+impl<T: DeserializeOwned> NamedPath<T> {
     /// Parses the slice of tuples `(String, String)` into [`Path<T>`]
     #[inline]
     pub(crate) fn from_slice(route_params: &PathArgs) -> Result<Self, Error> {
         let route_str = PathArg::make_query_str(route_params)?;
         serde_urlencoded::from_str::<T>(&route_str)
-            .map(Path)
+            .map(Self)
             .map_err(PathError::from_serde_error)
     }
 }
 
-impl<T: DeserializeOwned + Send> TryFrom<&Extensions> for Path<T> {
+impl<T: FromPathArgs + Send> TryFrom<&Extensions> for Path<T> {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(extensions: &Extensions) -> Result<Self, Error> {
+        extensions
+            .get::<PathArgs>()
+            .ok_or_else(PathError::args_missing)
+            .and_then(Self::from_slice)
+    }
+}
+
+impl<T: DeserializeOwned + Send> TryFrom<&Extensions> for NamedPath<T> {
     type Error = Error;
     
     #[inline]
@@ -102,11 +179,11 @@ impl<T: DeserializeOwned + Send> TryFrom<&Extensions> for Path<T> {
         extensions
             .get::<PathArgs>()
             .ok_or_else(PathError::args_missing)
-            .and_then(|params| Self::from_slice(params))
+            .and_then(Self::from_slice)
     }
 }
 
-impl<T: DeserializeOwned + Send> TryFrom<&Parts> for Path<T> {
+impl<T: FromPathArgs + Send> TryFrom<&Parts> for Path<T> {
     type Error = Error;
 
     #[inline]
@@ -116,9 +193,24 @@ impl<T: DeserializeOwned + Send> TryFrom<&Parts> for Path<T> {
     }
 }
 
-/// Extracts path args from request parts into `Path<T>`
-/// where T is deserializable `struct`
-impl<T: DeserializeOwned + Send> FromRequestParts for Path<T> {
+impl<T: DeserializeOwned + Send> TryFrom<&Parts> for NamedPath<T> {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(parts: &Parts) -> Result<Self, Error> {
+        let ext = &parts.extensions;
+        ext.try_into()
+    }
+}
+
+impl<T: FromPathArgs + Send> FromRequestParts for Path<T> {
+    #[inline]
+    fn from_parts(parts: &Parts) -> Result<Self, Error> {
+        parts.try_into()
+    }
+}
+
+impl<T: DeserializeOwned + Send> FromRequestParts for NamedPath<T> {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         parts.try_into()
@@ -132,22 +224,41 @@ impl<T: FromPathArgs + Send> FromRequestRef for Path<T> {
             .extensions()
             .get::<PathArgs>()
             .ok_or_else(PathError::args_missing)?;
-        T::from_path_args(args).map(Path)
+        Self::from_slice(args)
     }
 }
 
-impl<T: DeserializeOwned> FromPathArgs for T {
+impl<T: DeserializeOwned + Send> FromRequestRef for NamedPath<T> {
     #[inline]
-    fn from_path_args(args: &PathArgs) -> Result<Self, Error> {
-        let route_str = PathArg::make_query_str(args)?;
-        serde_urlencoded::from_str(&route_str)
-            .map_err(PathError::from_serde_error)
+    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+        let args = req
+            .extensions()
+            .get::<PathArgs>()
+            .ok_or_else(PathError::args_missing)?;
+        Self::from_slice(args)
     }
 }
 
 /// Extracts path args from request parts into `Path<T>`
+/// where T is a tuple
+impl<T: FromPathArgs + Send> FromPayload for Path<T> {
+    type Future = Ready<Result<Self, Error>>;
+
+    #[inline]
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
+        let Payload::PathArgs(params) = payload else { unreachable!() };
+        ready(Self::from_slice(&params))
+    }
+
+    #[inline]
+    fn source() -> Source {
+        Source::PathArgs
+    }
+}
+
+/// Extracts path args from request parts into `NamedPath<T>`
 /// where T is deserializable `struct`
-impl<T: DeserializeOwned + Send> FromPayload for Path<T> {
+impl<T: DeserializeOwned + Send> FromPayload for NamedPath<T> {
     type Future = Ready<Result<Self, Error>>;
 
     #[inline]
@@ -296,10 +407,11 @@ macro_rules! impl_tuple_path {
             $($T: FromPathArg),+
         {
             #[inline]
+            #[allow(non_snake_case)]
             fn from_path_args(args: &PathArgs) -> Result<Self, Error> {
                 let mut it = args.iter();
                 $(
-                    let arg = it.next().ok_or_else(PathError::args_len_mismatch)?;
+                    let arg = it.next().ok_or_else(PathError::args_missing)?;
                     let $T = <$T as FromPathArg>::from_path_arg(arg)?;
                 )+
                 Ok(($($T,)+))
@@ -308,9 +420,16 @@ macro_rules! impl_tuple_path {
     };
 }
 
-impl_tuple_path!(A);
-impl_tuple_path!(A, B);
-impl_tuple_path!(A, B, C);
+impl_tuple_path! { T1 }
+impl_tuple_path! { T1, T2 }
+impl_tuple_path! { T1, T2, T3 }
+impl_tuple_path! { T1, T2, T3, T4 }
+impl_tuple_path! { T1, T2, T3, T4, T5 }
+impl_tuple_path! { T1, T2, T3, T4, T5, T6 }
+impl_tuple_path! { T1, T2, T3, T4, T5, T6, T7 }
+impl_tuple_path! { T1, T2, T3, T4, T5, T6, T7, T8 }
+impl_tuple_path! { T1, T2, T3, T4, T5, T6, T7, T8, T9 }
+impl_tuple_path! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
 
 /// Describes errors of path extractor
 struct PathError;
@@ -336,7 +455,7 @@ impl PathError {
 mod tests {
     use hyper::{Request, http::Extensions};
     use serde::Deserialize;
-    use crate::{HttpBody, HttpRequest, Path};
+    use crate::{HttpBody, HttpRequest, Path, NamedPath};
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
 
@@ -344,6 +463,13 @@ mod tests {
     struct Params {
         id: u32,
         name: String
+    }
+    
+    fn create_path_args() -> PathArgs {
+        smallvec::smallvec![
+            PathArg { name: "id".into(), value: "123".into() },
+            PathArg { name: "name".into(), value: "John".into() }
+        ]
     }
 
     #[tokio::test]
@@ -459,53 +585,74 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_reads_path_from_payload() {
-        let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
-        ];
+    async fn it_reads_named_path_from_payload() {
+        let args = create_path_args();
 
-        let path = Path::<Params>::from_payload(Payload::PathArgs(args)).await.unwrap();
-
-        assert_eq!(path.id, 123u32);
-        assert_eq!(path.name, "John")
-    }
-    
-    #[test]
-    fn it_parses_slice() {
-        let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
-        ];
-        
-        let path = Path::<Params>::from_slice(&args).unwrap();
-        
-        assert_eq!(path.id, 123u32);
-        assert_eq!(path.name, "John")
-    }
-
-    #[test]
-    fn it_parses_request_extensions() {
-        let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
-        ];
-        
-        let mut ext = Extensions::new();
-        ext.insert(args);
-
-        let path = Path::<Params>::try_from(&ext).unwrap();
+        let path = NamedPath::<Params>::from_payload(Payload::PathArgs(args)).await.unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
     }
 
     #[tokio::test]
-    async fn it_reads_path_from_parts() {
-        let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
-        ];
+    async fn it_reads_path_from_payload() {
+        let args = create_path_args();
+
+        let path = Path::<(u32, String)>::from_payload(Payload::PathArgs(args)).await.unwrap().0;
+
+        assert_eq!(path.0, 123u32);
+        assert_eq!(path.1, "John")
+    }
+    
+    #[test]
+    fn it_parses_named_path_from_slice() {
+        let args = create_path_args();
+        
+        let path = NamedPath::<Params>::from_slice(&args).unwrap();
+        
+        assert_eq!(path.id, 123u32);
+        assert_eq!(path.name, "John")
+    }
+
+    #[test]
+    fn it_parses_path_from_slice() {
+        let args = create_path_args();
+
+        let path = Path::<(u32, String)>::from_slice(&args).unwrap().0;
+
+        assert_eq!(path.0, 123u32);
+        assert_eq!(path.1, "John")
+    }
+
+    #[test]
+    fn it_parses_named_path_from_request_extensions() {
+        let args= create_path_args();
+        
+        let mut ext = Extensions::new();
+        ext.insert(args);
+
+        let path = NamedPath::<Params>::try_from(&ext).unwrap();
+
+        assert_eq!(path.id, 123u32);
+        assert_eq!(path.name, "John")
+    }
+
+    #[test]
+    fn it_parses_path_from_request_extensions() {
+        let args= create_path_args();
+
+        let mut ext = Extensions::new();
+        ext.insert(args);
+
+        let path = Path::<(u32, String)>::try_from(&ext).unwrap().0;
+
+        assert_eq!(path.0, 123u32);
+        assert_eq!(path.1, "John")
+    }
+
+    #[tokio::test]
+    async fn it_reads_named_path_from_parts() {
+        let args= create_path_args();
 
         let req = Request::get("/")
             .extension(args)
@@ -513,18 +660,31 @@ mod tests {
             .unwrap();
 
         let (parts, _) = req.into_parts();
-        let path = Path::<Params>::from_parts(&parts).unwrap();
+        let path = NamedPath::<Params>::from_parts(&parts).unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
     }
 
     #[tokio::test]
-    async fn it_reads_path_from_request_ref() {
-        let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
-        ];
+    async fn it_reads_path_from_parts() {
+        let args= create_path_args();
+
+        let req = Request::get("/")
+            .extension(args)
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+        let path = Path::<(u32, String)>::from_parts(&parts).unwrap().0;
+
+        assert_eq!(path.0, 123u32);
+        assert_eq!(path.1, "John")
+    }
+
+    #[tokio::test]
+    async fn it_reads_named_path_from_request_ref() {
+        let args= create_path_args();
 
         let req = Request::get("/")
             .extension(args)
@@ -533,9 +693,26 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
-        let path = Path::<Params>::from_request(&req).unwrap();
+        let path = NamedPath::<Params>::from_request(&req).unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
+    }
+
+    #[tokio::test]
+    async fn it_reads_path_from_request_ref() {
+        let args= create_path_args();
+
+        let req = Request::get("/")
+            .extension(args)
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+        let path = Path::<(u32, String)>::from_request(&req).unwrap().0;
+
+        assert_eq!(path.0, 123u32);
+        assert_eq!(path.1, "John")
     }
 }
