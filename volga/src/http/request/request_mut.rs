@@ -320,6 +320,8 @@ impl HttpRequestMut {
     }
 
     /// Returns iterator of URL query params
+    /// 
+    /// > Note: Only `key=value` pairs are yielded. Arguments without `=` are ignored.
     ///
     /// # Example
     /// ```no_run

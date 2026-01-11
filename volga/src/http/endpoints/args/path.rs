@@ -33,7 +33,7 @@ use crate::http::endpoints::{
 /// This extractor operates on a snapshot of the matched path arguments.
 /// The original path state remains available to other extractors.
 ///
-/// ⚠️ This extractor must not be mixed with `NamedPath<T>` or
+/// ⚠️ This extractor must not be mixed with [`NamedPath<T>`] or
 /// positional path parameters (e.g. `x: i32`) within the same handler.
 /// 
 /// # Example
@@ -41,20 +41,22 @@ use crate::http::endpoints::{
 /// use volga::{HttpResult, Path, ok};
 /// 
 /// // https://www.example.com/api/hello/{name}/{age}
-/// async fn handle(Path((name, age)): Path<(String, u32)>) -> HttpResult {
-///     ok!("Hello {name}, you are {age} years name.")
+/// async fn handle(
+///     Path((name, age)): Path<(String, u32)>
+/// ) -> HttpResult {
+///     ok!("Hello {name}, you are {age} years old.")
 /// }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Path<T>(pub T);
 
-/// Unlike `Path<T>`, this extractor deserializes parameters into a named
+/// Unlike [`Path<T>`], this extractor deserializes parameters into a named
 /// struct, preserving parameter names.
 ///
 /// This extractor operates on a snapshot of the matched path arguments.
 /// The original path state remains available to other extractors.
 ///
-/// ⚠️ This extractor must not be mixed with `Path<T>` or
+/// ⚠️ This extractor must not be mixed with [`Path<T>`] or
 /// positional path parameters (e.g. `x: i32`) within the same handler.
 ///
 /// # Example
@@ -72,7 +74,7 @@ pub struct Path<T>(pub T);
 /// async fn handle(
 ///     NamedPath(Params { name, age }): NamedPath<Params>
 /// ) -> HttpResult {
-///     ok!("Hello {name}, you are {age} years name.")
+///     ok!("Hello {name}, you are {age} years old.")
 /// }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

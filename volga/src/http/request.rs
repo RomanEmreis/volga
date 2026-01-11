@@ -219,6 +219,8 @@ impl HttpRequest {
     }
 
     /// Returns iterator of URL query params
+    /// 
+    /// > Note: Only `key=value` pairs are yielded. Arguments without `=` are ignored.
     ///
     /// # Example
     /// ```no_run
@@ -236,15 +238,12 @@ impl HttpRequest {
     pub fn query_args(&self) -> impl Iterator<Item = (&str, &str)> {
         self.inner.uri()
             .query()
-            .map(|query| query.split('&')
-                .map(|arg| {
-                    let mut parts = arg.split('=');
-                    let key = parts.next().unwrap();
-                    let value = parts.next().unwrap();
-                    (key, value)
-                }))
             .into_iter()
-            .flatten()
+            .flat_map(|query| {
+                query.split('&').filter_map(|arg| {
+                    arg.split_once('=')
+                })
+            })
     }
 
     /// Returns a typed HTTP header value
@@ -392,7 +391,7 @@ mod tests {
 
     #[test]
     fn it_returns_url_query() {
-        let req = Request::get("/test?id=123&name=John")
+        let req = Request::get("/test?id=123&name=John&age")
             .body(HttpBody::empty())
             .unwrap();
 
@@ -403,6 +402,7 @@ mod tests {
 
         assert_eq!(args.next().unwrap(), ("id", "123"));
         assert_eq!(args.next().unwrap(), ("name", "John"));
+        assert!(args.next().is_none());
     }
 
     #[test]
