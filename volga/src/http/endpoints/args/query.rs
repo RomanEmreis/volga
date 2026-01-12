@@ -17,7 +17,8 @@ use crate::http::endpoints::args::{
     Payload, Source
 };
 
-/// Wraps typed data extracted from [`Uri`]
+/// `Query<T>` extracts HTTP request query parameters into a named
+/// struct, preserving parameter names.
 ///
 /// # Example
 /// ```no_run
@@ -33,7 +34,7 @@ use crate::http::endpoints::args::{
 ///     ok!("Hello {}", params.name)
 /// }
 /// ```
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Query<T>(pub T);
 
 impl<T> Query<T> {
@@ -83,7 +84,9 @@ impl<T: DeserializeOwned> TryFrom<&Uri> for Query<T> {
     
     #[inline]
     fn try_from(uri: &Uri) -> Result<Self, Error> {
-        uri.query().unwrap_or("").try_into()
+        uri.query()
+            .unwrap_or_default()
+            .try_into()
     }
 }
 
@@ -133,6 +136,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Query<T> {
 
 /// Describes errors of query extractor
 struct QueryError;
+
 impl QueryError {
     #[inline]
     fn from(err: serde::de::value::Error) -> Error {

@@ -8,7 +8,10 @@
 /// use volga::{HttpRequest, stream};
 ///
 /// # async fn dox(request: HttpRequest) -> std::io::Result<()> {
-/// let body_stream = request.into_body_stream();
+/// let body_stream = request
+///    .into_body()
+///    .into_data_stream();
+/// 
 /// stream!(body_stream);
 /// # Ok(())
 /// # }
@@ -18,7 +21,10 @@
 /// use volga::{HttpRequest, stream};
 ///
 /// # async fn dox(request: HttpRequest) -> std::io::Result<()> {
-/// let body_stream = request.into_body_stream();
+/// let body_stream = request
+///    .into_body()
+///    .into_data_stream();
+/// 
 /// stream!(body_stream, [
 ///    ("Content-Type", "message/http")
 /// ]);

@@ -3,9 +3,8 @@
 #[cfg(feature = "jwt-auth")]
 use {
     crate::{App, routing::{Route, RouteGroup}, http::StatusCode, error::Error, status, HttpResult},
-    crate::headers::{WWW_AUTHENTICATE, CACHE_CONTROL, cache_control::NO_STORE},
+    crate::headers::{HeaderValue, WWW_AUTHENTICATE, CACHE_CONTROL, cache_control::NO_STORE},
     crate::middleware::{HttpContext, NextFn},
-    crate::http::response::Results,
     std::{future::Future, sync::Arc},
 };
 
@@ -235,7 +234,7 @@ where
         let bts: BearerTokenService = ctx.extract()?;
         let resp = match bts.decode(bearer) {
             Ok(claims) if authorizer.validate(&claims) => {
-                ctx.request
+                ctx.request_mut()
                     .extensions_mut()
                     .insert(Authenticated(claims));
                 
@@ -255,7 +254,13 @@ where
                 ])
             }
         };
-        Results::with_header(resp, CACHE_CONTROL, NO_STORE)
+        resp.map(|mut resp| {
+            resp.headers_mut().insert(
+                CACHE_CONTROL, 
+                HeaderValue::from_static(NO_STORE)
+            );
+            resp
+        })
     }
 }
 

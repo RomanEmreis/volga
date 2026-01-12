@@ -4,9 +4,8 @@
 //! cargo run -p route_params
 //! ```
 
-use std::collections::HashMap;
 use serde::Deserialize;
-use volga::{App, Path, error::Error, ok};
+use volga::{App, Path, NamedPath, error::Error, ok};
 
 #[derive(Deserialize)]
 struct User {
@@ -24,15 +23,12 @@ async fn main() -> std::io::Result<()> {
     });
 
     // GET /hello/John/33
-    app.map_get("/hello/{name}/{age}", |user: Path<User>| async move {
+    app.map_get("/hello/{name}/{age}", |user: NamedPath<User>| async move {
         ok!("Hello {}! Your age is: {}", user.name, user.age)
     });
 
     // GET /hi/John/33
-    app.map_get("/hi/{name}/{age}", |path: Path<HashMap<String, String>>| async move {
-        let name = path.get("name").unwrap(); // "John"
-        let age = path.get("age").unwrap(); // "33"
-
+    app.map_get("/hi/{name}/{age}", |Path((name, age)): Path<(String, u32)>| async move {
         ok!("Hi {}! Your age is: {}", name, age)
     });
 

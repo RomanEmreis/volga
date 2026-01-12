@@ -6,7 +6,8 @@ use std::net::IpAddr;
 
 use crate::{
     http::request::request_body_limit::RequestBodyLimit,
-    server::Server
+    server::Server,
+    Limit
 };
 
 use std::{
@@ -20,7 +21,7 @@ use tokio::{
     io::self,
     net::{TcpListener, TcpStream},
     signal,
-    sync::watch
+    sync::{watch, Semaphore}
 };
 
 
@@ -47,6 +48,9 @@ use crate::rate_limiting::GlobalRateLimiter;
 
 #[cfg(feature = "static-files")]
 pub use self::env::HostEnv;
+
+#[cfg(feature = "http2")]
+pub use crate::limits::Http2Limits;
 
 #[cfg(feature = "static-files")]
 pub mod env;
@@ -118,6 +122,10 @@ pub struct App {
 
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
+
+    /// HTTP/2 resource and backpressure limits.
+    #[cfg(feature = "http2")]
+    pub(super) http2_limits: Http2Limits,
     
     /// TCP connection parameters
     connection: Connection,
@@ -139,13 +147,16 @@ pub struct App {
 
     /// Controls whether a `HEAD` route is automatically registered
     /// for this `GET` handler.
-    ///
-    /// When enabled, `HEAD` requests follow the same routing,
-    /// validation, and authorization logic as `GET`, but must not
-    /// produce a response body.
-    ///
-    /// Default: `true`
-    implicit_head: bool
+    implicit_head: bool,
+
+    /// Maximum total size of all HTTP request headers, in bytes.
+    max_header_size: Limit<usize>,
+
+    /// Maximum number of HTTP request headers.
+    max_header_count: Limit<usize>,
+
+    /// Maximum number of simultaneous TCP connections.
+    max_connections: Limit<usize>,
 }
 
 /// Wraps a socket
@@ -223,6 +234,16 @@ pub(crate) struct AppInstance {
     /// Request body limit
     pub(super) body_limit: RequestBodyLimit,
     
+    /// Maximum total size (in bytes) of HTTP headers per request.
+    pub(super) max_header_size: Limit<usize>,
+
+    /// Maximum number of HTTP headers per request.
+    pub(super) max_header_count: Limit<usize>,
+
+    /// HTTP/2 resource and backpressure limits.
+    #[cfg(feature = "http2")]
+    pub(super) http2_limits: Http2Limits,
+
     /// Request/Middleware pipeline
     pipeline: Pipeline,
 }
@@ -246,6 +267,10 @@ impl TryFrom<App> for AppInstance {
             body_limit: app.body_limit,
             pipeline: app.pipeline.build(),
             graceful_shutdown: GracefulShutdown::new(),
+            max_header_count: app.max_header_count,
+            max_header_size: app.max_header_size,
+            #[cfg(feature = "http2")]
+            http2_limits: app.http2_limits,
             #[cfg(feature = "static-files")]
             host_env: app.host_env,
             #[cfg(feature = "di")]
@@ -315,6 +340,11 @@ impl App {
             body_limit: Default::default(),
             no_delay: false,
             implicit_head: true,
+            max_header_count: Limit::Default,
+            max_header_size: Limit::Default,
+            max_connections: Limit::Default,
+            #[cfg(feature = "http2")]
+            http2_limits: Default::default(),
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
@@ -338,9 +368,14 @@ impl App {
     
     /// Sets a specific HTTP request body limit (in bytes)
     /// 
+    /// # Parameters
+    /// - `Limit::Default` — use the framework default (5 MB)
+    /// - `Limit::Limited(n)` — enforce an explicit limit
+    /// - `Limit::Unlimited` — disables the body size check completely
+    /// 
     /// Default: 5 MB
-    pub fn with_body_limit(mut self, limit: usize) -> Self {
-        self.body_limit = RequestBodyLimit::Enabled(limit);
+    pub fn with_body_limit(mut self, limit: Limit<usize>) -> Self {
+        self.body_limit = limit.into();
         self
     }
     
@@ -373,11 +408,84 @@ impl App {
     /// Disables automatic registration of a `HEAD` route
     /// for the `GET` handler.
     ///
-    /// After calling this method, `HEAD` requests to the same
-    /// route will result in `405 Method Not Allowed` unless a
-    /// separate `HEAD` handler is explicitly registered.
+    /// When enabled, `HEAD` requests follow the same routing,
+    /// validation, and authorization logic as `GET`, but must not
+    /// produce a response body.
+    ///
+    /// Default: `true`
     pub fn without_implicit_head(mut self) -> Self {
         self.implicit_head = false;
+        self
+    }
+
+    /// Sets the maximum allowed size of the HTTP/2 header list.
+    ///
+    /// This limit controls the total size (in bytes) of all headers for a single HTTP/2 request.
+    ///
+    /// # Parameters
+    /// - `limit` — a [`Limit<u32>`]:
+    ///   - `Limit::Default` — uses the framework default (recommended)
+    ///   - `Limit::Limited(n)` — enforces an explicit upper bound
+    ///   - `Limit::Unlimited` — treated as `u32::MAX` in production; 
+    ///     in debug builds this will **panic** to catch misconfiguration early.
+    pub fn with_max_header_list_size(mut self, size: Limit<usize>) -> Self {
+        self.max_header_size = match size {
+            Limit::Limited(size) => {
+                assert!(u32::try_from(size).is_ok(), "header limit too big");
+                Limit::Limited(size)
+            },
+
+            Limit::Unlimited => {
+                #[cfg(debug_assertions)]
+                panic!("HTTP/2 max_header_list_size cannot be Unlimited; use Limit::Limited(u32) instead");
+            
+                #[cfg(not(debug_assertions))]
+                {
+                    #[cfg(feature = "tracing")]
+                    tracing::warn!(
+                        "max_header_list_size set to Unlimited; using u32::MAX for production"
+                    );
+
+                    Limit::Limited(u32::MAX as usize)
+                }
+            },
+
+            Limit::Default => Limit::Default
+        };
+
+        self
+    }
+
+    /// Sets the maximum allowed number of HTTP request headers.
+    ///
+    /// This limit is enforced in a protocol-aware manner:
+    ///
+    /// - For HTTP/1, the limit is applied by the HTTP/1 parser,
+    ///   rejecting the request before it reaches application code.
+    /// 
+    /// - For HTTP/2, the limit is validated after headers are decoded,
+    ///   using a middleware check.
+    ///
+    /// When exceeded, the request is rejected with
+    /// `431 Request Header Fields Too Large`.
+    ///
+    /// If not set, the framework relies on the underlying HTTP implementation
+    /// defaults.
+    pub fn with_max_header_count(mut self, count: Limit<usize>) -> Self { 
+        self.max_header_count = count;
+        self
+    }
+
+    /// Sets the maximum number of concurrent TCP connections.
+    ///
+    /// This limit is applied at the transport level and acts as a
+    /// fail-fast mechanism to protect the server under high load.
+    ///
+    /// - `Default`: No explicit limit is enforced.
+    /// - `Limited(n)`: At most `n` concurrent connections are allowed.
+    /// - `Unlimited`: Disables connection limiting entirely.
+    pub fn with_max_connections(mut self, count: Limit<usize>) -> Self {
+        self.max_connections = count;
         self
     }
 
@@ -511,8 +619,6 @@ impl App {
             .as_ref()
             .map(|config| config.https_redirection_config);
         
-        let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
-        
         #[cfg(feature = "tls")]
         if let Some(redirection_config) = redirection_config 
             && redirection_config.enabled {
@@ -522,17 +628,38 @@ impl App {
                 shutdown_tx.clone());
         }
 
+        let active_connections = self.active_connections();
+        let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
+
         loop {
             let (stream, _) = tokio::select! {
                 Ok(connection) = tcp_listener.accept() => connection,
                 _ = shutdown_tx.closed() => break,
             };
+
+            let permit = match active_connections.as_ref() {
+                Some(sem) => match sem.clone().try_acquire_owned() {
+                    Ok(p) => Some(p),
+                    Err(_) => {
+                        #[cfg(feature = "tracing")]
+                        tracing::warn!("incoming connection rejected: max_connections limit reached");
+                        drop(stream);
+                        continue;
+                    }
+                },
+                None => None,
+            };
+
             if let Err(_err) = stream.set_nodelay(no_delay) {
                 #[cfg(feature = "tracing")]
                 tracing::warn!("failed to set TCP_NODELAY on incoming connection: {_err:#}");
             }
+
             let instance = Arc::downgrade(&app_instance);
-            tokio::spawn(Self::handle_connection(stream, instance));
+            tokio::spawn(async move {
+                let _permit = permit;
+                Self::handle_connection(stream, instance).await
+            });
         }
     
         drop(tcp_listener);
@@ -543,6 +670,16 @@ impl App {
         Ok(())
     }
     
+    #[inline]
+    fn active_connections(&self) -> Option<Arc<Semaphore>> {
+        match self.max_connections {
+            Limit::Limited(n) => Some(
+                Arc::new(Semaphore::new(n))
+            ),
+            _ => None,
+        }
+    }
+
     #[inline]
     fn shutdown_signal(shutdown_rx: watch::Receiver<()>) {
         tokio::spawn(async move {
@@ -626,7 +763,7 @@ impl App {
 mod tests {
     use std::net::SocketAddr;
     use crate::http::request::request_body_limit::RequestBodyLimit;
-    use crate::App;
+    use crate::{App, Limit};
     use crate::app::{AppInstance, Connection};
 
     #[test]
@@ -690,7 +827,7 @@ mod tests {
 
     #[test]
     fn it_sets_body_limit() {
-        let app = App::new().with_body_limit(10);
+        let app = App::new().with_body_limit(Limit::Limited(10));
         let RequestBodyLimit::Enabled(limit) = app.body_limit else { unreachable!() };
 
         assert_eq!(limit, 10)
@@ -701,6 +838,49 @@ mod tests {
         let app = App::new().without_body_limit();
 
         let RequestBodyLimit::Disabled = app.body_limit else { panic!() };
+    }
+
+    #[test]
+    fn it_sets_max_headers_size_limit() {
+        let app = App::new().with_max_header_list_size(Limit::Limited(1024));
+        let Limit::Limited(limit) = app.max_header_size else { unreachable!() };
+
+        assert_eq!(limit, 1024)
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_panics_on_unlimited() {
+        App::new().with_max_header_list_size(Limit::Unlimited);
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_panics_on_arge_value() {
+        App::new().with_max_header_list_size(Limit::Limited(usize::MAX));
+    }
+
+    #[test]
+    fn it_sets_max_headers_count_limit() {
+        let app = App::new().with_max_header_count(Limit::Limited(10));
+        let Limit::Limited(limit) = app.max_header_count else { unreachable!() };
+
+        assert_eq!(limit, 10)
+    }
+
+    #[test]
+    fn it_disables_implicit_head() {
+        let app = App::new().without_implicit_head();
+
+        assert!(!app.implicit_head)
+    }
+
+    #[test]
+    fn it_sets_max_connections_limit() {
+        let app = App::new().with_max_connections(Limit::Limited(1000));
+        let Limit::Limited(limit) = app.max_connections else { unreachable!() };
+
+        assert_eq!(limit, 1000)
     }
     
     #[test]

@@ -1,4 +1,5 @@
 ﻿use super::Server;
+use crate::limits::{Limit, Http2Limits};
 use crate::app::{AppInstance, scope::Scope};
 use std::sync::Arc;
 use hyper::rt::{Read, Write};
@@ -19,8 +20,16 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         #[cfg(feature = "ws")]
         {
             let mut connection_builder = Builder::new(TokioExecutor::new());
-            connection_builder.http2().enable_connect_protocol();
+
+            let http2_builder = &mut connection_builder.http2();
+            http2_builder.enable_connect_protocol();
             
+            if let Limit::Limited(max_header_size) = app_instance.max_header_size {
+                http2_builder.max_header_list_size(max_header_size as u32);
+            }
+            
+            configure_http2(http2_builder, app_instance.http2_limits);
+
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
             let connection = app_instance.graceful_shutdown.watch(connection);
             
@@ -34,7 +43,13 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         }
         #[cfg(not(feature = "ws"))]
         {
-            let connection_builder = Builder::new(TokioExecutor::new());
+            let mut connection_builder = Builder::new(TokioExecutor::new());
+            if let Limit::Limited(max_header_size) = app_instance.max_header_size {
+                connection_builder.max_header_list_size(max_header_size as u32);
+            }
+
+            configure_http2(&mut connection_builder, app_instance.http2_limits);
+
             let connection = connection_builder.serve_connection(self.io, scope);
             let connection = app_instance.graceful_shutdown.watch(connection);
 
@@ -47,4 +62,66 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             }   
         }
     }
+}
+
+#[inline]
+#[cfg(feature = "ws")]
+fn configure_http2<E>(
+    builder: &mut hyper_util::server::conn::auto::Http2Builder<'_, E>,
+    limits: Http2Limits,
+) {
+    match limits.max_concurrent_streams {
+        Limit::Limited(limit) => builder.max_concurrent_streams(limit),
+        Limit::Unlimited => builder.max_concurrent_streams(None),
+        _ => builder
+    };
+
+    match limits.max_frame_size {
+        Limit::Limited(limit) => builder.max_frame_size(limit),
+        Limit::Unlimited => builder.max_frame_size(None),
+        _ => builder
+    };
+
+    match limits.max_local_error_reset_streams {
+        Limit::Limited(limit) => builder.max_local_error_reset_streams(limit),
+        Limit::Unlimited => builder.max_local_error_reset_streams(None),
+        _ => builder
+    };
+
+    match limits.max_pending_reset_streams {
+        Limit::Limited(limit) => builder.max_pending_accept_reset_streams(limit),
+        Limit::Unlimited => builder.max_pending_accept_reset_streams(None),
+        _ => builder
+    };
+}
+
+#[inline]
+#[cfg(not(feature = "ws"))]
+fn configure_http2<E>(
+    builder: &mut Builder<E>,
+    limits: Http2Limits,
+) {
+    match limits.max_concurrent_streams {
+        Limit::Limited(limit) => builder.max_concurrent_streams(limit),
+        Limit::Unlimited => builder.max_concurrent_streams(None),
+        _ => builder
+    };
+
+    match limits.max_frame_size {
+        Limit::Limited(limit) => builder.max_frame_size(limit),
+        Limit::Unlimited => builder.max_frame_size(None),
+        _ => builder
+    };
+
+    match limits.max_local_error_reset_streams {
+        Limit::Limited(limit) => builder.max_local_error_reset_streams(limit),
+        Limit::Unlimited => builder.max_local_error_reset_streams(None),
+        _ => builder
+    };
+
+    match limits.max_pending_reset_streams {
+        Limit::Limited(limit) => builder.max_pending_accept_reset_streams(limit),
+        Limit::Unlimited => builder.max_pending_accept_reset_streams(None),
+        _ => builder
+    };
 }

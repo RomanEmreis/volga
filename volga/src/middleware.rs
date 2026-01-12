@@ -5,8 +5,8 @@ use std::{future::Future, sync::Arc};
 use make_fn::*;
 use crate::{
     http::{
+        request::IntoTapResult,
         IntoResponse,
-        FromRequest,
         FromRequestRef,
         GenericHandler,
         MapErrHandler,
@@ -15,9 +15,11 @@ use crate::{
     routing::{Route, RouteGroup},
     App,
     HttpResult, 
-    HttpRequest,
     not_found, 
 };
+
+#[cfg(feature = "di")]
+use crate::di::FromContainer;
 
 pub use http_context::HttpContext;
 pub use handler::{Next, MiddlewareHandler, TapReqHandler, MapOkHandler};
@@ -146,15 +148,18 @@ impl App {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    /// use volga::{App, HttpResponse, headers::{Header, headers}};
     ///
+    /// headers! {
+    ///     (CustomHeader, "x-custom-header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.map_ok(|mut resp: HttpResponse| async move { 
-    ///     resp.headers_mut()
-    ///         .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///     resp.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///     resp
     /// });
     /// 
@@ -175,19 +180,31 @@ impl App {
         self
     }
 
-    /// Adds a middleware that handles incoming [`HttpRequest`]
+    /// Registers request-tapping middleware.
+    ///
+    /// The middleware receives ownership of the incoming request and may
+    /// transform it before it is passed to the next stage.
+    ///
+    /// The return type may be either:
+    /// - `HttpRequestMut`
+    /// - `Result<HttpRequestMut, Error>`
+    ///
+    /// See [`IntoTapResult`] for details.
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
     ///
+    /// headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
-    /// app.tap_req(|mut req: HttpRequest| async move { 
-    ///     req.headers_mut()
-    ///         .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    /// app.tap_req(|mut req: HttpRequestMut| async move { 
+    ///     req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///     req
     /// });
     /// 
@@ -196,10 +213,57 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn tap_req<F, Args>(&mut self, map: F) -> &mut Self
+    #[cfg(feature = "di")]
+    pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Args, Output = HttpRequest>,
-        Args: FromRequestRef + Send + Sync + 'static,
+        F: TapReqHandler<Args, Output = R>,
+        R: IntoTapResult,
+        Args: FromContainer + Send + Sync + 'static,
+    {
+        self.pipeline
+            .middlewares_mut()
+            .add(make_tap_req_fn(map));
+        self
+    }
+
+    /// Registers request-tapping middleware.
+    ///
+    /// The middleware receives ownership of the incoming request and may
+    /// transform it before it is passed to the next stage.
+    ///
+    /// The return type may be either:
+    /// - `HttpRequestMut`
+    /// - `Result<HttpRequestMut, Error>`
+    ///
+    /// See [`IntoTapResult`] for details.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
+    ///
+    /// headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.tap_req(|mut req: HttpRequestMut| async move { 
+    ///     req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
+    ///     req
+    /// });
+    /// 
+    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    #[cfg(not(feature = "di"))]
+    pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
+    where
+        F: TapReqHandler<Output = R>,
+        R: IntoTapResult,
     {
         self.pipeline
             .middlewares_mut()
@@ -285,7 +349,7 @@ impl<'a> Route<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::App;
+    /// use volga::{App, Path};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -293,7 +357,7 @@ impl<'a> Route<'a> {
     /// 
     /// app
     ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
-    ///     .filter(|x: i32, y: i32| async move { x > 0 && y > 0 });
+    ///     .filter(|Path((x, y)): Path<(i32, i32)>| async move { x > 0 && y > 0 });
     /// 
     ///# app.run().await
     ///# }
@@ -302,18 +366,22 @@ impl<'a> Route<'a> {
     where
         F: GenericHandler<Args, Output = R>,
         R: Into<FilterResult> + 'static,
-        Args: FromRequest + Send + Sync + 'static
+        Args: FromRequestRef + Send + Sync + 'static
     {
         let filter_fn = make_filter_fn(filter);
         self.map_middleware(filter_fn)
     }
     
-    /// Adds a middleware called for this route when [`HttpResult`] is [`Ok`]
+    /// Adds middleware called for this route when [`HttpResult`] is [`Ok`]
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    /// use volga::{App, HttpResponse, headers::{Header, headers}};
     ///
+    /// headers! {
+    ///     (CustomHeader, "x-custom-header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
@@ -321,8 +389,7 @@ impl<'a> Route<'a> {
     /// app
     ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
     ///     .map_ok(|mut resp: HttpResponse| async move { 
-    ///         resp.headers_mut()
-    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         resp.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         resp
     ///     });
     /// 
@@ -369,31 +436,88 @@ impl<'a> Route<'a> {
         self.map_middleware(map_err_fn)
     }
 
-    /// Adds a middleware that handles incoming [`HttpRequest`] for this route
+    /// Registers request-tapping middleware.
+    ///
+    /// The middleware receives ownership of the incoming request and may
+    /// transform it before it is passed to the next stage.
+    ///
+    /// The return type may be either:
+    /// - `HttpRequestMut`
+    /// - `Result<HttpRequestMut, Error>`
+    ///
+    /// See [`IntoTapResult`] for details.
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
     ///
+    /// headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app
     ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
-    ///     .tap_req(|mut req: HttpRequest| async move { 
-    ///         req.headers_mut()
-    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///     .tap_req(|mut req: HttpRequestMut| async move { 
+    ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         req
     ///     });
     /// 
     ///# app.run().await
     ///# }
     /// ```
-    pub fn tap_req<F, Args>(self, map: F) -> Self
+    #[cfg(feature = "di")]
+    pub fn tap_req<F, Args, R>(self, map: F) -> Self
     where
-        F: TapReqHandler<Args, Output = HttpRequest>,
-        Args: FromRequestRef + Send + Sync + 'static,
+        F: TapReqHandler<Args, Output = R>,
+        R: IntoTapResult,
+        Args: FromContainer + Send + Sync + 'static,
+    {
+        let map_err_fn = make_tap_req_fn(map);
+        self.map_middleware(map_err_fn)
+    }
+
+    /// Registers request-tapping middleware.
+    ///
+    /// The middleware receives ownership of the incoming request and may
+    /// transform it before it is passed to the next stage.
+    ///
+    /// The return type may be either:
+    /// - `HttpRequestMut`
+    /// - `Result<HttpRequestMut, Error>`
+    ///
+    /// See [`IntoTapResult`] for details.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
+    ///
+    /// headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app
+    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .tap_req(|mut req: HttpRequestMut| async move { 
+    ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
+    ///         req
+    ///     });
+    /// 
+    ///# app.run().await
+    ///# }
+    /// ```
+    #[cfg(not(feature = "di"))]
+    pub fn tap_req<F, R>(self, map: F) -> Self
+    where
+        F: TapReqHandler<Output = R>,
+        R: IntoTapResult,
     {
         let map_err_fn = make_tap_req_fn(map);
         self.map_middleware(map_err_fn)
@@ -474,14 +598,14 @@ impl<'a> RouteGroup<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::App;
+    /// use volga::{App, Path};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.group("/positive", |api| {
-    ///     api.filter(|x: i32, y: i32| async move { x > 0 && y > 0 });
+    ///     api.filter(|Path((x, y)): Path<(i32, i32)>| async move { x > 0 && y > 0 });
     /// 
     ///     api.map_get("/sum", |x: i32, y: i32| async move { x + y });
     ///     api.map_get("/mul", |x: i32, y: i32| async move { x * y });
@@ -493,7 +617,7 @@ impl<'a> RouteGroup<'a> {
     where
         F: GenericHandler<Args, Output = R>,
         R: Into<FilterResult> + 'static,
-        Args: FromRequest + Send + Sync + 'static
+        Args: FromRequestRef + Send + Sync + 'static
     {
         let filter_fn = make_filter_fn(filter);
         self.middleware.push(filter_fn);
@@ -504,16 +628,19 @@ impl<'a> RouteGroup<'a> {
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpResponse, headers::HeaderValue};
+    /// use volga::{App, HttpResponse, headers::{Header, headers}};
     ///
+    /// headers! {
+    ///     (CustomHeader, "x-custom-header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.group("/positive", |api| {
     ///     api.map_ok(|mut resp: HttpResponse| async move { 
-    ///         resp.headers_mut()
-    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///         resp.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         resp
     ///     });
     ///     api.map_get("/sum", |x: i32, y: i32| async move { 
@@ -567,20 +694,32 @@ impl<'a> RouteGroup<'a> {
         self
     }
 
-    /// Adds a middleware that handles incoming [`HttpRequest`] for this group of routes
+    /// Registers request-tapping middleware.
+    ///
+    /// The middleware receives ownership of the incoming request and may
+    /// transform it before it is passed to the next stage.
+    ///
+    /// The return type may be either:
+    /// - `HttpRequestMut`
+    /// - `Result<HttpRequestMut, Error>`
+    ///
+    /// See [`IntoTapResult`] for details.
     /// 
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpRequest, headers::HeaderValue};
+    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
     ///
+    /// headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     /// 
     /// app.group("/positive", |api| {
-    ///     api.tap_req(|mut req: HttpRequest| async move { 
-    ///         req.headers_mut()
-    ///             .insert("X-Custom-Header", HeaderValue::from_static("Custom Value"));
+    ///     api.tap_req(|mut req: HttpRequestMut| async move { 
+    ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         req
     ///     });
     ///     api.map_get("/sum", |x: i32, y: i32| async move { 
@@ -590,10 +729,58 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn tap_req<F, Args>(&mut self, map: F) -> &mut Self
+    #[cfg(feature = "di")]
+    pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Args, Output = HttpRequest>,
-        Args: FromRequestRef + Send + Sync + 'static,
+        F: TapReqHandler<Args, Output = R>,
+        R: IntoTapResult,
+        Args: FromContainer + Send + Sync + 'static,
+    {
+        let map_err_fn = make_tap_req_fn(map);
+        self.middleware.push(map_err_fn);
+        self
+    }
+
+    /// Registers request-tapping middleware.
+    ///
+    /// The middleware receives ownership of the incoming request and may
+    /// transform it before it is passed to the next stage.
+    ///
+    /// The return type may be either:
+    /// - `HttpRequestMut`
+    /// - `Result<HttpRequestMut, Error>`
+    ///
+    /// See [`IntoTapResult`] for details.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
+    ///
+    /// headers! {
+    ///     (CustomHeader, "X-Custom-Header")
+    /// }
+    /// 
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    /// 
+    /// app.group("/positive", |api| {
+    ///     api.tap_req(|mut req: HttpRequestMut| async move { 
+    ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
+    ///         req
+    ///     });
+    ///     api.map_get("/sum", |x: i32, y: i32| async move { 
+    ///         x + y
+    ///     });
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    #[cfg(not(feature = "di"))]
+    pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
+    where
+        F: TapReqHandler<Output = R>,
+        R: IntoTapResult,
     {
         let map_err_fn = make_tap_req_fn(map);
         self.middleware.push(map_err_fn);

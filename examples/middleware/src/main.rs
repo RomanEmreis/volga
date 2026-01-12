@@ -23,7 +23,7 @@ async fn main() -> std::io::Result<()> {
 
     // Example of middleware
     app.with(|user_agent: Header<Accept>, token: CancellationToken, next| async move {
-        if !token.is_cancelled() && *user_agent == "*/*" {
+        if !token.is_cancelled() && user_agent.as_ref() == "*/*" {
             next.await
         } else {
             status!(406)

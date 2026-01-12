@@ -121,15 +121,15 @@ impl Endpoints {
 
 #[cfg(test)]
 mod tests {
+    use crate::ok;
     use super::{Endpoints, FindResult, handlers::Func};
-    use crate::Results;
     use hyper::{Method, Request};
 
     #[test]
     fn it_maps_and_gets_endpoint() {
         let mut endpoints = Endpoints::new();
         
-        let handler = Func::new(|| async { Results::ok() });
+        let handler = Func::new(|| async { ok!() });
         
         endpoints.map_route(Method::POST, "path/to/handler", handler);
         
@@ -146,7 +146,7 @@ mod tests {
     fn it_returns_route_not_found() {
         let mut endpoints = Endpoints::new();
 
-        let handler = Func::new(|| async { Results::ok() });
+        let handler = Func::new(|| async { ok!() });
 
         endpoints.map_route(Method::POST, "path/to/handler", handler);
 
@@ -163,7 +163,7 @@ mod tests {
     fn it_returns_method_not_found() {
         let mut endpoints = Endpoints::new();
 
-        let handler = Func::new(|| async { Results::ok() });
+        let handler = Func::new(|| async { ok!() });
 
         endpoints.map_route(Method::GET, "path/to/handler", handler);
 
@@ -180,7 +180,7 @@ mod tests {
     fn is_has_route_after_map() {
         let mut endpoints = Endpoints::new();
 
-        let handler = Func::new(|| async { Results::ok() });
+        let handler = Func::new(|| async { ok!() });
 
         endpoints.map_route(Method::GET, "path/to/handler", handler);
 
@@ -193,7 +193,7 @@ mod tests {
     fn is_doesnt_have_route_after_map_a_different_one() {
         let mut endpoints = Endpoints::new();
 
-        let handler = Func::new(|| async { Results::ok() });
+        let handler = Func::new(|| async { ok!() });
 
         endpoints.map_route(Method::GET, "path/to/handler", handler);
 

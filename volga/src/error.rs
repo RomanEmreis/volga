@@ -1,5 +1,7 @@
 ﻿//! Error Handling tools
 
+use hyper::http::status::InvalidStatusCode;
+
 use std::{
     convert::Infallible,
     fmt,
@@ -129,6 +131,17 @@ impl From<Error> for IoError {
 impl From<fmt::Error> for Error {
     #[inline]
     fn from(err: fmt::Error) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            inner: err.into(),
+            instance: None,
+        }
+    }
+}
+
+impl From<InvalidStatusCode> for Error {
+    #[inline]
+    fn from(err: InvalidStatusCode) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),

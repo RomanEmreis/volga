@@ -1,43 +1,39 @@
 ﻿//! HTTP request utilities
 
-use std::ops::{Deref, DerefMut};
-use http_body_util::BodyDataStream;
 use hyper::{
     body::Incoming,
-    http::request::Parts,
-    Request
 };
 
 use crate::{
     error::Error,
     headers::{FromHeaders, Header},
     HttpBody,
-    UnsyncBoxBody,
-    BoxBody
 };
 
 use crate::http::{
     endpoints::{args::FromRequestRef, route::PathArgs}, 
-    request::request_body_limit::RequestBodyLimit
+    request::request_body_limit::RequestBodyLimit,
+    Request,
+    Parts,
+    Extensions,
+    Method,
+    Uri,
+    Version
 };
 
-#[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::{
-    GlobalRateLimiter,
-    RateLimiter
-};
+use crate::headers::HeaderMap;
 
-#[cfg(feature = "di")]
-use crate::di::Container;
-#[cfg(any(feature = "di", feature = "rate-limiting"))]
-use std::sync::Arc;
+#[cfg(feature = "middleware")]
+pub use request_mut::{HttpRequestMut, IntoTapResult};
 
+#[cfg(feature = "middleware")]
+mod request_mut;
 pub mod request_body_limit;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
     /// Inner [`Request`]
-    pub inner: Request<HttpBody>
+    inner: Request<HttpBody>
 }
 
 impl std::fmt::Debug for HttpRequest {
@@ -47,28 +43,101 @@ impl std::fmt::Debug for HttpRequest {
     }
 }
 
-impl Deref for HttpRequest {
-    type Target = Request<HttpBody>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for HttpRequest {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
 impl HttpRequest {
     /// Creates a new [`HttpRequest`]
-    pub fn new(request: Request<Incoming>) -> Self {
+    pub(crate) fn new(request: Request<Incoming>) -> Self {
         Self { inner: request.map(HttpBody::incoming) }
     }
+
+    /// Returns a reference to the associated URI.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest};
+    /// 
+    /// let mut app = App::new();
+    /// 
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert_eq!(req.uri(), "/");
+    /// });
+    /// ```
+    #[inline]
+    pub fn uri(&self) -> &Uri {
+        self.inner.uri()
+    }
     
-    /// Turns [`HttpRequest's`] body into a limited body if it's specified
-    pub fn into_limited(self, body_limit: RequestBodyLimit) -> Self {
+    /// Returns a reference to the associated HTTP header map.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest};
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert!(req.headers().is_empty());
+    /// });
+    /// ```
+    #[inline]
+    pub fn headers(&self) -> &HeaderMap {
+        self.inner.headers()
+    }
+
+    /// Returns a mutable reference to the associated extensions.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
+        self.inner.headers_mut()
+    }
+    
+    /// Returns a reference to the associated HTTP method.
+    /// 
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest, http::Method};
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert_eq!(*req.method(), Method::GET);
+    /// });
+    /// ```
+    #[inline]
+    pub fn method(&self) -> &Method {
+        self.inner.method()
+    }
+
+    /// Represents a version of the HTTP spec.
+    #[inline]
+    pub fn version(&self) -> Version {
+        self.inner.version()
+    }
+    
+    /// Returns a reference to the associated extensions.
+    #[inline]
+    pub(crate) fn extensions(&self) -> &Extensions {
+        self.inner.extensions()
+    }
+
+    /// Returns a mutable reference to the associated extensions.
+    #[inline]
+    #[cfg(any(feature = "tls", feature = "tracing", feature = "auth"))]
+    pub(crate) fn extensions_mut(&mut self) -> &mut Extensions {
+        self.inner.extensions_mut()
+    }
+
+    /// Returns this [`HttpRequest`] body limit.
+    pub fn body_limit(&self) -> Option<usize> {
+        self.inner.extensions()
+            .get::<RequestBodyLimit>()
+            .and_then(|l| match l {
+                RequestBodyLimit::Enabled(size) => Some(*size),
+                RequestBodyLimit::Disabled => None,
+            })
+    }
+
+    #[inline]
+    pub(crate) fn into_limited(self, body_limit: RequestBodyLimit) -> Self {
         match body_limit {
             RequestBodyLimit::Disabled => self,
             RequestBodyLimit::Enabled(limit) => {
@@ -78,103 +147,22 @@ impl HttpRequest {
             }
         }
     }
-    
-    /// Unwraps the inner request
-    #[inline]
-    pub fn into_inner(self) -> Request<HttpBody> {
-        self.inner
-    }
 
     /// Consumes the request and returns just the body
     #[inline]
     pub fn into_body(self) -> HttpBody {
         self.inner.into_body()
     }
-
-    /// Consumes the request and returns the body as a boxed trait object
-    #[inline]
-    pub fn into_boxed_body(self) -> BoxBody {
-        self.inner
-            .into_body()
-            .into_boxed()
-    }
-
-    /// Consumes the request body into [`BodyDataStream`]
-    #[inline]
-    pub fn into_body_stream(self) -> BodyDataStream<HttpBody> {
-        self.inner
-            .into_body()
-            .into_data_stream()
-    }
-
-    /// Consumes the request and returns the body as a boxed trait object that is !Sync
-    #[inline]
-    pub fn into_boxed_unsync_body(self) -> UnsyncBoxBody {
-        self.inner
-            .into_body()
-            .into_boxed_unsync()
-    }
     
     /// Consumes the request and returns request head and body
-    pub fn into_parts(self) -> (Parts, HttpBody) {
+    pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
         self.inner.into_parts()
     }
 
     /// Creates a new `HttpRequest` with the given head and body
-    pub fn from_parts(parts: Parts, body: HttpBody) -> Self {
+    pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
         let request = Request::from_parts(parts, body);
         Self { inner: request }
-    }
-
-    /// Creates a new `HttpRequest` with the given head and empty body
-    pub fn slim(parts: &Parts) -> Self {
-        let request = Request::from_parts(parts.clone(), HttpBody::empty());
-        Self { inner: request }
-    }
-
-    /// Returns a reference to a Fixed Window Rate Limiter
-    #[inline]
-    #[cfg(feature = "rate-limiting")]
-    pub fn fixed_window_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.inner.extensions()
-            .get::<Arc<GlobalRateLimiter>>()?
-            .fixed_window(policy)
-    }
-
-    /// Returns a reference to a Sliding Window Rate Limiter
-    #[inline]
-    #[cfg(feature = "rate-limiting")]
-    pub fn sliding_window_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.inner.extensions()
-            .get::<Arc<GlobalRateLimiter>>()?
-            .sliding_window(policy)
-    }
-    
-    /// Returns a reference to the DI container of the request scope
-    #[inline]
-    #[cfg(feature = "di")]
-    pub fn container(&self) -> &Container {
-        self.inner.extensions()
-            .get::<Container>()
-            .expect("DI Container must be provided")
-    }
-
-    /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
-    #[inline]
-    #[cfg(feature = "di")]
-    pub fn resolve<T: Send + Sync + Clone + 'static>(&self) -> Result<T, Error> {
-        self.container()
-            .resolve::<T>()
-            .map_err(Into::into)
-    }
-
-    /// Resolves a service from Dependency Container
-    #[inline]
-    #[cfg(feature = "di")]
-    pub fn resolve_shared<T: Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
-        self.container()
-            .resolve_shared::<T>()
-            .map_err(Into::into)
     }
     
     /// Extracts a payload from request parts
@@ -221,7 +209,7 @@ impl HttpRequest {
     /// # }
     /// ```
     pub fn path_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.extensions()
+        self.inner.extensions()
             .get::<PathArgs>()
             .map(|args| args
                 .iter()
@@ -231,6 +219,8 @@ impl HttpRequest {
     }
 
     /// Returns iterator of URL query params
+    /// 
+    /// > Note: Only `key=value` pairs are yielded. Arguments without `=` are ignored.
     ///
     /// # Example
     /// ```no_run
@@ -246,24 +236,31 @@ impl HttpRequest {
     /// # }
     /// ```
     pub fn query_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.uri()
+        self.inner.uri()
             .query()
-            .map(|query| query.split('&')
-                .map(|arg| {
-                    let mut parts = arg.split('=');
-                    let key = parts.next().unwrap();
-                    let value = parts.next().unwrap();
-                    (key, value)
-                }))
             .into_iter()
-            .flatten()
+            .flat_map(|query| {
+                query.split('&').filter_map(|arg| {
+                    arg.split_once('=')
+                })
+            })
     }
 
-    /// Inserts the [`Header<T>`] to HTTP request headers
+    /// Returns a typed HTTP header value
     #[inline]
-    pub fn insert_header<T: FromHeaders>(&mut self, header: Header<T>) {
-        let (name, value) = header.into_parts();
-        self.headers_mut().insert(name, value);
+    pub fn get_header<T: FromHeaders>(&self) -> Option<Header<T>> {
+        self.headers()
+            .get(T::NAME)
+            .map(Header::new)
+    }
+
+    /// Returns a view of all values associated with this HTTP header.
+    #[inline]
+    pub fn get_all_headers<T: FromHeaders>(&self) -> impl Iterator<Item = Header<T>> {
+        self.headers()
+            .get_all(T::NAME)
+            .iter()
+            .map(Header::new)
     }
 }
 
@@ -271,27 +268,12 @@ impl HttpRequest {
 #[allow(unreachable_pub)]
 mod tests {
     use http_body_util::BodyExt;
-    use crate::headers::{Header, Vary, custom_headers};
+    use crate::headers::{Header, Vary, headers};
     use crate::http::endpoints::route::PathArg;
     use super::*;
-    
-    #[cfg(feature = "di")]
-    use std::collections::HashMap;
-    #[cfg(feature = "di")]
-    use std::sync::Mutex;
-    
-    #[cfg(feature = "di")]
-    use crate::di::ContainerBuilder;
 
-    custom_headers! {
+    headers! {
         (Foo, "x-foo")
-    }
-    
-    #[cfg(feature = "di")]
-    #[allow(dead_code)]
-    #[derive(Clone, Default)]
-    struct InMemoryCache {
-        inner: Arc<Mutex<HashMap<String, String>>>
     }
     
     #[test]
@@ -302,9 +284,8 @@ mod tests {
         
         let (parts, body) = req.into_parts();
         let mut http_req = HttpRequest::from_parts(parts, body);
-        let header = Header::<Vary>::from("foo");
         
-        http_req.insert_header(header);
+        http_req.headers_mut().insert("vary", "foo".parse().unwrap());
         
         assert_eq!(http_req.headers().get("vary").unwrap(), "foo");
     }
@@ -321,7 +302,7 @@ mod tests {
         
         let header = http_req.extract::<Header<Vary>>().unwrap();
         
-        assert_eq!(*header, "foo");
+        assert_eq!(header.value(), "foo");
     }
     
     #[tokio::test]
@@ -353,7 +334,6 @@ mod tests {
         let http_req = HttpRequest::from_parts(parts, body);
 
         let body = http_req
-            .into_inner()
             .into_body()
             .collect()
             .await
@@ -361,58 +341,6 @@ mod tests {
             .to_bytes();
 
         assert_eq!(String::from_utf8_lossy(&body), "foo");
-    }
-    
-    #[test]
-    #[cfg(feature = "di")]
-    #[should_panic]
-    fn it_panic_if_there_is_no_di_container() {
-        let req = Request::get("http://localhost/")
-            .body(HttpBody::full("foo"))
-            .unwrap();
-
-        let (parts, body) = req.into_parts();
-        let http_req = HttpRequest::from_parts(parts, body);
-        
-        _ = http_req.container();
-    }
-
-    #[test]
-    #[cfg(feature = "di")]
-    fn it_resolves_from_di_container() {
-        let mut container = ContainerBuilder::new();
-        container.register_singleton(InMemoryCache::default());
-        
-        let req = Request::get("http://localhost/")
-            .extension(container.build())
-            .body(HttpBody::full("foo"))
-            .unwrap();
-
-        let (parts, body) = req.into_parts();
-        let http_req = HttpRequest::from_parts(parts, body);
-
-        let cache = http_req.resolve::<InMemoryCache>();
-        
-        assert!(cache.is_ok());
-    }
-
-    #[test]
-    #[cfg(feature = "di")]
-    fn it_resolves_shared_from_di_container() {
-        let mut container = ContainerBuilder::new();
-        container.register_singleton(InMemoryCache::default());
-
-        let req = Request::get("http://localhost/")
-            .extension(container.build())
-            .body(HttpBody::full("foo"))
-            .unwrap();
-
-        let (parts, body) = req.into_parts();
-        let http_req = HttpRequest::from_parts(parts, body);
-
-        let cache = http_req.resolve_shared::<InMemoryCache>();
-
-        assert!(cache.is_ok());
     }
 
     #[test]
@@ -463,7 +391,7 @@ mod tests {
 
     #[test]
     fn it_returns_url_query() {
-        let req = Request::get("/test?id=123&name=John")
+        let req = Request::get("/test?id=123&name=John&age")
             .body(HttpBody::empty())
             .unwrap();
 
@@ -474,6 +402,7 @@ mod tests {
 
         assert_eq!(args.next().unwrap(), ("id", "123"));
         assert_eq!(args.next().unwrap(), ("name", "John"));
+        assert!(args.next().is_none());
     }
 
     #[test]
@@ -505,15 +434,42 @@ mod tests {
     }
 
     #[test]
-    fn it_inserts_and_header() {
+    fn it_gets_header() {
         let (parts, body) = Request::get("/test")
             .body(HttpBody::empty())
             .unwrap()
             .into_parts();
 
         let mut req = HttpRequest::from_parts(parts, body);
-        req.insert_header::<Foo>(Header::from("x-foo"));
+        req.headers_mut().insert("x-foo", "val".parse().unwrap());
 
-        assert_eq!(req.extract::<Header<Foo>>().unwrap().into_inner(), "x-foo");
+        assert_eq!(req.get_header::<Foo>().unwrap().value(), "val");
+    }
+
+    #[test]
+    fn it_gets_many_headers() {
+        let (parts, body) = Request::get("/test")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let mut req = HttpRequest::from_parts(parts, body);
+        req.headers_mut().append("x-foo", "1".parse().unwrap());
+        req.headers_mut().append("x-foo", "2".parse().unwrap());
+
+        assert_eq!(req.get_all_headers::<Foo>().map(|h| h.value().clone()).collect::<Vec<_>>(), ["1", "2"]);
+    }
+
+    #[test]
+    fn it_gets_body_limit() {
+        let (parts, body) = Request::get("/test")
+            .extension(RequestBodyLimit::Enabled(100))
+            .body(HttpBody::full("Hello, World!"))
+            .unwrap()
+            .into_parts();
+
+        let req = HttpRequest::from_parts(parts, body);
+
+        assert_eq!(req.body_limit(), Some(100))
     }
 }

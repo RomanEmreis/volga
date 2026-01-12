@@ -3,23 +3,19 @@
 //! Middleware that applies CORS headers for requests
 
 use hyper::Response;
-use crate::{
-    App,
-    http::{StatusCode, HttpBody, Method},
-    headers::{
-        HeaderMap,
-        HeaderValue,
-        CONTENT_LENGTH,
-        ACCESS_CONTROL_ALLOW_ORIGIN,
-        ACCESS_CONTROL_ALLOW_HEADERS,
-        ACCESS_CONTROL_ALLOW_METHODS,
-        ACCESS_CONTROL_ALLOW_CREDENTIALS,
-        ACCESS_CONTROL_MAX_AGE,
-        ACCESS_CONTROL_EXPOSE_HEADERS,
-        ORIGIN,
-        VARY
-    }
-};
+use crate::{App, http::{StatusCode, HttpBody, Method}, headers::{
+    HeaderMap,
+    HeaderValue,
+    CONTENT_LENGTH,
+    ACCESS_CONTROL_ALLOW_ORIGIN,
+    ACCESS_CONTROL_ALLOW_HEADERS,
+    ACCESS_CONTROL_ALLOW_METHODS,
+    ACCESS_CONTROL_ALLOW_CREDENTIALS,
+    ACCESS_CONTROL_MAX_AGE,
+    ACCESS_CONTROL_EXPOSE_HEADERS,
+    ORIGIN,
+    VARY
+}, HttpResponse};
 use crate::http::CorsConfig;
 
 fn validate_cors_config(cors_config: &Option<CorsConfig>) {
@@ -55,8 +51,8 @@ impl App {
         self.wrap(move |ctx, next| {
             let cors_config = cors_config.clone();
             async move {
-                let origin = ctx.request.headers().get(&ORIGIN);
-                let method = ctx.request.method();
+                let origin = ctx.request().headers().get(&ORIGIN);
+                let method = ctx.request().method();
 
                 let mut headers = HeaderMap::new();
 
@@ -84,9 +80,11 @@ impl App {
                     headers.insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
                     
                     let mut response = Response::new(HttpBody::empty());
+                    
                     *response.status_mut() = StatusCode::NO_CONTENT;
                     *response.headers_mut() = headers;
-                    Ok(response)
+                    
+                    Ok(HttpResponse::from_inner(response))
                 } else {
                     if let Some(expose_headers) = cors_config.expose_headers() {
                         headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, expose_headers);

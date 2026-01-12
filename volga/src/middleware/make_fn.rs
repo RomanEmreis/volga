@@ -3,15 +3,14 @@
 use std::{future::Future, sync::Arc};
 use crate::{
     http::{
+        request::IntoTapResult,
         endpoints::handlers::RouteHandler, 
-        FromRequest,
         FromRequestRef,
         GenericHandler,
         MapErrHandler,
         IntoResponse,
         FilterResult
     },
-    HttpRequest, 
     HttpResult,
 };
 use super::{
@@ -26,11 +25,15 @@ use super::{
     NextFn, 
 };
 
+#[cfg(feature = "di")]
+use crate::di::FromContainer;
+
 /// Wraps a [`RouteHandler`] into [`MiddlewareFn`]
 pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
     Arc::new(move |ctx: HttpContext, _| {
         let handler = handler.clone();
-        Box::pin(async move { handler.call(ctx.request).await })
+        let (req, _) = ctx.into_parts();
+        Box::pin(async move { handler.call(req.freeze()).await })
     })
 }
 
@@ -52,22 +55,17 @@ pub(super) fn make_filter_fn<F, R, Args>(filter: F) -> MiddlewareFn
 where
     F: GenericHandler<Args, Output = R>,
     R: Into<FilterResult> + 'static,
-    Args: FromRequest + Send + Sync + 'static
+    Args: FromRequestRef + Send + Sync + 'static
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let filter = filter.clone();
         async move {
-            let (req, pipeline) = ctx.into_parts();
-            let (parts, body) = req.into_parts();
-
-            let args = Args::from_request(HttpRequest::slim(&parts)).await.unwrap();
+            let args = Args::from_request(ctx.request())?;
             let result = filter
                 .call(args)
                 .await
                 .into();
 
-            let req = HttpRequest::from_parts(parts, body);
-            let ctx = HttpContext::new(req, pipeline);
             match result.into_inner() {
                 Ok(_) => next(ctx).await,
                 Err(err) => err.into_response()
@@ -88,7 +86,7 @@ where
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            match Args::from_request(&ctx.request) {
+            match Args::from_request(ctx.request()) {
                 Err(err) => err.into_response(),
                 Ok(args) => {
                     match next(ctx).await {
@@ -113,7 +111,7 @@ where
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            match Args::from_request(&ctx.request) { 
+            match Args::from_request(ctx.request()) { 
                 Err(err) => err.into_response(),
                 Ok(args) => match next(ctx).await {
                     Err(err) => map.call(err, args).await.into_response(),
@@ -127,23 +125,45 @@ where
 
 /// Wraps a closure for the request mapping into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_tap_req_fn<F, Args>(map: F) -> MiddlewareFn
+#[cfg(feature = "di")]
+pub(super) fn make_tap_req_fn<F, Args, R>(map: F) -> MiddlewareFn
 where
-    F: TapReqHandler<Args, Output = HttpRequest>,
-    Args: FromRequestRef + Send + Sync + 'static,
+    F: TapReqHandler<Args, Output = R>,
+    R: IntoTapResult,
+    Args: FromContainer + Send + Sync + 'static,
+{
+    let middleware_fn = move |ctx: HttpContext, next: NextFn| {
+        let map = map.clone();
+        async move {
+            match ctx.container().and_then(|c| Args::from_container(c)) {
+                Err(err) => err.into_response(),
+                Ok(args) => {
+                    let (req, pipeline) = ctx.into_parts();
+                    let req = map.call(req, args).await.into_result()?;
+                    let ctx = HttpContext::from_parts(req, pipeline);
+                    next(ctx).await
+                },
+            }
+        }
+    };
+    make_fn(middleware_fn)
+}
+
+/// Wraps a closure for the request mapping into [`MiddlewareFn`]
+#[inline]
+#[cfg(not(feature = "di"))]
+pub(super) fn make_tap_req_fn<F, R>(map: F) -> MiddlewareFn
+where
+    F: TapReqHandler<Output = R>,
+    R: IntoTapResult,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
             let (req, pipeline) = ctx.into_parts();
-            match Args::from_request(&req) {
-                Err(err) => err.into_response(),
-                Ok(args) => {
-                    let req = map.call(req, args).await;
-                    let ctx = HttpContext::new(req, pipeline);
-                    next(ctx).await
-                },
-            }
+            let req = map.call(req, ()).await.into_result()?;
+            let ctx = HttpContext::from_parts(req, pipeline);
+            next(ctx).await
         }
     };
     make_fn(middleware_fn)
@@ -160,7 +180,7 @@ where
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let middleware = middleware.clone();
         async move {
-            match Args::from_request(&ctx.request) { 
+            match Args::from_request(ctx.request()) { 
                 Err(err) => err.into_response(),
                 Ok(args) => {
                     let next = Next::new(ctx, next);
@@ -176,7 +196,7 @@ where
 mod tests {
     use hyper::Request;
     use super::*;
-    use crate::{bad_request, ok, HttpResponse, HttpBody};
+    use crate::{bad_request, ok, HttpResponse, HttpRequest, HttpRequestMut, HttpBody};
     use crate::http::endpoints::handlers::Func;
     use crate::http::StatusCode;
     use crate::error::Error;
@@ -196,7 +216,7 @@ mod tests {
         let middleware = from_handler(route_handler);
         
         let req = create_request();
-        let ctx = HttpContext::slim(req);
+        let ctx = HttpContext::new(req, None);
         let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
@@ -213,7 +233,7 @@ mod tests {
         let middleware = make_fn(middleware_logic);
 
         let req = create_request();
-        let ctx = HttpContext::slim(req);
+        let ctx = HttpContext::new(req, None);
         let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
@@ -226,7 +246,7 @@ mod tests {
         let middleware = make_filter_fn(filter);
 
         let req = create_request();
-        let ctx = HttpContext::slim(req);
+        let ctx = HttpContext::new(req, None);
         let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
@@ -244,7 +264,7 @@ mod tests {
         let middleware = make_map_ok_fn(map);
 
         let req = create_request();
-        let ctx = HttpContext::slim(req);
+        let ctx = HttpContext::new(req, None);
         let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
@@ -264,7 +284,8 @@ mod tests {
         let middleware = make_map_err_fn(map);
 
         let req = create_request();
-        let ctx = HttpContext::slim(req);
+        let ctx = HttpContext::new(req, None);
+        
         // Create a next function that returns an error
         let next: NextFn = Arc::new(|_| Box::pin(async {
             Err(Error::client_error("test error"))
@@ -278,9 +299,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_test_make_map_request_fn() {
+    async fn it_test_make_tap_req_fn() {
         // Create a request mapper that adds a header
-        let map = |mut req: HttpRequest| async move {
+        let map = |mut req: HttpRequestMut| async move {
             req.headers_mut().insert("X-Test", "value".parse().unwrap());
             req
         };
@@ -288,9 +309,17 @@ mod tests {
         let middleware = make_tap_req_fn(map);
 
         let req = create_request();
-        let ctx = HttpContext::slim(req);
+        
+        #[cfg(feature = "di")]
+        let req = {
+            let mut req = req;
+            req.extensions_mut().insert(crate::di::ContainerBuilder::new().build());
+            req
+        };
+        
+        let ctx = HttpContext::new(req, None);
         let next: NextFn = Arc::new(|ctx: HttpContext| Box::pin(async move {
-            assert_eq!(ctx.request.headers().get("X-Test").unwrap(), "value");
+            assert_eq!(ctx.request().headers().get("X-Test").unwrap(), "value");
             ok!()
         }));
 

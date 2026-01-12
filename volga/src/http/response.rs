@@ -1,21 +1,27 @@
 ﻿//! HTTP response utilities
- 
-use crate::{builder, response, RESPONSE_ERROR};
+
 use crate::error::Error;
-use crate::http::body::{BoxBody, HttpBody};
-
-use std::collections::HashMap;
-use tokio::fs::File;
-use serde::Serialize;
-
-use hyper::{header::{HeaderName, HeaderValue}, http, http::response::Builder, Response, StatusCode};
-use hyper::header::{IntoHeaderName, CONTENT_DISPOSITION, CONTENT_TYPE, TRANSFER_ENCODING};
-
-use mime::{
-    APPLICATION_JSON,
-    APPLICATION_OCTET_STREAM,
-    TEXT_PLAIN
+use crate::http::{
+    body::HttpBody,
+    Extensions,
+    StatusCode,
+    Version
 };
+
+use hyper::{
+    header::{
+        HeaderMap,
+        HeaderName,
+        HeaderValue
+    }, 
+    body::{Body, SizeHint},
+    http::response::Parts, 
+    Response,
+};
+
+use crate::headers::{FromHeaders, Header};
+
+pub use builder::HttpResponseBuilder;
 
 pub mod builder;
 pub mod macros;
@@ -31,246 +37,310 @@ pub mod sse;
 #[cfg(feature = "middleware")]
 pub mod filter_result;
 
-/// A customized response context with custom response `headers` and `content_type`
-/// > NOTE: This is not suitable for file response use the `file!` or `Results::file()` instead
-/// # Example
-/// ```no_run
-/// use volga::{Results, ResponseContext};
-/// use std::collections::HashMap;
-/// use std::result;
-///
-/// let mut headers = HashMap::new();
-/// headers.insert(String::from("x-api-key"), String::from("some api key"));
-///
-/// let result = Results::from(ResponseContext {
-///     content: "Hello World!",
-///     status: 200,
-///     headers
-/// });
-/// ```
-/// or alternative way by using `From` trait
-/// ```no_run
-/// use volga::{ResponseContext, HttpResult};
-/// use std::collections::HashMap;
-///
-/// let mut headers = HashMap::new();
-/// headers.insert(String::from("x-api-key"), String::from("some api key"));
-///
-/// let result = HttpResult::from(ResponseContext {
-///     content: "Hello World!",
-///     status: 200,
-///     headers
-/// });
-/// ```
-#[derive(Debug)]
-pub struct ResponseContext<T: Serialize> {
-    /// Response content
-    pub content: T,
-
-    /// HTTP response status code
-    pub status: u16,
-
-    /// HTTP response headers
-    pub headers: HashMap<String, String>
-}
-
 /// Represents an HTTP response
 /// 
 /// See [`Response`]
-pub type HttpResponse = Response<HttpBody>;
+pub struct HttpResponse {
+    inner: Response<HttpBody>
+}
+
+impl std::fmt::Debug for HttpResponse {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HttpResponse(..)")
+    }
+}
 
 /// Represents a result of HTTP request that could be 
 /// either [`HttpResponse`] or [`Error`]
 pub type HttpResult = Result<HttpResponse, Error>;
 
-/// s
-#[allow(missing_debug_implementations)]
-pub struct Results;
-
-impl Results {
-    /// Inserts a key-value pairs as HTTP headers for the [`HttpResult`] if it is [`Ok`].
-    ///
-    /// Otherwise, leaves the [`Err`] as is.
+impl From<HttpResponse> for Response<HttpBody> {
     #[inline]
-    pub fn with_headers<K, V, const N: usize>(res: HttpResult, headers: [(K, V); N]) -> HttpResult
-    where
-        K: IntoHeaderName,
-        V: TryInto<HeaderValue>,
-        <V as TryInto<HeaderValue>>::Error: Into<http::Error>,
-    {
-        match res {
-            Err(err) => Err(err),
-            Ok(mut res) => {
-                let headers_mut = res.headers_mut();
-                for (k, v) in headers.into_iter() {
-                    match v.try_into() { 
-                        Ok(v) => headers_mut.insert(k, v),
-                        Err(err) => return Err(Error::from(err.into()))
-                    };
-                }
-                Ok(res)
-            },
-        }
-    }
-    
-    /// Inserts a key-value pair as an HTTP header for the [`HttpResult`] if it is [`Ok`].
-    /// 
-    /// Otherwise, leaves the [`Err`] as is.
-    #[inline]
-    pub fn with_header<K, V>(res: HttpResult, key: K, value: V) -> HttpResult
-    where 
-        K: IntoHeaderName,
-        V: TryInto<HeaderValue>,
-        <V as TryInto<HeaderValue>>::Error: Into<http::Error>,
-    {
-        match res {
-            Err(err) => Err(err),
-            Ok(mut res) => {
-                let value = value
-                    .try_into()
-                    .map_err(|err| Error::from(err.into()))?;
-                res.headers_mut().insert(key, value);
-                Ok(res)
-            },
-        }
-    }
-    
-    /// Produces a customized `OK 200` response
-    #[inline]
-    pub fn from<T: Serialize>(context: ResponseContext<T>) -> HttpResult {
-        HttpResult::from(context)
-    }
-
-    /// Produces an `OK 200` response with the `JSON` body.
-    #[inline]
-    pub fn json<T>(content: T) -> HttpResult
-    where 
-        T: Serialize
-    {
-        Self::json_with_status(StatusCode::OK, content)
-    }
-
-    /// Produces a response with `StatusCode` the `JSON` body.
-    #[inline]
-    pub fn json_with_status<T>(status: StatusCode, content: T) -> HttpResult
-    where 
-        T: Serialize
-    {
-        response!(
-            status,
-            HttpBody::json(content),
-            [
-                (CONTENT_TYPE, APPLICATION_JSON.as_ref())
-            ]
-        )
-    }
-
-    /// Produces an `OK 200` response with the plain text body.
-    #[inline]
-    pub fn text(content: &str) -> HttpResult {
-        response!(
-            StatusCode::OK, 
-            HttpBody::full(content.to_string()),
-            [
-                (CONTENT_TYPE, TEXT_PLAIN.as_ref())
-            ]
-        )
-    }
-
-    /// Produces an `OK 200` response with the stream body.
-    #[inline]
-    pub fn stream(content: BoxBody) -> HttpResult {
-        response!(StatusCode::OK, HttpBody::new(content))
-    }
-
-    /// Produces an `OK 200` response with the file body.
-    #[inline]
-    pub fn file(file_name: &str, content: File) -> HttpResult {
-        let boxed_body = HttpBody::file(content);
-        let file_name = format!("attachment; filename=\"{file_name}\"");
-        response!(
-            StatusCode::OK, 
-            boxed_body,
-            [
-                (CONTENT_TYPE, APPLICATION_OCTET_STREAM.as_ref()),
-                (TRANSFER_ENCODING, "chunked"),
-                (CONTENT_DISPOSITION, file_name)
-            ]
-        )
-    }
-
-    /// Produces an empty `OK 200` response.
-    #[inline]
-    pub fn ok() -> HttpResult {
-        response!(
-            StatusCode::OK, 
-            HttpBody::empty(),
-            [
-                (CONTENT_TYPE, TEXT_PLAIN.as_ref())
-            ]
-        )
-    }
-
-    /// Produces a ` CLIENT CLOSED REQUEST 499 ` response.
-    #[inline]
-    pub fn client_closed_request() -> HttpResult {
-        response!(
-            StatusCode::from_u16(499).unwrap(),
-            HttpBody::empty(),
-            [(CONTENT_TYPE, TEXT_PLAIN.as_ref())])
-    }
-
-    #[inline]
-    fn create_custom_builder(status: StatusCode, headers: HashMap<String, String>) -> Builder {
-        let mut builder = builder!(status);
-        if let Some(headers_ref) = builder.headers_mut() {
-            for (name, value) in &headers {
-                if let (Ok(header_name), Ok(header_value)) = (
-                    HeaderName::from_bytes(name.as_bytes()),
-                    HeaderValue::from_bytes(value.as_bytes()),
-                ) {
-                    headers_ref.insert(header_name, header_value);
-                }
-            }
-            // if the content type is not provided - using the application/json by default
-            if headers_ref.get(&CONTENT_TYPE).is_none() {
-                headers_ref.insert(
-                    CONTENT_TYPE, 
-                    HeaderValue::from_static(APPLICATION_JSON.as_ref())
-                );
-            }
-        } else if cfg!(debug_assertions) {
-            #[cfg(feature = "tracing")]
-            tracing::error!("failed to write to HTTP headers");
-        }
-        builder
+    fn from(resp: HttpResponse) -> Self {
+        resp.into_inner()
     }
 }
 
-impl<T: Serialize> From<ResponseContext<T>> for HttpResult {
+impl HttpResponse {
+    /// Creates a new [`HttpResponseBuilder`] with default settings.
+    ///
+    /// By default:
+    /// - status is set to `200 OK`
+    /// - no headers are set
     #[inline]
-    fn from(value: ResponseContext<T>) -> Self {
-        let ResponseContext { content, headers, status } = value;
-        let content = serde_json::to_vec(&content)?;
-        let status = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
+    pub fn builder() -> HttpResponseBuilder {
+        HttpResponseBuilder::new()
+    }
+    
+    /// Returns a reference to the associated HTTP header map.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest};
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert!(req.headers().is_empty());
+    /// });
+    /// ```
+    #[inline]
+    pub fn headers(&self) -> &HeaderMap {
+        self.inner.headers()
+    }
 
-        Results::create_custom_builder(status, headers)
-            .body(HttpBody::full(content))
-            .map_err(|_| Error::server_error(RESPONSE_ERROR))
+    /// Returns a mutable reference to the associated extensions.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
+        self.inner.headers_mut()
+    }
+
+    /// Returns a reference to the associated HTTP method.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, HttpRequest, http::Method};
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.map_get("/", |req: HttpRequest| async move {
+    ///     assert_eq!(*req.method(), Method::GET);
+    /// });
+    /// ```
+    #[inline]
+    pub fn status(&self) -> StatusCode {
+        self.inner.status()
+    }
+
+    /// Represents a version of the HTTP spec.
+    #[inline]
+    pub fn version(&self) -> Version {
+        self.inner.version()
+    }
+
+    /// Returns a reference to the associated extensions.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn extensions(&self) -> &Extensions {
+        self.inner.extensions()
+    }
+
+    /// Returns a mutable reference to the associated extensions.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn extensions_mut(&mut self) -> &mut Extensions {
+        self.inner.extensions_mut()
+    }
+
+    /// Returns a reference to the associated HTTP body.
+    #[inline]
+    pub fn body(&self) -> &HttpBody {
+        self.inner.body()
+    }
+
+    /// Returns the bounds on the remaining length of the stream.
+    /// 
+    /// When the exact remaining length of the stream is known, 
+    /// the upper bound will be set and will equal the lower bound.
+    #[inline]
+    pub fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+
+    /// Returns a typed HTTP header value
+    #[inline]
+    pub fn get_header<T: FromHeaders>(&self) -> Option<Header<T>> {
+        self.headers()
+            .get(T::NAME)
+            .map(Header::new)
+    }
+
+    /// Returns a view of all values associated with this HTTP header.
+    #[inline]
+    pub fn get_all_headers<T: FromHeaders>(&self) -> impl Iterator<Item = Header<T>> {
+        self.headers()
+            .get_all(T::NAME)
+            .iter()
+            .map(Header::new)
+    }
+
+    /// Inserts the header into the response, replacing any existing values
+    /// with the same header name.
+    ///
+    /// This method always overwrites previous values.
+    #[inline]
+    pub fn insert_header<T>(&mut self, header: Header<T>) -> Header<T>
+    where
+        T: FromHeaders,
+    {
+        self.inner.headers_mut().insert(
+            header.name(),
+            header.value().clone()
+        );
+        header
+    }
+
+    /// Attempts to insert the header into the response, replacing any existing
+    /// values with the same header name.
+    ///
+    /// Returns an error if the header cannot be constructed.
+    #[inline]
+    pub fn try_insert_header<T>(
+        &mut self,
+        header: impl TryInto<Header<T>, Error = Error>
+    ) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        let header = header.try_into()?;
+        Ok(self.insert_header(header))
+    }
+
+    /// Inserts the raw header into the response, replacing any existing values
+    /// with the same header name.
+    #[inline]
+    pub fn insert_raw_header(&mut self, name: HeaderName, value: HeaderValue) {
+        self.inner.headers_mut().insert(name, value);
+    }
+
+    /// Attempts to inserts the raw header into the response, replacing any existing values
+    /// with the same header name.
+    #[inline]
+    pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(Error::from)?;
+        let value = HeaderValue::from_str(value)
+            .map_err(Error::from)?;
+
+        self.insert_raw_header(name, value);
+        Ok(())
+    }
+
+    /// Appends a new value for the given header name.
+    ///
+    /// Existing values with the same name are preserved.
+    /// Multiple values for the same header may be present.
+    #[inline]
+    pub fn append_header<T>(&mut self, header: Header<T>) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        self.inner.headers_mut().append(
+            header.name(),
+            header.value().clone()
+        );
+        Ok(header)
+    }
+
+    /// Attempts to append a new value for the given header name.
+    ///
+    /// Returns an error if the header cannot be constructed or appended.
+    #[inline]
+    pub fn try_append_header<T>(
+        &mut self,
+        header: impl TryInto<Header<T>, Error = Error>
+    ) -> Result<Header<T>, Error>
+    where
+        T: FromHeaders,
+    {
+        let header = header.try_into()?;
+        self.append_header(header)
+    }
+
+    /// Appends a new raw value for the given raw header name.
+    #[inline]
+    pub fn append_raw_header(&mut self, name: HeaderName, value: HeaderValue) {
+        self.inner.headers_mut().append(name, value);
+    }
+
+    /// Attempts to append a new raww value for the given header name.
+    #[inline]
+    pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(Error::from)?;
+        let value = HeaderValue::from_str(value)
+            .map_err(Error::from)?;
+
+        self.append_raw_header(name, value);
+        Ok(())
+    }
+
+    /// Removes all values for the given header name.
+    ///
+    /// Returns `true` if at least one header value was removed.
+    #[inline]
+    pub fn remove_header<T>(&mut self) -> bool
+    where
+        T: FromHeaders,
+    {
+        self.inner
+            .headers_mut()
+            .remove(&T::NAME)
+            .is_some()
+    }
+
+    /// Attempts to remove all values for the given header name.
+    ///
+    /// Returns `true` if at least one value was removed.
+    #[inline]
+    pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
+        let name = HeaderName::from_bytes(name.as_bytes())
+            .map_err(Error::from)?;
+
+        Ok(self.inner.headers_mut().remove(name).is_some())
+    }
+
+    /// Returns a mutable reference to the associated HTTP body.
+    #[inline]
+    pub(crate) fn body_mut(&mut self) -> &mut HttpBody {
+        self.inner.body_mut()
+    }
+    
+    /// Unwraps the inner request
+    #[inline]
+    pub(crate) fn into_inner(self) -> Response<HttpBody> {
+        self.inner
+    }
+    
+    /// Consumes the response returning the head and body parts.
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
+        self.inner.into_parts()
+    }
+
+    /// Creates a new [`HttpResponse`] with the given head and body
+    #[inline]
+    #[allow(unused)]
+    pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
+        Self { inner: Response::from_parts(parts, body) }
+    }
+
+    /// Creates a new [`HttpResponse`] from [`Response<HttpBody>`] 
+    #[inline]
+    pub(crate) fn from_inner(inner: Response<HttpBody>) -> Self {
+        Self { inner }
     }
 }
 
 #[cfg(test)]
+#[allow(unreachable_pub)]
 mod tests {
-    use std::collections::HashMap;
     use std::path::Path;
     use hyper::StatusCode;
     use http_body_util::BodyExt;
     use serde::Serialize;
     use tokio::fs::File;
-    use crate::{response, HttpResult, ResponseContext, Results};
+    use crate::{response, HttpResponse};
+    use crate::headers::{Header, HeaderValue, HeaderName, headers};
     use crate::http::body::HttpBody;
     use crate::test_utils::read_file_bytes;
+    
+    headers! {
+        (ApiKey, "x-api-key")
+    }
 
     #[derive(Serialize)]
     struct TestPayload {
@@ -278,57 +348,49 @@ mod tests {
     }
     
     #[tokio::test]
-    async fn in_creates_text_response_with_custom_headers() {
-        let mut headers = HashMap::new();
-        headers.insert(String::from("x-api-key"), String::from("some api key"));
-        
-        let mut response = HttpResult::from(ResponseContext {
-            status: 400,
-            content: String::from("Hello World!"),
-            headers
-        }).unwrap();
+    async fn in_creates_text_response_with_custom_headers() {       
+        let mut response = HttpResponse::builder()
+            .status(400)
+            .header("x-api-key", "some api key")
+            .header("Content-Type", "text/plain")
+            .body(HttpBody::full(String::from("Hello World!")))
+            .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
         
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(String::from_utf8_lossy(body), "\"Hello World!\"");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(String::from_utf8_lossy(body), "Hello World!");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
     #[tokio::test]
     async fn in_creates_str_text_response_with_custom_headers() {
-        let mut headers = HashMap::new();
-        headers.insert(String::from("x-api-key"), String::from("some api key"));
-        headers.insert(String::from("Content-Type"), String::from("text/plain"));
-
-        let mut response = HttpResult::from(ResponseContext {
-            status: 200,
-            content: "Hello World!",
-            headers,
-        }).unwrap();
+        let mut response = HttpResponse::builder()
+            .status(200)
+            .header("x-api-key", "some api key")
+            .header("Content-Type", "text/plain")
+            .body(HttpBody::full("Hello World!"))
+            .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(String::from_utf8_lossy(body), "\"Hello World!\"");
+        assert_eq!(String::from_utf8_lossy(body), "Hello World!");
         assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
     #[tokio::test]
     async fn in_creates_json_response_with_custom_headers() {
-        let mut headers = HashMap::new();
-        headers.insert(String::from("x-api-key"), String::from("some api key"));
-        headers.insert(String::from("Content-Type"), String::from("application/json"));
-
         let content = TestPayload { name: "test".into() };
         
-        let mut response = HttpResult::from(ResponseContext {
-            status: 200,
-            content,
-            headers,
-        }).unwrap();
+        let mut response = HttpResponse::builder()
+            .status(200)
+            .header("x-api-key", "some api key")
+            .header("Content-Type", "application/json")
+            .body(HttpBody::json(content))
+            .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
@@ -339,64 +401,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_creates_json_response() {
-        let payload = TestPayload { name: "test".into() };
-        let mut response = Results::json(payload).unwrap();
-
-        let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
-    }
-
-    #[tokio::test]
-    async fn it_creates_json_response_with_custom_status() {
-        let payload = TestPayload { name: "test".into() };
-        let mut response = Results::json_with_status(StatusCode::NOT_FOUND, payload).unwrap();
-
-        let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
-    }
-
-    #[tokio::test]
-    async fn it_creates_text_response() {
-        let mut response = Results::text("Hello World!").unwrap();
-
-        let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(String::from_utf8_lossy(body), "Hello World!");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
-    }
-
-    #[tokio::test]
     async fn it_creates_stream_response() {
         let path = Path::new("tests/resources/test_file.txt");
         let file = File::open(path).await.unwrap();
-        let body = HttpBody::file(file);
         
-        let mut response = Results::stream(body.into_boxed()).unwrap();
+        let mut response = HttpResponse::builder()
+            .status(StatusCode::OK)
+            .body(HttpBody::file(file))
+            .unwrap();
 
         let body = read_file_bytes(&mut response).await;
 
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
-    }
-
-    #[tokio::test]
-    async fn it_creates_file_response() {
-        let path = Path::new("tests/resources/test_file.txt");
-        let file_name = path.file_name().and_then(|name| name.to_str()).unwrap();
-        
-        let file = File::open(path).await.unwrap();
-        let mut response = Results::file(file_name, file).unwrap();
-
-        let body = read_file_bytes(&mut response).await;
-        
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
     }
@@ -421,17 +436,6 @@ mod tests {
         assert_eq!(response.headers().get("Content-Type").unwrap(), "application/octet-stream");
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
-    
-    #[tokio::test]
-    async fn it_creates_empty_ok_response() {
-        let mut response = Results::ok().unwrap();
-
-        let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
-    }
 
     #[tokio::test]
     async fn it_creates_empty_not_found_response() {
@@ -446,17 +450,6 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
         
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
-    }
-
-    #[tokio::test]
-    async fn it_creates_client_closed_request_response() {
-        let mut response = Results::client_closed_request().unwrap();
-
-        let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
-        assert_eq!(response.status().as_u16(), 499);
         assert_eq!(body.len(), 0);
         assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
     }
@@ -497,34 +490,176 @@ mod tests {
     
     #[test]
     fn it_inserts_header() {
-        let response = response!(
+        let mut response = response!(
             StatusCode::OK,
             HttpBody::full("Hello World!"),
             [
                 ("Content-Type", "text/plain")
             ]
-        );
-        
-        let response = Results::with_header(response, "X-Api-Key", "some api key").unwrap();
-        assert_eq!(response.headers().get("X-Api-Key").unwrap(), "some api key");
+        ).unwrap();
+
+        let api_key_header: Header<ApiKey> = Header::from_static("some api key");
+        let _ = response.insert_header(api_key_header);
+
+        assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
     #[test]
-    fn it_inserts_headers() {
-        let response = response!(
+    fn it_tries_insert_header() {
+        let mut response = response!(
             StatusCode::OK,
             HttpBody::full("Hello World!"),
             [
                 ("Content-Type", "text/plain")
             ]
+        ).unwrap();
+
+        response.try_insert_header::<ApiKey>("some api key").unwrap();
+
+        assert_eq!(response.get_header::<ApiKey>().unwrap().value(), "some api key");  
+    }
+
+    #[test]
+    fn it_inserts_raw_header() {
+        let mut response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        ).unwrap();
+
+        response.insert_raw_header(
+            HeaderName::from_static("x-api-key"),
+            HeaderValue::from_static("some api key"),
         );
-        
-        let response = Results::with_headers(response, [
-            ("X-Api-Key", "some api key"),
-            ("X-Api-Key-2", "some api key 2")
-        ]).unwrap();
-        
-        assert_eq!(response.headers().get("X-Api-Key").unwrap(), "some api key");
-        assert_eq!(response.headers().get("X-Api-Key-2").unwrap(), "some api key 2");   
+
+        assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
+    }
+
+    #[test]
+    fn it_tries_insert_raw_header() {
+        let mut response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        ).unwrap();
+
+        response.try_insert_raw_header("x-api-key", "some api key").unwrap();
+
+        assert_eq!(response.get_header::<ApiKey>().unwrap().value(), "some api key");  
+    }
+
+    #[test]
+    fn it_appends_header() {
+        let mut response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        ).unwrap();
+
+        let api_key_header: Header<ApiKey> = Header::from_static("1");
+        let _ = response.append_header(api_key_header);
+
+        let api_key_header: Header<ApiKey> = Header::from_static("2");
+        let _ = response.append_header(api_key_header);
+
+        assert_eq!(response.headers().get_all("x-api-key").into_iter().collect::<Vec<_>>(), ["1", "2"]);
+    }
+
+    #[test]
+    fn it_tries_append_header() {
+        let mut response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        ).unwrap();
+
+        response.try_append_header::<ApiKey>("1").unwrap();
+        response.try_append_header::<ApiKey>("2").unwrap();
+
+        assert_eq!(response.get_all_headers::<ApiKey>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]);  
+    }
+
+    #[test]
+    fn it_appends_raw_header() {
+        let mut response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        ).unwrap();
+
+        response.append_raw_header(
+            HeaderName::from_static("x-api-key"),
+            HeaderValue::from_static("1"),
+        );
+
+        response.append_raw_header(
+            HeaderName::from_static("x-api-key"),
+            HeaderValue::from_static("2"),
+        );
+
+        assert_eq!(response.get_all_headers::<ApiKey>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]); 
+    }
+
+    #[test]
+    fn it_tries_appends_raw_header() {
+        let mut response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        ).unwrap();
+
+        response.try_append_raw_header("x-api-key", "1").unwrap();
+        response.try_append_raw_header("x-api-key", "2").unwrap();
+
+        assert_eq!(response.get_all_headers::<ApiKey>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]); 
+    }
+
+    #[test]
+    fn it_removes_header() {
+        let mut response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        ).unwrap();
+
+        let api_key_header: Header<ApiKey> = Header::from_static("some api key");
+        let _ = response.insert_header(api_key_header);
+
+        response.remove_header::<ApiKey>();
+
+        assert!(response.headers().get("x-api-key").is_none());
+    }
+
+    #[test]
+    fn it_tries_remove_header() {
+        let mut response = response!(
+            StatusCode::OK,
+            HttpBody::full("Hello World!"),
+            [
+                ("Content-Type", "text/plain")
+            ]
+        ).unwrap();
+
+        let api_key_header: Header<ApiKey> = Header::from_static("some api key");
+        let _ = response.insert_header(api_key_header);
+
+        let result = response.try_remove_header("x-api-key").unwrap();
+
+        assert!(result);
+        assert!(response.headers().get("x-api-key").is_none());
     }
 }

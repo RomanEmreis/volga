@@ -17,7 +17,9 @@ async fn main() -> std::io::Result<()> {
 
     // Example of TRACE handler
     app.map_trace("/", |req: HttpRequest| async move {
-        let body_stream = req.into_body_stream();
+        let body_stream = req
+            .into_body()
+            .into_data_stream();
         stream!(body_stream, [
             ("content-type", "message/http")
         ])

@@ -10,15 +10,14 @@ pub(super) fn expand_http_header(header: &attr::HeaderInput, input: &syn::ItemSt
     let struct_name = &input.ident;
     let header_expr = header.as_token_stream();
     Ok(quote! {
+        #[derive(Clone)]
         #input
         impl ::volga::headers::FromHeaders for #struct_name {
+            const NAME: ::volga::headers::HeaderName = ::volga::headers::HeaderName::from_static(#header_expr);
+            
             #[inline]
             fn from_headers(headers: &::volga::headers::HeaderMap) -> Option<&::volga::headers::HeaderValue> {
                 headers.get(#header_expr)
-            }
-            #[inline]
-            fn header_type() -> &'static str {
-                #header_expr
             }
         }
     })

@@ -107,7 +107,7 @@ macro_rules! define_generic_handler ({ $($param:ident)* } => {
     }
     impl<Func, Fut: Send, $($param,)*> MapErrHandler<($($param,)*)> for Func
     where
-        Func: Fn($($param,)* Error) -> Fut + Send + Sync + Clone + 'static,
+        Func: Fn(Error, $($param,)*) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
     {
         type Output = Fut::Output;
@@ -116,7 +116,7 @@ macro_rules! define_generic_handler ({ $($param:ident)* } => {
         #[inline]
         #[allow(non_snake_case)]
         fn call(&self, err: Error, ($($param,)*): ($($param,)*)) -> Self::Future {
-            (self)($($param,)* err)
+            (self)(err, $($param,)*)
         }
     }
 });
