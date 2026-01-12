@@ -376,10 +376,8 @@ macro_rules! impl_from_payload {
             type Future = Ready<Result<Self, Error>>;
             #[inline]
             fn from_payload(payload: Payload<'_>) -> Self::Future {
-                let Payload::Path(param) = payload else { unreachable!() };
-                ready(param.value
-                    .parse::<$type>()
-                    .map_err(|_| PathError::type_mismatch(param.name.as_ref())))
+                let Payload::Path(arg) = payload else { unreachable!() };
+                ready(<$type as FromPathArg>::from_path_arg(&arg))
             }
             #[inline]
             fn source() -> Source {
@@ -459,7 +457,7 @@ mod tests {
     use serde::Deserialize;
     use crate::{HttpBody, HttpRequest, Path, NamedPath};
     use crate::http::endpoints::route::{PathArg, PathArgs};
-    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
+    use crate::http::endpoints::args::{FromPathArg, FromPayload, FromRequestParts, FromRequestRef, Payload};
 
     #[derive(Deserialize)]
     struct Params {
@@ -481,6 +479,14 @@ mod tests {
 
         assert_eq!(id, 123);
     }
+
+    #[test]
+    fn it_reads_isize_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = isize::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 123);
+    }
     
     #[tokio::test]
     async fn it_reads_i8_from_payload() {
@@ -489,11 +495,27 @@ mod tests {
 
         assert_eq!(id, 123);
     }
+
+    #[test]
+    fn it_reads_i8_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i8::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 123);
+    }
     
     #[tokio::test]
     async fn it_reads_i16_from_payload() {
         let param = PathArg { name: "id".into(), value: "123".into() };
         let id = i16::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[test]
+    fn it_reads_i16_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i16::from_path_arg(&param).unwrap();
 
         assert_eq!(id, 123);
     }
@@ -506,10 +528,26 @@ mod tests {
         assert_eq!(id, 123);
     }
 
+    #[test]
+    fn it_reads_i32_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i32::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 123);
+    }
+
     #[tokio::test]
     async fn it_reads_i64_from_payload() {
         let param = PathArg { name: "id".into(), value: "123".into() };
         let id = i64::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[test]
+    fn it_reads_i64_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i64::from_path_arg(&param).unwrap();
 
         assert_eq!(id, 123);
     }
@@ -522,10 +560,26 @@ mod tests {
         assert_eq!(id, 123);
     }
 
+    #[test]
+    fn it_reads_i128_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = i128::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 123);
+    }
+
     #[tokio::test]
     async fn it_reads_usize_from_payload() {
         let param = PathArg { name: "id".into(), value: "123".into() };
         let id = usize::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[test]
+    fn it_reads_usize_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = usize::from_path_arg(&param).unwrap();
 
         assert_eq!(id, 123);
     }
@@ -538,10 +592,26 @@ mod tests {
         assert_eq!(id, 123);
     }
 
+    #[test]
+    fn it_reads_u8_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u8::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 123);
+    }
+
     #[tokio::test]
     async fn it_reads_u16_from_payload() {
         let param = PathArg { name: "id".into(), value: "123".into() };
         let id = u16::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[test]
+    fn it_reads_u16_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u16::from_path_arg(&param).unwrap();
 
         assert_eq!(id, 123);
     }
@@ -554,10 +624,42 @@ mod tests {
         assert_eq!(id, 123);
     }
 
+    #[test]
+    fn it_reads_u32_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u32::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[tokio::test]
+    async fn it_reads_u64_from_payload() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u64::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[test]
+    fn it_reads_u64_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u64::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 123);
+    }
+
     #[tokio::test]
     async fn it_reads_u128_from_payload() {
         let param = PathArg { name: "id".into(), value: "123".into() };
         let id = u128::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[test]
+    fn it_reads_u128_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = u128::from_path_arg(&param).unwrap();
 
         assert_eq!(id, 123);
     }
@@ -570,10 +672,26 @@ mod tests {
         assert_eq!(id, "123");
     }
 
+    #[test]
+    fn it_reads_string_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = String::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, "123");
+    }
+
     #[tokio::test]
     async fn it_reads_box_str_from_payload() {
         let param = PathArg { name: "id".into(), value: "123".into() };
         let id = Box::<str>::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(&*id, "123");
+    }
+
+    #[test]
+    fn it_reads_box_str_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = Box::<str>::from_path_arg(&param).unwrap();
 
         assert_eq!(&*id, "123");
     }
@@ -584,6 +702,46 @@ mod tests {
         let id = Box::<[u8]>::from_payload(Payload::Path(param)).await.unwrap();
 
         assert_eq!(&*id, [b'1', b'2', b'3']);
+    }
+
+    #[test]
+    fn it_reads_box_bytes_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "123".into() };
+        let id = Box::<[u8]>::from_path_arg(&param).unwrap();
+
+        assert_eq!(&*id, [b'1', b'2', b'3']);
+    }
+
+    #[tokio::test]
+    async fn it_reads_f32_from_payload() {
+        let param = PathArg { name: "id".into(), value: "12.3".into() };
+        let id = f32::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(id, 12.3);
+    }
+
+    #[test]
+    fn it_reads_f32_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "12.3".into() };
+        let id = f32::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 12.3);
+    }
+
+    #[tokio::test]
+    async fn it_reads_f64_from_payload() {
+        let param = PathArg { name: "id".into(), value: "12.3".into() };
+        let id = f64::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(id, 12.3);
+    }
+
+    #[test]
+    fn it_reads_f64_from_path_arg() {
+        let param = PathArg { name: "id".into(), value: "12.3".into() };
+        let id = f64::from_path_arg(&param).unwrap();
+
+        assert_eq!(id, 12.3);
     }
 
     #[tokio::test]

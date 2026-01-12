@@ -71,8 +71,8 @@ impl HttpHeaders {
 
     /// Returns a view of all rawvalues associated with this HTTP header.
     #[inline]
-    pub fn get_all_raw<T: FromHeaders>(&self) -> impl Iterator<Item = &HeaderValue> {
-        self.inner.get_all(T::NAME).iter()
+    pub fn get_all_raw(&self, name: impl AsHeaderName) -> impl Iterator<Item = &HeaderValue> {
+        self.inner.get_all(name).iter()
     }
 }
 
@@ -310,6 +310,68 @@ mod tests {
     use hyper::http::HeaderValue;
     use crate::headers::{ContentType, Header, HttpHeaders};
     use crate::http::endpoints::args::{FromPayload, Payload};
+
+    #[test]
+    fn it_creates_http_header_from_header_map() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
+
+        let headers = HttpHeaders::from(headers);
+
+        assert_eq!(headers.get_raw("Content-Type").unwrap(), "text/plain");
+    }
+
+    #[test]
+    fn it_gets_header_from_http_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
+
+        let headers = HttpHeaders::from(headers);
+
+        assert_eq!(headers.get::<ContentType>().unwrap().value(), "text/plain");
+    }
+
+    #[test]
+    fn it_tries_get_header_from_http_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
+
+        let headers = HttpHeaders::from(headers);
+
+        let header = headers.try_get::<ContentType>();
+
+        assert_eq!(header.unwrap().value(), "text/plain");
+    }
+
+    #[test]
+    fn it_trie_get_missing_header_from_http_headers() {
+        let headers = HeaderMap::new();
+        let headers = HttpHeaders::from(headers);
+
+        let header = headers.try_get::<ContentType>();
+
+        assert!(header.is_err());
+    }
+
+    #[test]
+    fn it_gets_all_headers_from_http_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
+
+        let headers = HttpHeaders::from(headers);
+
+        assert_eq!(headers.get_all::<ContentType>().map(|h| h.value().clone()).collect::<Vec<_>>(), ["text/plain"]);
+    }
+
+    #[test]
+    fn it_gets_all_raw_headers_from_http_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert("Content-Type", HeaderValue::from_static("text/plain"));
+
+        let headers = HttpHeaders::from(headers);
+
+        assert_eq!(headers.get_all_raw("Content-Type").collect::<Vec<_>>(), ["text/plain"]);
+    }
 
     #[tokio::test]
     async fn it_reads_headers_from_payload() {
