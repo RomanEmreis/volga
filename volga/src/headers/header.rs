@@ -308,7 +308,9 @@ impl<T: FromHeaders + Send> FromPayload for Header<T> {
 mod tests {
     use hyper::{HeaderMap, Request};
     use hyper::http::HeaderValue;
+    use crate::{HttpBody, HttpRequest};
     use crate::headers::{ContentType, Header, HttpHeaders};
+    use crate::http::{FromRequestParts, FromRequestRef};
     use crate::http::endpoints::args::{FromPayload, Payload};
 
     #[test]
@@ -385,6 +387,64 @@ mod tests {
         let headers = HttpHeaders::from_payload(Payload::Parts(&parts)).await.unwrap();
 
         assert_eq!(headers.get_raw("content-type").unwrap(), "text/plain");
+    }
+
+    #[test]
+    fn it_reads_headers_from_parts() {
+        let req = Request::get("/")
+            .header("Content-Type", HeaderValue::from_static("text/plain"))
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+
+        let headers = HttpHeaders::from_parts(&parts).unwrap();
+
+        assert_eq!(headers.get_raw("content-type").unwrap(), "text/plain");
+    }
+
+    #[test]
+    fn it_reads_headers_from_request_ref() {
+        let req = Request::get("/")
+            .header("Content-Type", HeaderValue::from_static("text/plain"))
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let headers = HttpHeaders::from_request(&req).unwrap();
+
+        assert_eq!(headers.get_raw("content-type").unwrap(), "text/plain");
+    }
+
+    #[test]
+    fn it_reads_header_from_parts() {
+        let req = Request::get("/")
+            .header("Content-Type", HeaderValue::from_static("text/plain"))
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+
+        let header: Header<ContentType> = Header::from_parts(&parts).unwrap();
+
+        assert_eq!(header.as_ref(), "text/plain");
+    }
+
+    #[test]
+    fn it_reads_header_from_request_ref() {
+        let req = Request::get("/")
+            .header("Content-Type", HeaderValue::from_static("text/plain"))
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let header: Header<ContentType> = Header::from_request(&req).unwrap();
+
+        assert_eq!(header.as_ref(), "text/plain");
     }
 
     #[tokio::test]

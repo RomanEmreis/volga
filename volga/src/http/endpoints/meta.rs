@@ -88,3 +88,99 @@ impl RouteInfo {
         Self { method, path: path.into() }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::http::Method;
+
+    #[test]
+    fn it_can_create_route_info() {
+        let route = RouteInfo::new(Method::GET, "/health");
+
+        assert_eq!(route.method, Method::GET);
+        assert_eq!(route.path, "/health");
+    }
+
+    #[test]
+    fn it_does_compare_route_info_with_method_and_string() {
+        let route = RouteInfo::new(Method::POST, "/users");
+
+        assert_eq!(route, (Method::POST, "/users".to_string()));
+        assert_eq!((Method::POST, "/users".to_string()), route);
+    }
+
+    #[test]
+    fn it_does_compare_route_info_with_method_and_str() {
+        let route = RouteInfo::new(Method::PUT, "/users/1");
+
+        assert_eq!(route, (Method::PUT, "/users/1"));
+        assert_eq!((Method::PUT, "/users/1"), route);
+    }
+
+    #[test]
+    fn it_does_not_match_different_method_or_path() {
+        let route = RouteInfo::new(Method::GET, "/users");
+
+        assert_ne!(route, (Method::POST, "/users"));
+        assert_ne!(route, (Method::GET, "/admins"));
+    }
+
+    #[test]
+    fn it_can_format_route_info_with_colored_method() {
+        let route = RouteInfo::new(Method::GET, "/health");
+
+        let formatted = route.to_string();
+
+        assert!(formatted.contains("/health"));
+        assert!(formatted.contains("GET"));
+        assert!(formatted.starts_with("  "));
+    }
+
+    #[test]
+    fn it_can_deref_routes_info_as_vec() {
+        let routes = RoutesInfo(vec![
+            RouteInfo::new(Method::GET, "/"),
+            RouteInfo::new(Method::POST, "/users"),
+        ]);
+
+        assert_eq!(routes.len(), 2);
+        assert_eq!(routes[0], (Method::GET, "/"));
+        assert_eq!(routes[1], (Method::POST, "/users"));
+    }
+
+    #[test]
+    fn it_can_mutate_routes_info_via_deref_mut() {
+        let mut routes = RoutesInfo(vec![]);
+
+        routes.push(RouteInfo::new(Method::DELETE, "/users/1"));
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0], (Method::DELETE, "/users/1"));
+    }
+
+    #[test]
+    fn it_can_format_routes_info_display() {
+        let routes = RoutesInfo(vec![
+            RouteInfo::new(Method::GET, "/"),
+            RouteInfo::new(Method::POST, "/users"),
+        ]);
+
+        let output = routes.to_string();
+
+        assert!(output.contains("Available routes:"));
+        assert!(output.contains("/"));
+        assert!(output.contains("/users"));
+        assert!(output.contains("GET"));
+        assert!(output.contains("POST"));
+    }
+
+    #[test]
+    fn it_can_display_empty_routes_info() {
+        let routes = RoutesInfo(vec![]);
+
+        let output = routes.to_string();
+
+        assert!(output.contains("Available routes:"));
+    }
+}

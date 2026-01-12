@@ -47,11 +47,11 @@ async fn set_req_id(mut req: HttpRequestMut, log: Dc<RequestLog>) -> Result<Http
     Ok(req)
 }
 
-async fn set_resp_id(mut resp: HttpResponse, log: Dc<RequestLog>) -> HttpResponse {
+async fn set_resp_id(mut resp: HttpResponse, log: Dc<RequestLog>) -> HttpResult {
     log.append("ended");
-    resp.try_insert_header::<RequestId>(log.request_id.as_str()).unwrap();
+    resp.try_insert_header::<RequestId>(log.request_id.as_str())?;
     log.write();
-    resp
+    Ok(resp)
 }
 
 async fn get_value<T: Cache>(id: String, cache: Dc<T>) -> Option<String> {
@@ -62,7 +62,7 @@ async fn set_value<T: Cache>(Json(item): Json<Item>, cache: Dc<T>) {
     cache.set(item.id, item.value);
 }
 
-async fn error_handler(log: Dc<RequestLog>, error: Error) -> HttpResult {
+async fn error_handler(error: Error, log: Dc<RequestLog>) -> HttpResult {
     log.append(&format!("An Error occurred: {error:#}"));
     status!(500, "Internal Server Error", [
         ("x-req-id", &log.request_id)

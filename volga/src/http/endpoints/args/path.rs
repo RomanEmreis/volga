@@ -745,6 +745,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_reads_bool_from_payload() {
+        let param = PathArg { name: "flag".into(), value: "true".into() };
+        let flag = bool::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(flag, true);
+    }
+
+    #[test]
+    fn it_reads_bool_from_path_arg() {
+        let param = PathArg { name: "flag".into(), value: "true".into() };
+        let flag = bool::from_path_arg(&param).unwrap();
+
+        assert_eq!(flag, true);
+    }
+
+    #[tokio::test]
+    async fn it_reads_char_from_payload() {
+        let param = PathArg { name: "char".into(), value: "a".into() };
+        let char = char::from_payload(Payload::Path(param)).await.unwrap();
+
+        assert_eq!(char, 'a');
+    }
+
+    #[test]
+    fn it_reads_char_from_path_arg() {
+        let param = PathArg { name: "char".into(), value: "a".into() };
+        let char = char::from_path_arg(&param).unwrap();
+
+        assert_eq!(char, 'a');
+    }
+
+    #[tokio::test]
     async fn it_reads_named_path_from_payload() {
         let args = create_path_args();
 

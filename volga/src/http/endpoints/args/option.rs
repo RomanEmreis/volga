@@ -103,6 +103,18 @@ mod tests {
         }
     }
 
+    impl FromRequestParts for SuccessExtractor {
+        fn from_parts(_: &Parts) -> Result<Self, Error> {
+            Ok(SuccessExtractor)
+        }
+    }
+
+    impl FromRequestRef for SuccessExtractor {
+        fn from_request(_: &HttpRequest) -> Result<Self, Error> {
+            Ok(SuccessExtractor)
+        }
+    }
+
     struct FailureExtractor;
 
     impl FromPayload for FailureExtractor {
@@ -114,6 +126,18 @@ mod tests {
 
         fn source() -> Source {
             Source::Parts
+        }
+    }
+
+    impl FromRequestParts for FailureExtractor {
+        fn from_parts(_: &Parts) -> Result<Self, Error> {
+            Err(Error::client_error("Test error"))
+        }
+    }
+
+    impl FromRequestRef for FailureExtractor {
+        fn from_request(_: &HttpRequest) -> Result<Self, Error> {
+            Err(Error::client_error("Test error"))
         }
     }
 
@@ -166,6 +190,29 @@ mod tests {
         assert!(result.unwrap().is_some());
     }
 
+    #[test]
+    fn it_extracts_option_returns_some_from_parts() {
+        let req = Request::get("/").body(()).unwrap();
+        let (parts, _) = req.into_parts();
+
+        let result = Option::<SuccessExtractor>::from_parts(&parts);
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
+    #[test]
+    fn it_extracts_option_returns_some_from_request_ref() {
+        let req = Request::get("/").body(HttpBody::empty()).unwrap();
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let result = Option::<SuccessExtractor>::from_request(&req);
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+    }
+
     #[tokio::test]
     async fn it_extracts_option_returns_none() {
         let req = Request::get("/").body(()).unwrap();
@@ -177,12 +224,36 @@ mod tests {
         assert!(result.unwrap().is_none());
     }
 
+    #[test]
+    fn it_extracts_option_returns_none_from_parts() {
+        let req = Request::get("/").body(()).unwrap();
+        let (parts, _) = req.into_parts();
+
+        let result = Option::<FailureExtractor>::from_parts(&parts);
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn it_extracts_option_returns_none_from_request_ref() {
+        let req = Request::get("/").body(HttpBody::empty()).unwrap();
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let result = Option::<FailureExtractor>::from_request(&req);
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
     #[tokio::test]
     async fn it_extracts_option_preserves_source() {
         assert_eq!(Option::<SuccessExtractor>::source(), Source::Parts);
         assert_eq!(Option::<BodyExtractor>::source(), Source::Body);
         assert_eq!(Option::<PathExtractor>::source(), Source::Path);
     }
+
 
     #[tokio::test]
     async fn it_extracts_option_with_body_extractor() {
