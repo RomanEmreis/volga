@@ -749,7 +749,7 @@ mod tests {
         let param = PathArg { name: "flag".into(), value: "true".into() };
         let flag = bool::from_payload(Payload::Path(param)).await.unwrap();
 
-        assert_eq!(flag, true);
+        assert!(flag);
     }
 
     #[test]
@@ -757,7 +757,7 @@ mod tests {
         let param = PathArg { name: "flag".into(), value: "true".into() };
         let flag = bool::from_path_arg(&param).unwrap();
 
-        assert_eq!(flag, true);
+        assert!(flag);
     }
 
     #[tokio::test]
