@@ -412,7 +412,11 @@ impl TlsConfig {
     /// Configures a list of host names that will not add the HSTS header.
     /// 
     /// Default: empty list
-    pub fn with_hsts_exclude_hosts(mut self, exclude_hosts: &[&'static str]) -> Self {
+    pub fn with_hsts_exclude_hosts<I, S>(mut self, exclude_hosts: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
         self.hsts_config = self.hsts_config.with_exclude_hosts(exclude_hosts);
         self
     }
@@ -731,7 +735,7 @@ impl App {
 #[inline]
 fn normalize_host(host: &str) -> String {
     let host = match host.trim().rsplit_once(':') {
-        Some((h, port)) if port == "443" => h,
+        Some((h, "443")) => h,
         _ => host,
     };
 
@@ -841,7 +845,7 @@ mod tests {
     #[test]
     fn it_creates_tls_config_with_hsts() {
         let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_exclude_hosts(&["example.com"])
+            .with_hsts_exclude_hosts(["example.com"])
             .with_hsts(|hsts| hsts
                 .with_preload(false)
                 .with_sub_domains(false)
@@ -926,7 +930,7 @@ mod tests {
     #[test]
     fn it_creates_tls_config_with_hsts_exclude_hosts() {
         let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_exclude_hosts(&["example.com"]);
+            .with_hsts_exclude_hosts(["example.com"]);
 
         let path = PathBuf::from("tls");
 
@@ -978,7 +982,7 @@ mod tests {
                 .with_max_age(Duration::from_secs(1))
                 .with_preload(false)
                 .with_sub_domains(false)
-                .with_exclude_hosts(&["example.com"]));
+                .with_exclude_hosts(["example.com"]));
 
         let tls_config = app.tls_config.unwrap();
 
@@ -997,7 +1001,7 @@ mod tests {
             .with_max_age(Duration::from_secs(1))
             .with_preload(false)
             .with_sub_domains(false)
-            .with_exclude_hosts(&["example.com"]);
+            .with_exclude_hosts(["example.com"]);
         
         let app = App::new()
             .with_tls(|tls| tls.with_https_redirection())
@@ -1042,7 +1046,7 @@ mod tests {
     #[test]
     fn it_creates_hsts_header() {
         let hsts_config = HstsConfig::default()
-            .with_exclude_hosts(&["www.example.com"]);
+            .with_exclude_hosts(["www.example.com"]);
         
         let hsts_header = HstsHeader::new(hsts_config);
         

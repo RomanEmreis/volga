@@ -225,10 +225,6 @@ async fn handle_impl(
     }
 }
 
-/// Applies response-level guarantees:
-/// - tracing headers
-/// - security headers (HSTS)
-/// Must be called for *all* responses.
 #[inline]
 fn finalize_response(
     response: HttpResult,
