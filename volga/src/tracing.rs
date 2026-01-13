@@ -1,11 +1,6 @@
 ﻿//! Tools for tracing, logging and observability
 
-use futures_util::TryFutureExt;
-use tracing::{Instrument, trace_span};
-use crate::{
-    App, HttpResult, middleware::{HttpContext, NextFn}, 
-    error::handler::call_weak_err_handler
-};
+use crate::App;
 
 const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
 
@@ -15,12 +10,12 @@ pub struct TracingConfig {
     /// Specifies whether to include a span id HTTP header
     /// 
     /// Default: `false`
-    include_header: bool,
+    pub(super) include_header: bool,
     
     /// Specifies a span id HTTP header name
     /// 
     /// Default: `request-id`
-    span_header_name: &'static str,
+    pub(super) span_header_name: &'static str,
 }
 
 impl Default for TracingConfig {
@@ -112,57 +107,8 @@ impl App {
         self.tracing_config = Some(config);
         self
     }
-    
-    /// Adds middleware for wrapping each request into unique [`tracing::Span`]
-    /// 
-    /// # Example
-    /// ```no_run
-    /// use volga::{App, tracing::TracingConfig};
-    ///
-    /// let mut app = App::new();
-    /// // is equivalent to:
-    /// let mut app = App::new().set_tracing(TracingConfig::default());
-    ///
-    /// // if the tracing middleware is enabled
-    /// app.use_tracing(); 
-    /// ```
-    pub fn use_tracing(&mut self) -> &mut Self {
-        let cfg = self.tracing_config
-            .take()
-            .unwrap_or_default();
-        self.wrap(move |ctx, next| wrap_tracing(cfg, ctx, next))
-    }
 }
 
-async fn wrap_tracing(
-    cfg: TracingConfig, 
-    ctx: HttpContext, 
-    next: NextFn
-) -> HttpResult {
-    let method = ctx.request().method();
-    let uri = ctx.request().uri();
-
-    let span = trace_span!("request", %method, %uri);
-    let span_id = span.id();
-    
-    let parts = ctx.request_parts_snapshot();
-    let error_handler = ctx.error_handler();
-    let http_result = next(ctx)
-        .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
-        .instrument(span)
-        .await;
-
-    if cfg.include_header && span_id.is_some() {
-        http_result.map(|mut response| {
-            response.headers_mut().append(
-                cfg.span_header_name,
-                span_id.map_or(0, |id| id.into_u64()).into());
-            response
-        })
-    } else {
-        http_result
-    }
-}
 
 #[cfg(test)]
 mod tests {

@@ -17,8 +17,6 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new()
         .with_tracing(|tracing| tracing.with_header());
 
-    app.use_tracing();
-
     app.map_get("/error", || async {
         tracing::trace!("producing error");
         Error::other("some error")

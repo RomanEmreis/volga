@@ -4,8 +4,8 @@
 //! cargo run -p tracing_example
 //! ```
 
-use volga::App;
-use tracing::trace;
+use volga::{App, error::Error, status};
+use tracing::{info, trace, error};
 use tracing_subscriber::prelude::*;
 
 #[tokio::main]
@@ -16,29 +16,31 @@ async fn main() -> std::io::Result<()> {
         .init();
 
     let mut app = App::new()
+        // Configuring tracing
         .with_tracing(|tracing| tracing
             .with_header()
             .with_header_name("x-span-id"));
 
-    // this middleware won't be in the request span scope 
-    // since it's defined above the tracing middleware
+    // Global error handler will be in the request span scope
+    app.map_err(|err| async move {
+        error!("{err}");
+        status!(500)
+    });
+
+    // Middleware will be in the request span scope
     app.wrap(|ctx, next| async move {
-        trace!("inner middleware");
+        trace!("trace middleware");
         next(ctx).await
     });
 
-    // Enable tracing middleware
-    app.use_tracing();
+    // Request handlers will be in the request span scope
 
-    // this middleware will be in the request span scope 
-    // since it's defined below the tracing middleware
-    app.wrap(|ctx, next| async move {
-        trace!("inner middleware");
-        next(ctx).await
+    app.map_get("/error", || async {
+        Err::<(), _>(Error::client_error("Hello from always failing handler"))
     });
 
     app.map_get("/tracing", || async {
-        trace!("handling the request!");
+        info!("handling the request!");
         "Done!"
     });
 

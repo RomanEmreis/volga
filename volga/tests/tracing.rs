@@ -12,7 +12,6 @@ async fn it_adds_request_id() {
             app.with_tracing(|tracing| tracing.with_header())
         })
         .setup(|app| {
-            app.use_tracing();
             app.map_get("/test", async || "Pass!");
         })
         .build()

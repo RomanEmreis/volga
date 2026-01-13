@@ -121,7 +121,7 @@ impl HttpRequest {
 
     /// Returns a mutable reference to the associated extensions.
     #[inline]
-    #[cfg(any(feature = "tls", feature = "tracing", feature = "auth"))]
+    #[allow(unused)]
     pub(crate) fn extensions_mut(&mut self) -> &mut Extensions {
         self.inner.extensions_mut()
     }

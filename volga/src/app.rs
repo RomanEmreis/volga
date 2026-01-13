@@ -32,7 +32,7 @@ use crate::di::{Container, ContainerBuilder};
 use tokio_rustls::TlsAcceptor;
 
 #[cfg(feature = "tls")]
-use crate::tls::TlsConfig;
+use crate::tls::{TlsConfig, HstsHeader};
 
 #[cfg(feature = "tracing")]
 use crate::tracing::TracingConfig;
@@ -227,6 +227,14 @@ pub(crate) struct AppInstance {
     /// Global rate limiter
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<Arc<GlobalRateLimiter>>,
+
+    /// HSTS configuration options
+    #[cfg(feature = "tls")]
+    pub(super) hsts: Option<HstsHeader>,
+    
+    /// Tracing configuration options
+    #[cfg(feature = "tracing")]
+    pub(super) tracing_config: Option<TracingConfig>,
     
     /// Graceful shutdown utilities
     pub(super) graceful_shutdown: GracefulShutdown,
@@ -253,6 +261,11 @@ impl TryFrom<App> for AppInstance {
 
     fn try_from(app: App) -> Result<Self, Self::Error> {
         #[cfg(feature = "tls")]
+        let hsts = app.tls_config
+            .as_ref()
+            .map(|tls| HstsHeader::new(tls.hsts_config.clone()));
+
+        #[cfg(feature = "tls")]
         let acceptor = {
             let tls_config = app.tls_config
                 .map(|config| config.build())
@@ -260,6 +273,7 @@ impl TryFrom<App> for AppInstance {
             tls_config
                 .map(|config| TlsAcceptor::from(Arc::new(config)))
         };
+
         #[cfg(feature = "jwt-auth")]
         let bearer_token_service = app.auth_config.map(Into::into);
         
@@ -279,8 +293,12 @@ impl TryFrom<App> for AppInstance {
             rate_limiter: app.rate_limiter.map(Arc::new),
             #[cfg(feature = "jwt-auth")]
             bearer_token_service,
+            #[cfg(feature = "tracing")]
+            tracing_config: app.tracing_config,
             #[cfg(feature = "tls")]
-            acceptor
+            acceptor,
+            #[cfg(feature = "tls")]
+            hsts
         };
         Ok(app_instance)
     }
