@@ -15,7 +15,8 @@ use hyper::{
 
 use crate::{
     app::AppInstance, 
-    error::{Error, handler::call_weak_err_handler}, 
+    error::{Error, handler::call_weak_err_handler},
+    headers::CACHE_CONTROL,
     http::endpoints::FindResult,
     HttpRequest, HttpBody, HttpResult, ClientIp,
     Limit,
@@ -83,7 +84,7 @@ impl Scope {
             Some(shared) => shared,
             None => {
                 #[cfg(feature = "tracing")]
-                tracing::warn!("app instance could not be upgraded; aborting...");
+                tracing::error!("app instance could not be upgraded; aborting...");
 
                 return status!(500)
             }
@@ -235,6 +236,10 @@ fn finalize_response(
     host: Option<HeaderValue>
 ) -> HttpResult {
     response.map(|mut resp| {
+        if let Some(hv) = &shared.cache_control {
+            apply_default_cache_control(&mut resp, hv.clone());
+        }
+
         #[cfg(feature = "tracing")]
         if let Some(tracing) = &shared.tracing_config {
             apply_tracing_headers(&mut resp, tracing, span_id);
@@ -247,6 +252,16 @@ fn finalize_response(
 
         resp
     })
+}
+
+#[inline]
+fn apply_default_cache_control(
+    resp: &mut crate::HttpResponse, 
+    header: HeaderValue,
+) {
+    if !resp.headers().contains_key(CACHE_CONTROL) {
+        resp.headers_mut().insert(CACHE_CONTROL, header);
+    }
 }
 
 #[inline]

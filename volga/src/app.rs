@@ -6,6 +6,7 @@ use std::net::IpAddr;
 
 use crate::{
     http::request::request_body_limit::RequestBodyLimit,
+    headers::{cache_control::CacheControl, HeaderValue},
     server::Server,
     Limit
 };
@@ -29,10 +30,10 @@ use tokio::{
 use crate::di::{Container, ContainerBuilder};
 
 #[cfg(feature = "tls")]
-use tokio_rustls::TlsAcceptor;
-
-#[cfg(feature = "tls")]
-use crate::tls::{TlsConfig, HstsHeader};
+use {
+    crate::tls::{TlsConfig, HstsHeader},
+    tokio_rustls::TlsAcceptor
+};
 
 #[cfg(feature = "tracing")]
 use crate::tracing::TracingConfig;
@@ -122,6 +123,11 @@ pub struct App {
 
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
+
+    /// Default `Cache-Control`
+    /// 
+    /// Default: `None`
+    pub(super) cache_control: Option<CacheControl>,
 
     /// HTTP/2 resource and backpressure limits.
     #[cfg(feature = "http2")]
@@ -252,6 +258,9 @@ pub(crate) struct AppInstance {
     #[cfg(feature = "http2")]
     pub(super) http2_limits: Http2Limits,
 
+    /// Default `Cache-Control` header value
+    pub(super) cache_control: Option<HeaderValue>,
+
     /// Request/Middleware pipeline
     pipeline: Pipeline,
 }
@@ -277,12 +286,17 @@ impl TryFrom<App> for AppInstance {
         #[cfg(feature = "jwt-auth")]
         let bearer_token_service = app.auth_config.map(Into::into);
         
+        let default_cache_control = app.cache_control
+            .map(|c| c.try_into())
+            .transpose()?;
+
         let app_instance = Self {
             body_limit: app.body_limit,
             pipeline: app.pipeline.build(),
             graceful_shutdown: GracefulShutdown::new(),
             max_header_count: app.max_header_count,
             max_header_size: app.max_header_size,
+            cache_control: default_cache_control,
             #[cfg(feature = "http2")]
             http2_limits: app.http2_limits,
             #[cfg(feature = "static-files")]
@@ -361,6 +375,7 @@ impl App {
             max_header_count: Limit::Default,
             max_header_size: Limit::Default,
             max_connections: Limit::Default,
+            cache_control: None,
             #[cfg(feature = "http2")]
             http2_limits: Default::default(),
             #[cfg(debug_assertions)]

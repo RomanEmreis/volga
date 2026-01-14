@@ -291,7 +291,8 @@ impl ResponseCaching {
 
 #[cfg(feature = "middleware")]
 impl App {
-    /// Adds middleware that includes a configured `cache-control` header for all responses from this server.
+    /// Configures a `cache-control` header that will be added for all responses from this server 
+    /// if they are not explicitly configured for the route or route group.
     /// 
     /// # Example
     /// ```no_run
@@ -299,10 +300,8 @@ impl App {
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
-    /// let mut app = App::new();
-    /// 
-    /// app.use_cache_control(|cache_control| 
-    ///     cache_control
+    /// let mut app = App::new()
+    ///     .with_cache_control(|cache_control| cache_control
     ///         .with_max_age(60)
     ///         .with_immutable()
     ///         .with_public());
@@ -312,11 +311,12 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn use_cache_control<F>(&mut self, config: F) -> &mut Self
+    pub fn with_cache_control<F>(mut self, config: F) -> Self
     where 
-        F: Fn(CacheControl) -> CacheControl + Clone + Send + Sync + 'static,
+        F: Fn(CacheControl) -> CacheControl,
     {
-        self.map_ok(move |resp: HttpResponse| make_cache_control_fn(resp, config.clone()))
+        self.cache_control = Some(config(CacheControl::default()));
+        self
     }
 }
 
@@ -333,20 +333,25 @@ impl<'a> Route<'a> {
     /// let mut app = App::new();
     /// 
     /// app.map_get("/hello", || async move { "Hello, World!" })
-    ///     .with_cache_control(|cache_control| 
-    ///         cache_control
-    ///             .with_max_age(60)
-    ///             .with_immutable()
-    ///             .with_public());
+    ///     .cache_control(|cache_control| cache_control
+    ///         .with_max_age(60)
+    ///         .with_immutable()
+    ///         .with_public());
     /// 
     ///# app.run().await
     ///# }
     /// ```
-    pub fn with_cache_control<F>(self, config: F) -> Self
+    pub fn cache_control<F>(self, config: F) -> Self
     where
-        F: Fn(CacheControl) -> CacheControl + Clone + Send + Sync + 'static,
+        F: Fn(CacheControl) -> CacheControl,
     {
-        self.map_ok(move |resp: HttpResponse| make_cache_control_fn(resp, config.clone()))
+        let hv: HeaderValue = config(CacheControl::default())
+            .try_into()
+            .expect("valid cache-control header");
+
+        self.map_ok(move |resp: HttpResponse| {
+            make_cache_control_fn(resp, hv.clone(), HeaderInsertMode::Override)
+        })
     }
 }
 
@@ -363,37 +368,55 @@ impl<'a> RouteGroup<'a> {
     /// let mut app = App::new();
     /// 
     /// app.group("/greeting", |api| {
-    ///     api.with_cache_control(|cache_control| 
-    ///         cache_control
-    ///             .with_max_age(60)
-    ///             .with_immutable()
-    ///             .with_public());
+    ///     api.cache_control(|cache_control| cache_control
+    ///         .with_max_age(60)
+    ///         .with_immutable()
+    ///         .with_public());
     /// 
     ///     api.map_get("/hello", || async move { "Hello, World!" });    
     /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn with_cache_control<F>(&mut self, config: F) -> &mut Self
+    pub fn cache_control<F>(&mut self, config: F) -> &mut Self
     where
-        F: Fn(CacheControl) -> CacheControl + Clone + Send + Sync + 'static,
+        F: Fn(CacheControl) -> CacheControl,
     {
-        self.map_ok(move |resp: HttpResponse| make_cache_control_fn(resp, config.clone()))
+        let hv: HeaderValue = config(CacheControl::default())
+            .try_into()
+            .expect("valid cache-control header");
+
+        self.map_ok(move |resp: HttpResponse| {
+            make_cache_control_fn(resp, hv.clone(), HeaderInsertMode::IfAbsent)
+        })
     }
 }
 
+#[derive(Copy, Clone)]
+enum HeaderInsertMode {
+    Override,
+    IfAbsent,
+}
+
 #[cfg(feature = "middleware")]
-fn make_cache_control_fn<F>(mut resp: HttpResponse, config: F) -> impl Future<Output = HttpResult>
-where
-    F: Fn(CacheControl) -> CacheControl + Clone + Send + Sync + 'static,
-{
-    let config = config.clone();
-    async move {
-        let cache_control = config(CacheControl::default());
-        resp.headers_mut()
-            .insert(CACHE_CONTROL, cache_control.try_into()?);
-        Ok(resp)
+#[inline]
+fn make_cache_control_fn(
+    mut resp: HttpResponse,
+    hv: HeaderValue,
+    mode: HeaderInsertMode,
+) -> impl Future<Output = HttpResult> {
+    match mode {
+        HeaderInsertMode::Override => {
+            resp.headers_mut().insert(CACHE_CONTROL, hv);
+        }
+        HeaderInsertMode::IfAbsent => {
+            if !resp.headers().contains_key(CACHE_CONTROL) {
+                resp.headers_mut().insert(CACHE_CONTROL, hv);
+            }
+        }
     }
+
+    futures_util::future::ready(Ok(resp))
 }
 
 #[cfg(test)]
