@@ -392,6 +392,7 @@ impl<'a> RouteGroup<'a> {
     }
 }
 
+#[cfg(feature = "middleware")]
 #[derive(Copy, Clone)]
 enum HeaderInsertMode {
     Override,
