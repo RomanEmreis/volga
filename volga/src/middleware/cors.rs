@@ -2,35 +2,34 @@
 //!
 //! Middleware that applies CORS headers for requests
 
+use std::sync::Arc;
 use hyper::Response;
-use crate::{App, http::{StatusCode, HttpBody, Method}, headers::{
-    HeaderMap,
-    HeaderValue,
-    CONTENT_LENGTH,
-    ACCESS_CONTROL_ALLOW_ORIGIN,
-    ACCESS_CONTROL_ALLOW_HEADERS,
-    ACCESS_CONTROL_ALLOW_METHODS,
-    ACCESS_CONTROL_ALLOW_CREDENTIALS,
-    ACCESS_CONTROL_MAX_AGE,
-    ACCESS_CONTROL_EXPOSE_HEADERS,
-    ORIGIN,
-    VARY
-}, HttpResponse};
+use crate::{
+    App,
+    http::{StatusCode, HttpBody, Method},
+    headers::{
+        ACCESS_CONTROL_REQUEST_METHOD,
+        ORIGIN,
+    },
+    HttpResponse
+};
 use crate::http::CorsConfig;
 
-fn validate_cors_config(cors_config: &Option<CorsConfig>) {
-    assert!(
-        cors_config.is_some(), 
-        "CORS error: Missing CORS configuration, you can configure it with `App::new().with_cors(|cors| cors...)`"
-    );
-    
-    if let Some(ref cors_config) = *cors_config {
-        cors_config.validate()
-    }
+#[inline]
+fn validate_cors_config(cors_config: &mut Option<CorsConfig>) -> CorsConfig {
+    let Some(cors_config) = cors_config.take() else {
+        panic!(
+            "CORS error: Missing CORS configuration, you can configure it with `App::new().with_cors(|cors| cors...)`"
+        );
+    };
+
+    cors_config.validate();
+
+    cors_config
 }
 
 impl App {
-    /// Adds a CORS middleware to your web server's pipeline to allow cross domain requests.
+    /// Adds CORS middleware to your web server's pipeline to allow cross-domain requests.
     /// 
     /// # Example
     /// ```no_run
@@ -44,65 +43,41 @@ impl App {
     ///
     /// app.use_cors(); 
     /// ```
+    ///
+    /// # Panics
+    /// If CORS hasn't been configured with [`App::set_cors`] or [`App::with_cors`]
     pub fn use_cors(&mut self) -> &mut Self {
-        validate_cors_config(&self.cors_config);
+        let cors_headers = Arc::new(
+            validate_cors_config(&mut self.cors_config).precompute()
+        );
 
-        let cors_config = self.cors_config.clone().unwrap();
         self.wrap(move |ctx, next| {
-            let cors_config = cors_config.clone();
+            let cors_headers = cors_headers.clone();
             async move {
-                let origin = ctx.request().headers().get(&ORIGIN);
                 let method = ctx.request().method();
+                let origin = ctx.request().headers().get(&ORIGIN).cloned();
+                let acrm = ctx.request().headers()
+                    .get(ACCESS_CONTROL_REQUEST_METHOD)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| Method::from_bytes(s.as_bytes()).ok());
 
-                let mut headers = HeaderMap::new();
-
-                if let Some(allow_credentials) = cors_config.allow_credentials() {
-                    headers.insert(ACCESS_CONTROL_ALLOW_CREDENTIALS, allow_credentials);
-                }
-                if let Some(vary_header) = cors_config.vary_header() {
-                    headers.insert(VARY, vary_header);
-                }
-                if let Some(allow_origin) = cors_config.allow_origin(origin) {
-                    headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, allow_origin);
-                }
-
-                if method == Method::OPTIONS {
-                    if let Some(allow_methods) = cors_config.allow_methods() {
-                        headers.insert(ACCESS_CONTROL_ALLOW_METHODS, allow_methods);
-                    }
-                    if let Some(allow_headers) = cors_config.allow_headers() {
-                        headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, allow_headers);
-                    }
-                    if let Some(max_age) = cors_config.max_age() {
-                        headers.insert(ACCESS_CONTROL_MAX_AGE, max_age);
-                    };
-
-                    headers.insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
-                    
+                if method == Method::OPTIONS && origin.is_some() && acrm.is_some() {
                     let mut response = Response::new(HttpBody::empty());
                     
                     *response.status_mut() = StatusCode::NO_CONTENT;
-                    *response.headers_mut() = headers;
+                    cors_headers.apply_common(response.headers_mut(), origin);
+                    cors_headers.append_vary(response.headers_mut());
+                    cors_headers.apply_preflight(response.headers_mut());
                     
                     Ok(HttpResponse::from_inner(response))
                 } else {
-                    if let Some(expose_headers) = cors_config.expose_headers() {
-                        headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, expose_headers);
-                    }
+                    let mut response = next(ctx).await?;
 
-                    let response = next(ctx).await;
-                    match response {
-                        Err(err) => Err(err),
-                        Ok(mut response) => {
-                            let response_headers = response.headers_mut();
-                            if let Some(vary_header) = headers.remove(&VARY) {
-                                response_headers.append(VARY, vary_header);
-                            }
-                            response_headers.extend(headers.drain());
+                    cors_headers.apply_common(response.headers_mut(), origin);
+                    cors_headers.append_vary(response.headers_mut());
+                    cors_headers.apply_normal(response.headers_mut());
 
-                            Ok(response)
-                        }
-                    }
+                    Ok(response)
                 }
             }
         });

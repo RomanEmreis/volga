@@ -7,7 +7,10 @@ use super::endpoints::{
 };
 
 #[cfg(feature = "middleware")]
-use super::endpoints::route::Layer;
+use {
+    crate::headers::{HeaderMap, ORIGIN, ACCESS_CONTROL_REQUEST_METHOD},
+    super::endpoints::route::Layer,
+};
 
 #[cfg(debug_assertions)]
 pub(crate) mod meta;
@@ -60,7 +63,12 @@ impl Endpoints {
 
     /// Gets a context of the executing route by its `HttpRequest`
     #[inline]
-    pub(crate) fn find(&self, method: &Method, uri: &Uri) -> FindResult {
+    pub(crate) fn find(
+        &self,
+        method: &Method,
+        uri: &Uri,
+        #[cfg(feature = "middleware")] headers: &HeaderMap
+    ) -> FindResult {
         let route_params = match self.routes.find(uri.path()) {
             Some(params) => params,
             None => return FindResult::RouteNotFound,
@@ -70,6 +78,30 @@ impl Endpoints {
             return FindResult::RouteNotFound;
         };
 
+        #[cfg(feature = "middleware")]
+        if method == Method::OPTIONS {
+            // OPTIONS path: treat CORS preflight specially
+            // (Only if it looks like a preflight request)
+            let origin_present = headers.contains_key(ORIGIN);
+            let acrm = headers
+                .get(ACCESS_CONTROL_REQUEST_METHOD)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| Method::from_bytes(s.as_bytes()).ok());
+
+            if origin_present {
+                if let Some(target_method) = acrm {
+                    // Check if the target method exists for this path
+                    return handlers
+                        .binary_search_by(|h| h.cmp(&target_method))
+                        .map_or_else(
+                            |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
+                            |i| FindResult::Ok(Endpoint::new(handlers[i].pipeline.clone(), route_params.params)),
+                        );
+                }
+            }
+        }
+
+        // Normal OPTIONS: keep existing behavior (likely 405 unless the user actually mapped OPTIONS)
         handlers
             .binary_search_by(|h| h.cmp(method))
             .map_or_else(
@@ -124,6 +156,8 @@ mod tests {
     use crate::ok;
     use super::{Endpoints, FindResult, handlers::Func};
     use hyper::{Method, Request};
+    #[cfg(feature = "middleware")]
+    use crate::headers::HeaderMap;
 
     #[test]
     fn it_maps_and_gets_endpoint() {
@@ -134,7 +168,11 @@ mod tests {
         endpoints.map_route(Method::POST, "path/to/handler", handler);
         
         let request = Request::post("https://example.com/path/to/handler").body(()).unwrap();
-        let post_handler = endpoints.find(request.method(), request.uri());
+        let post_handler = endpoints.find(
+            request.method(),
+            request.uri(),
+            #[cfg(feature = "middleware")] &HeaderMap::new()
+        );
 
         match post_handler {
             FindResult::Ok(_) => (),
@@ -151,7 +189,11 @@ mod tests {
         endpoints.map_route(Method::POST, "path/to/handler", handler);
 
         let request = Request::post("https://example.com/path/to/another-handler").body(()).unwrap();
-        let post_handler = endpoints.find(request.method(), request.uri());
+        let post_handler = endpoints.find(
+            request.method(),
+            request.uri(),
+            #[cfg(feature = "middleware")] &HeaderMap::new()
+        );
 
         match post_handler {
             FindResult::RouteNotFound => (),
@@ -168,7 +210,11 @@ mod tests {
         endpoints.map_route(Method::GET, "path/to/handler", handler);
 
         let request = Request::post("https://example.com/path/to/handler").body(()).unwrap();
-        let post_handler = endpoints.find(request.method(), request.uri());
+        let post_handler = endpoints.find(
+            request.method(),
+            request.uri(),
+            #[cfg(feature = "middleware")] &HeaderMap::new()
+        );
 
         match post_handler {
             FindResult::MethodNotFound(allow) => assert_eq!(allow, "GET"),

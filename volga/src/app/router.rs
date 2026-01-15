@@ -82,10 +82,7 @@ impl App {
                 endpoints.map_route(head, pattern, handler.clone());
             }
         }
-        
-        #[cfg(feature = "middleware")]
-        self.map_preflight_handler(pattern);
-        
+
         Route { 
             app: self,
             #[cfg(feature = "middleware")]
@@ -123,9 +120,6 @@ impl App {
             .endpoints_mut()
             .map_route(Method::POST, pattern, handler);
 
-        #[cfg(feature = "middleware")]
-        self.map_preflight_handler(pattern);
-
         Route {
             app: self,
             #[cfg(feature = "middleware")]
@@ -161,9 +155,6 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::PUT, pattern, handler);
-
-        #[cfg(feature = "middleware")]
-        self.map_preflight_handler(pattern);
 
         Route {
             app: self,
@@ -201,9 +192,6 @@ impl App {
             .endpoints_mut()
             .map_route(Method::PATCH, pattern, handler);
 
-        #[cfg(feature = "middleware")]
-        self.map_preflight_handler(pattern);
-
         Route {
             app: self,
             #[cfg(feature = "middleware")]
@@ -239,9 +227,6 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::DELETE, pattern, handler);
-
-        #[cfg(feature = "middleware")]
-        self.map_preflight_handler(pattern);
 
         Route {
             app: self,
@@ -279,9 +264,6 @@ impl App {
             .endpoints_mut()
             .map_route(Method::HEAD, pattern, handler);
 
-        #[cfg(feature = "middleware")]
-        self.map_preflight_handler(pattern);
-
         Route {
             app: self,
             #[cfg(feature = "middleware")]
@@ -317,6 +299,7 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::OPTIONS, pattern, handler);
+
         Route {
             app: self,
             #[cfg(feature = "middleware")]
@@ -352,9 +335,6 @@ impl App {
         self.pipeline
             .endpoints_mut()
             .map_route(Method::TRACE, pattern, handler);
-
-        #[cfg(feature = "middleware")]
-        self.map_preflight_handler(pattern);
 
         Route {
             app: self,
@@ -392,26 +372,12 @@ impl App {
             .endpoints_mut()
             .map_route(Method::CONNECT, pattern, handler);
 
-        #[cfg(feature = "middleware")]
-        self.map_preflight_handler(pattern);
         Route {
             app: self,
             #[cfg(feature = "middleware")]
             method: Method::CONNECT,
             #[cfg(feature = "middleware")]
             pattern
-        }
-    }
-
-    #[inline]
-    #[cfg(feature = "middleware")]
-    fn map_preflight_handler(&mut self, pattern: &str) {
-        if self.cors_config.is_some() {
-            let endpoints = self.pipeline.endpoints_mut();
-            let options = Method::OPTIONS;
-            if !endpoints.contains(&options, pattern) {
-                endpoints.map_route(options, pattern, Func::new(|| async {}));
-            }
         }
     }
 }

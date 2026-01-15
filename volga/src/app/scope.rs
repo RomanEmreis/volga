@@ -169,7 +169,11 @@ async fn handle_impl(
     };
         
     let pipeline = &shared.pipeline;
-    match pipeline.endpoints().find(request.method(), request.uri()) {
+    match pipeline.endpoints().find(
+        request.method(),
+        request.uri(),
+        #[cfg(feature = "middleware")] request.headers()
+    ) {
         FindResult::RouteNotFound => pipeline.fallback(request).await,
         FindResult::MethodNotFound(allowed) => status!(405, [
             (ALLOW, allowed)
@@ -230,10 +234,8 @@ async fn handle_impl(
 fn finalize_response(
     response: HttpResult,
     shared: &AppInstance,
-    #[cfg(feature = "tracing")]
-    span_id: Option<Id>,
-    #[cfg(feature = "tls")]
-    host: Option<HeaderValue>
+    #[cfg(feature = "tracing")] span_id: Option<Id>,
+    #[cfg(feature = "tls")] host: Option<HeaderValue>
 ) -> HttpResult {
     response.map(|mut resp| {
         if let Some(hv) = &shared.cache_control {

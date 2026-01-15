@@ -2,7 +2,7 @@
 
 use crate::App;
 use hyper::{
-    http::{HeaderValue, HeaderName},
+    http::{HeaderValue, HeaderName, HeaderMap},
     header::{ORIGIN, ACCESS_CONTROL_REQUEST_METHOD, ACCESS_CONTROL_REQUEST_HEADERS},
     Method
 };
@@ -10,6 +10,16 @@ use hyper::{
 use std::{
     collections::HashSet,
     time::Duration
+};
+use crate::headers::{
+    ACCESS_CONTROL_ALLOW_CREDENTIALS,
+    ACCESS_CONTROL_ALLOW_HEADERS,
+    ACCESS_CONTROL_ALLOW_METHODS,
+    ACCESS_CONTROL_ALLOW_ORIGIN,
+    ACCESS_CONTROL_EXPOSE_HEADERS,
+    ACCESS_CONTROL_MAX_AGE,
+    CONTENT_LENGTH,
+    VARY
 };
 
 const DEFAULT_MAX_AGE: u64 = 24 * 60 * 60; // 24 hours = 86,400 seconds
@@ -33,6 +43,18 @@ pub struct CorsConfig {
     max_age: Option<Duration>,
     allow_credentials: bool,
     vary_header: bool
+}
+
+/// represents pre-computed CORS headers
+#[derive(Debug)]
+pub(crate) struct CorsHeaders {
+    allow_origins: Option<HashSet<&'static str>>,
+    allow_any_origin: bool,
+    allow_credentials: bool,
+    vary_header: Option<HeaderValue>,
+    common: HeaderMap,
+    preflight: HeaderMap,
+    normal: HeaderMap,
 }
 
 impl Default for CorsConfig {
@@ -271,18 +293,6 @@ impl CorsConfig {
         self.expose_headers = Some(HashSet::from([WILDCARD_STR]));
         self
     }
-
-    /// Creates a value for the [`Access-Control-Allow-Origin`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Origin)
-    /// HTTP header
-    pub fn allow_origin(&self, origin: Option<&HeaderValue>) -> Option<HeaderValue> {
-        match (&self.allow_origins, self.allow_credentials) {
-            (Some(allow_origins), _) => origin
-                .filter(|&o| allow_origins.contains(o.to_str().unwrap()))
-                .cloned(),
-            (None, false) => Some(WILDCARD_VALUE),
-            (None, true) => None,
-        }
-    }
     
     /// Creates a value for the [`Access-Control-Allow-Methods`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Methods)
     /// HTTP header
@@ -357,6 +367,41 @@ impl CorsConfig {
             None
         }
     }
+
+    /// Pre-compute CORS headers
+    pub(crate) fn precompute(self) -> CorsHeaders {
+        let mut common = HeaderMap::new();
+        if let Some(v) = self.allow_credentials() {
+            common.insert(ACCESS_CONTROL_ALLOW_CREDENTIALS, v);
+        }
+
+        let mut preflight = HeaderMap::new();
+        if let Some(v) = self.allow_methods() {
+            preflight.insert(ACCESS_CONTROL_ALLOW_METHODS, v);
+        }
+        if let Some(v) = self.allow_headers() {
+            preflight.insert(ACCESS_CONTROL_ALLOW_HEADERS, v);
+        }
+        if let Some(v) = self.max_age() {
+            preflight.insert(ACCESS_CONTROL_MAX_AGE, v);
+        }
+        preflight.insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
+
+        let mut normal = HeaderMap::new();
+        if let Some(v) = self.expose_headers() {
+            normal.insert(ACCESS_CONTROL_EXPOSE_HEADERS, v);
+        }
+
+        CorsHeaders {
+            allow_any_origin: self.allow_origins.is_none(),
+            vary_header: self.vary_header(),
+            allow_origins: self.allow_origins,
+            allow_credentials: self.allow_credentials,
+            common,
+            preflight,
+            normal,
+        }
+    }
     
     /// Validates the [`CorsConfig`] and panics if it's invalid
     pub(crate) fn validate(&self) {
@@ -364,7 +409,7 @@ impl CorsConfig {
             assert!(
                 self.allow_origins.is_some(),
                 "CORS error: The `Access-Control-Allow-Credentials: true` cannot be used \
-                with `Access-Control-Allow-Headers: *`"
+                with `Access-Control-Allow-Origin: *`"
             );
 
             assert!(
@@ -388,6 +433,59 @@ impl CorsConfig {
             }
         }
     } 
+}
+
+impl CorsHeaders {
+    /// Creates a value for the [`Access-Control-Allow-Origin`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Origin)
+    /// HTTP header
+    #[inline]
+    pub(crate) fn allow_origin(&self, origin: Option<HeaderValue>) -> Option<HeaderValue> {
+        match (self.allow_any_origin, self.allow_credentials) {
+            (true, false) => Some(WILDCARD_VALUE),
+            (true, true) => None,
+            (false, _) => {
+                let o = origin?;
+                let s = o.to_str().ok()?;
+                let set = self.allow_origins.as_ref()?;
+                if set.contains(s) { Some(o) } else { None }
+            }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn apply_common(&self, headers: &mut HeaderMap, origin: Option<HeaderValue>) {
+        // allow-origin
+        if let Some(ao) = self.allow_origin(origin) {
+            headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, ao);
+        }
+
+        // common headers (credentials, vary=Origin)
+        Self::apply_headers(headers, &self.common);
+    }
+
+    #[inline]
+    pub(crate) fn apply_preflight(&self, headers: &mut HeaderMap) {
+        Self::apply_headers(headers, &self.preflight);
+    }
+
+    #[inline]
+    pub(crate) fn apply_normal(&self, headers: &mut HeaderMap) {
+        Self::apply_headers(headers, &self.normal);
+    }
+
+    #[inline]
+    pub(crate) fn append_vary(&self, dst: &mut HeaderMap) {
+        if let Some(v) = &self.vary_header {
+            dst.append(VARY, v.clone());
+        }
+    }
+
+    #[inline]
+    fn apply_headers(dst: &mut HeaderMap, src: &HeaderMap) {
+        src.iter().for_each(|(k, v)| {
+            dst.insert(k, v.clone());
+        });
+    }
 }
 
 impl App {
@@ -634,10 +732,11 @@ mod tests {
     #[test]
     fn it_returns_access_control_allow_origin_header() {
         let config = CorsConfig::default()
-            .with_origins(["https://example.com"]);
+            .with_origins(["https://example.com"])
+            .precompute();
         
         let origin = Some(HeaderValue::from_static("https://example.com"));
-        let header = config.allow_origin(origin.as_ref());
+        let header = config.allow_origin(origin);
         
         assert!(header.is_some());
         
@@ -647,10 +746,11 @@ mod tests {
     #[test]
     fn it_returns_access_control_allow_origin_header_with_wildcard() {
         let config = CorsConfig::default()
-            .with_any_origin();
+            .with_any_origin()
+            .precompute();
 
         let origin = Some(HeaderValue::from_static("https://example.com"));
-        let header = config.allow_origin(origin.as_ref());
+        let header = config.allow_origin(origin);
 
         assert!(header.is_some());
 
@@ -661,10 +761,11 @@ mod tests {
     fn it_does_not_return_access_control_allow_origin_header_with_credentials() {
         let config = CorsConfig::default()
             .with_any_origin()
-            .with_credentials(true);
+            .with_credentials(true)
+            .precompute();
 
         let origin = Some(HeaderValue::from_static("https://example.com"));
-        let header = config.allow_origin(origin.as_ref());
+        let header = config.allow_origin(origin);
 
         assert!(header.is_none());
     }
@@ -672,7 +773,8 @@ mod tests {
     #[test]
     fn it_does_not_return_access_control_allow_origin_header_for_empty_origin() {
         let config = CorsConfig::default()
-            .with_origins(["https://example.com"]);
+            .with_origins(["https://example.com"])
+            .precompute();
 
         let header = config.allow_origin(None);
 
@@ -682,10 +784,11 @@ mod tests {
     #[test]
     fn it_does_not_return_access_control_allow_origin_header() {
         let config = CorsConfig::default()
-            .with_origins(["https://example.net"]);
+            .with_origins(["https://example.net"])
+            .precompute();
 
         let origin = Some(HeaderValue::from_static("https://example.com"));
-        let header = config.allow_origin(origin.as_ref());
+        let header = config.allow_origin(origin);
 
         assert!(header.is_none());
     }
