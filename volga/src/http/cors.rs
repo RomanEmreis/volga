@@ -8,8 +8,7 @@ use hyper::{
 };
 
 use std::{
-    collections::HashSet,
-    time::Duration
+    collections::HashSet, str::FromStr, time::Duration
 };
 use crate::headers::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS,
@@ -24,6 +23,7 @@ use crate::headers::{
 
 const DEFAULT_MAX_AGE: u64 = 24 * 60 * 60; // 24 hours = 86,400 seconds
 const WILDCARD_STR: &str = "*";
+const ORIGIN_STR: &str = "Origin";
 const WILDCARD_VALUE: HeaderValue = HeaderValue::from_static(WILDCARD_STR);
 const TRUE_VALUE: HeaderValue = HeaderValue::from_static("true");
 
@@ -36,22 +36,24 @@ const DEFAULT_PREFLIGHT_HEADERS: [HeaderName; 3] = [
 /// Represents the CORS (Cross-Origin Resource Sharing) Middleware configuration options
 #[derive(Debug, Clone)]
 pub struct CorsConfig {
-    allow_origins: Option<HashSet<&'static str>>,
-    allow_headers: Option<HashSet<&'static str>>,
+    allow_origins: Option<HashSet<HeaderValue>>,
+    allow_headers: Option<HashSet<HeaderName>>,
     allow_methods: Option<HashSet<Method>>,
-    expose_headers: Option<HashSet<&'static str>>,
+    expose_headers: Option<HashSet<HeaderName>>,
+    expose_any: bool,
     max_age: Option<Duration>,
     allow_credentials: bool,
-    vary_header: bool
+    include_vary: bool
 }
 
 /// represents pre-computed CORS headers
 #[derive(Debug)]
 pub(crate) struct CorsHeaders {
-    allow_origins: Option<HashSet<&'static str>>,
+    allow_origins: Option<HashSet<HeaderValue>>,
     allow_any_origin: bool,
     allow_credentials: bool,
-    vary_header: Option<HeaderValue>,
+    vary_prefilight: Option<HeaderValue>,
+    vary_normal: Option<HeaderValue>,
     common: HeaderMap,
     preflight: HeaderMap,
     normal: HeaderMap,
@@ -63,7 +65,8 @@ impl Default for CorsConfig {
         Self {
             max_age: Some(Duration::from_secs(DEFAULT_MAX_AGE)),
             allow_credentials: false,
-            vary_header: true,
+            include_vary: true,
+            expose_any: false,
             expose_headers: None,
             allow_origins: None,
             allow_headers: None,
@@ -85,12 +88,15 @@ impl CorsConfig {
     /// let config = CorsConfig::default()
     ///     .with_origins(["http://example.com", "https://example.net"]);
     /// ```
-    pub fn with_origins<T>(mut self, origins: T) -> Self
+    pub fn with_origins<T, S>(mut self, origins: T) -> Self
     where
-        T: IntoIterator<Item = &'static str>,
+        T: IntoIterator<Item = S>,
+        S: AsRef<str>
     {
         let allowed_origins = origins
             .into_iter()
+            .map(|o| HeaderValue::from_str(o.as_ref())
+                .expect("CORS error: invalid origin value"))
             .collect::<HashSet<_>>();
         self.allow_origins = Some(allowed_origins);
         self
@@ -124,12 +130,15 @@ impl CorsConfig {
     /// let config = CorsConfig::default()
     ///     .with_headers(["Content-Type", "X-Req-Id"]);
     /// ```
-    pub fn with_headers<T>(mut self, headers: T) -> Self
+    pub fn with_headers<T, S>(mut self, headers: T) -> Self
     where
-        T: IntoIterator<Item = &'static str>,
+        T: IntoIterator<Item = S>,
+        S: AsRef<str>
     {
         let allowed_headers = headers
             .into_iter()
+            .map(|h| HeaderName::from_str(h.as_ref())
+                .expect("CORS error: invalid header value"))
             .collect::<HashSet<_>>();
         self.allow_headers = Some(allowed_headers);
         self
@@ -251,7 +260,7 @@ impl CorsConfig {
     ///     .with_vary_header(false);
     /// ```
     pub fn with_vary_header(mut self, include_vary: bool) -> Self {
-        self.vary_header = include_vary;
+        self.include_vary = include_vary;
         self
     }
 
@@ -267,12 +276,15 @@ impl CorsConfig {
     /// let config = CorsConfig::default()
     ///     .with_expose_headers(["Content-Type", "X-Req-Id"]);
     /// ```
-    pub fn with_expose_headers<T>(mut self, headers: T) -> Self
+    pub fn with_expose_headers<T, S>(mut self, headers: T) -> Self
     where
-        T: IntoIterator<Item = &'static str>,
+        T: IntoIterator<Item = S>,
+        S: AsRef<str>
     {
         let allowed_headers = headers
             .into_iter()
+            .map(|h| HeaderName::from_str(h.as_ref())
+                .expect("CORS error: invalid header value"))
             .collect::<HashSet<_>>();
         self.expose_headers = Some(allowed_headers);
         self
@@ -290,7 +302,8 @@ impl CorsConfig {
     ///     .with_expose_any_header();
     /// ```
     pub fn with_expose_any_header(mut self) -> Self {
-        self.expose_headers = Some(HashSet::from([WILDCARD_STR]));
+        self.expose_any = true;
+        self.expose_headers = None;
         self
     }
     
@@ -303,7 +316,7 @@ impl CorsConfig {
                 let allow_methods = allow_methods
                     .iter()
                     .map(|method| method.as_str())
-                    .collect::<Vec<_>>().join(",");
+                    .collect::<Vec<_>>().join(", ");
                 HeaderValue::from_str(&allow_methods).ok()
             }
         }
@@ -315,10 +328,11 @@ impl CorsConfig {
         match &self.allow_headers { 
             None => Some(WILDCARD_VALUE),
             Some(allow_headers) => {
-                let allow_headers = allow_headers
-                    .iter()
-                    .copied()
-                    .collect::<Vec<_>>().join(",");
+                let allow_headers = build_csv(
+                    allow_headers
+                        .iter()
+                        .map(|h| h.as_str())
+                );
                 HeaderValue::from_str(&allow_headers).ok()
             }
         }
@@ -327,13 +341,15 @@ impl CorsConfig {
     /// Creates a value for the [`Access-Control-Expose-Headers`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Expose-Headers)
     /// HTTP header
     pub fn expose_headers(&self) -> Option<HeaderValue> {
-        match &self.expose_headers { 
+        match &self.expose_headers {
+            None if self.expose_any => Some(WILDCARD_VALUE),
             None => None,
             Some(expose_headers) => {
-                let expose_headers = expose_headers
-                    .iter()
-                    .copied()
-                    .collect::<Vec<_>>().join(",");
+                let expose_headers = build_csv(
+                    expose_headers
+                        .iter()
+                        .map(|h| h.as_str())
+                );
                 HeaderValue::from_str(&expose_headers).ok()
             }
         }
@@ -358,11 +374,20 @@ impl CorsConfig {
         }
     }
 
-    /// Creates a value for the `Vary` HTTP header
-    pub fn vary_header(&self) -> Option<HeaderValue> {
-        if self.vary_header {
-            let vary_header = DEFAULT_PREFLIGHT_HEADERS.join(",");
+    /// Creates a value for the `Vary` HTTP header for preflight requstes
+    pub fn vary_preflight(&self) -> Option<HeaderValue> {
+        if self.needs_vary() {
+            let vary_header = DEFAULT_PREFLIGHT_HEADERS.join(", ");
             HeaderValue::from_str(&vary_header).ok()
+        } else {
+            None
+        }
+    }
+
+    /// Creates a value for the `Vary` HTTP header for normal requests
+    pub fn vary_normal(&self) -> Option<HeaderValue> {
+        if self.needs_vary() {
+            Some(HeaderValue::from_static(ORIGIN_STR))
         } else {
             None
         }
@@ -394,7 +419,8 @@ impl CorsConfig {
 
         CorsHeaders {
             allow_any_origin: self.allow_origins.is_none(),
-            vary_header: self.vary_header(),
+            vary_normal: self.vary_normal(),
+            vary_prefilight: self.vary_preflight(),
             allow_origins: self.allow_origins,
             allow_credentials: self.allow_credentials,
             common,
@@ -424,14 +450,17 @@ impl CorsConfig {
                 with `Access-Control-Allow-Methods: *`"
             );
 
-            if let Some(expose_headers) = &self.expose_headers {
-                assert!(
-                    !expose_headers.contains(WILDCARD_STR),
-                    "CORS error: The `Access-Control-Allow-Credentials: true` cannot be used \
-                    with `Access-Control-Expose-Headers: *`"
-                );   
-            }
+            assert!(
+                !self.expose_any,
+                "CORS error: The `Access-Control-Allow-Credentials: true` cannot be used \
+                with `Access-Control-Expose-Headers: *`"
+            );
         }
+    }
+
+    #[inline(always)]
+    fn needs_vary(&self) -> bool {
+        (self.allow_credentials || self.allow_origins.is_some()) && self.include_vary
     } 
 }
 
@@ -445,39 +474,49 @@ impl CorsHeaders {
             (true, true) => None,
             (false, _) => {
                 let o = origin?;
-                let s = o.to_str().ok()?;
                 let set = self.allow_origins.as_ref()?;
-                if set.contains(s) { Some(o) } else { None }
+                if set.contains(&o) { Some(o) } else { None }
             }
         }
     }
 
     #[inline]
-    pub(crate) fn apply_common(&self, headers: &mut HeaderMap, origin: Option<HeaderValue>) {
-        // allow-origin
-        if let Some(ao) = self.allow_origin(origin) {
-            headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, ao);
+    pub(crate) fn apply_preflight_response(
+        &self,
+        headers: &mut HeaderMap,
+        origin: Option<HeaderValue>,
+    ) {
+        self.apply_common(headers, origin);
+
+        if let Some(v) = &self.vary_prefilight {
+            headers.append(VARY, v.clone());
         }
 
-        // common headers (credentials, vary=Origin)
-        Self::apply_headers(headers, &self.common);
-    }
-
-    #[inline]
-    pub(crate) fn apply_preflight(&self, headers: &mut HeaderMap) {
         Self::apply_headers(headers, &self.preflight);
     }
 
     #[inline]
-    pub(crate) fn apply_normal(&self, headers: &mut HeaderMap) {
+    pub(crate) fn apply_normal_response(
+        &self,
+        headers: &mut HeaderMap,
+        origin: Option<HeaderValue>,
+    ) {
+        self.apply_common(headers, origin);
+
+        if let Some(v) = &self.vary_normal {
+            Self::merge_vary_origin(headers, v.clone());
+        }
+
         Self::apply_headers(headers, &self.normal);
     }
 
     #[inline]
-    pub(crate) fn append_vary(&self, dst: &mut HeaderMap) {
-        if let Some(v) = &self.vary_header {
-            dst.append(VARY, v.clone());
+    fn apply_common(&self, headers: &mut HeaderMap, origin: Option<HeaderValue>) {
+        if let Some(ao) = self.allow_origin(origin) {
+            headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, ao);
         }
+
+        Self::apply_headers(headers, &self.common);
     }
 
     #[inline]
@@ -485,6 +524,43 @@ impl CorsHeaders {
         src.iter().for_each(|(k, v)| {
             dst.insert(k, v.clone());
         });
+    }
+
+    #[inline]
+    fn merge_vary_origin(headers: &mut HeaderMap, vary: HeaderValue) {
+        match headers.get(VARY) {
+            None => {
+                headers.insert(VARY, vary);
+            }
+            Some(existing) => {
+                let Ok(s) = existing.to_str() else {
+                    return;
+                };
+
+                if s.trim() == "*" {
+                    return;
+                }
+
+                let already_has_origin = s
+                    .split(',')
+                    .map(|p| p.trim())
+                    .any(|p| p.eq_ignore_ascii_case(ORIGIN_STR));
+
+                if already_has_origin {
+                    return;
+                }
+
+                let mut merged = String::with_capacity(s.len() + 2 + ORIGIN_STR.len());
+                
+                merged.push_str(s);
+                merged.push_str(", ");
+                merged.push_str(ORIGIN_STR);
+
+                if let Ok(v) = HeaderValue::from_str(&merged) {
+                    headers.insert(VARY, v);
+                }
+            }
+        }
     }
 }
 
@@ -530,10 +606,30 @@ impl App {
     }
 }
 
+#[inline]
+fn build_csv<I>(items: I) -> String
+where
+    I: IntoIterator,
+    I::Item: AsRef<str>,
+{
+    let mut it = items.into_iter();
+    let mut out = String::new();
+
+    if let Some(first) = it.next() {
+        out.push_str(first.as_ref());
+        for item in it {
+            out.push_str(", ");
+            out.push_str(item.as_ref());
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-    use hyper::http::HeaderValue;
+    use hyper::{header::HeaderName, http::HeaderValue};
     use reqwest::Method;
     use crate::App;
     use super::{CorsConfig, DEFAULT_MAX_AGE};
@@ -548,7 +644,7 @@ mod tests {
         assert_eq!(config.expose_headers, None);
         assert_eq!(config.max_age, Some(Duration::from_secs(DEFAULT_MAX_AGE)));
         assert!(!config.allow_credentials);
-        assert!(config.vary_header);
+        assert!(config.include_vary);
     }
     
     #[test]
@@ -558,9 +654,9 @@ mod tests {
         
         let allowed_origins = config.allow_origins.unwrap();
         
-        assert!(allowed_origins.contains(&"https://example.com"));
-        assert!(allowed_origins.contains(&"https://example.net"));
-        assert!(!allowed_origins.contains(&"https://example.org"));
+        assert!(allowed_origins.contains(&HeaderValue::from_static("https://example.com")));
+        assert!(allowed_origins.contains(&HeaderValue::from_static("https://example.net")));
+        assert!(!allowed_origins.contains(&HeaderValue::from_static("https://example.org")));
     }
 
     #[test]
@@ -578,9 +674,9 @@ mod tests {
 
         let allowed_headers = config.allow_headers.unwrap();
 
-        assert!(allowed_headers.contains(&"Content-Type"));
-        assert!(allowed_headers.contains(&"X-Correlation-Id"));
-        assert!(!allowed_headers.contains(&"X-Some-Header"));
+        assert!(allowed_headers.contains(&HeaderName::from_static("content-type")));
+        assert!(allowed_headers.contains(&HeaderName::from_static("x-correlation-id")));
+        assert!(!allowed_headers.contains(&HeaderName::from_static("x-some-header")));
     }
 
     #[test]
@@ -632,7 +728,7 @@ mod tests {
         let config = CorsConfig::default()
             .with_vary_header(false);
 
-        assert!(!config.vary_header);
+        assert!(!config.include_vary);
     }
 
     #[test]
@@ -650,17 +746,9 @@ mod tests {
 
         let exposed_headers = config.expose_headers.unwrap();
 
-        assert!(exposed_headers.contains(&"Content-Type"));
-        assert!(exposed_headers.contains(&"X-Correlation-Id"));
-        assert!(!exposed_headers.contains(&"X-Some-Header"));
-    }
-
-    #[test]
-    fn it_creates_cors_config_with_expose_any_header() {
-        let config = CorsConfig::default()
-            .with_expose_any_header();
-
-        assert!(config.expose_headers.unwrap().contains("*"));
+        assert!(exposed_headers.contains(&HeaderName::from_static("content-type")));
+        assert!(exposed_headers.contains(&HeaderName::from_static("x-correlation-id")));
+        assert!(!exposed_headers.contains(&HeaderName::from_static("x-some-header")));
     }
     
     #[test]
@@ -678,11 +766,11 @@ mod tests {
         let allowed_headers = config.allow_headers.unwrap();
         let allowed_methods = config.allow_methods.unwrap();
         
-        assert!(allowed_origins.contains(&"https://example.com"));
-        assert!(!allowed_origins.contains(&"https://example.org"));
+        assert!(allowed_origins.contains(&HeaderValue::from_static("https://example.com")));
+        assert!(!allowed_origins.contains(&HeaderValue::from_static("https://example.org")));
 
-        assert!(allowed_headers.contains(&"Content-Type"));
-        assert!(!allowed_headers.contains(&"X-Some-Header"));
+        assert!(allowed_headers.contains(&HeaderName::from_static("content-type")));
+        assert!(!allowed_headers.contains(&HeaderName::from_static("x-some-header")));
 
         assert!(allowed_methods.contains(&Method::GET));
         assert!(allowed_methods.contains(&Method::POST));
@@ -691,7 +779,7 @@ mod tests {
         assert_eq!(config.expose_headers, None);
         assert_eq!(config.max_age, Some(Duration::from_secs(DEFAULT_MAX_AGE)));
         assert!(config.allow_credentials);
-        assert!(!config.vary_header);
+        assert!(!config.include_vary);
     }
 
     #[test]
@@ -713,11 +801,11 @@ mod tests {
         let allowed_headers = config.allow_headers.unwrap();
         let allowed_methods = config.allow_methods.unwrap();
 
-        assert!(allowed_origins.contains(&"https://example.com"));
-        assert!(!allowed_origins.contains(&"https://example.org"));
+        assert!(allowed_origins.contains(&HeaderValue::from_static("https://example.com")));
+        assert!(!allowed_origins.contains(&HeaderValue::from_static("https://example.org")));
 
-        assert!(allowed_headers.contains(&"Content-Type"));
-        assert!(!allowed_headers.contains(&"X-Some-Header"));
+        assert!(allowed_headers.contains(&HeaderName::from_static("content-type")));
+        assert!(!allowed_headers.contains(&HeaderName::from_static("x-some-header")));
 
         assert!(allowed_methods.contains(&Method::GET));
         assert!(allowed_methods.contains(&Method::POST));
@@ -726,7 +814,7 @@ mod tests {
         assert_eq!(config.expose_headers, None);
         assert_eq!(config.max_age, None);
         assert!(config.allow_credentials);
-        assert!(!config.vary_header);
+        assert!(!config.include_vary);
     }
     
     #[test]
@@ -802,7 +890,7 @@ mod tests {
 
         assert!(header.is_some());
 
-        assert_eq!(header.unwrap(), "Content-Type");
+        assert_eq!(header.unwrap(), "content-type");
     }
 
     #[test]
@@ -897,24 +985,79 @@ mod tests {
     }
 
     #[test]
-    fn it_returns_vary_header() {
+    fn it_returns_none_vary_preflight_header() {
         let config = CorsConfig::default();
 
-        let header = config.vary_header();
+        let header = config.vary_preflight();
 
-        assert!(header.is_some());
-
-        assert_eq!(header.unwrap(), "origin,access-control-request-method,access-control-request-headers");
+        assert!(header.is_none());
     }
 
     #[test]
-    fn it_does_not_return_vary_header() {
+    fn it_returns_vary_preflight_header() {
+        let config = CorsConfig::default()
+            .with_origins(["http://www.example.com"]);
+
+        let header = config.vary_preflight();
+
+        assert_eq!(header.unwrap(), "origin, access-control-request-method, access-control-request-headers");
+    }
+
+    #[test]
+    fn it_returns_none_vary_normal_header() {
+        let config = CorsConfig::default();
+
+        let header = config.vary_normal();
+
+        assert!(header.is_none());
+    }
+
+    #[test]
+    fn it_returns_vary_normal_header() {
+        let config = CorsConfig::default()
+            .with_origins(["http://www.example.com"]);
+
+        let header = config.vary_normal();
+
+        assert_eq!(header.unwrap(), "Origin");
+    }
+
+    #[test]
+    fn it_does_not_return_vary_preflight_header() {
         let config = CorsConfig::default()
             .with_vary_header(false);
 
-        let header = config.vary_header();
+        let header = config.vary_preflight();
 
         assert!(header.is_none());
+    }
+
+    #[test]
+    fn it_does_not_return_vary_normal_header() {
+        let config = CorsConfig::default()
+            .with_vary_header(false);
+
+        let header = config.vary_normal();
+
+        assert!(header.is_none());
+    }
+
+    #[test]
+    fn it_doesnt_needs_vary_when_any_origin_and_allow_any_credentials_false() {
+        let config = CorsConfig::default()
+            .with_any_origin()
+            .with_vary_header(true);
+
+        assert!(!config.needs_vary());
+    }
+
+    #[test]
+    fn it_needs_vary_with_origin() {
+        let config = CorsConfig::default()
+            .with_vary_header(true)
+            .with_origins(["http://localhost:7878/"]);
+
+        assert!(config.needs_vary());
     }
 
     #[test]

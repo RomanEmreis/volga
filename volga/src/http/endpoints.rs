@@ -67,6 +67,7 @@ impl Endpoints {
         &self,
         method: &Method,
         uri: &Uri,
+        #[cfg(feature = "middleware")] cors_enabled: bool,
         #[cfg(feature = "middleware")] headers: &HeaderMap
     ) -> FindResult {
         let route_params = match self.routes.find(uri.path()) {
@@ -79,7 +80,7 @@ impl Endpoints {
         };
 
         #[cfg(feature = "middleware")]
-        if method == Method::OPTIONS {
+        if cors_enabled && method == Method::OPTIONS {
             // OPTIONS path: treat CORS preflight specially
             // (Only if it looks like a preflight request)
             let origin_present = headers.contains_key(ORIGIN);
@@ -88,16 +89,14 @@ impl Endpoints {
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| Method::from_bytes(s.as_bytes()).ok());
 
-            if origin_present {
-                if let Some(target_method) = acrm {
-                    // Check if the target method exists for this path
-                    return handlers
-                        .binary_search_by(|h| h.cmp(&target_method))
-                        .map_or_else(
-                            |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
-                            |i| FindResult::Ok(Endpoint::new(handlers[i].pipeline.clone(), route_params.params)),
-                        );
-                }
+            if origin_present && let Some(target_method) = acrm {
+                // Check if the target method exists for this path
+                return handlers
+                    .binary_search_by(|h| h.cmp(&target_method))
+                    .map_or_else(
+                        |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
+                        |i| FindResult::Ok(Endpoint::new(handlers[i].pipeline.clone(), route_params.params)),
+                    );
             }
         }
 
@@ -171,6 +170,7 @@ mod tests {
         let post_handler = endpoints.find(
             request.method(),
             request.uri(),
+            #[cfg(feature = "middleware")] false,
             #[cfg(feature = "middleware")] &HeaderMap::new()
         );
 
@@ -192,6 +192,7 @@ mod tests {
         let post_handler = endpoints.find(
             request.method(),
             request.uri(),
+            #[cfg(feature = "middleware")] false,
             #[cfg(feature = "middleware")] &HeaderMap::new()
         );
 
@@ -213,6 +214,7 @@ mod tests {
         let post_handler = endpoints.find(
             request.method(),
             request.uri(),
+            #[cfg(feature = "middleware")] false,
             #[cfg(feature = "middleware")] &HeaderMap::new()
         );
 

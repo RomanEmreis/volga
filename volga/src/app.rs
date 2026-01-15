@@ -132,6 +132,12 @@ pub struct App {
     /// HTTP/2 resource and backpressure limits.
     #[cfg(feature = "http2")]
     pub(super) http2_limits: Http2Limits,
+
+    /// Controls whether a CORS middleware is enabled
+    /// 
+    /// Default: `false`
+    #[cfg(feature = "middleware")]
+    pub(super) cors_enabled: bool,
     
     /// TCP connection parameters
     connection: Connection,
@@ -261,6 +267,10 @@ pub(crate) struct AppInstance {
     /// Default `Cache-Control` header value
     pub(super) cache_control: Option<HeaderValue>,
 
+    /// Controls whether a CORS middleware is enabled
+    #[cfg(feature = "middleware")]
+    pub(super) cors_enabled: bool,
+
     /// Request/Middleware pipeline
     pipeline: Pipeline,
 }
@@ -297,6 +307,8 @@ impl TryFrom<App> for AppInstance {
             max_header_count: app.max_header_count,
             max_header_size: app.max_header_size,
             cache_control: default_cache_control,
+            #[cfg(feature = "middleware")]
+            cors_enabled: app.cors_enabled,
             #[cfg(feature = "http2")]
             http2_limits: app.http2_limits,
             #[cfg(feature = "static-files")]
@@ -376,6 +388,8 @@ impl App {
             max_header_size: Limit::Default,
             max_connections: Limit::Default,
             cache_control: None,
+            #[cfg(feature = "middleware")]
+            cors_enabled: false,
             #[cfg(feature = "http2")]
             http2_limits: Default::default(),
             #[cfg(debug_assertions)]

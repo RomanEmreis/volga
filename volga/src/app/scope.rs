@@ -172,6 +172,7 @@ async fn handle_impl(
     match pipeline.endpoints().find(
         request.method(),
         request.uri(),
+        #[cfg(feature = "middleware")] shared.cors_enabled,
         #[cfg(feature = "middleware")] request.headers()
     ) {
         FindResult::RouteNotFound => pipeline.fallback(request).await,

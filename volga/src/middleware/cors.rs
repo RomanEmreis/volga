@@ -51,12 +51,15 @@ impl App {
             validate_cors_config(&mut self.cors_config).precompute()
         );
 
+        self.cors_enabled = true;
+
         self.wrap(move |ctx, next| {
             let cors_headers = cors_headers.clone();
             async move {
-                let method = ctx.request().method();
-                let origin = ctx.request().headers().get(&ORIGIN).cloned();
-                let acrm = ctx.request().headers()
+                let request = ctx.request();
+                let method = request.method();
+                let origin = request.headers().get(&ORIGIN).cloned();
+                let acrm = request.headers()
                     .get(ACCESS_CONTROL_REQUEST_METHOD)
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| Method::from_bytes(s.as_bytes()).ok());
@@ -65,17 +68,12 @@ impl App {
                     let mut response = Response::new(HttpBody::empty());
                     
                     *response.status_mut() = StatusCode::NO_CONTENT;
-                    cors_headers.apply_common(response.headers_mut(), origin);
-                    cors_headers.append_vary(response.headers_mut());
-                    cors_headers.apply_preflight(response.headers_mut());
-                    
+                    cors_headers.apply_preflight_response(response.headers_mut(), origin);
+            
                     Ok(HttpResponse::from_inner(response))
                 } else {
                     let mut response = next(ctx).await?;
-
-                    cors_headers.apply_common(response.headers_mut(), origin);
-                    cors_headers.append_vary(response.headers_mut());
-                    cors_headers.apply_normal(response.headers_mut());
+                    cors_headers.apply_normal_response(response.headers_mut(), origin);
 
                     Ok(response)
                 }
