@@ -1,7 +1,7 @@
 ﻿use std::net::SocketAddr;
 use tokio_util::sync::CancellationToken;
 use futures_util::{TryFutureExt, future::BoxFuture};
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use hyper::{
     header::{HeaderValue, CONTENT_LENGTH, ALLOW}, 
@@ -15,18 +15,28 @@ use hyper::{
 
 use crate::{
     app::AppInstance, 
-    error::{Error, handler::call_weak_err_handler}, 
+    error::{Error, handler::call_weak_err_handler},
+    headers::CACHE_CONTROL,
     http::endpoints::FindResult,
     HttpRequest, HttpBody, HttpResult, ClientIp,
     Limit,
     status
 };
 
+#[cfg(feature = "tls")]
+use crate::{
+    headers::{HOST, STRICT_TRANSPORT_SECURITY},
+    tls::HstsHeader
+};
+
+#[cfg(feature = "tracing")]
+use {
+    crate::tracing::TracingConfig,
+    tracing::{trace_span, Id}
+};
+
 #[cfg(feature = "middleware")]
 use crate::middleware::HttpContext;
-
-#[cfg(any(feature = "tls", feature = "tracing"))]
-use std::sync::Arc;
 
 /// Represents the execution scope of the current connection
 #[derive(Clone)]
@@ -74,111 +84,248 @@ impl Scope {
             Some(shared) => shared,
             None => {
                 #[cfg(feature = "tracing")]
-                tracing::warn!("app instance could not be upgraded; aborting...");
+                tracing::error!("app instance could not be upgraded; aborting...");
 
                 return status!(500)
             }
         };
 
-        {
-            let headers = request.headers();
+        #[cfg(feature = "tracing")]
+        let span = shared
+            .tracing_config
+            .as_ref()
+            .map(|_| {
+                let method = request.method();
+                let uri = request.uri();
+                trace_span!("request", %method, %uri)
+            });
 
-            #[cfg(feature = "http1")]
-            if let Limit::Limited(max_header_size) = shared.max_header_size 
-                && !check_max_header_size(headers, max_header_size) {
-                #[cfg(feature = "tracing")]
-                tracing::warn!("Request rejected due to headers exceeding configured limits");
+        #[cfg(feature = "tracing")]
+        let _guard = span.as_ref().map(|s| s.enter());
 
-                return status!(431, "Request headers too large");
-            }
+        #[cfg(feature = "tls")]
+        let host = request
+            .headers()
+            .get(HOST)
+            .cloned();
 
-            #[cfg(feature = "http2")]
-            if let Limit::Limited(max_header_count) = shared.max_header_count 
-                && !check_max_header_count(headers, max_header_count) {
-                #[cfg(feature = "tracing")]
-                tracing::warn!("Request rejected due to headers exceeding configured limits");
+        let response = handle_impl(
+            request, 
+            peer_addr, 
+            shared.clone(), 
+            cancellation_token
+        ).await;
+        
+        finalize_response(
+            response, 
+            &shared,
+            #[cfg(feature = "tracing")]
+            span.as_ref().and_then(|s| s.id()),
+            #[cfg(feature = "tls")]
+            host
+        )
+    }
+}
 
-                return status!(431, "Request headers too large");
-            }
+async fn handle_impl(        
+    request: Request<Incoming>,
+    peer_addr: SocketAddr,
+    shared: Arc<AppInstance>,
+    cancellation_token: CancellationToken) -> HttpResult {
+    {
+        let headers = request.headers();
+
+        #[cfg(feature = "http1")]
+        if let Limit::Limited(max_header_size) = shared.max_header_size 
+            && !check_max_header_size(headers, max_header_size) {
+            #[cfg(feature = "tracing")]
+            tracing::warn!("Request rejected due to headers exceeding configured limits");
+
+            return status!(431, "Request headers too large");
         }
-        
-        #[cfg(feature = "static-files")]
-        let request = {
-            let mut request = request;
-            request.extensions_mut().insert(shared.host_env.clone());
-            request
-        };
 
-        #[cfg(feature = "di")]
-        let request = {
-            let mut request = request;
-            request.extensions_mut().insert(shared.container.create_scope());
-            request
-        };
+        #[cfg(feature = "http2")]
+        if let Limit::Limited(max_header_count) = shared.max_header_count 
+            && !check_max_header_count(headers, max_header_count) {
+            #[cfg(feature = "tracing")]
+            tracing::warn!("Request rejected due to headers exceeding configured limits");
+
+            return status!(431, "Request headers too large");
+        }
+    }
         
-        let pipeline = &shared.pipeline;
-        match pipeline.endpoints().find(request.method(), request.uri()) {
-            FindResult::RouteNotFound => pipeline.fallback(request).await,
-            FindResult::MethodNotFound(allowed) => status!(405, [
-                (ALLOW, allowed)
-            ]),
-            FindResult::Ok(endpoint) => {
-                let (route_pipeline, params) = endpoint.into_parts();
-                let error_handler = pipeline.error_handler();
-                let (mut parts, body) = request.into_parts();
+    #[cfg(feature = "static-files")]
+    let request = {
+        let mut request = request;
+        request.extensions_mut().insert(shared.host_env.clone());
+        request
+    };
+
+    #[cfg(feature = "di")]
+    let request = {
+        let mut request = request;
+        request.extensions_mut().insert(shared.container.create_scope());
+        request
+    };
+        
+    let pipeline = &shared.pipeline;
+    match pipeline.endpoints().find(request.method(), request.uri()) {
+        FindResult::RouteNotFound => pipeline.fallback(request).await,
+        FindResult::MethodNotFound(allowed) => status!(405, [
+            (ALLOW, allowed)
+        ]),
+        FindResult::Ok(endpoint) => {
+            let (route_pipeline, params) = endpoint.into_parts();
+            let error_handler = pipeline.error_handler();
+            let (mut parts, body) = request.into_parts();
                 
-                {
-                    let extensions = &mut parts.extensions;
-                    extensions.insert(ClientIp(peer_addr));
-                    extensions.insert(cancellation_token);
-                    extensions.insert(shared.body_limit);
-                    extensions.insert(params);
-                    extensions.insert(error_handler.clone());
+            {
+                let extensions = &mut parts.extensions;
+                extensions.insert(ClientIp(peer_addr));
+                extensions.insert(cancellation_token);
+                extensions.insert(shared.body_limit);
+                extensions.insert(params);
+
+                #[cfg(feature = "ws")]
+                extensions.insert(error_handler.clone());
                     
-                    #[cfg(feature = "jwt-auth")]
-                    if let Some(bts) = &shared.bearer_token_service {
-                        extensions.insert(bts.clone());
-                    }
-
-                    #[cfg(feature = "rate-limiting")]
-                    if let Some(rate_limiter) = &shared.rate_limiter {
-                        extensions.insert(rate_limiter.clone());
-                    }
+                #[cfg(feature = "jwt-auth")]
+                if let Some(bts) = &shared.bearer_token_service {
+                    extensions.insert(bts.clone());
                 }
 
-                let request = HttpRequest::new(Request::from_parts(parts.clone(), body))
-                    .into_limited(shared.body_limit);
-                
-                #[cfg(any(feature = "tls", feature = "tracing"))]
-                let (request, parts) = {
-                    let mut request = request;
-                    let parts= Arc::new(parts);
-                    request.extensions_mut().insert(parts.clone());
-                    (request, parts)
-                };
-                
-                #[cfg(feature = "middleware")]
-                let response = if pipeline.has_middleware_pipeline() {
-                    let ctx = HttpContext::new(request, Some(route_pipeline));
-                    pipeline.execute(ctx).await
-                } else {
-                    route_pipeline.call(HttpContext::new(request, None)).await
-                };
-                #[cfg(not(feature = "middleware"))]
-                let response = route_pipeline.call(request).await;
-                
-                match response {
-                    Ok(response) if parts.method != Method::HEAD => Ok(response),
-                    Ok(mut response) => {
-                        keep_content_length(response.size_hint(), response.headers_mut());
-                        *response.body_mut() = HttpBody::empty();
-                        Ok(response)
-                    },
-                    Err(err) => call_weak_err_handler(error_handler, &parts, err).await,
+                #[cfg(feature = "rate-limiting")]
+                if let Some(rate_limiter) = &shared.rate_limiter {
+                    extensions.insert(rate_limiter.clone());
                 }
+            }
+
+            let request = HttpRequest::new(Request::from_parts(parts.clone(), body))
+                .into_limited(shared.body_limit);
+                
+            #[cfg(feature = "middleware")]
+            let response = if pipeline.has_middleware_pipeline() {
+                let ctx = HttpContext::new(request, Some(route_pipeline));
+                pipeline.execute(ctx).await
+            } else {
+                route_pipeline.call(HttpContext::new(request, None)).await
+            };
+            #[cfg(not(feature = "middleware"))]
+            let response = route_pipeline.call(request).await;
+                
+            match response {
+                Ok(response) if parts.method != Method::HEAD => Ok(response),
+                Ok(mut response) => {
+                    keep_content_length(response.size_hint(), response.headers_mut());
+                    *response.body_mut() = HttpBody::empty();
+                    Ok(response)
+                },
+                Err(err) => call_weak_err_handler(error_handler, &parts, err).await,
             }
         }
     }
+}
+
+#[inline]
+fn finalize_response(
+    response: HttpResult,
+    shared: &AppInstance,
+    #[cfg(feature = "tracing")]
+    span_id: Option<Id>,
+    #[cfg(feature = "tls")]
+    host: Option<HeaderValue>
+) -> HttpResult {
+    response.map(|mut resp| {
+        if let Some(hv) = &shared.cache_control {
+            apply_default_cache_control(&mut resp, hv.clone());
+        }
+
+        #[cfg(feature = "tracing")]
+        if let Some(tracing) = &shared.tracing_config {
+            apply_tracing_headers(&mut resp, tracing, span_id);
+        }
+
+        #[cfg(feature = "tls")]
+        if let Some(hsts) = &shared.hsts {
+            apply_hsts_headers(&mut resp, hsts, host);
+        }
+
+        resp
+    })
+}
+
+#[inline]
+fn apply_default_cache_control(
+    resp: &mut crate::HttpResponse, 
+    header: HeaderValue,
+) {
+    if !resp.headers().contains_key(CACHE_CONTROL) {
+        resp.headers_mut().insert(CACHE_CONTROL, header);
+    }
+}
+
+#[inline]
+#[cfg(feature = "tracing")]
+fn apply_tracing_headers(
+    resp: &mut crate::HttpResponse,
+    tracing: &TracingConfig,
+    span_id: Option<Id>,
+) {
+    if !tracing.include_header {
+        return;
+    }
+
+    let value = span_id
+        .map_or(0, |id| id.into_u64())
+        .to_string();
+
+    resp.headers_mut().insert(
+        tracing.span_header_name,
+        value.parse().expect("valid span id"),
+    );
+}
+
+#[cfg(feature = "tls")]
+fn apply_hsts_headers(
+    resp: &mut crate::HttpResponse,
+    hsts: &HstsHeader,
+    host: Option<HeaderValue>,
+) {
+    if is_excluded(host, &hsts.exclude_hosts) {
+        println!("22");
+        return;
+    }
+
+    resp.headers_mut().insert(
+        STRICT_TRANSPORT_SECURITY,
+        hsts.value(),
+    );
+}
+
+#[inline]
+#[cfg(feature = "tls")]
+fn is_excluded(host: Option<HeaderValue>, exclude_hosts: &[String]) -> bool {
+    host.as_ref()
+        .and_then(|h| h.to_str().ok())
+        .map(|h| {
+            let h = normalize_host(h);
+            exclude_hosts.iter().any(|e| e == h)
+        })
+        .unwrap_or(false)
+}
+
+#[inline]
+#[cfg(feature = "tls")]
+fn normalize_host(host: &str) -> &str {
+    let host = host.trim();
+
+    let host = match host.rsplit_once(':') {
+        Some((h, "443")) => h,
+        Some((h, "80")) => h,
+        _ => host,
+    };
+
+    host.trim_end_matches('.')
 }
 
 fn keep_content_length(size_hint: SizeHint, headers: &mut HeaderMap) {

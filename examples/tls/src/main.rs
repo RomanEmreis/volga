@@ -19,17 +19,15 @@ async fn main() -> std::io::Result<()> {
             .with_http_port(7879))
         .with_hsts(|hsts| hsts
             .with_max_age(Duration::from_secs(30))
-            .with_exclude_hosts(&["example.com", "example.net"]));
-
-    app.use_hsts();
+            .with_exclude_hosts(["example.com", "example.net"]));
 
     app.group("/user", |api| {
-       api.map_get("/{name}", |name: String| async move {
-        ok!("Hello {name}!")
-       });
-       api.map_post("/create", |user: Json<serde_json::Value>| async move { 
-           user
-       }); 
+        api.map_get("/{name}", |name: String| async move {
+            ok!("Hello {name}!")
+        });
+        api.map_post("/create", |user: Json<serde_json::Value>| async move { 
+            user
+        }); 
     });
 
     app.run().await

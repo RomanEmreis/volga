@@ -10,15 +10,7 @@ use crate::{
     status
 };
 
-#[cfg(any(feature = "tls", feature = "tracing"))]
-use {
-    crate::error::handler::WeakErrorHandler,
-    hyper::http::request::Parts
-};
-
 #[cfg(any(
-    feature = "tls", 
-    feature = "tracing", 
     feature = "di",
     feature = "rate-limiting"
 ))]
@@ -170,28 +162,6 @@ impl HttpContext {
         } else { 
             status!(405)
         }
-    }
-    
-    /// Returns a weak reference to global error handler
-    #[inline]
-    #[cfg(any(feature = "tls", feature = "tracing"))]
-    pub(crate) fn error_handler(&self) -> WeakErrorHandler {
-        self.request
-            .extensions()
-            .get::<WeakErrorHandler>()
-            .expect("error handler must be provided")
-            .clone()
-    }
-
-    /// Returns HTTP request parts snapshot
-    #[inline]
-    #[cfg(any(feature = "tls", feature = "tracing"))]
-    pub(crate) fn request_parts_snapshot(&self) -> Arc<Parts> {
-        self.request
-            .extensions()
-            .get::<Arc<Parts>>()
-            .expect("http request parts snapshot must be provided")
-            .clone()
     }
 }
 

@@ -18,8 +18,6 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new()
         .with_tracing(|tracing| tracing.with_header());
 
-    app.use_tracing();
-
     // Enabling global error handler that produces
     // error responses in Problem details format
     app.use_problem_details();  

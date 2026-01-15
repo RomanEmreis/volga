@@ -228,9 +228,8 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
                 .with_preload(false)
                 .with_sub_domains(true)
                 .with_max_age(Duration::from_secs(60))
-                .with_exclude_hosts(&["example.com", "example.net"])))
+                .with_exclude_hosts(["example.com", "example.net"])))
         .setup(|app| {
-            app.use_hsts();
             app.map_get("/tls", || async {
                 "Pass!"
             });
@@ -281,9 +280,8 @@ async fn it_works_with_tls_with_https_redirection() {
                 .with_preload(false)
                 .with_sub_domains(true)
                 .with_max_age(Duration::from_secs(60))
-                .with_exclude_hosts(&["example.com", "example.net"])))
+                .with_exclude_hosts(["example.com", "example.net"])))
         .setup(|app| {
-            app.use_hsts();
             app.map_get("/tls", || async {
                 "Pass!"
             });
@@ -331,9 +329,8 @@ async fn it_returns_404_if_no_host() {
                 .with_preload(false)
                 .with_sub_domains(true)
                 .with_max_age(Duration::from_secs(60))
-                .with_exclude_hosts(&["example.com", "example.net"])))
+                .with_exclude_hosts(["example.com", "example.net"])))
         .setup(|app| {
-            app.use_hsts();
             app.map_get("/tls", || async {
                 "Pass!"
             });

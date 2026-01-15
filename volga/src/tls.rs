@@ -1,8 +1,7 @@
 ﻿//! HTTPS/TLS protocol implementations and middlewares
 
-use futures_util::TryFutureExt;
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
-use crate::{App, app::AppInstance, error::{Error, handler::call_weak_err_handler}};
+use crate::{App, app::AppInstance, error::Error, headers::HeaderValue};
 
 use std::{
     fmt, 
@@ -79,7 +78,7 @@ pub struct TlsConfig {
     pub https_redirection_config: RedirectionConfig,
     
     /// HSTS configuration options
-    hsts_config: HstsConfig,
+    pub(super) hsts_config: HstsConfig,
     
     /// Client Auth options
     client_auth: ClientAuth,
@@ -100,7 +99,7 @@ pub struct RedirectionConfig {
 } 
 
 /// Represents HSTS (HTTP Strict Transport Security Protocol) configuration options
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HstsConfig {
     /// Specifies whether include a `preload` to HSTS header
     /// 
@@ -118,7 +117,17 @@ pub struct HstsConfig {
     max_age: Duration,
     
     /// A list of hosts names that will not add the HSTS header.
-    exclude_hosts: Vec<&'static str>
+    exclude_hosts: Vec<String>
+}
+
+/// Represents HSTS (HTTP Strict Transport Security Protocol) header
+#[derive(Debug, Clone)]
+pub struct HstsHeader {
+    /// Inner [`HeaderValue`]
+    pub(super) inner: HeaderValue,
+    
+    /// A list of hosts names that will not add the HSTS header.
+    pub(super) exclude_hosts: Vec<String>
 }
 
 /// Represents a type of Client Auth
@@ -212,9 +221,50 @@ impl HstsConfig {
     /// Configures a list of host names that will not add the HSTS header.
     ///
     /// Default: empty list
-    pub fn with_exclude_hosts(mut self, exclude_hosts: &[&'static str]) -> Self {
-        self.exclude_hosts = exclude_hosts.into();
+    pub fn with_exclude_hosts<I, S>(mut self, hosts: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        self.exclude_hosts = hosts
+            .into_iter()
+            .map(|h| normalize_host(h.as_ref()))
+            .collect();
         self
+    }
+}
+
+impl HstsHeader {
+    /// Creates a new [`HstsHeader`]
+    #[inline]
+    pub(super) fn new(config: HstsConfig) -> Self {
+        let mut value = String::with_capacity(64);
+
+        use std::fmt::Write;
+        write!(&mut value, "max-age={}", config.max_age.as_secs())
+            .expect("valid HSTS header");
+
+        if config.include_sub_domains {
+            value.push_str("; includeSubDomains");
+        }
+
+        if config.preload {
+            value.push_str("; preload");
+        }
+
+        let header_value = HeaderValue::from_str(&value)
+            .expect("valid HSTS header");
+
+        Self {
+            exclude_hosts: config.exclude_hosts,
+            inner: header_value
+        }
+    }
+
+    /// Providea clone of the HSTS HTTP header value
+    #[inline]
+    pub(super) fn value(&self) -> HeaderValue {
+        self.inner.clone()
     }
 }
 
@@ -362,7 +412,11 @@ impl TlsConfig {
     /// Configures a list of host names that will not add the HSTS header.
     /// 
     /// Default: empty list
-    pub fn with_hsts_exclude_hosts(mut self, exclude_hosts: &[&'static str]) -> Self {
+    pub fn with_hsts_exclude_hosts<I, S>(mut self, exclude_hosts: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
         self.hsts_config = self.hsts_config.with_exclude_hosts(exclude_hosts);
         self
     }
@@ -613,52 +667,6 @@ impl App {
         self
     }
     
-    /// Adds middleware for using HSTS, which adds the `Strict-Transport-Security` HTTP header.
-    pub fn use_hsts(&mut self) -> &mut Self {
-        if let Some(tls_config) = &self.tls_config {
-            use crate::headers::{Header, Host, STRICT_TRANSPORT_SECURITY};
-            
-            let hsts_header_value = tls_config.hsts_config.to_string();
-            let exclude_hosts = tls_config.hsts_config.exclude_hosts.clone();
-            
-            let is_excluded = move |host: Option<&str>| {
-                if exclude_hosts.is_empty() { 
-                    return false;
-                }
-                if let Some(host) = host {
-                    return exclude_hosts.contains(&host);
-                }
-                false
-            };
-            
-            self.wrap(move |ctx, next| {
-                let hsts_header_value = hsts_header_value.clone();
-                let is_excluded = is_excluded.clone();
-                
-                async move {
-                    let host = ctx.extract::<Header<Host>>()?;
-                    let error_handler = ctx.error_handler();
-                    let parts = ctx.request_parts_snapshot();
-                    let http_result = next(ctx)
-                        .or_else(|err| async { call_weak_err_handler(error_handler, &parts, err).await })
-                        .await;
-
-                    if !is_excluded(host.as_str().ok()) {
-                        http_result.map(|mut response| {
-                            response
-                                .headers_mut()
-                                .append(STRICT_TRANSPORT_SECURITY, hsts_header_value.parse().unwrap());
-                            response
-                        })
-                    } else { 
-                        http_result
-                    }
-                }
-            });
-        }
-        self
-    }
-    
     pub(super) fn run_https_redirection_middleware(
         socket: SocketAddr, 
         http_port: u16,
@@ -724,11 +732,23 @@ impl App {
     }
 }
 
+#[inline]
+fn normalize_host(host: &str) -> String {
+    let host = match host.trim().rsplit_once(':') {
+        Some((h, "443")) => h,
+        _ => host,
+    };
+
+    host
+        .trim_end_matches('.')
+        .to_ascii_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
-    use crate::App;
+    use crate::{App, tls::HstsHeader};
     use super::{
         TlsConfig, 
         HstsConfig, 
@@ -804,7 +824,7 @@ mod tests {
                 max_age: Duration::from_secs(1),
                 preload: false, 
                 include_sub_domains: false, 
-                exclude_hosts: vec!["example.com"]
+                exclude_hosts: vec!["example.com".to_string()]
             });
 
         let path = PathBuf::from("tls");
@@ -825,7 +845,7 @@ mod tests {
     #[test]
     fn it_creates_tls_config_with_hsts() {
         let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_exclude_hosts(&["example.com"])
+            .with_hsts_exclude_hosts(["example.com"])
             .with_hsts(|hsts| hsts
                 .with_preload(false)
                 .with_sub_domains(false)
@@ -910,7 +930,7 @@ mod tests {
     #[test]
     fn it_creates_tls_config_with_hsts_exclude_hosts() {
         let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_exclude_hosts(&["example.com"]);
+            .with_hsts_exclude_hosts(["example.com"]);
 
         let path = PathBuf::from("tls");
 
@@ -962,7 +982,7 @@ mod tests {
                 .with_max_age(Duration::from_secs(1))
                 .with_preload(false)
                 .with_sub_domains(false)
-                .with_exclude_hosts(&["example.com"]));
+                .with_exclude_hosts(["example.com"]));
 
         let tls_config = app.tls_config.unwrap();
 
@@ -981,7 +1001,7 @@ mod tests {
             .with_max_age(Duration::from_secs(1))
             .with_preload(false)
             .with_sub_domains(false)
-            .with_exclude_hosts(&["example.com"]);
+            .with_exclude_hosts(["example.com"]);
         
         let app = App::new()
             .with_tls(|tls| tls.with_https_redirection())
@@ -1021,5 +1041,24 @@ mod tests {
 
         assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
         assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+    }
+
+    #[test]
+    fn it_creates_hsts_header() {
+        let hsts_config = HstsConfig::default()
+            .with_exclude_hosts(["www.example.com"]);
+        
+        let hsts_header = HstsHeader::new(hsts_config);
+        
+        assert_eq!(hsts_header.exclude_hosts, &["www.example.com"]);
+        assert_eq!(hsts_header.inner, "max-age=2592000; includeSubDomains; preload");
+    }
+
+    #[test]
+    fn it_normalizes_excluded_hosts() {
+        let hsts_config = HstsConfig::default()
+            .with_exclude_hosts(["www.ExAmplE.com.", "www.ExAmplE.net:80", "www.ExAmplE.org:443"]);
+        
+        assert_eq!(hsts_config.exclude_hosts, &["www.example.com", "www.example.net:80", "www.example.org"]);
     }
 }

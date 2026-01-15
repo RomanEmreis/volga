@@ -7,7 +7,7 @@ use volga::test::TestServer;
 async fn it_configures_cache_control_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/testing", |api| {
-            api.with_cache_control(|c| c
+            api.cache_control(|c| c
                 .with_max_age(60)
                 .with_immutable()
                 .with_public());
@@ -32,7 +32,7 @@ async fn it_configures_cache_control_for_group() {
 async fn it_configures_cache_control_for_route() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", || async { "Pass!" })
-            .with_cache_control(|c| c
+            .cache_control(|c| c
                 .with_max_age(60)
                 .with_immutable()
                 .with_public());
@@ -53,14 +53,17 @@ async fn it_configures_cache_control_for_route() {
 
 #[tokio::test]
 async fn it_configures_cache_control() {
-    let server = TestServer::spawn(|app| {
-        app.use_cache_control(|c| c
-            .with_max_age(60)
-            .with_immutable()
-            .with_public());
-
-        app.map_get("/test", || async { "Pass!" });
-    }).await;
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_cache_control(|c| c
+                .with_max_age(60)
+                .with_immutable()
+                .with_public())
+        })
+        .setup(|app| {
+            app.map_get("/test", || async { "Pass!" });
+        })
+        .build().await;
 
     let response = server.client()
         .get(server.url("/test"))
