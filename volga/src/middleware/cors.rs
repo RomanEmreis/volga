@@ -39,28 +39,40 @@ impl App {
         }
 
         self.cors.is_enabled = true;
-        self.wrap(|ctx, next| async move{
-            let request = ctx.request();
-            let method = request.method();
-            let origin = request.headers().get(&ORIGIN).cloned();
-            let acrm = request.headers()
-                .get(ACCESS_CONTROL_REQUEST_METHOD)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| Method::from_bytes(s.as_bytes()).ok());
+        
+        let default_cors = self.cors.get_default().cloned();
 
-            let Some(cors) = &ctx.cors else {
-                return next(ctx).await;
-            };
+        self.wrap(move |ctx, next| {
+            let default_cors = default_cors.clone();
+            async move {
+                // Resolve effective policy (Route > Group > Default)
+                let Some(cors) = ctx.resolve_cors(default_cors.as_ref()) else {
+                    return next(ctx).await;
+                };
 
-            if method == Method::OPTIONS && origin.is_some() && acrm.is_some() {
-                let mut response = Response::new(HttpBody::empty());
+                let request = ctx.request();
+                let method = request.method();
 
-                *response.status_mut() = StatusCode::NO_CONTENT;
-                cors.apply_preflight_response(response.headers_mut(), origin);
+                // Preflight is only possible for OPTIONS
+                if method == Method::OPTIONS {
+                    let origin = request.headers().get(&ORIGIN);
+                    let acrm = request.headers()
+                        .get(ACCESS_CONTROL_REQUEST_METHOD)
+                        .and_then(|v| Method::from_bytes(v.as_bytes()).ok());
 
-                Ok(HttpResponse::from_inner(response))
-            } else {
-                let cors = cors.clone();
+                    if origin.is_some() && acrm.is_some() {
+                        let mut response = Response::new(HttpBody::empty());
+                        *response.status_mut() = StatusCode::NO_CONTENT;
+
+                        cors.apply_preflight_response(response.headers_mut(), origin.cloned());
+
+                        return Ok(HttpResponse::from_inner(response))
+                    }
+
+                    // Not a valid preflight => fall through to user OPTIONS handler
+                }
+
+                let origin = request.headers().get(&ORIGIN).cloned();
                 let mut response = next(ctx).await?;
                 cors.apply_normal_response(response.headers_mut(), origin);
 

@@ -9,9 +9,8 @@ use super::endpoints::{
 #[cfg(feature = "middleware")]
 use {
     crate::headers::{HeaderMap, ORIGIN, ACCESS_CONTROL_REQUEST_METHOD},
-    crate::http::cors::CorsHeaders,
+    crate::http::cors::CorsOverride,
     super::endpoints::route::Layer,
-    std::sync::Arc
 };
 
 #[cfg(debug_assertions)]
@@ -42,7 +41,7 @@ pub(crate) struct Endpoint {
     pub(crate) params: PathArgs,
 
     #[cfg(feature = "middleware")]
-    pub(super) cors: Option<Arc<CorsHeaders>>
+    pub(super) cors: CorsOverride
 }
 
 impl Endpoint {
@@ -51,7 +50,7 @@ impl Endpoint {
     fn new(
         pipeline: RoutePipeline,
         params: PathArgs,
-        #[cfg(feature = "middleware")] cors: Option<Arc<CorsHeaders>>
+        #[cfg(feature = "middleware")] cors: CorsOverride
     ) -> Self {
         Self { pipeline, params, #[cfg(feature = "middleware")] cors }
     }
@@ -59,7 +58,7 @@ impl Endpoint {
     /// Converts the endpoint into a tuple of (request handler, path parameters)
     #[inline]
     #[cfg(feature = "middleware")]
-    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs, Option<Arc<CorsHeaders>>) {
+    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs, CorsOverride) {
         (self.pipeline, self.params, self.cors)
     }
 
@@ -102,8 +101,7 @@ impl Endpoints {
             let origin_present = headers.contains_key(ORIGIN);
             let acrm = headers
                 .get(ACCESS_CONTROL_REQUEST_METHOD)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| Method::from_bytes(s.as_bytes()).ok());
+                .and_then(|v| Method::from_bytes(v.as_bytes()).ok());
 
             if origin_present && let Some(target_method) = acrm {
                 // Check if the target method exists for this path
@@ -163,7 +161,7 @@ impl Endpoints {
         &mut self,
         method: &Method,
         pattern: &str,
-        cors: Option<Arc<CorsHeaders>>
+        cors: CorsOverride
     ) {
         self
             .routes

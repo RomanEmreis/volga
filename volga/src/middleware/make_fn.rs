@@ -198,6 +198,7 @@ mod tests {
     use super::*;
     use crate::{bad_request, ok, HttpResponse, HttpRequest, HttpRequestMut, HttpBody};
     use crate::http::endpoints::handlers::Func;
+    use crate::http::cors::CorsOverride;
     use crate::http::StatusCode;
     use crate::error::Error;
 
@@ -216,7 +217,7 @@ mod tests {
         let middleware = from_handler(route_handler);
         
         let req = create_request();
-        let ctx = HttpContext::new(req, None, None);
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
         let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
@@ -233,7 +234,7 @@ mod tests {
         let middleware = make_fn(middleware_logic);
 
         let req = create_request();
-        let ctx = HttpContext::new(req, None, None);
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
         let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
@@ -246,7 +247,7 @@ mod tests {
         let middleware = make_filter_fn(filter);
 
         let req = create_request();
-        let ctx = HttpContext::new(req, None, None);
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
         let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
@@ -264,7 +265,7 @@ mod tests {
         let middleware = make_map_ok_fn(map);
 
         let req = create_request();
-        let ctx = HttpContext::new(req, None, None);
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
         let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
 
         let result = middleware(ctx, next).await;
@@ -284,7 +285,7 @@ mod tests {
         let middleware = make_map_err_fn(map);
 
         let req = create_request();
-        let ctx = HttpContext::new(req, None, None);
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
         
         // Create a next function that returns an error
         let next: NextFn = Arc::new(|_| Box::pin(async {
@@ -317,7 +318,7 @@ mod tests {
             req
         };
         
-        let ctx = HttpContext::new(req, None, None);
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
         let next: NextFn = Arc::new(|ctx: HttpContext| Box::pin(async move {
             assert_eq!(ctx.request().headers().get("X-Test").unwrap(), "value");
             ok!()

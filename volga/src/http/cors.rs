@@ -71,6 +71,14 @@ pub(crate) struct CorsRegistry {
     pub(crate) is_enabled: bool,
 }
 
+/// Describes how CORS binded to the a route 
+#[derive(Debug, Clone)]
+pub(crate) enum CorsOverride {
+    Inherit,
+    Disabled,
+    Named(Arc<CorsHeaders>),
+}
+
 impl Default for CorsConfig {
     #[inline]
     fn default() -> Self {
@@ -588,7 +596,7 @@ impl CorsHeaders {
 impl CorsRegistry {
     /// Returns `true` if CORS policies are registered
     #[inline]
-    pub fn registered(&self) -> bool {
+    pub(crate) fn registered(&self) -> bool {
         self.default.is_some() || !self.named.is_empty()
     }
 
@@ -661,23 +669,40 @@ impl App {
 }
 
 impl<'a> Route<'a> {
-    pub fn cors(mut self) -> Self {
-        let policy = self.cors.get_default().cloned();
+    /// Disables CORS for this route
+    pub fn disable_cors(self) -> Self {
         self.app
             .pipeline
             .endpoints_mut()
-            .bind_cors(&self.method, &self.pattern, policy);
+            .bind_cors(
+                &self.method, 
+                &self.pattern, 
+                CorsOverride::Disabled
+            );
         self
     }
 
-    pub fn cors_policy(self, name: &str) -> Self {
-        let policy = self.cors.get_named(name).cloned();
+    /// Specifis the named CORS policy
+    pub fn cors(self, name: &str) -> Self {
+        let policy = self.cors
+            .get_named(name)
+            .expect("cors policy")
+            .clone();
+
         self.app
             .pipeline
             .endpoints_mut()
-            .bind_cors(&self.method, &self.pattern, policy);
+            .bind_cors(
+                &self.method, 
+                &self.pattern, 
+                CorsOverride::Named(policy)
+            );
         self
     }
+}
+
+impl<'a> RouteGroup<'a> {
+
 }
 
 #[inline]

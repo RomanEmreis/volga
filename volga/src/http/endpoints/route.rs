@@ -48,10 +48,7 @@ use smallvec::SmallVec;
 use crate::utils::str::memchr_split_nonempty;
 
 #[cfg(feature = "middleware")]
-use {
-    crate::http::cors::CorsHeaders,
-    std::sync::Arc
-};
+use crate::http::cors::CorsOverride;
 
 pub(crate) use path_args::{PathArgs, PathArg};
 pub(crate) use layer::{RoutePipeline, Layer};
@@ -72,7 +69,7 @@ pub(super) struct RouteEndpoint {
     pub(super) method: Method,
     pub(super) pipeline: RoutePipeline,
     #[cfg(feature = "middleware")]
-    pub(super) cors: Option<Arc<CorsHeaders>>
+    pub(super) cors: CorsOverride
 }
 
 /// Represents route path node
@@ -128,7 +125,7 @@ impl RouteEndpoint {
             method,
             pipeline: RoutePipeline::new(),
             #[cfg(feature = "middleware")]
-            cors: None
+            cors: CorsOverride::Inherit
         }
     }
     
@@ -244,6 +241,7 @@ impl RouteNode {
 
     /// Returns a reference to the handler for the given method
     #[inline]
+    #[allow(unused)]
     pub(super) fn handler(&self, method: &Method) -> Option<&RouteEndpoint> {
         let handlers = self.handlers.as_ref()?;
         let i = handlers.binary_search_by(|h| h.cmp(method)).ok()?;

@@ -7,7 +7,7 @@ use crate::http::endpoints::{
 use crate::{
     HttpRequest, HttpRequestMut, HttpResult,
     error::Error,
-    http::cors::CorsHeaders,
+    http::cors::{CorsOverride, CorsHeaders},
     status
 };
 
@@ -29,7 +29,7 @@ pub struct HttpContext {
     pipeline: Option<RoutePipeline>,
 
     /// CORS headers for this route
-    pub(crate) cors: Option<Arc<CorsHeaders>>
+    cors: CorsOverride
 }
 
 impl std::fmt::Debug for HttpContext {
@@ -45,7 +45,7 @@ impl HttpContext {
     pub(crate) fn new(
         request: HttpRequest,
         pipeline: Option<RoutePipeline>,
-        cors: Option<Arc<CorsHeaders>>
+        cors: CorsOverride
     ) -> Self {
         Self { 
             request: HttpRequestMut::new(request),
@@ -57,13 +57,13 @@ impl HttpContext {
     /// Splits [`HttpContext`] into request parts and pipeline
     #[inline]
     #[allow(dead_code)]
-    pub(crate) fn into_parts(self) -> (HttpRequestMut, Option<RoutePipeline>, Option<Arc<CorsHeaders>>) {
+    pub(crate) fn into_parts(self) -> (HttpRequestMut, Option<RoutePipeline>, CorsOverride) {
         (self.request, self.pipeline, self.cors)
     }
 
     /// Creates a new [`HttpContext`] from request parts and pipeline
     #[inline]
-    pub(crate) fn from_parts(request: HttpRequestMut, pipeline: Option<RoutePipeline>, cors: Option<Arc<CorsHeaders>>) -> Self {
+    pub(crate) fn from_parts(request: HttpRequestMut, pipeline: Option<RoutePipeline>, cors: CorsOverride) -> Self {
         Self { request, pipeline, cors }
     }
     
@@ -155,6 +155,16 @@ impl HttpContext {
         &mut self.request
     }
 
+    /// Resolves effective CORS policy (Route > Group > Default)
+    #[inline]
+    pub(crate) fn resolve_cors(&self, default: Option<&Arc<CorsHeaders>>) -> Option<Arc<CorsHeaders>> {
+        match &self.cors {
+            CorsOverride::Named(cors) => Some(cors.clone()),
+            CorsOverride::Inherit => default.cloned(),
+            CorsOverride::Disabled => None,
+        }
+    }
+
     /// Executes the request handler for the current HTTP request
     #[inline]
     pub(crate) async fn execute(self) -> HttpResult {
@@ -197,7 +207,7 @@ mod tests {
         HttpContext::new(
             HttpRequest::from_parts(parts, body),
             None,
-            None
+            CorsOverride::Inherit
         )
     }
     
@@ -225,7 +235,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None, None);
+        let ctx = HttpContext::new(http_req, None, CorsOverride::Inherit);
 
         assert!(ctx.container().is_err());
     }
@@ -243,7 +253,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None, None);
+        let ctx = HttpContext::new(http_req, None, CorsOverride::Inherit);
 
         let cache = ctx.resolve::<InMemoryCache>();
 
@@ -263,7 +273,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None, None);
+        let ctx = HttpContext::new(http_req, None, CorsOverride::Inherit);
 
         let cache = ctx.resolve_shared::<InMemoryCache>();
 
