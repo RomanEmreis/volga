@@ -676,14 +676,27 @@ impl<'a> Route<'a> {
             .endpoints_mut()
             .bind_cors(
                 &self.method, 
-                &self.pattern, 
+                self.pattern, 
                 CorsOverride::Disabled
             );
         self
     }
 
-    /// Specifis the named CORS policy
-    pub fn cors(self, name: &str) -> Self {
+    /// Sets the default CORS policy for this route
+    pub fn cors(self) -> Self {
+        self.app
+            .pipeline
+            .endpoints_mut()
+            .bind_cors(
+                &self.method, 
+                self.pattern, 
+                CorsOverride::Inherit
+            );
+        self
+    }
+
+    /// Sets the named CORS policy for this route
+    pub fn cors_policy(self, name: &str) -> Self {
         let policy = self.cors
             .get_named(name)
             .expect("cors policy")
@@ -694,7 +707,7 @@ impl<'a> Route<'a> {
             .endpoints_mut()
             .bind_cors(
                 &self.method, 
-                &self.pattern, 
+                self.pattern, 
                 CorsOverride::Named(policy)
             );
         self
