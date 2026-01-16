@@ -7,13 +7,10 @@ use crate::http::endpoints::{
 use crate::{
     HttpRequest, HttpRequestMut, HttpResult,
     error::Error,
+    http::cors::CorsHeaders,
     status
 };
 
-#[cfg(any(
-    feature = "di",
-    feature = "rate-limiting"
-))]
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
@@ -29,7 +26,10 @@ pub struct HttpContext {
     request: HttpRequestMut,
     
     /// Current route middleware pipeline or handler that mapped to handle the HTTP request
-    pipeline: Option<RoutePipeline>
+    pipeline: Option<RoutePipeline>,
+
+    /// CORS headers for this route
+    pub(crate) cors: Option<Arc<CorsHeaders>>
 }
 
 impl std::fmt::Debug for HttpContext {
@@ -44,25 +44,27 @@ impl HttpContext {
     #[inline]
     pub(crate) fn new(
         request: HttpRequest,
-        pipeline: Option<RoutePipeline>
+        pipeline: Option<RoutePipeline>,
+        cors: Option<Arc<CorsHeaders>>
     ) -> Self {
         Self { 
             request: HttpRequestMut::new(request),
-            pipeline
+            pipeline,
+            cors
         }
     }
     
     /// Splits [`HttpContext`] into request parts and pipeline
     #[inline]
     #[allow(dead_code)]
-    pub(crate) fn into_parts(self) -> (HttpRequestMut, Option<RoutePipeline>) {
-        (self.request, self.pipeline)
+    pub(crate) fn into_parts(self) -> (HttpRequestMut, Option<RoutePipeline>, Option<Arc<CorsHeaders>>) {
+        (self.request, self.pipeline, self.cors)
     }
 
     /// Creates a new [`HttpContext`] from request parts and pipeline
     #[inline]
-    pub(crate) fn from_parts(request: HttpRequestMut, pipeline: Option<RoutePipeline>) -> Self {
-        Self { request, pipeline }
+    pub(crate) fn from_parts(request: HttpRequestMut, pipeline: Option<RoutePipeline>, cors: Option<Arc<CorsHeaders>>) -> Self {
+        Self { request, pipeline, cors }
     }
     
     /// Extracts a payload from request parts
@@ -156,9 +158,9 @@ impl HttpContext {
     /// Executes the request handler for the current HTTP request
     #[inline]
     pub(crate) async fn execute(self) -> HttpResult {
-        let (request, pipeline) = self.into_parts();
+        let (request, pipeline, cors) = self.into_parts();
         if let Some(pipeline) = pipeline {
-            pipeline.call(Self { request, pipeline: None }).await
+            pipeline.call(Self { request, cors, pipeline: None }).await
         } else { 
             status!(405)
         }
@@ -194,6 +196,7 @@ mod tests {
 
         HttpContext::new(
             HttpRequest::from_parts(parts, body),
+            None,
             None
         )
     }
@@ -208,7 +211,7 @@ mod tests {
     fn it_splits_into_parts() {
         let ctx = create_ctx();
 
-        let (parts, _) = ctx.into_parts();
+        let (parts, _, _) = ctx.into_parts();
         
         assert_eq!(parts.uri(), "/")
     }
@@ -222,7 +225,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None);
+        let ctx = HttpContext::new(http_req, None, None);
 
         assert!(ctx.container().is_err());
     }
@@ -240,7 +243,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None);
+        let ctx = HttpContext::new(http_req, None, None);
 
         let cache = ctx.resolve::<InMemoryCache>();
 
@@ -260,7 +263,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None);
+        let ctx = HttpContext::new(http_req, None, None);
 
         let cache = ctx.resolve_shared::<InMemoryCache>();
 

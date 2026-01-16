@@ -9,7 +9,9 @@ use super::endpoints::{
 #[cfg(feature = "middleware")]
 use {
     crate::headers::{HeaderMap, ORIGIN, ACCESS_CONTROL_REQUEST_METHOD},
+    crate::http::cors::CorsHeaders,
     super::endpoints::route::Layer,
+    std::sync::Arc
 };
 
 #[cfg(debug_assertions)]
@@ -37,18 +39,32 @@ pub(crate) struct Endpoint {
     pub(crate) pipeline: RoutePipeline,
     
     /// Current request path parameters with their values
-    pub(crate) params: PathArgs
+    pub(crate) params: PathArgs,
+
+    #[cfg(feature = "middleware")]
+    pub(super) cors: Option<Arc<CorsHeaders>>
 }
 
 impl Endpoint {
     /// Creates a new endpoint with the given request handler and path parameters
     #[inline]
-    fn new(pipeline: RoutePipeline, params: PathArgs) -> Self {
-        Self { pipeline, params }
+    fn new(
+        pipeline: RoutePipeline,
+        params: PathArgs,
+        #[cfg(feature = "middleware")] cors: Option<Arc<CorsHeaders>>
+    ) -> Self {
+        Self { pipeline, params, #[cfg(feature = "middleware")] cors }
     }
 
     /// Converts the endpoint into a tuple of (request handler, path parameters)
     #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs, Option<Arc<CorsHeaders>>) {
+        (self.pipeline, self.params, self.cors)
+    }
+
+    #[inline]
+    #[cfg(not(feature = "middleware"))]
     pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs) {
         (self.pipeline, self.params)
     }
@@ -95,7 +111,15 @@ impl Endpoints {
                     .binary_search_by(|h| h.cmp(&target_method))
                     .map_or_else(
                         |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
-                        |i| FindResult::Ok(Endpoint::new(handlers[i].pipeline.clone(), route_params.params)),
+                        |i| {
+                            let handler = &handlers[i];
+                            FindResult::Ok(
+                                Endpoint::new(
+                                    handler.pipeline.clone(),
+                                    route_params.params,
+                                    #[cfg(feature = "middleware")] handler.cors.clone())
+                            )
+                        },
                     );
             }
         }
@@ -105,9 +129,15 @@ impl Endpoints {
             .binary_search_by(|h| h.cmp(method))
             .map_or_else(
                 |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
-                |i| FindResult::Ok(
-                    Endpoint::new(handlers[i].pipeline.clone(), route_params.params)
-                )
+                |i| {
+                    let handler = &handlers[i];
+                    FindResult::Ok(
+                        Endpoint::new(
+                            handler.pipeline.clone(),
+                            route_params.params,
+                            #[cfg(feature = "middleware")] handler.cors.clone())
+                    )
+                },
             )
     }
 
@@ -124,6 +154,24 @@ impl Endpoints {
     pub(crate) fn map_layer(&mut self, method: Method, pattern: &str, handler: Layer) {
         self.routes
             .insert(pattern, method, handler);
+    }
+
+    /// Binds CORS headers to the route handler
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn bind_cors(
+        &mut self,
+        method: &Method,
+        pattern: &str,
+        cors: Option<Arc<CorsHeaders>>
+    ) {
+        self
+            .routes
+            .find_mut(pattern)
+            .map(|route| route
+                .handler_mut(method)
+                .map(|h| h.cors = cors)
+            );
     }
     
     #[inline]

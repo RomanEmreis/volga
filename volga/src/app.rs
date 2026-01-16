@@ -39,7 +39,7 @@ use {
 use crate::tracing::TracingConfig;
 
 #[cfg(feature = "middleware")]
-use crate::http::CorsConfig;
+use crate::http::cors::CorsRegistry;
 
 #[cfg(feature = "jwt-auth")]
 use crate::auth::bearer::{BearerAuthConfig, BearerTokenService};
@@ -107,7 +107,7 @@ pub struct App {
 
     /// CORS configuration options
     #[cfg(feature = "middleware")]
-    pub(super) cors_config: Option<CorsConfig>,
+    pub(super) cors: CorsRegistry,
     
     /// Web Server's Hosting Environment
     #[cfg(feature = "static-files")]
@@ -133,12 +133,6 @@ pub struct App {
     #[cfg(feature = "http2")]
     pub(super) http2_limits: Http2Limits,
 
-    /// Controls whether a CORS middleware is enabled
-    /// 
-    /// Default: `false`
-    #[cfg(feature = "middleware")]
-    pub(super) cors_enabled: bool,
-    
     /// TCP connection parameters
     connection: Connection,
     
@@ -267,9 +261,9 @@ pub(crate) struct AppInstance {
     /// Default `Cache-Control` header value
     pub(super) cache_control: Option<HeaderValue>,
 
-    /// Controls whether a CORS middleware is enabled
+    /// CORS registry
     #[cfg(feature = "middleware")]
-    pub(super) cors_enabled: bool,
+    pub(super) cors: CorsRegistry,
 
     /// Request/Middleware pipeline
     pipeline: Pipeline,
@@ -308,7 +302,7 @@ impl TryFrom<App> for AppInstance {
             max_header_size: app.max_header_size,
             cache_control: default_cache_control,
             #[cfg(feature = "middleware")]
-            cors_enabled: app.cors_enabled,
+            cors: app.cors,
             #[cfg(feature = "http2")]
             http2_limits: app.http2_limits,
             #[cfg(feature = "static-files")]
@@ -372,7 +366,7 @@ impl App {
             #[cfg(feature = "tracing")]
             tracing_config: None,
             #[cfg(feature = "middleware")]
-            cors_config: None,
+            cors: Default::default(),
             #[cfg(feature = "static-files")]
             host_env: HostEnv::default(),
             #[cfg(feature = "jwt-auth")]
@@ -388,8 +382,6 @@ impl App {
             max_header_size: Limit::Default,
             max_connections: Limit::Default,
             cache_control: None,
-            #[cfg(feature = "middleware")]
-            cors_enabled: false,
             #[cfg(feature = "http2")]
             http2_limits: Default::default(),
             #[cfg(debug_assertions)]

@@ -172,7 +172,7 @@ async fn handle_impl(
     match pipeline.endpoints().find(
         request.method(),
         request.uri(),
-        #[cfg(feature = "middleware")] shared.cors_enabled,
+        #[cfg(feature = "middleware")] shared.cors.is_enabled,
         #[cfg(feature = "middleware")] request.headers()
     ) {
         FindResult::RouteNotFound => pipeline.fallback(request).await,
@@ -180,7 +180,11 @@ async fn handle_impl(
             (ALLOW, allowed)
         ]),
         FindResult::Ok(endpoint) => {
+            #[cfg(feature = "middleware")]
+            let (route_pipeline, params, cors) = endpoint.into_parts();
+            #[cfg(not(feature = "middleware"))]
             let (route_pipeline, params) = endpoint.into_parts();
+
             let error_handler = pipeline.error_handler();
             let (mut parts, body) = request.into_parts();
                 
@@ -210,10 +214,10 @@ async fn handle_impl(
                 
             #[cfg(feature = "middleware")]
             let response = if pipeline.has_middleware_pipeline() {
-                let ctx = HttpContext::new(request, Some(route_pipeline));
+                let ctx = HttpContext::new(request, Some(route_pipeline), cors);
                 pipeline.execute(ctx).await
             } else {
-                route_pipeline.call(HttpContext::new(request, None)).await
+                route_pipeline.call(HttpContext::new(request, None, cors)).await
             };
             #[cfg(not(feature = "middleware"))]
             let response = route_pipeline.call(request).await;
