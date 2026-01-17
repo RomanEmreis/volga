@@ -160,9 +160,9 @@ where
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            let (req, pipeline) = ctx.into_parts();
+            let (req, pipeline, cors) = ctx.into_parts();
             let req = map.call(req, ()).await.into_result()?;
-            let ctx = HttpContext::from_parts(req, pipeline);
+            let ctx = HttpContext::from_parts(req, pipeline, cors);
             next(ctx).await
         }
     };

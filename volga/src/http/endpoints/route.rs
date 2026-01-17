@@ -167,7 +167,8 @@ impl RouteNode {
 
         for segment in path_segments {
             if Self::is_dynamic_segment(segment) {
-                current = current.insert_dynamic_node(segment);
+                let name = Self::dynamic_name(segment);
+                current = current.insert_dynamic_node(name);
             } else {
                 current = current.insert_static_node(segment);
             }
@@ -307,9 +308,9 @@ impl RouteNode {
         // Traverse dynamic route (if any)
         if let Some(route) = &self.dynamic_route {
             let new_path = if current_path.is_empty() {
-                format!("/{}", route.path)
+                format!("/{{{}}}", route.path)
             } else {
-                format!("{current_path}/{}", route.path)
+                format!("{current_path}/{{{}}}", route.path)
             };
             route.node.traverse_routes(routes, new_path);
         }
@@ -363,6 +364,15 @@ impl RouteNode {
             }
         };
         endpoint.insert(handler);
+    }
+
+    #[inline(always)]
+    fn dynamic_name(segment: &str) -> &str {
+        // expects "{name}" but safely handles unexpected input
+        segment
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .unwrap_or(segment)
     }
 
     #[inline(always)]
