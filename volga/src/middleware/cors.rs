@@ -3,34 +3,18 @@
 //! Middleware that applies CORS headers for requests
 
 use hyper::Response;
-use crate::{App, http::{StatusCode, HttpBody, Method}, headers::{
-    HeaderMap,
-    HeaderValue,
-    CONTENT_LENGTH,
-    ACCESS_CONTROL_ALLOW_ORIGIN,
-    ACCESS_CONTROL_ALLOW_HEADERS,
-    ACCESS_CONTROL_ALLOW_METHODS,
-    ACCESS_CONTROL_ALLOW_CREDENTIALS,
-    ACCESS_CONTROL_MAX_AGE,
-    ACCESS_CONTROL_EXPOSE_HEADERS,
-    ORIGIN,
-    VARY
-}, HttpResponse};
-use crate::http::CorsConfig;
-
-fn validate_cors_config(cors_config: &Option<CorsConfig>) {
-    assert!(
-        cors_config.is_some(), 
-        "CORS error: Missing CORS configuration, you can configure it with `App::new().with_cors(|cors| cors...)`"
-    );
-    
-    if let Some(ref cors_config) = *cors_config {
-        cors_config.validate()
-    }
-}
+use crate::{
+    App,
+    http::{StatusCode, HttpBody, Method},
+    headers::{
+        ACCESS_CONTROL_REQUEST_METHOD,
+        ORIGIN,
+    },
+    HttpResponse
+};
 
 impl App {
-    /// Adds a CORS middleware to your web server's pipeline to allow cross domain requests.
+    /// Adds CORS middleware to your web server's pipeline to allow cross-domain requests.
     /// 
     /// # Example
     /// ```no_run
@@ -44,66 +28,55 @@ impl App {
     ///
     /// app.use_cors(); 
     /// ```
+    ///
+    /// # Panics
+    /// If CORS hasn't been configured with [`App::set_cors`] or [`App::with_cors`]
     pub fn use_cors(&mut self) -> &mut Self {
-        validate_cors_config(&self.cors_config);
+        if !self.cors.registered() {
+            panic!(
+                "CORS error: Missing CORS configuration, you can configure it with `App::new().with_cors(|cors| cors...)`"
+            );
+        }
 
-        let cors_config = self.cors_config.clone().unwrap();
+        self.cors.is_enabled = true;
+        
+        let default_cors = self.cors.get_default().cloned();
+
         self.wrap(move |ctx, next| {
-            let cors_config = cors_config.clone();
+            let default_cors = default_cors.clone();
             async move {
-                let origin = ctx.request().headers().get(&ORIGIN);
-                let method = ctx.request().method();
+                // Resolve effective policy (Route > Group > Default)
+                let Some(cors) = ctx.resolve_cors(default_cors.as_ref()) else {
+                    return next(ctx).await;
+                };
 
-                let mut headers = HeaderMap::new();
+                let request = ctx.request();
+                let method = request.method();
 
-                if let Some(allow_credentials) = cors_config.allow_credentials() {
-                    headers.insert(ACCESS_CONTROL_ALLOW_CREDENTIALS, allow_credentials);
-                }
-                if let Some(vary_header) = cors_config.vary_header() {
-                    headers.insert(VARY, vary_header);
-                }
-                if let Some(allow_origin) = cors_config.allow_origin(origin) {
-                    headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, allow_origin);
-                }
-
+                // Preflight is only possible for OPTIONS
                 if method == Method::OPTIONS {
-                    if let Some(allow_methods) = cors_config.allow_methods() {
-                        headers.insert(ACCESS_CONTROL_ALLOW_METHODS, allow_methods);
-                    }
-                    if let Some(allow_headers) = cors_config.allow_headers() {
-                        headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, allow_headers);
-                    }
-                    if let Some(max_age) = cors_config.max_age() {
-                        headers.insert(ACCESS_CONTROL_MAX_AGE, max_age);
-                    };
+                    let origin = request.headers().get(&ORIGIN);
+                    let acrm = request.headers()
+                        .get(ACCESS_CONTROL_REQUEST_METHOD)
+                        .and_then(|v| Method::from_bytes(v.as_bytes()).ok());
 
-                    headers.insert(CONTENT_LENGTH, HeaderValue::from_static("0"));
-                    
-                    let mut response = Response::new(HttpBody::empty());
-                    
-                    *response.status_mut() = StatusCode::NO_CONTENT;
-                    *response.headers_mut() = headers;
-                    
-                    Ok(HttpResponse::from_inner(response))
-                } else {
-                    if let Some(expose_headers) = cors_config.expose_headers() {
-                        headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, expose_headers);
+                    if origin.is_some() && acrm.is_some() {
+                        let mut response = Response::new(HttpBody::empty());
+                        *response.status_mut() = StatusCode::NO_CONTENT;
+
+                        cors.apply_preflight_response(response.headers_mut(), origin.cloned());
+
+                        return Ok(HttpResponse::from_inner(response))
                     }
 
-                    let response = next(ctx).await;
-                    match response {
-                        Err(err) => Err(err),
-                        Ok(mut response) => {
-                            let response_headers = response.headers_mut();
-                            if let Some(vary_header) = headers.remove(&VARY) {
-                                response_headers.append(VARY, vary_header);
-                            }
-                            response_headers.extend(headers.drain());
-
-                            Ok(response)
-                        }
-                    }
+                    // Not a valid preflight => fall through to user OPTIONS handler
                 }
+
+                let origin = request.headers().get(&ORIGIN).cloned();
+                let mut response = next(ctx).await?;
+                cors.apply_normal_response(response.headers_mut(), origin);
+
+                Ok(response)
             }
         });
         self

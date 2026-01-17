@@ -8,7 +8,7 @@ publish = false
 tokio = "1.46.1"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-volga = { path = "../../volga", features = ["tracing"] }
+volga = { path = "../../volga", features = ["tracing", "middleware"] }
 
 [lints]
 workspace = true

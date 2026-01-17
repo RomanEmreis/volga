@@ -6,9 +6,11 @@ use serde_json::Value;
 use super::Error;
 use crate::{
     http::{HttpBody, HttpResult, StatusCode, IntoResponse},
-    routing::{Route, RouteGroup},
     App
 };
+
+#[cfg(feature = "middleware")]
+use crate::routing::{Route, RouteGroup};
 
 /// Produces an error response in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
 /// 
@@ -286,6 +288,7 @@ impl App {
     }
 }
 
+#[cfg(feature = "middleware")]
 impl<'a> Route<'a> {
     /// Adds an error handler for this route that produces error responses 
     /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
@@ -311,6 +314,7 @@ impl<'a> Route<'a> {
     }
 }
 
+#[cfg(feature = "middleware")]
 impl<'a> RouteGroup<'a> {
     /// Adds an error handler for this route group that produces error ressponses 
     /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format

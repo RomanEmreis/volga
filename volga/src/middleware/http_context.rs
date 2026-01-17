@@ -7,13 +7,10 @@ use crate::http::endpoints::{
 use crate::{
     HttpRequest, HttpRequestMut, HttpResult,
     error::Error,
+    http::cors::{CorsOverride, CorsHeaders},
     status
 };
 
-#[cfg(any(
-    feature = "di",
-    feature = "rate-limiting"
-))]
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
@@ -29,7 +26,10 @@ pub struct HttpContext {
     request: HttpRequestMut,
     
     /// Current route middleware pipeline or handler that mapped to handle the HTTP request
-    pipeline: Option<RoutePipeline>
+    pipeline: Option<RoutePipeline>,
+
+    /// CORS headers for this route
+    cors: CorsOverride
 }
 
 impl std::fmt::Debug for HttpContext {
@@ -44,25 +44,27 @@ impl HttpContext {
     #[inline]
     pub(crate) fn new(
         request: HttpRequest,
-        pipeline: Option<RoutePipeline>
+        pipeline: Option<RoutePipeline>,
+        cors: CorsOverride
     ) -> Self {
         Self { 
             request: HttpRequestMut::new(request),
-            pipeline
+            pipeline,
+            cors
         }
     }
     
     /// Splits [`HttpContext`] into request parts and pipeline
     #[inline]
     #[allow(dead_code)]
-    pub(crate) fn into_parts(self) -> (HttpRequestMut, Option<RoutePipeline>) {
-        (self.request, self.pipeline)
+    pub(crate) fn into_parts(self) -> (HttpRequestMut, Option<RoutePipeline>, CorsOverride) {
+        (self.request, self.pipeline, self.cors)
     }
 
     /// Creates a new [`HttpContext`] from request parts and pipeline
     #[inline]
-    pub(crate) fn from_parts(request: HttpRequestMut, pipeline: Option<RoutePipeline>) -> Self {
-        Self { request, pipeline }
+    pub(crate) fn from_parts(request: HttpRequestMut, pipeline: Option<RoutePipeline>, cors: CorsOverride) -> Self {
+        Self { request, pipeline, cors }
     }
     
     /// Extracts a payload from request parts
@@ -153,12 +155,22 @@ impl HttpContext {
         &mut self.request
     }
 
+    /// Resolves effective CORS policy (Route > Group > Default)
+    #[inline]
+    pub(crate) fn resolve_cors(&self, default: Option<&Arc<CorsHeaders>>) -> Option<Arc<CorsHeaders>> {
+        match &self.cors {
+            CorsOverride::Named(cors) => Some(cors.clone()),
+            CorsOverride::Inherit => default.cloned(),
+            CorsOverride::Disabled => None,
+        }
+    }
+
     /// Executes the request handler for the current HTTP request
     #[inline]
     pub(crate) async fn execute(self) -> HttpResult {
-        let (request, pipeline) = self.into_parts();
+        let (request, pipeline, cors) = self.into_parts();
         if let Some(pipeline) = pipeline {
-            pipeline.call(Self { request, pipeline: None }).await
+            pipeline.call(Self { request, cors, pipeline: None }).await
         } else { 
             status!(405)
         }
@@ -178,6 +190,7 @@ mod tests {
 
     #[cfg(feature = "di")]
     use crate::di::ContainerBuilder;
+    use crate::http::CorsConfig;
 
     #[cfg(feature = "di")]
     #[allow(dead_code)]
@@ -194,7 +207,8 @@ mod tests {
 
         HttpContext::new(
             HttpRequest::from_parts(parts, body),
-            None
+            None,
+            CorsOverride::Inherit
         )
     }
     
@@ -208,7 +222,7 @@ mod tests {
     fn it_splits_into_parts() {
         let ctx = create_ctx();
 
-        let (parts, _) = ctx.into_parts();
+        let (parts, _, _) = ctx.into_parts();
         
         assert_eq!(parts.uri(), "/")
     }
@@ -222,7 +236,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None);
+        let ctx = HttpContext::new(http_req, None, CorsOverride::Inherit);
 
         assert!(ctx.container().is_err());
     }
@@ -240,7 +254,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None);
+        let ctx = HttpContext::new(http_req, None, CorsOverride::Inherit);
 
         let cache = ctx.resolve::<InMemoryCache>();
 
@@ -260,10 +274,93 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        let ctx = HttpContext::new(http_req, None);
+        let ctx = HttpContext::new(http_req, None, CorsOverride::Inherit);
 
         let cache = ctx.resolve_shared::<InMemoryCache>();
 
         assert!(cache.is_ok());
+    }
+
+    #[test]
+    fn it_resolves_cors() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+        
+        let permissive_cors = CorsConfig::default()
+            .with_name("permissive")
+            .with_any_method()
+            .with_any_header()
+            .with_any_origin()
+            .precompute();
+        
+        let ctx = HttpContext::new(
+            http_req, 
+            None, 
+            CorsOverride::Named(Arc::new(permissive_cors))
+        );
+
+        let resolved_cors = ctx.resolve_cors(None);
+        
+        assert!(resolved_cors.is_some());
+    }
+
+    #[test]
+    fn it_resolves_default_cors() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+
+        let default_cors = CorsConfig::default()
+            .with_methods(["GET", "POST"])
+            .with_any_header()
+            .with_any_origin()
+            .precompute();
+
+        let default_cors = Some(Arc::new(default_cors));
+
+        let ctx = HttpContext::new(
+            http_req,
+            None,
+            CorsOverride::Inherit
+        );
+
+        let resolved_cors = ctx.resolve_cors(default_cors.as_ref());
+
+        assert!(resolved_cors.is_some());
+    }
+
+    #[test]
+    fn it_resolves_disabled_cors() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+
+        let default_cors = CorsConfig::default()
+            .with_methods(["GET", "POST"])
+            .with_any_header()
+            .with_any_origin()
+            .precompute();
+
+        let default_cors = Some(Arc::new(default_cors));
+
+        let ctx = HttpContext::new(
+            http_req,
+            None,
+            CorsOverride::Disabled
+        );
+
+        let resolved_cors = ctx.resolve_cors(default_cors.as_ref());
+
+        assert!(resolved_cors.is_none());
     }
 }

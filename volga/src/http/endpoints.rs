@@ -7,7 +7,11 @@ use super::endpoints::{
 };
 
 #[cfg(feature = "middleware")]
-use super::endpoints::route::Layer;
+use {
+    crate::headers::{HeaderMap, ORIGIN, ACCESS_CONTROL_REQUEST_METHOD},
+    crate::http::cors::CorsOverride,
+    super::endpoints::route::Layer,
+};
 
 #[cfg(debug_assertions)]
 pub(crate) mod meta;
@@ -34,18 +38,32 @@ pub(crate) struct Endpoint {
     pub(crate) pipeline: RoutePipeline,
     
     /// Current request path parameters with their values
-    pub(crate) params: PathArgs
+    pub(crate) params: PathArgs,
+
+    #[cfg(feature = "middleware")]
+    pub(super) cors: CorsOverride
 }
 
 impl Endpoint {
     /// Creates a new endpoint with the given request handler and path parameters
     #[inline]
-    fn new(pipeline: RoutePipeline, params: PathArgs) -> Self {
-        Self { pipeline, params }
+    fn new(
+        pipeline: RoutePipeline,
+        params: PathArgs,
+        #[cfg(feature = "middleware")] cors: CorsOverride
+    ) -> Self {
+        Self { pipeline, params, #[cfg(feature = "middleware")] cors }
     }
 
     /// Converts the endpoint into a tuple of (request handler, path parameters)
     #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs, CorsOverride) {
+        (self.pipeline, self.params, self.cors)
+    }
+
+    #[inline]
+    #[cfg(not(feature = "middleware"))]
     pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs) {
         (self.pipeline, self.params)
     }
@@ -60,7 +78,13 @@ impl Endpoints {
 
     /// Gets a context of the executing route by its `HttpRequest`
     #[inline]
-    pub(crate) fn find(&self, method: &Method, uri: &Uri) -> FindResult {
+    pub(crate) fn find(
+        &self,
+        method: &Method,
+        uri: &Uri,
+        #[cfg(feature = "middleware")] cors_enabled: bool,
+        #[cfg(feature = "middleware")] headers: &HeaderMap
+    ) -> FindResult {
         let route_params = match self.routes.find(uri.path()) {
             Some(params) => params,
             None => return FindResult::RouteNotFound,
@@ -70,13 +94,48 @@ impl Endpoints {
             return FindResult::RouteNotFound;
         };
 
+        #[cfg(feature = "middleware")]
+        if cors_enabled && method == Method::OPTIONS {
+            // OPTIONS path: treat CORS preflight specially
+            // (Only if it looks like a preflight request)
+            let origin_present = headers.contains_key(ORIGIN);
+            let acrm = headers
+                .get(ACCESS_CONTROL_REQUEST_METHOD)
+                .and_then(|v| Method::from_bytes(v.as_bytes()).ok());
+
+            if origin_present && let Some(target_method) = acrm {
+                // Check if the target method exists for this path
+                return handlers
+                    .binary_search_by(|h| h.cmp(&target_method))
+                    .map_or_else(
+                        |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
+                        |i| {
+                            let handler = &handlers[i];
+                            FindResult::Ok(
+                                Endpoint::new(
+                                    handler.pipeline.clone(),
+                                    route_params.params,
+                                    #[cfg(feature = "middleware")] handler.cors.clone())
+                            )
+                        },
+                    );
+            }
+        }
+
+        // Normal OPTIONS: keep existing behavior (likely 405 unless the user actually mapped OPTIONS)
         handlers
             .binary_search_by(|h| h.cmp(method))
             .map_or_else(
                 |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
-                |i| FindResult::Ok(
-                    Endpoint::new(handlers[i].pipeline.clone(), route_params.params)
-                )
+                |i| {
+                    let handler = &handlers[i];
+                    FindResult::Ok(
+                        Endpoint::new(
+                            handler.pipeline.clone(),
+                            route_params.params,
+                            #[cfg(feature = "middleware")] handler.cors.clone())
+                    )
+                },
             )
     }
 
@@ -93,6 +152,24 @@ impl Endpoints {
     pub(crate) fn map_layer(&mut self, method: Method, pattern: &str, handler: Layer) {
         self.routes
             .insert(pattern, method, handler);
+    }
+
+    /// Binds CORS headers to the route handler
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn bind_cors(
+        &mut self,
+        method: &Method,
+        pattern: &str,
+        cors: CorsOverride
+    ) {
+        self
+            .routes
+            .find_mut(pattern)
+            .map(|route| route
+                .handler_mut(method)
+                .map(|h| h.cors = cors)
+            );
     }
     
     #[inline]
@@ -124,6 +201,8 @@ mod tests {
     use crate::ok;
     use super::{Endpoints, FindResult, handlers::Func};
     use hyper::{Method, Request};
+    #[cfg(feature = "middleware")]
+    use crate::headers::HeaderMap;
 
     #[test]
     fn it_maps_and_gets_endpoint() {
@@ -134,7 +213,12 @@ mod tests {
         endpoints.map_route(Method::POST, "path/to/handler", handler);
         
         let request = Request::post("https://example.com/path/to/handler").body(()).unwrap();
-        let post_handler = endpoints.find(request.method(), request.uri());
+        let post_handler = endpoints.find(
+            request.method(),
+            request.uri(),
+            #[cfg(feature = "middleware")] false,
+            #[cfg(feature = "middleware")] &HeaderMap::new()
+        );
 
         match post_handler {
             FindResult::Ok(_) => (),
@@ -151,7 +235,12 @@ mod tests {
         endpoints.map_route(Method::POST, "path/to/handler", handler);
 
         let request = Request::post("https://example.com/path/to/another-handler").body(()).unwrap();
-        let post_handler = endpoints.find(request.method(), request.uri());
+        let post_handler = endpoints.find(
+            request.method(),
+            request.uri(),
+            #[cfg(feature = "middleware")] false,
+            #[cfg(feature = "middleware")] &HeaderMap::new()
+        );
 
         match post_handler {
             FindResult::RouteNotFound => (),
@@ -168,7 +257,12 @@ mod tests {
         endpoints.map_route(Method::GET, "path/to/handler", handler);
 
         let request = Request::post("https://example.com/path/to/handler").body(()).unwrap();
-        let post_handler = endpoints.find(request.method(), request.uri());
+        let post_handler = endpoints.find(
+            request.method(),
+            request.uri(),
+            #[cfg(feature = "middleware")] false,
+            #[cfg(feature = "middleware")] &HeaderMap::new()
+        );
 
         match post_handler {
             FindResult::MethodNotFound(allow) => assert_eq!(allow, "GET"),
