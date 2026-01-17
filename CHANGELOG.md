@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Backpressure & limits (#135)
 - Refactor Cache-Control, HSTS and Tracing (#136)
-- Additional updates (#137)
+- Improve CORS Middleware: Correct Preflight Handling & Precomputed Headers (#137)
 
 ### Tests
 - Improvements for integration tests (#133)
