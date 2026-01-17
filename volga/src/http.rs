@@ -17,6 +17,7 @@ pub use endpoints::{
     handlers::{GenericHandler, MapErrHandler}
 };
 pub use request::HttpRequest;
+
 #[cfg(feature = "middleware")]
 pub use request::HttpRequestMut;
 

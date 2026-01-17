@@ -560,7 +560,7 @@ impl<'a> Route<'a> {
         self.app
             .pipeline
             .endpoints_mut()
-            .map_layer(self.method.clone(), self.pattern, mw.into());
+            .map_layer(self.method.clone(), self.pattern.as_ref(), mw.into());
         self
     }
 }

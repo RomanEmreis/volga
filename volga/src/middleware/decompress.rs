@@ -108,9 +108,9 @@ async fn make_decompression_fn(mut ctx: HttpContext, next: NextFn) -> HttpResult
     if let Ok(content_encoding) = ctx.extract::<Header<ContentEncoding>>() {
         match content_encoding.into_inner().try_into() {
             Ok(encoding) => {
-                let (req, handler) = ctx.into_parts();
+                let (req, handler, cors) = ctx.into_parts();
                 let req = decompress(encoding, req);
-                ctx = HttpContext::from_parts(req, handler);
+                ctx = HttpContext::from_parts(req, handler, cors);
             }
             Err(error) if error.is_client_error() => (),
             Err(_) => {

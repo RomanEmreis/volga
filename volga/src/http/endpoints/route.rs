@@ -47,6 +47,9 @@ use hyper::Method;
 use smallvec::SmallVec;
 use crate::utils::str::memchr_split_nonempty;
 
+#[cfg(feature = "middleware")]
+use crate::http::cors::CorsOverride;
+
 pub(crate) use path_args::{PathArgs, PathArg};
 pub(crate) use layer::{RoutePipeline, Layer};
 
@@ -64,7 +67,9 @@ const DEFAULT_DEPTH: usize = 4;
 #[derive(Clone)]
 pub(super) struct RouteEndpoint {
     pub(super) method: Method,
-    pub(super) pipeline: RoutePipeline
+    pub(super) pipeline: RoutePipeline,
+    #[cfg(feature = "middleware")]
+    pub(super) cors: CorsOverride
 }
 
 /// Represents route path node
@@ -116,7 +121,12 @@ impl RouteEndpoint {
     /// Creates a new [`RouteEndpoint`]
     #[inline]
     fn new(method: Method) -> Self {
-        Self { method, pipeline: RoutePipeline::new() }
+        Self {
+            method,
+            pipeline: RoutePipeline::new(),
+            #[cfg(feature = "middleware")]
+            cors: CorsOverride::Inherit
+        }
     }
     
     /// Inserts a layer into the pipeline
@@ -157,7 +167,8 @@ impl RouteNode {
 
         for segment in path_segments {
             if Self::is_dynamic_segment(segment) {
-                current = current.insert_dynamic_node(segment);
+                let name = Self::dynamic_name(segment);
+                current = current.insert_dynamic_node(name);
             } else {
                 current = current.insert_static_node(segment);
             }
@@ -199,6 +210,54 @@ impl RouteNode {
                 route: current,
                 params,
             })
+    }
+
+    /// Finds handlers by path and returns a mutable reference to it
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(super) fn find_mut(&mut self, path: &str) -> Option<&'_ mut RouteNode> {
+        let mut current = self;
+        let path_segments = split_path(path);
+
+        for segment in path_segments {
+            if let Ok(i) = current.static_routes.binary_search_by(|r| r.cmp(segment)) {
+                current = current.static_routes[i].node.as_mut();
+                continue;
+            }
+
+            if let Some(next) = &mut current.dynamic_route {
+                current = next.node.as_mut();
+                continue;
+            }
+
+            return None;
+        }
+
+        (!current
+            .handlers
+            .as_ref()
+            .is_none_or(|h| h.is_empty()))
+            .then_some(current)
+    }
+
+    /// Returns a reference to the handler for the given method
+    #[inline]
+    #[allow(unused)]
+    pub(super) fn handler(&self, method: &Method) -> Option<&RouteEndpoint> {
+        let handlers = self.handlers.as_ref()?;
+        let i = handlers.binary_search_by(|h| h.cmp(method)).ok()?;
+        Some(&handlers[i])
+    }
+
+    /// Returns a mutable reference to the handler for the given method
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(super) fn handler_mut(&mut self, method: &Method) -> Option<&mut RouteEndpoint> {
+        let i = self.handlers.as_ref()?
+            .binary_search_by(|h| h.cmp(method))
+            .ok()?;
+
+        Some(&mut self.handlers.as_mut()?[i])
     }
     
     #[cfg(feature = "middleware")]
@@ -249,9 +308,9 @@ impl RouteNode {
         // Traverse dynamic route (if any)
         if let Some(route) = &self.dynamic_route {
             let new_path = if current_path.is_empty() {
-                format!("/{}", route.path)
+                format!("/{{{}}}", route.path)
             } else {
-                format!("{current_path}/{}", route.path)
+                format!("{current_path}/{{{}}}", route.path)
             };
             route.node.traverse_routes(routes, new_path);
         }
@@ -305,6 +364,15 @@ impl RouteNode {
             }
         };
         endpoint.insert(handler);
+    }
+
+    #[inline(always)]
+    fn dynamic_name(segment: &str) -> &str {
+        // expects "{name}" but safely handles unexpected input
+        segment
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .unwrap_or(segment)
     }
 
     #[inline(always)]

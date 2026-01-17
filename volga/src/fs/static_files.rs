@@ -165,7 +165,8 @@ impl RouteGroup<'_> {
             segment.push_str(&format!("/{{path_{i}}}"));
             self.map_get(&segment, respond_with_file);
         }
-        self.map_get("/", index)
+        self.map_get("/", index);
+        self
     }
 
     /// Configures a static files server

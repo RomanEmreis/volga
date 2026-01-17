@@ -39,7 +39,7 @@ use {
 use crate::tracing::TracingConfig;
 
 #[cfg(feature = "middleware")]
-use crate::http::CorsConfig;
+use crate::http::cors::CorsRegistry;
 
 #[cfg(feature = "jwt-auth")]
 use crate::auth::bearer::{BearerAuthConfig, BearerTokenService};
@@ -107,7 +107,7 @@ pub struct App {
 
     /// CORS configuration options
     #[cfg(feature = "middleware")]
-    pub(super) cors_config: Option<CorsConfig>,
+    pub(super) cors: CorsRegistry,
     
     /// Web Server's Hosting Environment
     #[cfg(feature = "static-files")]
@@ -132,7 +132,7 @@ pub struct App {
     /// HTTP/2 resource and backpressure limits.
     #[cfg(feature = "http2")]
     pub(super) http2_limits: Http2Limits,
-    
+
     /// TCP connection parameters
     connection: Connection,
     
@@ -261,6 +261,10 @@ pub(crate) struct AppInstance {
     /// Default `Cache-Control` header value
     pub(super) cache_control: Option<HeaderValue>,
 
+    /// CORS registry
+    #[cfg(feature = "middleware")]
+    pub(super) cors: CorsRegistry,
+
     /// Request/Middleware pipeline
     pipeline: Pipeline,
 }
@@ -297,6 +301,8 @@ impl TryFrom<App> for AppInstance {
             max_header_count: app.max_header_count,
             max_header_size: app.max_header_size,
             cache_control: default_cache_control,
+            #[cfg(feature = "middleware")]
+            cors: app.cors,
             #[cfg(feature = "http2")]
             http2_limits: app.http2_limits,
             #[cfg(feature = "static-files")]
@@ -360,7 +366,7 @@ impl App {
             #[cfg(feature = "tracing")]
             tracing_config: None,
             #[cfg(feature = "middleware")]
-            cors_config: None,
+            cors: Default::default(),
             #[cfg(feature = "static-files")]
             host_env: HostEnv::default(),
             #[cfg(feature = "jwt-auth")]
@@ -781,7 +787,7 @@ impl App {
 
         println!();
         println!("\x1b[1;34m╭───────────────────────────────────────────────╮");
-        println!("│          🚀 Welcome to Volga v{version:<5}           │");
+        println!("│                >> Volga v{version:<5}                │");
         println!("│     Listening on: {url:<28}│");
         println!("╰───────────────────────────────────────────────╯\x1b[0m");
         
