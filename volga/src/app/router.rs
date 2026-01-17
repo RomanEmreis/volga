@@ -5,14 +5,16 @@ use std::borrow::Cow;
 use hyper::Method;
 use crate::App;
 use crate::http::IntoResponse;
-use crate::http::cors::CorsOverride;
 use crate::http::endpoints::{
     args::FromRequest,
     handlers::{Func, GenericHandler},
 };
 
 #[cfg(feature = "middleware")]
-use crate::middleware::MiddlewareFn;
+use {
+    crate::middleware::MiddlewareFn,
+    crate::http::cors::CorsOverride
+};
 
 /// Routes mapping 
 impl App {
