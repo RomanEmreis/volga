@@ -135,3 +135,72 @@ impl core::convert::From<ToStrError> for Error {
         HeaderError::from_to_str_error(error)
     }
 }
+
+#[cfg(test)]
+#[allow(unreachable_pub)]
+mod tests {
+    use super::*;
+    use crate::http::StatusCode;
+
+    headers! {
+        (XTest, "x-test")
+    }
+
+    #[test]
+    fn header_missing_impl_builds_not_found_error() {
+        let err = HeaderError::header_missing_impl("x-test");
+
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+
+        let msg = err.to_string();
+        assert!(msg.contains("Header: `x-test` not found"));
+    }
+
+    #[test]
+    fn header_missing_uses_from_headers_name() {
+        let err = HeaderError::header_missing::<XTest>();
+
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        let msg = err.to_string();
+        assert!(msg.contains("Header: `x-test` not found"));
+    }
+
+    #[test]
+    fn invalid_header_value_maps_to_client_error() {
+        use crate::headers::HeaderValue;
+
+        let invalid = HeaderValue::from_bytes(&[0]).unwrap_err();
+        let err: Error = invalid.into();
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        let msg = err.to_string();
+        assert!(msg.contains("Header:"));
+    }
+
+    #[test]
+    fn invalid_header_name_maps_to_client_error() {
+        let invalid = HeaderName::from_bytes(b"Bad Header").unwrap_err();
+        let err: Error = invalid.into();
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        let msg = err.to_string();
+        assert!(msg.contains("Header:"));
+    }
+
+    #[test]
+    fn to_str_error_maps_to_client_error() {
+        use crate::headers::HeaderValue;
+
+        let hv = HeaderValue::from_bytes(&[0xFF]).unwrap();
+        let to_str_err = hv.to_str().unwrap_err();
+
+        let err: Error = to_str_err.into();
+
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        let msg = err.to_string();
+        assert!(msg.contains("Header:"));
+    }
+
+}

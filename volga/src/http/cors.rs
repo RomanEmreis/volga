@@ -4,7 +4,7 @@ use crate::{App, routing::{Route, RouteGroup}};
 use hyper::{
     http::{HeaderValue, HeaderName, HeaderMap},
     header::{ORIGIN, ACCESS_CONTROL_REQUEST_METHOD, ACCESS_CONTROL_REQUEST_HEADERS},
-    Method
+    Method,
 };
 
 use std::{
@@ -13,6 +13,7 @@ use std::{
     str::FromStr,
     time::Duration
 };
+
 use crate::headers::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS,
     ACCESS_CONTROL_ALLOW_HEADERS,
@@ -25,6 +26,7 @@ use crate::headers::{
 };
 
 const DEFAULT_MAX_AGE: u64 = 24 * 60 * 60; // 24 hours = 86,400 seconds
+const SEPARATOR: &str = ", ";
 const WILDCARD_STR: &str = "*";
 const ORIGIN_STR: &str = "Origin";
 const WILDCARD_VALUE: HeaderValue = HeaderValue::from_static(WILDCARD_STR);
@@ -71,9 +73,10 @@ pub(crate) struct CorsRegistry {
     pub(crate) is_enabled: bool,
 }
 
-/// Describes how CORS binded to the a route 
-#[derive(Debug, Clone)]
+/// Describes how CORS bound to a route 
+#[derive(Debug, Default, Clone)]
 pub(crate) enum CorsOverride {
+    #[default]
     Inherit,
     Disabled,
     Named(Arc<CorsHeaders>),
@@ -103,7 +106,7 @@ impl CorsConfig {
         self
     }
 
-    /// Configures CORS with allowed origins 
+    /// Configures CORS with allowed origins, 
     /// which will be used with the [`Access-Control-Allow-Origin`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Origin) HTTP header
     ///
     /// Default value: `None` (Any Origin is allowed)
@@ -199,12 +202,15 @@ impl CorsConfig {
     /// let config = CorsConfig::default()
     ///     .with_methods([Method::GET, Method::PUT, Method::POST]);
     /// ```
-    pub fn with_methods<T>(mut self, methods: T) -> Self
+    pub fn with_methods<T, I>(mut self, methods: T) -> Self
     where
-        T: IntoIterator<Item = Method>,
+        T: IntoIterator<Item = I>,
+        I: TryInto<Method>,
+        <I as TryInto<Method>>::Error: std::fmt::Debug,
     {
         let allowed_methods = methods
             .into_iter()
+            .map(|m| m.try_into().expect("valid HTTP method"))
             .collect::<HashSet<_>>();
         self.allow_methods = Some(allowed_methods);
         self
@@ -401,10 +407,10 @@ impl CorsConfig {
         }
     }
 
-    /// Creates a value for the `Vary` HTTP header for preflight requstes
+    /// Creates a value for the `Vary` HTTP header for preflight requests
     pub fn vary_preflight(&self) -> Option<HeaderValue> {
         if self.needs_vary() {
-            let vary_header = DEFAULT_PREFLIGHT_HEADERS.join(", ");
+            let vary_header = DEFAULT_PREFLIGHT_HEADERS.join(SEPARATOR);
             HeaderValue::from_str(&vary_header).ok()
         } else {
             None
@@ -566,7 +572,7 @@ impl CorsHeaders {
                     return;
                 };
 
-                if s.trim() == "*" {
+                if s.trim() == WILDCARD_STR {
                     return;
                 }
 
@@ -582,7 +588,7 @@ impl CorsHeaders {
                 let mut merged = String::with_capacity(s.len() + 2 + ORIGIN_STR.len());
                 
                 merged.push_str(s);
-                merged.push_str(", ");
+                merged.push_str(SEPARATOR);
                 merged.push_str(ORIGIN_STR);
 
                 if let Ok(v) = HeaderValue::from_str(&merged) {
@@ -671,51 +677,61 @@ impl App {
 impl<'a> Route<'a> {
     /// Disables CORS for this route
     pub fn disable_cors(self) -> Self {
-        self.app
-            .pipeline
-            .endpoints_mut()
-            .bind_cors(
-                &self.method, 
-                self.pattern, 
-                CorsOverride::Disabled
-            );
-        self
+        self.cors_override(CorsOverride::Disabled)
     }
 
     /// Sets the default CORS policy for this route
     pub fn cors(self) -> Self {
-        self.app
-            .pipeline
-            .endpoints_mut()
-            .bind_cors(
-                &self.method, 
-                self.pattern, 
-                CorsOverride::Inherit
-            );
-        self
+        self.cors_override(CorsOverride::Inherit)
     }
 
     /// Sets the named CORS policy for this route
-    pub fn cors_policy(self, name: &str) -> Self {
+    pub fn cors_with(self, name: &str) -> Self {
         let policy = self.cors
             .get_named(name)
             .expect("cors policy")
             .clone();
 
+        self.cors_override(CorsOverride::Named(policy))
+    }
+    
+    #[inline]
+    pub(crate) fn cors_override(self, cors: CorsOverride) -> Self {
         self.app
             .pipeline
             .endpoints_mut()
             .bind_cors(
-                &self.method, 
-                self.pattern, 
-                CorsOverride::Named(policy)
+                &self.method,
+                self.pattern.as_ref(),
+                cors
             );
         self
     }
 }
 
 impl<'a> RouteGroup<'a> {
+    /// Disables CORS for this route
+    pub fn disable_cors(&mut self) -> &mut Self {
+        self.cors = CorsOverride::Disabled;
+        self
+    }
 
+    /// Sets the default CORS policy for this route
+    pub fn cors(&mut self) -> &mut Self {
+        self.cors = CorsOverride::Disabled;
+        self
+    }
+
+    /// Sets the named CORS policy for this route
+    pub fn cors_with(&mut self, name: &str) -> &mut Self {
+        let policy = self.app.cors
+            .get_named(name)
+            .expect("cors policy")
+            .clone();
+
+        self.cors = CorsOverride::Named(policy);
+        self
+    }
 }
 
 #[inline]

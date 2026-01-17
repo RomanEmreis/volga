@@ -190,6 +190,7 @@ mod tests {
 
     #[cfg(feature = "di")]
     use crate::di::ContainerBuilder;
+    use crate::http::CorsConfig;
 
     #[cfg(feature = "di")]
     #[allow(dead_code)]
@@ -278,5 +279,88 @@ mod tests {
         let cache = ctx.resolve_shared::<InMemoryCache>();
 
         assert!(cache.is_ok());
+    }
+
+    #[test]
+    fn it_resolves_cors() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+        
+        let permissive_cors = CorsConfig::default()
+            .with_name("permissive")
+            .with_any_method()
+            .with_any_header()
+            .with_any_origin()
+            .precompute();
+        
+        let ctx = HttpContext::new(
+            http_req, 
+            None, 
+            CorsOverride::Named(Arc::new(permissive_cors))
+        );
+
+        let resolved_cors = ctx.resolve_cors(None);
+        
+        assert!(resolved_cors.is_some());
+    }
+
+    #[test]
+    fn it_resolves_default_cors() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+
+        let default_cors = CorsConfig::default()
+            .with_methods(["GET", "POST"])
+            .with_any_header()
+            .with_any_origin()
+            .precompute();
+
+        let default_cors = Some(Arc::new(default_cors));
+
+        let ctx = HttpContext::new(
+            http_req,
+            None,
+            CorsOverride::Inherit
+        );
+
+        let resolved_cors = ctx.resolve_cors(default_cors.as_ref());
+
+        assert!(resolved_cors.is_some());
+    }
+
+    #[test]
+    fn it_resolves_disabled_cors() {
+        let req = Request::get("http://localhost/")
+            .body(HttpBody::full("foo"))
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let http_req = HttpRequest::from_parts(parts, body);
+
+        let default_cors = CorsConfig::default()
+            .with_methods(["GET", "POST"])
+            .with_any_header()
+            .with_any_origin()
+            .precompute();
+
+        let default_cors = Some(Arc::new(default_cors));
+
+        let ctx = HttpContext::new(
+            http_req,
+            None,
+            CorsOverride::Disabled
+        );
+
+        let resolved_cors = ctx.resolve_cors(default_cors.as_ref());
+
+        assert!(resolved_cors.is_none());
     }
 }
