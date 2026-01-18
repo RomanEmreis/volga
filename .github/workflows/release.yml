@@ -3,7 +3,11 @@ name: Release
 on:
   release:
     types: [published]
-
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag/branch/SHA to publish from"
+        required: true
 env:
   CARGO_TERM_COLOR: always
 
@@ -13,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.ref }}
+          
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Publish crates
