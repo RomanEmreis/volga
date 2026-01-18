@@ -3,7 +3,11 @@ name: Release
 on:
   release:
     types: [published]
-
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag/branch/SHA to publish from"
+        required: true
 env:
   CARGO_TERM_COLOR: always
 
