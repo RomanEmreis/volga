@@ -201,7 +201,7 @@ async fn it_overrides_default_head_map() {
             ])
         });
         app.map_get("/test", || async {
-            volga::ok!("Pass!", [
+            volga::ok!("Pass!"; [
                 ("x-header", "Hello from GET")
             ])
         });

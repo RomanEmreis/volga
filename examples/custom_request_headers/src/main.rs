@@ -46,7 +46,7 @@ async fn main() -> std::io::Result<()> {
 
     // Reading custom header and insert it to response headers
     app.map_get("/hello", |correlation_id: Header<CorrelationId>, api_key: Header<ApiKey>, header: Header<SomeHeader>| async move {
-        ok!(format!("{}: {}", header.name(), header.as_str()?), [
+        ok!(format!("{}: {}", header.name(), header.as_str()?); [
             (correlation_id.name(), correlation_id.as_str()?),
             (api_key.name(), api_key.as_str()?)
         ])

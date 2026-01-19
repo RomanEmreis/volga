@@ -31,7 +31,7 @@ async fn main() -> std::io::Result<()> {
 
     // Respond with headers
     app.map_get("/hello", || async {
-        ok!("Hello World!", [
+        ok!("Hello World!"; [
            ("x-api-key", "some api key"),
            ("Content-Type", "text/plain")
        ])
