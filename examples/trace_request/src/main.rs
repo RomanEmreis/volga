@@ -20,7 +20,7 @@ async fn main() -> std::io::Result<()> {
         let body_stream = req
             .into_body()
             .into_data_stream();
-        stream!(body_stream, [
+        stream!(body_stream; [
             ("content-type", "message/http")
         ])
     });

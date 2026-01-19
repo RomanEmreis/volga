@@ -88,7 +88,7 @@ impl IntoResponse for Cow<'static, str> {
     fn into_response(self) -> HttpResult {
         response!(
             StatusCode::OK,
-            HttpBody::from(self),
+            HttpBody::from(self);
             [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
         )
     }
@@ -222,7 +222,7 @@ macro_rules! impl_into_response {
             fn into_response(self) -> HttpResult {
                 response!(
                     $crate::http::StatusCode::OK,
-                    HttpBody::full(self.to_string()),
+                    HttpBody::full(self.to_string());
                     [($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8")]
                 )
             }

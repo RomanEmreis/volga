@@ -25,7 +25,7 @@
 /// let file_name = "example.txt";
 /// let file_data = File::open(file_name).await?;
 /// 
-/// file!(file_name, file_data, [
+/// file!(file_name, file_data; [
 ///    ("x-api-key", "some api key")
 /// ]);
 /// # Ok(())   
@@ -34,14 +34,14 @@
 #[macro_export]
 macro_rules! file {
     ($file_name:expr, $body:expr) => {
-        $crate::file!($file_name, $body, [])
+        $crate::file!($file_name, $body; [])
     };
     
-    ($file_name:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+    ($file_name:expr, $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
         let mime = $crate::fs::get_mime_or_octet_stream($file_name);
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::file($body),
+            $crate::HttpBody::file($body);
             [
                 ($crate::headers::CONTENT_TYPE, mime.as_ref()),
                 ($crate::headers::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", $file_name)),
@@ -81,7 +81,7 @@ mod tests {
 
         let file = File::open(path).await.unwrap();
 
-        let response = file!(file_name, file, [
+        let response = file!(file_name, file; [
             ("x-api-key", "some api key")
         ]);
 

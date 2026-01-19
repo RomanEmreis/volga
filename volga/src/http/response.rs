@@ -422,7 +422,7 @@ mod tests {
         let file = File::open(path).await.unwrap();
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::file(file),
+            HttpBody::file(file);
             [
                 ("x-api-key", "some api key"),
                 ("Content-Type", "application/octet-stream")
@@ -441,7 +441,7 @@ mod tests {
     async fn it_creates_empty_not_found_response() {
         let mut response = response!(
             StatusCode::NOT_FOUND, 
-            HttpBody::empty(),
+            HttpBody::empty();
             [
                 ("Content-Type", "text/plain")
             ]
@@ -458,7 +458,7 @@ mod tests {
     async fn it_creates_empty_custom_response() {
         let mut response = response!(
             StatusCode::UNAUTHORIZED,
-            HttpBody::empty(),
+            HttpBody::empty();
             [
                 ("Content-Type", "application/pdf")
             ]
@@ -475,7 +475,7 @@ mod tests {
     async fn it_creates_custom_response() {
         let mut response = response!(
             StatusCode::FORBIDDEN,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -492,7 +492,7 @@ mod tests {
     fn it_inserts_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -508,7 +508,7 @@ mod tests {
     fn it_tries_insert_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -523,7 +523,7 @@ mod tests {
     fn it_inserts_raw_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -541,7 +541,7 @@ mod tests {
     fn it_tries_insert_raw_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -556,7 +556,7 @@ mod tests {
     fn it_appends_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -575,7 +575,7 @@ mod tests {
     fn it_tries_append_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -591,7 +591,7 @@ mod tests {
     fn it_appends_raw_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -614,7 +614,7 @@ mod tests {
     fn it_tries_appends_raw_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -630,7 +630,7 @@ mod tests {
     fn it_removes_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]
@@ -648,7 +648,7 @@ mod tests {
     fn it_tries_remove_header() {
         let mut response = response!(
             StatusCode::OK,
-            HttpBody::full("Hello World!"),
+            HttpBody::full("Hello World!");
             [
                 ("Content-Type", "text/plain")
             ]

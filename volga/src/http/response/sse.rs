@@ -6,13 +6,13 @@
 macro_rules! sse {
     ($body:expr) => {
         $crate::sse!(
-            $body,
+            $body;
             []
         )
     };
-    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::stream!(
-            $body,
+            $body;
             [
                 ($crate::headers::CONTENT_TYPE, "text/event-stream"),
                 ($crate::headers::CACHE_CONTROL, "no-cache"),
@@ -54,7 +54,7 @@ mod tests {
             .map(Ok::<&str, Error>)
             .take(1);
 
-        let mut response = sse!(stream, [
+        let mut response = sse!(stream; [
             ("x-header", "some value"),
         ]).unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();

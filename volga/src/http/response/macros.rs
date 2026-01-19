@@ -24,13 +24,13 @@ macro_rules! not_found {
         $crate::status!(404, { $($json)* })
     };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, [ $( ($key, $value) ),* ])
+        $crate::status!(404; [ $( ($key, $value) ),* ])
     };
     ($var:ident) => {
         $crate::status!(404, $var)
     };
-    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, $body, [ $( ($key, $value) ),* ])
+    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, $body; [ $( ($key, $value) ),* ])
     };
     ($fmt:tt) => {
         $crate::status!(404, $fmt)
@@ -67,13 +67,13 @@ macro_rules! bad_request {
         $crate::status!(400, { $($json)* })
     };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, [ $( ($key, $value) ),* ])
+        $crate::status!(400; [ $( ($key, $value) ),* ])
     };
     ($var:ident) => {
         $crate::status!(400, $var)
     };
-    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, $body, [ $( ($key, $value) ),* ])
+    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(400, $body; [ $( ($key, $value) ),* ])
     };
     ($fmt:tt) => {
         $crate::status!(400, $fmt)
@@ -110,13 +110,13 @@ macro_rules! created {
         $crate::status!(201, { $($json)* })
     };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, [ $( ($key, $value) ),* ])
+        $crate::status!(201; [ $( ($key, $value) ),* ])
     };
     ($var:ident) => {
         $crate::status!(201, $var)
     };
-    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, $body, [ $( ($key, $value) ),* ])
+    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(201, $body; [ $( ($key, $value) ),* ])
     };
     ($fmt:tt) => {
         $crate::status!(201, $fmt)
@@ -153,13 +153,13 @@ macro_rules! accepted {
         $crate::status!(202, { $($json)* })
     };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, [ $( ($key, $value) ),* ])
+        $crate::status!(202; [ $( ($key, $value) ),* ])
     };
     ($var:ident) => {
         $crate::status!(202, $var)
     };
-    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, $body, [ $( ($key, $value) ),* ])
+    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(202, $body; [ $( ($key, $value) ),* ])
     };
     ($fmt:tt) => {
         $crate::status!(202, $fmt)
@@ -267,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_anonymous_type_400_response_with_json_body_and_headers() {
         let payload = TestPayload { name: "test".into() };
-        let response = bad_request!(payload, [
+        let response = bad_request!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -385,7 +385,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_anonymous_type_404_response_with_json_body_and_headers() {
         let payload = TestPayload { name: "test".into() };
-        let response = not_found!(payload, [
+        let response = not_found!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -503,7 +503,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_anonymous_type_201_response_with_json_body_and_headers() {
         let payload = TestPayload { name: "test".into() };
-        let response = created!(payload, [
+        let response = created!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -621,7 +621,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_anonymous_type_202_response_with_json_body_and_headers() {
         let payload = TestPayload { name: "test".into() };
-        let response = accepted!(payload, [
+        let response = accepted!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);

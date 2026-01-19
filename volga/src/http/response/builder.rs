@@ -146,9 +146,9 @@ macro_rules! builder {
 #[macro_export]
 macro_rules! response {
     ($status:expr, $body:expr) => {
-        $crate::response!($status, $body, [])
+        $crate::response!($status, $body; [])
     };
-    ($status:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($status:expr, $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::builder!($status)
         $(
             .header($key, $value)

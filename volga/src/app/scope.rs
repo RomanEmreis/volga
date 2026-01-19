@@ -176,7 +176,7 @@ async fn handle_impl(
         #[cfg(feature = "middleware")] request.headers()
     ) {
         FindResult::RouteNotFound => pipeline.fallback(request).await,
-        FindResult::MethodNotFound(allowed) => status!(405, [
+        FindResult::MethodNotFound(allowed) => status!(405; [
             (ALLOW, allowed)
         ]),
         FindResult::Ok(endpoint) => {

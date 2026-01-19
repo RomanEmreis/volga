@@ -172,7 +172,7 @@ impl WebSocketConnection {
 
         let http_response = if let Some(sec_websocket_key) = &sec_websocket_key {
             let accept_key = Self::generate_websocket_accept_key(sec_websocket_key.as_bytes());
-            status!(101, [
+            status!(101; [
                 (UPGRADE, super::WEBSOCKET),
                 (CONNECTION, super::UPGRADE),
                 (SEC_WEBSOCKET_ACCEPT, accept_key)

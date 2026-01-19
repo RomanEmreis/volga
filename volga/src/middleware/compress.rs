@@ -172,7 +172,7 @@ fn negotiate(accept_encoding: Header<AcceptEncoding>, http_result: HttpResult) -
         }
     }
 
-    status!(406, [
+    status!(406; [
         (VARY, ACCEPT_ENCODING),
         (ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))
     ])

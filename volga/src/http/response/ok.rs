@@ -112,7 +112,7 @@ macro_rules! ok {
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::empty(),
+            $crate::HttpBody::empty();
             [ $( ($key, $value) ),* ]
         )
     };
@@ -125,7 +125,7 @@ macro_rules! ok {
     (text: $body:expr) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full($body.to_string()),
+            $crate::HttpBody::full($body.to_string());
             [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
         )
     };
@@ -134,7 +134,7 @@ macro_rules! ok {
     (text: $body:expr ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full($body.to_string()),
+            $crate::HttpBody::full($body.to_string());
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
                 $( ($key, $value) ),*
@@ -151,7 +151,7 @@ macro_rules! ok {
     (textf: $fmt:literal) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt)),
+            $crate::HttpBody::full(format!($fmt));
             [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
         )
     };
@@ -160,7 +160,7 @@ macro_rules! ok {
     (textf: $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt)),
+            $crate::HttpBody::full(format!($fmt));
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
                 $( ($key, $value) ),*
@@ -172,7 +172,7 @@ macro_rules! ok {
     (textf: $fmt:literal, $( $arg:expr ),+ $(,)? ) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt, $( $arg ),+)),
+            $crate::HttpBody::full(format!($fmt, $( $arg ),+));
             [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
         )
     };
@@ -181,7 +181,7 @@ macro_rules! ok {
     (textf: $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt, $( $arg ),+)),
+            $crate::HttpBody::full(format!($fmt, $( $arg ),+));
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
                 $( ($key, $value) ),*
@@ -198,7 +198,7 @@ macro_rules! ok {
         match $crate::HttpBody::json($body) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
-                body,
+                body;
                 [ ($crate::headers::CONTENT_TYPE, "application/json") ]
             ),
             Err(err) => Err(err),
@@ -210,7 +210,7 @@ macro_rules! ok {
         match $crate::HttpBody::json($body) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
-                body,
+                body;
                 [
                     ($crate::headers::CONTENT_TYPE, "application/json"),
                     $( ($key, $value) ),*
@@ -229,7 +229,7 @@ macro_rules! ok {
         match $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
-                body,
+                body;
                 [ ($crate::headers::CONTENT_TYPE, "application/json") ]
             ),
             Err(err) => Err(err),
@@ -241,7 +241,7 @@ macro_rules! ok {
         match $crate::HttpBody::json($crate::json::json_internal!({ $($name: $value),* })) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
-                body,
+                body;
                 [ ($crate::headers::CONTENT_TYPE, "application/json") ]
             ),
             Err(err) => Err(err),
@@ -253,7 +253,7 @@ macro_rules! ok {
         match $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
-                body,
+                body;
                 [
                     ($crate::headers::CONTENT_TYPE, "application/json"),
                     $( ($key, $value) ),*
@@ -272,7 +272,7 @@ macro_rules! ok {
     ($fmt:literal) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt)),
+            $crate::HttpBody::full(format!($fmt));
             [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
         )
     };
@@ -281,7 +281,7 @@ macro_rules! ok {
     ($fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt)),
+            $crate::HttpBody::full(format!($fmt));
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
                 $( ($key, $value) ),*
@@ -293,7 +293,7 @@ macro_rules! ok {
     ($fmt:literal, $( $arg:expr ),+ $(,)? ) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt, $( $arg ),+)),
+            $crate::HttpBody::full(format!($fmt, $( $arg ),+));
             [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
         )
     };
@@ -302,7 +302,7 @@ macro_rules! ok {
     ($fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt, $( $arg ),+)),
+            $crate::HttpBody::full(format!($fmt, $( $arg ),+));
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
                 $( ($key, $value) ),*
@@ -319,7 +319,7 @@ macro_rules! ok {
         match $crate::HttpBody::json($body) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
-                body,
+                body;
                 [ ($crate::headers::CONTENT_TYPE, "application/json") ]
             ),
             Err(err) => Err(err),
@@ -331,7 +331,7 @@ macro_rules! ok {
         match $crate::HttpBody::json($body) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
-                body,
+                body;
                 [
                     ($crate::headers::CONTENT_TYPE, "application/json"),
                     $( ($key, $value) ),*

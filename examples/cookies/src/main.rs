@@ -32,7 +32,7 @@ async fn me(cookies: Cookies) -> HttpResult {
     cookies
         .get("session-id")
         .map_or_else(
-            || status!(401, "Unauthorized", [(WWW_AUTHENTICATE, "Basic realm=\"Restricted area\"")]),
+            || status!(401, "Unauthorized"; [(WWW_AUTHENTICATE, "Basic realm=\"Restricted area\"")]),
             |_session_id| ok!("Success"))
 
 }

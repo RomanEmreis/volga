@@ -25,7 +25,7 @@
 ///    .into_body()
 ///    .into_data_stream();
 /// 
-/// stream!(body_stream, [
+/// stream!(body_stream; [
 ///    ("Content-Type", "message/http")
 /// ]);
 /// # Ok(())
@@ -34,12 +34,12 @@
 #[macro_export]
 macro_rules! stream {
     ($body:expr) => {
-        $crate::stream!($body, [])
+        $crate::stream!($body; [])
     };
-    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::stream($body),
+            $crate::HttpBody::stream($body);
             [ $( ($key, $value) ),* ]
         )
     };
@@ -75,7 +75,7 @@ mod tests {
         let file = File::open(path).await.unwrap();
         let body = HttpBody::file(file);
 
-        let response = stream!(body.into_data_stream(), [
+        let response = stream!(body.into_data_stream(); [
             ("x-api-key", "some api key")
         ]);
 
