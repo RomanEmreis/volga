@@ -48,10 +48,7 @@ macro_rules! ok {
     () => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::empty(),
-            [
-                ($crate::headers::CONTENT_TYPE, "text/plain")
-            ]
+            $crate::HttpBody::empty()
         )
     };
     

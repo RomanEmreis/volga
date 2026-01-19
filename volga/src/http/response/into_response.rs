@@ -268,7 +268,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert!(response.headers().get("Content-Type").is_none());
         assert_eq!(response.status(), 200);
     }
 
@@ -388,7 +388,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert!(response.headers().get("Content-Type").is_none());
         assert_eq!(response.status(), 404);
     }
 

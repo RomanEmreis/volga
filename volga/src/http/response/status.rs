@@ -43,10 +43,7 @@ macro_rules! status {
     ($status:expr) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK), 
-            $crate::HttpBody::empty(),
-            [
-                ($crate::headers::CONTENT_TYPE, "text/plain")
-            ]
+            $crate::HttpBody::empty()
         )
     };
     
