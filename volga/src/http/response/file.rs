@@ -44,7 +44,6 @@ macro_rules! file {
             $crate::HttpBody::file($body),
             [
                 ($crate::headers::CONTENT_TYPE, mime.as_ref()),
-                ($crate::headers::TRANSFER_ENCODING, "chunked"),
                 ($crate::headers::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", $file_name)),
                 $( ($key, $value) ),*
             ]

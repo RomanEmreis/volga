@@ -65,7 +65,6 @@ macro_rules! html_file {
             $crate::HttpBody::file($body),
             [
                 ($crate::headers::CONTENT_TYPE, mime.as_ref()),
-                ($crate::headers::TRANSFER_ENCODING, "chunked"),
                 $( ($key, $value) ),*
             ]
         )
