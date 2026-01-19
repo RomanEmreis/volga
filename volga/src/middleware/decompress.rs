@@ -114,10 +114,10 @@ async fn make_decompression_fn(mut ctx: HttpContext, next: NextFn) -> HttpResult
             }
             Err(error) if error.is_client_error() => (),
             Err(_) => {
-                return status!(415, [
-                            (VARY, CONTENT_ENCODING),
-                            (ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))
-                        ]);
+                return status!(415; [
+                    (VARY, CONTENT_ENCODING),
+                    (ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))
+                ]);
             }
         }
     }

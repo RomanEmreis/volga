@@ -20,48 +20,60 @@
 macro_rules! form {
     // handles form!({ "key": "value" })
     ({ $($json:tt)* }) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::form($crate::json::json_internal!({ $($json)* })),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
-            ]
-        )
+        match $crate::HttpBody::form($crate::json::json_internal!({ $($json)* })) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body;
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
-    // handles form!({ "key": "value" }, [("key", "val")])
-    ({ $($json:tt)* }, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::form($crate::json::json_internal!({ $($json)* })),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
-                $( ($key, $value) ),*
-            ]
-        )
+    // handles form!({ "key": "value" }; [("key", "val")])
+    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        match $crate::HttpBody::form($crate::json::json_internal!({ $($json)* })) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body;
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                    $( ($key, $value) ),*
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
-    // handles form!(object, [("key", "val")])
-    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::form($body),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
-                $( ($key, $value) ),*
-            ]
-        )
+    // handles form!(object; [("key", "val")])
+    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        match $crate::HttpBody::form($body) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body;
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                    $( ($key, $value) ),*
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     // handles form!(object)
     ($body:expr) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::form($body),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
-            ]
-        )
+        match $crate::HttpBody::form($body) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body;
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
 }
 
@@ -92,7 +104,7 @@ mod tests {
         let data = HashMap::from([
             ("key", "value"),
         ]);
-        let response = form!(data, [
+        let response = form!(data; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -125,7 +137,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_form_data_untyped_response_with_headers() {
-        let response = form!({ "key": "value" }, [
+        let response = form!({ "key": "value" }; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);

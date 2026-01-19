@@ -24,12 +24,12 @@
 #[macro_export]
 macro_rules! html {
     ($body:expr) => {
-        $crate::html!($body, [])
+        $crate::html!($body; [])
     };
-    ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::full($body),
+            $crate::HttpBody::full($body);
             [
                 ($crate::headers::CONTENT_TYPE, "text/html; charset=utf-8"),
                 $( ($key, $value) ),*
@@ -56,16 +56,15 @@ macro_rules! html {
 #[macro_export]
 macro_rules! html_file {
     ($file_name:expr, $body:expr) => {
-        $crate::html_file!($file_name, $body, [])
+        $crate::html_file!($file_name, $body; [])
     };
-    ($file_name:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+    ($file_name:expr, $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
         let mime = $crate::fs::get_mime_or_octet_stream($file_name);
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::file($body),
+            $crate::HttpBody::file($body);
             [
                 ($crate::headers::CONTENT_TYPE, mime.as_ref()),
-                ($crate::headers::TRANSFER_ENCODING, "chunked"),
                 $( ($key, $value) ),*
             ]
         )
@@ -136,7 +135,7 @@ mod tests {
             </html>
             "#;
 
-        let response = html!(html_text, [
+        let response = html!(html_text; [
             ("x-api-key", "some api key")
         ]);
 

@@ -183,36 +183,23 @@ impl HttpBody {
     
     /// Creates a new [`HttpBody`] from JSON object
     #[inline]
-    pub fn json<T: Serialize>(content: T) -> HttpBody {
-        let inner = match serde_json::to_vec(&content) {
-            Ok(content) => Full::from(content)
-                .map_err(Error::from)
-                .boxed(),
-            Err(e) => {
-                let error_message = format!("JSON serialization error: {e}");
-                Full::from(error_message)
-                    .map_err(Error::from)
-                    .boxed()
-            }
-        };
-        Self { inner: InnerBody::Boxed { inner } }
+    pub fn json<T: Serialize>(content: T) -> Result<HttpBody, Error> {
+        let content = serde_json::to_vec(&content)?;
+        let inner = Full::from(content)
+            .map_err(Error::from)
+            .boxed();
+        Ok(Self { inner: InnerBody::Boxed { inner } })
     }
 
     /// Creates a new [`HttpBody`] from a Form Data object
     #[inline]
-    pub fn form<T: Serialize>(content: T) -> HttpBody {
-        let inner = match serde_urlencoded::to_string(&content) {
-            Ok(content) => Full::from(content)
-                .map_err(Error::from)
-                .boxed(),
-            Err(e) => {
-                let error_message = format!("Form Data serialization error: {e}");
-                Full::from(error_message)
-                    .map_err(Error::from)
-                    .boxed()
-            }
-        };
-        Self { inner: InnerBody::Boxed { inner } }
+    pub fn form<T: Serialize>(content: T) -> Result<HttpBody, Error> {
+        let content = serde_urlencoded::to_string(&content)
+            .map_err(|e| Error::server_error(e.to_string()))?;
+        let inner = Full::from(content)
+            .map_err(Error::from)
+            .boxed();
+        Ok(Self { inner: InnerBody::Boxed { inner } })
     }
 
     /// Creates a new [`HttpBody`] from an object that is convertable to a byte array
@@ -306,10 +293,7 @@ mod tests {
         let content =  FailStruct;
         let body = HttpBody::json(content);
 
-        let collected = body.collect().await;
-
-        assert!(collected.is_ok());
-        assert_eq!(String::from_utf8_lossy(&collected.unwrap().to_bytes()), "JSON serialization error: oops...")
+        assert!(body.is_err());
     }
 
     #[tokio::test]
@@ -317,10 +301,7 @@ mod tests {
         let content =  FailStruct;
         let body = HttpBody::form(content);
 
-        let collected = body.collect().await;
-        
-        assert!(collected.is_ok());
-        assert_eq!(String::from_utf8_lossy(&collected.unwrap().to_bytes()), "Form Data serialization error: oops...")
+        assert!(body.is_err());
     }
 
     #[tokio::test]
@@ -335,5 +316,3 @@ mod tests {
         assert_eq!(size.upper(), None)
     }
 }
-
-

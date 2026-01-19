@@ -75,7 +75,7 @@ mod test {
     
     #[tokio::test]
     async fn it_extracts_vec_of_integers() {
-        let body = HttpBody::boxed(HttpBody::json([1, 2, 3]));
+        let body = HttpBody::boxed(HttpBody::json([1, 2, 3]).unwrap());
         let payload = Payload::Body(body);
         let fut = <Vec<i32> as FromPayload>::from_payload(payload);
         let result = fut.await;
@@ -84,7 +84,7 @@ mod test {
 
     #[tokio::test]
     async fn it_extracts_vec_of_strings() {
-        let body = HttpBody::boxed(HttpBody::json(["foo", "bar"]));
+        let body = HttpBody::boxed(HttpBody::json(["foo", "bar"]).unwrap());
         let payload = Payload::Body(body);
         let fut = <Vec<String> as FromPayload>::from_payload(payload);
         let result = fut.await;
@@ -93,7 +93,7 @@ mod test {
 
     #[tokio::test]
     async fn it_extracts_vec_empty_array() {
-        let body = HttpBody::boxed(HttpBody::json(Vec::<i32>::new()));
+        let body = HttpBody::boxed(HttpBody::json(Vec::<i32>::new()).unwrap());
         let payload = Payload::Body(body);
         let fut = <Vec<i32> as FromPayload>::from_payload(payload);
         let result = fut.await;
@@ -105,7 +105,7 @@ mod test {
         let body = HttpBody::boxed(HttpBody::json([
             User { age: 33, name: "John".into() },
             User { age: 30, name: "Jack".into() }
-        ]));
+        ]).unwrap());
         let payload = Payload::Body(body);
         let fut = <Vec<User> as FromPayload>::from_payload(payload);
         let result = fut.await;

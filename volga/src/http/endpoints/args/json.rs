@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn it_reads_from_payload() {
         let user = User { age: 33, name: "John".into() };
-        let body = HttpBody::boxed(HttpBody::json(user));
+        let body = HttpBody::boxed(HttpBody::json(user).unwrap());
         
         let user = Json::<User>::from_payload(Payload::Body(body)).await.unwrap();
         
@@ -226,7 +226,7 @@ mod tests {
     #[tokio::test]
     async fn it_deserializes_json_from_fut() {
         let user = User { age: 33, name: "John".into() };
-        let body = HttpBody::json(user);
+        let body = HttpBody::json(user).unwrap();
         
         let fut = ExtractJsonPayloadFut::<User> { fut: body.collect(), _marker: PhantomData };
         

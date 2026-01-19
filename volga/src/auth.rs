@@ -240,7 +240,7 @@ where
                 
                 next(ctx).await
             },
-            Ok(_) => status!(403, [
+            Ok(_) => status!(403; [
                 (WWW_AUTHENTICATE, authorizer::DEFAULT_ERROR_MSG)
             ]),
             Err(err) => {
@@ -249,7 +249,7 @@ where
                     .downcast_ref::<JwtError>()
                     .map(|e| map_jwt_error_to_www_authenticate(e.kind()))
                     .unwrap_or(authorizer::DEFAULT_ERROR_MSG);
-                status!(403, [
+                status!(403; [
                     (WWW_AUTHENTICATE, www_authenticate)
                 ])
             }

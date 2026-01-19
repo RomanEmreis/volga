@@ -87,7 +87,7 @@ async fn respond_with_file_or_dir_impl(
             let caching = ResponseCaching::try_from(&metadata)?;
             if validate_etag(&caching.etag, &headers) ||
                 validate_last_modified(caching.last_modified, &headers) {
-                status!(304, [
+                status!(304; [
                     (ETAG, caching.etag()),
                     (LAST_MODIFIED, caching.last_modified())
                 ])
@@ -108,7 +108,7 @@ async fn respond_with_folder_impl(path: PathBuf, is_root: bool) -> HttpResult {
 async fn respond_with_file_impl(path: PathBuf, caching: ResponseCaching) -> HttpResult {
     match File::open(&path).await {
         Err(err) => Err(err.into()),
-        Ok(index) => html_file!(path, index, [
+        Ok(index) => html_file!(path, index; [
             (ETAG, caching.etag()),
             (LAST_MODIFIED, caching.last_modified()),
             (CACHE_CONTROL, caching.cache_control()),

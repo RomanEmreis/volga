@@ -135,7 +135,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
         
         assert_eq!(response.status(), 500);
-        assert_eq!(String::from_utf8_lossy(body), "\"Some error\"");
+        assert_eq!(String::from_utf8_lossy(body), "Some error");
     }
 
     #[tokio::test]
@@ -148,7 +148,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(response.status(), 400);
-        assert_eq!(String::from_utf8_lossy(body), "\"Some error\"");
+        assert_eq!(String::from_utf8_lossy(body), "Some error");
     }
 
     #[tokio::test]

@@ -88,7 +88,7 @@ impl IntoResponse for Cow<'static, str> {
     fn into_response(self) -> HttpResult {
         response!(
             StatusCode::OK,
-            HttpBody::from(self),
+            HttpBody::from(self);
             [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
         )
     }
@@ -222,7 +222,7 @@ macro_rules! impl_into_response {
             fn into_response(self) -> HttpResult {
                 response!(
                     $crate::http::StatusCode::OK,
-                    HttpBody::full(self.to_string()),
+                    HttpBody::full(self.to_string());
                     [($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8")]
                 )
             }
@@ -268,7 +268,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert!(response.headers().get("Content-Type").is_none());
         assert_eq!(response.status(), 200);
     }
 
@@ -333,8 +333,8 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"test\"");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(String::from_utf8_lossy(body), "test");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
         assert_eq!(response.status(), 200);
     }
 
@@ -388,7 +388,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert!(response.headers().get("Content-Type").is_none());
         assert_eq!(response.status(), 404);
     }
 

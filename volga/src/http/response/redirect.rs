@@ -12,10 +12,10 @@
 #[macro_export]
 macro_rules! redirect {
     ($url:expr) => {
-        $crate::redirect!($url, [])
+        $crate::redirect!($url; [])
     };
-    ($url:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(301, [
+    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(301; [
             ($crate::headers::LOCATION, $url),
             $( ($key, $value) ),*
         ])
@@ -34,10 +34,10 @@ macro_rules! redirect {
 #[macro_export]
 macro_rules! found {
     ($url:expr) => {
-        $crate::found!($url, [])
+        $crate::found!($url; [])
     };
-    ($url:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(302, [
+    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(302; [
             ($crate::headers::LOCATION, $url),
             $( ($key, $value) ),*
         ])
@@ -56,10 +56,10 @@ macro_rules! found {
 #[macro_export]
 macro_rules! see_other {
     ($url:expr) => {
-        $crate::see_other!($url, [])
+        $crate::see_other!($url; [])
     };
-    ($url:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(303, [
+    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(303; [
             ($crate::headers::LOCATION, $url),
             $( ($key, $value) ),*
         ])
@@ -78,10 +78,10 @@ macro_rules! see_other {
 #[macro_export]
 macro_rules! temp_redirect {
     ($url:expr) => {
-        $crate::temp_redirect!($url, [])
+        $crate::temp_redirect!($url; [])
     };
-    ($url:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(307, [
+    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(307; [
             ($crate::headers::LOCATION, $url),
             $( ($key, $value) ),*
         ])
@@ -100,10 +100,10 @@ macro_rules! temp_redirect {
 #[macro_export]
 macro_rules! permanent_redirect {
     ($url:expr) => {
-        $crate::permanent_redirect!($url, [])
+        $crate::permanent_redirect!($url; [])
     };
-    ($url:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(308, [
+    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(308; [
             ($crate::headers::LOCATION, $url),
             $( ($key, $value) ),*
         ])
@@ -132,7 +132,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_redirect_response_with_custom_headers() {
         let url = "https://www.rust-lang.org/";
-        let response = redirect!(url, [
+        let response = redirect!(url; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -167,7 +167,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_redirect_temporary_response_with_custom_headers() {
         let url = "https://www.rust-lang.org/";
-        let response = temp_redirect!(url, [
+        let response = temp_redirect!(url; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -202,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_permanent_redirect_response_with_custom_headers() {
         let url = "https://www.rust-lang.org/";
-        let response = permanent_redirect!(url, [
+        let response = permanent_redirect!(url; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -237,7 +237,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_found_redirect_response_with_custom_headers() {
         let url = "https://www.rust-lang.org/";
-        let response = found!(url, [
+        let response = found!(url; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -272,7 +272,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_see_other_redirect_response_with_custom_headers() {
         let url = "https://www.rust-lang.org/";
-        let response = see_other!(url, [
+        let response = see_other!(url; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);

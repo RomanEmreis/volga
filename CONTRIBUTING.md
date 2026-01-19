@@ -7,8 +7,6 @@ and code improvements.
 This project is currently maintained by a small team (often just one person),
 so please keep that in mind when interacting or proposing changes.
 
----
-
 ## Reporting issues
 
 Before opening an issue:
@@ -17,8 +15,6 @@ Before opening an issue:
 - For feature requests, describe the problem you’re trying to solve.
 
 If you’re unsure, feel free to open a discussion first.
-
----
 
 ## Pull Requests
 
@@ -32,16 +28,12 @@ A few simple guidelines:
 
 Draft PRs are totally fine if you want early feedback.
 
----
-
 ## Breaking changes
 
 Breaking changes are welcome, but:
 - Please open an issue or discussion first.
 - Clearly explain the motivation and impact.
 - Migration guidance is highly appreciated.
-
----
 
 ## Communication
 

@@ -153,7 +153,7 @@ mod tests {
     #[tokio::test]
     async fn it_reads_from_payload() {
         let user = User { age: 33, name: "John".into() };
-        let body = HttpBody::boxed(HttpBody::form(user));
+        let body = HttpBody::boxed(HttpBody::form(user).unwrap());
 
         let user = Form::<User>::from_payload(Payload::Body(body)).await.unwrap();
 
@@ -164,7 +164,7 @@ mod tests {
     #[tokio::test]
     async fn it_reads_optional_from_payload() {
         let user = OptionalUser { name: Some("John".into()), age: None };
-        let body = HttpBody::boxed(HttpBody::form(user));
+        let body = HttpBody::boxed(HttpBody::form(user).unwrap());
 
         let user = Form::<OptionalUser>::from_payload(Payload::Body(body)).await.unwrap();
 
@@ -178,7 +178,7 @@ mod tests {
             ("age", "33"),
             ("name", "John")
         ]);
-        let body = HttpBody::boxed(HttpBody::form(user_map));
+        let body = HttpBody::boxed(HttpBody::form(user_map).unwrap());
 
         let user = Form::<HashMap<String, String>>::from_payload(Payload::Body(body)).await.unwrap();
 
@@ -191,7 +191,7 @@ mod tests {
         let user_map = HashMap::from([
             ("name", "John")
         ]);
-        let body = HttpBody::boxed(HttpBody::form(user_map));
+        let body = HttpBody::boxed(HttpBody::form(user_map).unwrap());
 
         let user = Form::<HashMap<String, String>>::from_payload(Payload::Body(body)).await.unwrap();
 
