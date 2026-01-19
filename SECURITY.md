@@ -4,8 +4,6 @@ Thanks for taking the time to help keep this project secure! 🙏
 Volga is currently in **0.x** and maintained by a small team, so the security
 process is intentionally lightweight.
 
----
-
 ## Supported Versions
 
 During the **0.x** stage, we generally **support security fixes only for the
@@ -17,8 +15,6 @@ latest released version**.
 In practice, security fixes are published as part of the next release.  
 If a fix is important, we may ship a quick patch release - but we typically
 won’t maintain intermediate versions once a newer release is available.
-
----
 
 ## Reporting a Vulnerability
 
@@ -35,8 +31,6 @@ Please include:
 - Steps to reproduce / PoC (if available)
 - Affected versions and environment details
 
----
-
 ## What to Expect
 
 We aim to:
@@ -47,8 +41,6 @@ We aim to:
 
 If the issue is already public or actively exploited, we may prioritize a faster
 release.
-
----
 
 ## Coordinated Disclosure
 
