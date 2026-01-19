@@ -81,7 +81,7 @@ macro_rules! problem {
         })) {
             Ok(body) => $crate::response!(
                 status,
-                body,
+                body;
                 [
                     ($crate::headers::CONTENT_TYPE, "problem+json"),
                 ]
@@ -103,7 +103,7 @@ macro_rules! problem {
         })) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-                body,
+                body;
                 [
                     ($crate::headers::CONTENT_TYPE, "problem+json"),
                 ]
