@@ -233,7 +233,7 @@ mod tests {
         use async_compression::tokio::write::BrotliDecoder;
         
         let body = HttpBody::json(json!({ "age": 33, "name": "John" }));
-        let body = brotli(body);
+        let body = brotli(body.unwrap());
 
         let mut decoder = BrotliDecoder::new(Vec::new());
         decoder.write_all(&body.collect().await.unwrap().to_bytes()).await.unwrap();
@@ -249,7 +249,7 @@ mod tests {
         use async_compression::tokio::write::GzipDecoder;
 
         let body = HttpBody::json(json!({ "age": 33, "name": "John" }));
-        let body = gzip(body);
+        let body = gzip(body.unwrap());
 
         let mut decoder = GzipDecoder::new(Vec::new());
         decoder.write_all(&body.collect().await.unwrap().to_bytes()).await.unwrap();
@@ -265,7 +265,7 @@ mod tests {
         use async_compression::tokio::write::ZlibDecoder;
 
         let body = HttpBody::json(json!({ "age": 33, "name": "John" }));
-        let body = deflate(body);
+        let body = deflate(body.unwrap());
 
         let mut decoder = ZlibDecoder::new(Vec::new());
         decoder.write_all(&body.collect().await.unwrap().to_bytes()).await.unwrap();
@@ -281,7 +281,7 @@ mod tests {
         use async_compression::tokio::write::ZstdDecoder;
 
         let body = HttpBody::json(json!({ "age": 33, "name": "John" }));
-        let body = zstd(body);
+        let body = zstd(body.unwrap());
 
         let mut decoder = ZstdDecoder::new(Vec::new());
         decoder.write_all(&body.collect().await.unwrap().to_bytes()).await.unwrap();

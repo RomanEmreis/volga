@@ -29,7 +29,7 @@ async fn it_reads_json_payload() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "\"My name is: John, I'm 35 years old\"");
+    assert_eq!(response.text().await.unwrap(), "My name is: John, I'm 35 years old");
     
     server.shutdown().await;
 }

@@ -1,6 +1,6 @@
 ﻿//! Macros for responses with various HTTP statuses
 
-/// Produces a response with specified `StatusCode` with plain text or JSON body
+/// Produces a response with specified `StatusCode` with UTF-8 plain text or JSON body
 ///
 /// # Examples
 /// ## Without body
@@ -9,7 +9,7 @@
 ///
 /// status!(404);
 /// ```
-/// ## plain/text body
+/// ## text/plain body
 /// ```no_run
 /// use volga::status;
 ///
@@ -31,13 +31,16 @@
 #[macro_export]
 macro_rules! status {
     ($status:expr, { $($json:tt)* }) => {
-        $crate::response!(
-            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-            ]
-        )
+        match $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     ($status:expr) => {
@@ -56,49 +59,59 @@ macro_rules! status {
     };
     
     ($status:expr, $var:ident) => {
-        $crate::response!(
-            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::json($var),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-            ]
-        )
+        match $crate::HttpBody::json($var) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     ($status:expr, $body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::response!(
-            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK), 
-            $crate::HttpBody::json($body),
-            [ $( ($key, $value) ),* ]
-        )
+        match $crate::HttpBody::json($body) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK), 
+                body,
+                [ $( ($key, $value) ),* ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     ($status:expr, $fmt:tt) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::json(format!($fmt)),
+            $crate::HttpBody::full(format!($fmt)),
             [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
+                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
             ]
         )
+
     };
     
     ($status:expr, $body:expr) => {
-        $crate::response!(
-            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::json($body),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-            ]
-        )
+        match $crate::HttpBody::json($body) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     ($status:expr, $($fmt:tt)*) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::json(format!($($fmt)*)),
+            $crate::HttpBody::full(format!($($fmt)*)),
             [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
+                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
             ]
         )
     };
@@ -190,7 +203,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"You are not authorized!\"");
+        assert_eq!(String::from_utf8_lossy(body), "You are not authorized!");
         assert_eq!(response.status(), 401);
     }
 
@@ -204,7 +217,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"John is not authorized!\"");
+        assert_eq!(String::from_utf8_lossy(body), "John is not authorized!");
         assert_eq!(response.status(), 401);
     }
     
@@ -218,7 +231,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"John is not authorized!\"");
+        assert_eq!(String::from_utf8_lossy(body), "John is not authorized!");
         assert_eq!(response.status(), 401);
     }
 
@@ -271,7 +284,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"It's forbidden!\"");
+        assert_eq!(String::from_utf8_lossy(body), "It's forbidden!");
         assert_eq!(response.status(), 403);
     }
 

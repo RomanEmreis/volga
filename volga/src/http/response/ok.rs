@@ -1,6 +1,6 @@
 ﻿//! Macros for `OK 200` HTTP responses
 
-/// Produces an `OK 200` response with plain text or JSON body
+/// Produces an `OK 200` response with UTF-8 plain text or JSON body
 /// 
 /// # Examples
 /// ## plain/text
@@ -9,7 +9,7 @@
 ///
 /// ok!("healthy");
 /// ```
-/// ## plain/text without body
+/// ## Without body
 /// ```no_run
 /// use volga::ok;
 ///
@@ -63,90 +63,108 @@ macro_rules! ok {
     
     // handles ok!({ json })
     ({ $($json:tt)* }) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-            ]
-        )
+        match $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     // handles ok! { json }
     { $($name:tt : $value:tt),* $(,)? } => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::json($crate::json::json_internal!({ $($name: $value),* })),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-            ]
-        )
+        match $crate::HttpBody::json($crate::json::json_internal!({ $($name: $value),* })) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     // handles ok!({ json }, [("key", "val")])
     ({ $($json:tt)* }, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-                $( ($key, $value) ),*
-            ]
-        )
+        match $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                    $( ($key, $value) ),*
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     // handles ok!(json)
     ($var:ident) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::json($var),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-            ]
-        )
+        match $crate::HttpBody::json($var) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     // handles ok!(json, [("key", "val")])
     ($body:expr, [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::json($body),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-                $( ($key, $value) ),*
-            ]
-        )
+        match $crate::HttpBody::json($body) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                    $( ($key, $value) ),*
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     // handles ok!("Hello {name}")
     ($fmt:tt) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::json(format!($fmt)),
+            $crate::HttpBody::full(format!($fmt)),
             [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
+                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
             ]
         )
     };
     
     // handles ok!(thing.to_string()) or ok!(5 + 5)
     ($body:expr) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::json($body),
-            [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
-            ]
-        )
+        match $crate::HttpBody::json($body) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::OK,
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     // handles ok!("Hello {}", name)
     ($($fmt:tt)*) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::json(format!($($fmt)*)),
+            $crate::HttpBody::full(format!($($fmt)*)),
             [
-                ($crate::headers::CONTENT_TYPE, "application/json"),
+                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
             ]
         )
     };
@@ -239,7 +257,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"test\"");
+        assert_eq!(String::from_utf8_lossy(body), "test");
         assert_eq!(response.status(), 200);
     }
 
@@ -261,7 +279,7 @@ mod tests {
         let number = 100;
         let response = ok!(number);
         // this is known issue will be fixed in future releases.
-        //let response = ok!(100);
+        // let response = ok!(100);
 
         assert!(response.is_ok());
 
@@ -325,7 +343,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"This is text: test\"");
+        assert_eq!(String::from_utf8_lossy(body), "This is text: test");
         assert_eq!(response.status(), 200);
     }
 
@@ -339,7 +357,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"This is text: test\"");
+        assert_eq!(String::from_utf8_lossy(body), "This is text: test");
         assert_eq!(response.status(), 200);
     }
 

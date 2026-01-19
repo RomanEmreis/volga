@@ -333,8 +333,8 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"test\"");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(String::from_utf8_lossy(body), "test");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
         assert_eq!(response.status(), 200);
     }
 

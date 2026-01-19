@@ -32,7 +32,7 @@ async fn it_adds_middleware_request() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "\"Pass!\"");
+    assert_eq!(response.text().await.unwrap(), "Pass!");
     
     server.shutdown().await;
 }
@@ -57,7 +57,7 @@ async fn it_adds_map_ok_middleware() {
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("X-Test").unwrap(), "Test");
-    assert_eq!(response.text().await.unwrap(), "\"Pass!\"");
+    assert_eq!(response.text().await.unwrap(), "Pass!");
     
     server.shutdown().await;
 }
@@ -209,7 +209,7 @@ async fn it_adds_map_err_middleware_for_route() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(response.text().await.unwrap(), "\"Some Error occurred!\"");
+    assert_eq!(response.text().await.unwrap(), "Some Error occurred!");
     
     server.shutdown().await;
 }
@@ -236,7 +236,7 @@ async fn it_adds_map_err_middleware_for_group() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert_eq!(response.text().await.unwrap(), "\"Some Error occurred!\"");
+    assert_eq!(response.text().await.unwrap(), "Some Error occurred!");
     
     server.shutdown().await;
 }
@@ -258,7 +258,7 @@ async fn it_adds_invalid_filter_middleware_for_route() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         response.text().await.unwrap(), 
-        "\"Validation: One or more request parameters are incorrect\""
+        "Validation: One or more request parameters are incorrect"
     );
     
     server.shutdown().await;
@@ -302,7 +302,7 @@ async fn it_adds_invalid_filter_middleware_for_group() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
         response.text().await.unwrap(), 
-        "\"Validation: One or more request parameters are incorrect\""
+        "Validation: One or more request parameters are incorrect"
     );
     
     server.shutdown().await;
@@ -366,7 +366,7 @@ async fn it_adds_shortcut_with_middleware() {
         .unwrap();
 
     assert!(!response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "\"Error!\"");
+    assert_eq!(response.text().await.unwrap(), "Error!");
     
     server.shutdown().await;
 }
@@ -410,7 +410,7 @@ async fn it_adds_shortcut_with_middleware_for_route() {
         .unwrap();
 
     assert!(!response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "\"Error!\"");
+    assert_eq!(response.text().await.unwrap(), "Error!");
     
     server.shutdown().await;
 }
@@ -459,7 +459,7 @@ async fn it_adds_shortcut_with_middleware_for_group() {
         .unwrap();
 
     assert!(!response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "\"Error!\"");
+    assert_eq!(response.text().await.unwrap(), "Error!");
     
     server.shutdown().await;
 }

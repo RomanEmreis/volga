@@ -389,7 +389,7 @@ mod tests {
             .status(200)
             .header("x-api-key", "some api key")
             .header("Content-Type", "application/json")
-            .body(HttpBody::json(content))
+            .body(HttpBody::json(content).unwrap())
             .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();

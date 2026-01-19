@@ -219,7 +219,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"Error: test\"");
+        assert_eq!(String::from_utf8_lossy(body), "Error: test");
         assert_eq!(response.status(), 400);
     }
 
@@ -233,7 +233,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"Error: test\"");
+        assert_eq!(String::from_utf8_lossy(body), "Error: test");
         assert_eq!(response.status(), 400);
     }
 
@@ -305,7 +305,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"User not found\"");
+        assert_eq!(String::from_utf8_lossy(body), "User not found");
         assert_eq!(response.status(), 404);
     }
 
@@ -319,7 +319,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"User not found\"");
+        assert_eq!(String::from_utf8_lossy(body), "User not found");
         assert_eq!(response.status(), 404);
     }
 
@@ -333,7 +333,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"User not found\"");
+        assert_eq!(String::from_utf8_lossy(body), "User not found");
         assert_eq!(response.status(), 404);
     }
 
@@ -423,7 +423,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"User created\"");
+        assert_eq!(String::from_utf8_lossy(body), "User created");
         assert_eq!(response.status(), 201);
     }
 
@@ -437,7 +437,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"User created\"");
+        assert_eq!(String::from_utf8_lossy(body), "User created");
         assert_eq!(response.status(), 201);
     }
 
@@ -451,7 +451,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"User created\"");
+        assert_eq!(String::from_utf8_lossy(body), "User created");
         assert_eq!(response.status(), 201);
     }
 
@@ -541,7 +541,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"Task accepted\"");
+        assert_eq!(String::from_utf8_lossy(body), "Task accepted");
         assert_eq!(response.status(), 202);
     }
 
@@ -555,7 +555,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"Task accepted\"");
+        assert_eq!(String::from_utf8_lossy(body), "Task accepted");
         assert_eq!(response.status(), 202);
     }
 
@@ -569,7 +569,7 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "\"Task accepted\"");
+        assert_eq!(String::from_utf8_lossy(body), "Task accepted");
         assert_eq!(response.status(), 202);
     }
 

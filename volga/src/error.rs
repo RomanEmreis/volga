@@ -66,13 +66,26 @@ impl StdError for Error {
 }
 
 impl From<Infallible> for Error {
+    #[inline]
     fn from(infallible: Infallible) -> Error {
         match infallible {}
     }
 }
 
 impl From<serde_json::Error> for Error {
+    #[inline]
     fn from(err: serde_json::Error) -> Error {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            inner: err.into(),
+            instance: None,
+        }
+    }
+}
+
+impl From<serde_urlencoded::ser::Error> for Error {
+    #[inline]
+    fn from(err: serde_urlencoded::ser::Error) -> Error {
         Self {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),

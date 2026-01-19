@@ -16,7 +16,7 @@ use crate::routing::{Route, RouteGroup};
 /// 
 /// # Deprecated
 /// This macro is deprecated in favor of [`volga::error::Problem`].
-/// The `Problem` type provides a strongly-typed API, better IDE support,
+/// The `Problem` type provides a strongly typed API, better IDE support,
 /// compile-time safety, and a single source of truth for response behavior.
 ///
 /// This macro is kept for backward compatibility and may be removed
@@ -49,18 +49,21 @@ macro_rules! problem {
     ) => {{
         let status = $crate::http::StatusCode::from_u16($status)
             .unwrap_or($crate::http::StatusCode::OK);
-        $crate::response!(
-            status,
-            $crate::HttpBody::json($crate::json::json_internal!({
-                "type": $crate::error::problem::get_problem_type_url($status),
-                "title": status.canonical_reason().unwrap_or("unknown status code"),
-                "status": $status,
-                $($key: $value),*
-            })),
-            [
-                ($crate::headers::CONTENT_TYPE, "problem+json"),
-            ]
-        )        
+        match $crate::HttpBody::json($crate::json::json_internal!({
+            "type": $crate::error::problem::get_problem_type_url($status),
+            "title": status.canonical_reason().unwrap_or("unknown status code"),
+            "status": $status,
+            $($key: $value),*
+        })) {
+            Ok(body) => $crate::response!(
+                status,
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "problem+json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     }};
     
     (
@@ -70,18 +73,21 @@ macro_rules! problem {
     ) => {{
         let status = $crate::http::StatusCode::from_u16($status)
             .unwrap_or($crate::http::StatusCode::OK);
-        $crate::response!(
-            status,
-            $crate::HttpBody::json($crate::json::json_internal!({
-                "type": $type,
-                "title": status.canonical_reason().unwrap_or("unknown status code"),
-                "status": $status,
-                $($key: $value),*
-            })),
-            [
-                ($crate::headers::CONTENT_TYPE, "problem+json"),
-            ]
-        )        
+        match $crate::HttpBody::json($crate::json::json_internal!({
+            "type": $type,
+            "title": status.canonical_reason().unwrap_or("unknown status code"),
+            "status": $status,
+            $($key: $value),*
+        })) {
+            Ok(body) => $crate::response!(
+                status,
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "problem+json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     }};
     
     (
@@ -89,18 +95,21 @@ macro_rules! problem {
         "status": $status:expr 
         $(, $key:tt : $value:tt)* $(,)?
     ) => {
-        $crate::response!(
-            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::json($crate::json::json_internal!({
-                "type": $crate::error::problem::get_problem_type_url($status),
-                "title": $title,
-                "status": $status,
-                $($key: $value),*
-            })),
-            [
-                ($crate::headers::CONTENT_TYPE, "problem+json"),
-            ]
-        )        
+        match $crate::HttpBody::json($crate::json::json_internal!({
+            "type": $crate::error::problem::get_problem_type_url($status),
+            "title": $title,
+            "status": $status,
+            $($key: $value),*
+        })) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "problem+json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
     
     (
@@ -109,18 +118,21 @@ macro_rules! problem {
         "status": $status:expr 
         $(, $key:tt : $value:tt)* $(,)?
     ) => {
-        $crate::response!(
-            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::json($crate::json::json_internal!({
-                "type": $type,
-                "title": $title,
-                "status": $status,
-                $($key: $value),*
-            })),
-            [
-                ($crate::headers::CONTENT_TYPE, "problem+json"),
-            ]
-        )        
+        match $crate::HttpBody::json($crate::json::json_internal!({
+            "type": $type,
+            "title": $title,
+            "status": $status,
+            $($key: $value),*
+        })) {
+            Ok(body) => $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                body,
+                [
+                    ($crate::headers::CONTENT_TYPE, "problem+json"),
+                ]
+            ),
+            Err(err) => Err(err),
+        }
     };
 }
 
@@ -187,7 +199,7 @@ impl<E: Serialize> IntoResponse for Problem<E> {
     fn into_response(self) -> HttpResult {
         crate::response!(
             self.status,
-            HttpBody::json(self),
+            HttpBody::json(self)?,
             [
                 (crate::headers::CONTENT_TYPE, "problem+json"),
             ]
