@@ -69,6 +69,10 @@ pin_project! {
             #[pin]
             inner: Limited<BoxBody>
         },
+        FullLimited {
+            #[pin]
+            inner: Limited<Full<Bytes>>
+        },
     }   
 }
 
@@ -85,6 +89,7 @@ impl Body for HttpBody {
             InnerBodyProj::Limited { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::BoxedLimited  { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Boxed  { inner } => inner.poll_frame(cx),
+            InnerBodyProj::FullLimited  { inner } => inner.poll_frame(cx).map_err(Error::client_error),
         }
     }
 
@@ -96,7 +101,8 @@ impl Body for HttpBody {
             InnerBody::Incoming { inner } => inner.is_end_stream(),
             InnerBody::Limited { inner } => inner.is_end_stream(),
             InnerBody::BoxedLimited  { inner } => inner.is_end_stream(),
-            InnerBody::Boxed  { inner } => inner.is_end_stream(),
+            InnerBody::Boxed { inner } => inner.is_end_stream(),
+            InnerBody::FullLimited { inner } => inner.is_end_stream(),
         }
     }
     
@@ -108,7 +114,8 @@ impl Body for HttpBody {
             InnerBody::Incoming { inner } => inner.size_hint(),
             InnerBody::Limited { inner } => inner.size_hint(),
             InnerBody::BoxedLimited { inner } => inner.size_hint(),
-            InnerBody::Boxed  { inner } => inner.size_hint(),
+            InnerBody::Boxed { inner } => inner.size_hint(),
+            InnerBody::FullLimited { inner } => inner.size_hint(),
         }
     }
 }
@@ -130,11 +137,14 @@ impl HttpBody {
     #[inline]
     pub(crate) fn limited(inner: HttpBody, limit: usize) -> Self {
         match inner.inner {
+            InnerBody::Incoming { inner } => Self { 
+                inner: InnerBody::Limited { inner: Limited::new(inner, limit) }
+            },
             InnerBody::Empty { inner } => Self {
                 inner: InnerBody::Empty { inner }
             },
             InnerBody::Full { inner } => Self {
-                inner: InnerBody::Full { inner }
+                inner: InnerBody::FullLimited { inner: Limited::new(inner, limit) }
             },
             InnerBody::Limited { inner } => Self { 
                 inner: InnerBody::Limited { inner }
@@ -145,9 +155,9 @@ impl HttpBody {
             InnerBody::Boxed { inner } => Self { 
                 inner: InnerBody::BoxedLimited { inner: Limited::new(inner, limit) }
             },
-            InnerBody::Incoming { inner } => Self { 
-                inner: InnerBody::Limited { inner: Limited::new(inner, limit) }
-            }
+            InnerBody::FullLimited { inner } => Self { 
+                inner: InnerBody::FullLimited { inner }
+            },
         }
     }
 
@@ -172,6 +182,9 @@ impl HttpBody {
             InnerBody::Full { inner } => inner
                 .map_err(Error::client_error)
                 .boxed(),
+            InnerBody::FullLimited { inner } => inner
+                .map_err(Error::client_error)
+                .boxed(),
             InnerBody::BoxedLimited { inner } => inner
                 .map_err(Error::client_error)
                 .boxed(),
@@ -181,6 +194,15 @@ impl HttpBody {
             InnerBody::Incoming { inner } => inner
                 .map_err(Error::client_error)
                 .boxed(),
+        }
+    }
+
+    /// Convert this body into boxed representation.
+    #[inline]
+    pub fn into_boxed_http_body(self) -> Self {
+        match self.inner {
+            InnerBody::Boxed { .. } => self,
+            _ => Self::new(self.into_boxed()),
         }
     }
 
@@ -306,7 +328,7 @@ mod tests {
     
     #[tokio::test]
     async fn it_returns_err_if_body_limit_exceeded() {
-        let body = HttpBody::boxed(HttpBody::full("Hello, World!").into_boxed());
+        let body = HttpBody::full("Hello, World!").into_boxed_http_body();
         let body = HttpBody::limited(body, 5);
         
         let collected = body.collect().await;
