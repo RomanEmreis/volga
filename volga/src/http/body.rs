@@ -226,7 +226,7 @@ impl HttpBody {
     /// Creates a new [`HttpBody`] from `&str` object 
     /// by copying it without `String` or `Box<str>` allocation.
     #[inline(always)]
-    pub fn from_str(s: &str) -> Self {
+    pub fn text_ref(s: &str) -> Self {
         Self::from_slice(s.as_bytes())
     }
 
@@ -400,7 +400,7 @@ mod tests {
     #[tokio::test]
     async fn it_works_with_str() {
         let string = String::from("Hello, World!");
-        let body = HttpBody::from_str(string.as_str());
+        let body = HttpBody::text_ref(string.as_str());
         
         let collected = body.collect().await;
         

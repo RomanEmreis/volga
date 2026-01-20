@@ -3,9 +3,19 @@
 use crate::{Json, Form, HttpBody};
 use crate::error::Error;
 use tokio::fs::File;
-use std::borrow::Cow;
+use std::convert::Infallible;
+use std::{borrow::Cow, str::FromStr};
 use bytes::Bytes;
 use serde::Serialize;
+
+impl FromStr for HttpBody {
+    type Err = Infallible;
+
+    #[inline(always)]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::text_ref(s))
+    }
+}
 
 impl From<&'static str> for HttpBody {
     #[inline]
@@ -292,5 +302,15 @@ mod from_tryfrom_tests {
         assert!(s.contains("a=1"));
         assert!(s.contains("b=two"));
         assert!(s.contains('&') || s == "a=1" || s == "b=two");
+    }
+
+    #[tokio::test]
+    async fn it_works_with_str() {
+        let string = String::from("Hello, World!");
+        let body = HttpBody::from_str(string.as_str()).unwrap();
+        
+        let collected = body.collect().await;
+        
+        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
     }
 }
