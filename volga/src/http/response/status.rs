@@ -8,7 +8,7 @@
 /// - **Plain text (UTF-8)**:
 ///   - Sugar for string literals: `status!(401, "...")`, `status!(401, "...", args...)`
 ///   - Explicit: `status!(401, text: ...)` (works for any value via `ToString`)
-///   - Explicit formatted: `status!(401, textf: "...", args...)`
+///   - Explicit formatted: `status!(401, fmt: "...", args...)`
 /// - **JSON**:
 ///   - Typed: `status!(401, value)` (serializes `value` as JSON)
 ///   - Untyped object sugar: `status!(401, { ... })`
@@ -20,7 +20,7 @@
 ///
 /// - `status!(401; [("x-req-id", "123")])`
 /// - `status!(401, text: "Unauthorized!"; [("x-req-id", "123")])`
-/// - `status!(401, textf: "Unauthorized: {}", reason; [("x-req-id", "123")])`
+/// - `status!(401, fmt: "Unauthorized: {}", reason; [("x-req-id", "123")])`
 /// - `status!(401, json: payload; [("x-req-id", "123")])`
 ///
 /// This form avoids macro ambiguities where headers could be accidentally captured as
@@ -42,9 +42,9 @@
 ///
 /// status!(401, "Unauthorized!");
 /// status!(401, text: true);
-/// status!(401, textf: "Unauthorized: {}", "token expired");
+/// status!(401, fmt: "Unauthorized: {}", "token expired");
 /// status!(401, "Unauthorized!"; [("x-req-id", "123")]);
-/// status!(401, textf: "Unauthorized: {}", "token expired"; [("x-req-id", "123")]);
+/// status!(401, fmt: "Unauthorized: {}", "token expired"; [("x-req-id", "123")]);
 /// ```
 ///
 /// ## JSON body
@@ -99,7 +99,7 @@ macro_rules! status {
     ($status:expr, text: $body:expr) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::full($body.to_string());
+            $body.into();
             [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
         )
     };
@@ -108,7 +108,7 @@ macro_rules! status {
     ($status:expr, text: $body:expr ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::full($body.to_string());
+            $body.into();
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
                 $( ($key, $value) ),*
@@ -117,12 +117,12 @@ macro_rules! status {
     };
 
     // =========================
-    // 3) Explicit TEXTF (format!)
+    // 3) Explicit FMT (format!)
     //    Use expr args to avoid capturing headers.
     // =========================
 
-    // status!(401, textf: "literal")
-    ($status:expr, textf: $fmt:literal) => {
+    // status!(401, fmt: "literal")
+    ($status:expr, fmt: $fmt:literal) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::full(format!($fmt));
@@ -130,8 +130,8 @@ macro_rules! status {
         )
     };
 
-    // status!(401, textf: "literal"; [headers])
-    ($status:expr, textf: $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    // status!(401, fmt: "literal"; [headers])
+    ($status:expr, fmt: $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::full(format!($fmt));
@@ -142,8 +142,8 @@ macro_rules! status {
         )
     };
 
-    // status!(401, textf: "literal", args...)
-    ($status:expr, textf: $fmt:literal, $( $arg:expr ),+ $(,)? ) => {
+    // status!(401, fmt: "literal", args...)
+    ($status:expr, fmt: $fmt:literal, $( $arg:expr ),+ $(,)? ) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
@@ -151,8 +151,8 @@ macro_rules! status {
         )
     };
 
-    // status!(401, textf: "literal", args...; [headers])
-    ($status:expr, textf: $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    // status!(401, fmt: "literal", args...; [headers])
+    ($status:expr, fmt: $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
@@ -231,25 +231,48 @@ macro_rules! status {
     // =========================
 
     // status!(401, "Unauthorized!")
-    ($status:expr, $fmt:literal) => {
-        $crate::response!(
-            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::full(format!($fmt));
-            [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
-        )
-    };
+    ($status:expr, $fmt:literal) => {{
+        const __S: &str = $fmt;
+
+        if $crate::utils::str::memchr_contains(b'{', __S.as_bytes()) {
+            $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                $crate::HttpBody::full(format!($fmt));
+                [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+            )
+        } else {
+            $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                $crate::HttpBody::text(__S);
+                [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+            )
+        }
+    }};
 
     // status!(401, "Unauthorized!"; [headers])
-    ($status:expr, $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::response!(
-            $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-            $crate::HttpBody::full(format!($fmt));
-            [
-                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                $( ($key, $value) ),*
-            ]
-        )
-    };
+    ($status:expr, $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+        const __S: &str = $fmt;
+        
+        if $crate::utils::str::memchr_contains(b'{', __S.as_bytes()) {
+            $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                $crate::HttpBody::full(format!($fmt));
+                [
+                    ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                    $( ($key, $value) ),*
+                ]
+            )
+        } else {
+            $crate::response!(
+                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
+                $crate::HttpBody::text(__S);
+                [
+                    ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                    $( ($key, $value) ),*
+                ]
+            )
+        }
+    }};
 
     // status!(401, "Unauthorized: {}", reason)
     ($status:expr, $fmt:literal, $( $arg:expr ),+ $(,)? ) => {
@@ -614,9 +637,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_creates_textf_formatted_response() {
+    async fn it_creates_fmt_formatted_response() {
         let name = "John";
-        let response = status!(401, textf: "{} is not authorized!", name);
+        let response = status!(401, fmt: "{} is not authorized!", name);
 
         assert!(response.is_ok());
 
@@ -632,9 +655,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_creates_textf_interpolated_response() {
+    async fn it_creates_fmt_interpolated_response() {
         let name = "John";
-        let response = status!(401, textf: "{name} is not authorized!");
+        let response = status!(401, fmt: "{name} is not authorized!");
 
         assert!(response.is_ok());
 
@@ -650,9 +673,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_creates_textf_with_headers_using_semicolon_separator() {
+    async fn it_creates_fmt_with_headers_using_semicolon_separator() {
         let name = "John";
-        let response = status!(401, textf: "{} is not authorized!", name; [
+        let response = status!(401, fmt: "{} is not authorized!", name; [
             ("x-req-id", "some req id"),
         ]);
 

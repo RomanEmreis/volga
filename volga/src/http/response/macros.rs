@@ -20,26 +20,62 @@ macro_rules! not_found {
     () => {
         $crate::status!(404)
     };
-    ({ $($json:tt)* }) => {
-        $crate::status!(404, { $($json)* })
-    };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(404; [ $( ($key, $value) ),* ])
     };
-    ($var:ident) => {
-        $crate::status!(404, $var)
+
+    (text: $body:expr) => {
+        $crate::status!(404, text: $body)
     };
+    (text: $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, text: $body; [ $( ($key, $value) ),* ])
+    };
+
+    (fmt: $body:literal) => {
+        $crate::status!(404, fmt: $body)
+    };
+    (fmt: $body:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, fmt: $body; [ $( ($key, $value) ),* ])
+    };
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ) => {
+        $crate::status!(404, fmt: $body, $( $arg ),+)
+    };
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, fmt: $body, $( $arg ),+ ; [ $( ($key, $value) ),* ])
+    };
+
+    (json: $text:expr) => {
+        $crate::status!(404, json: $text)
+    };
+    (json: $text:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, json: $text; [ $( ($key, $value) ),* ])
+    };
+
+    ({ $($json:tt)* }) => {
+        $crate::status!(404, { $($json)* })
+    };
+    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, { $($json)* }; [ $( ($key, $value) ),* ])
+    };
+
+    ($text:literal) => {
+        $crate::status!(404, $text)
+    };
+    ($text:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, $text; [ $( ($key, $value) ),* ])
+    };
+    ($text:literal, $( $arg:expr ),+ $(,)?) => {
+        $crate::status!(404, $text, $( $arg ),+)
+    };
+    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(404, $text, $( $arg ),+; [ $( ($key, $value) ),* ])
+    };
+
     ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(404, $body; [ $( ($key, $value) ),* ])
     };
-    ($fmt:tt) => {
-        $crate::status!(404, $fmt)
-    };
     ($body:expr) => {
         $crate::status!(404, $body)
-    };
-    ($($fmt:tt)*) => {
-        $crate::status!(404, $($fmt)*)
     };
 }
 
@@ -63,26 +99,62 @@ macro_rules! bad_request {
     () => {
         $crate::status!(400)
     };
-    ({ $($json:tt)* }) => {
-        $crate::status!(400, { $($json)* })
-    };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(400; [ $( ($key, $value) ),* ])
     };
-    ($var:ident) => {
-        $crate::status!(400, $var)
+
+    (text: $body:expr) => {
+        $crate::status!(400, text: $body)
     };
+    (text: $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(400, text: $body; [ $( ($key, $value) ),* ])
+    };
+
+    (fmt: $body:literal) => {
+        $crate::status!(400, fmt: $body)
+    };
+    (fmt: $body:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(400, fmt: $body; [ $( ($key, $value) ),* ])
+    };
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ) => {
+        $crate::status!(400, fmt: $body, $( $arg ),+)
+    };
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(400, fmt: $body, $( $arg ),+ ; [ $( ($key, $value) ),* ])
+    };
+
+    (json: $text:expr) => {
+        $crate::status!(400, json: $text)
+    };
+    (json: $text:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(400, json: $text; [ $( ($key, $value) ),* ])
+    };
+
+    ({ $($json:tt)* }) => {
+        $crate::status!(400, { $($json)* })
+    };
+    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(400, { $($json)* }; [ $( ($key, $value) ),* ])
+    };
+
+    ($text:literal) => {
+        $crate::status!(400, $text)
+    };
+    ($text:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(400, $text; [ $( ($key, $value) ),* ])
+    };
+    ($text:literal, $( $arg:expr ),+ $(,)?) => {
+        $crate::status!(400, $text, $( $arg ),+)
+    };
+    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(400, $text, $( $arg ),+; [ $( ($key, $value) ),* ])
+    };
+
     ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(400, $body; [ $( ($key, $value) ),* ])
     };
-    ($fmt:tt) => {
-        $crate::status!(400, $fmt)
-    };
     ($body:expr) => {
         $crate::status!(400, $body)
-    };
-    ($($fmt:tt)*) => {
-        $crate::status!(400, $($fmt)*)
     };
 }
 
@@ -106,26 +178,62 @@ macro_rules! created {
     () => {
         $crate::status!(201)
     };
-    ({ $($json:tt)* }) => {
-        $crate::status!(201, { $($json)* })
-    };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(201; [ $( ($key, $value) ),* ])
     };
-    ($var:ident) => {
-        $crate::status!(201, $var)
+
+    (text: $body:expr) => {
+        $crate::status!(201, text: $body)
     };
+    (text: $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(201, text: $body; [ $( ($key, $value) ),* ])
+    };
+
+    (fmt: $body:literal) => {
+        $crate::status!(201, fmt: $body)
+    };
+    (fmt: $body:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(201, fmt: $body; [ $( ($key, $value) ),* ])
+    };
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ) => {
+        $crate::status!(201, fmt: $body, $( $arg ),+)
+    };
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(201, fmt: $body, $( $arg ),+ ; [ $( ($key, $value) ),* ])
+    };
+
+    (json: $text:expr) => {
+        $crate::status!(201, json: $text)
+    };
+    (json: $text:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(201, json: $text; [ $( ($key, $value) ),* ])
+    };
+
+    ({ $($json:tt)* }) => {
+        $crate::status!(201, { $($json)* })
+    };
+    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(201, { $($json)* }; [ $( ($key, $value) ),* ])
+    };
+
+    ($text:literal) => {
+        $crate::status!(201, $text)
+    };
+    ($text:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(201, $text; [ $( ($key, $value) ),* ])
+    };
+    ($text:literal, $( $arg:expr ),+ $(,)?) => {
+        $crate::status!(201, $text, $( $arg ),+)
+    };
+    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(201, $text, $( $arg ),+; [ $( ($key, $value) ),* ])
+    };
+
     ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(201, $body; [ $( ($key, $value) ),* ])
     };
-    ($fmt:tt) => {
-        $crate::status!(201, $fmt)
-    };
     ($body:expr) => {
         $crate::status!(201, $body)
-    };
-    ($($fmt:tt)*) => {
-        $crate::status!(201, $($fmt)*)
     };
 }
 
@@ -149,26 +257,62 @@ macro_rules! accepted {
     () => {
         $crate::status!(202)
     };
-    ({ $($json:tt)* }) => {
-        $crate::status!(202, { $($json)* })
-    };
     ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(202; [ $( ($key, $value) ),* ])
     };
-    ($var:ident) => {
-        $crate::status!(202, $var)
+
+    (text: $body:expr) => {
+        $crate::status!(202, text: $body)
     };
+    (text: $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(202, text: $body; [ $( ($key, $value) ),* ])
+    };
+
+    (fmt: $body:literal) => {
+        $crate::status!(202, fmt: $body)
+    };
+    (fmt: $body:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(202, fmt: $body; [ $( ($key, $value) ),* ])
+    };
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ) => {
+        $crate::status!(202, fmt: $body, $( $arg ),+)
+    };
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(202, fmt: $body, $( $arg ),+ ; [ $( ($key, $value) ),* ])
+    };
+
+    (json: $text:expr) => {
+        $crate::status!(202, json: $text)
+    };
+    (json: $text:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(202, json: $text; [ $( ($key, $value) ),* ])
+    };
+
+    ({ $($json:tt)* }) => {
+        $crate::status!(202, { $($json)* })
+    };
+    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(202, { $($json)* }; [ $( ($key, $value) ),* ])
+    };
+
+    ($text:literal) => {
+        $crate::status!(202, $text)
+    };
+    ($text:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(202, $text; [ $( ($key, $value) ),* ])
+    };
+    ($text:literal, $( $arg:expr ),+ $(,)?) => {
+        $crate::status!(202, $text, $( $arg ),+)
+    };
+    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+        $crate::status!(202, $text, $( $arg ),+; [ $( ($key, $value) ),* ])
+    };
+
     ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::status!(202, $body; [ $( ($key, $value) ),* ])
     };
-    ($fmt:tt) => {
-        $crate::status!(202, $fmt)
-    };
     ($body:expr) => {
         $crate::status!(202, $body)
-    };
-    ($($fmt:tt)*) => {
-        $crate::status!(202, $($fmt)*)
     };
 }
 
@@ -176,10 +320,19 @@ macro_rules! accepted {
 mod tests {
     use http_body_util::BodyExt;
     use serde::Serialize;
+    use bytes::Bytes;
 
     #[derive(Serialize)]
     struct TestPayload {
         name: String
+    }
+
+    async fn body_to_bytes(resp: &mut crate::http::HttpResponse) -> Bytes {
+        resp.body_mut().collect().await.unwrap().to_bytes()
+    }
+
+    fn assert_header(resp: &crate::http::HttpResponse, k: &str, v: &str) {
+        assert_eq!(resp.headers().get(k).unwrap(), v);
     }
     
     #[tokio::test]
@@ -282,6 +435,89 @@ mod tests {
         assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
         assert_eq!(response.status(), 400);
     }
+
+    #[tokio::test]
+    async fn it_creates_400_with_text_prefixed_response() {
+        let response = bad_request!(text: "test");
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "test");
+        assert_eq!(response.status(), 400);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_400_with_text_prefixed_response_and_headers() {
+        let response = bad_request!(text: "test"; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "test");
+        assert_eq!(response.status(), 400);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_400_with_fmt_prefixed_capture() {
+        let text = "test";
+        let response = bad_request!(fmt: "Error: {text}");
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "Error: test");
+        assert_eq!(response.status(), 400);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_400_with_fmt_prefixed_args() {
+        let response = bad_request!(fmt: "Error: {} {}", "a", 1);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "Error: a 1");
+        assert_eq!(response.status(), 400);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_400_with_fmt_prefixed_args_and_headers() {
+        let response = bad_request!(fmt: "Error: {}", "x"; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "Error: x");
+        assert_eq!(response.status(), 400);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_anonymous_type_400_with_json_body_and_headers_via_braces() {
+        let response = bad_request!({ "name": "test" }; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
+        assert_eq!(response.status(), 400);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+    }
+
     
     #[tokio::test]
     async fn it_creates_404_response() {
@@ -402,6 +638,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_creates_404_with_text_prefixed_response() {
+        let response = not_found!(text: "User not found");
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "User not found");
+        assert_eq!(response.status(), 404);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_404_with_fmt_prefixed_capture_and_headers() {
+        let user = "User";
+        let response = not_found!(fmt: "{user} not found"; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "User not found");
+        assert_eq!(response.status(), 404);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_404_with_fmt_prefixed_args() {
+        let response = not_found!(fmt: "{} {}", "User", "not found");
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "User not found");
+        assert_eq!(response.status(), 404);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_404_with_json_prefixed_response_and_headers() {
+        let payload = TestPayload { name: "test".into() };
+        let response = not_found!(json: payload; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
+        assert_eq!(response.status(), 404);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+    }
+
+    #[tokio::test]
     async fn it_creates_201_response() {
         let response = created!();
 
@@ -518,6 +810,62 @@ mod tests {
         assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
         assert_eq!(response.status(), 201);
     }
+
+    #[tokio::test]
+    async fn it_creates_201_with_text_prefixed_response() {
+        let response = created!(text: "User created");
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "User created");
+        assert_eq!(response.status(), 201);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_201_with_fmt_prefixed_args_and_headers() {
+        let response = created!(fmt: "{} created", "User"; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "User created");
+        assert_eq!(response.status(), 201);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_201_with_json_prefixed_response_and_headers() {
+        let payload = TestPayload { name: "test".into() };
+        let response = created!(json: payload; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
+        assert_eq!(response.status(), 201);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+    }
+
+    #[tokio::test]
+    async fn it_creates_anonymous_type_201_with_json_body_and_headers_via_braces() {
+        let response = created!({ "name": "test" }; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
+        assert_eq!(response.status(), 201);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+    }
     
     #[tokio::test]
     async fn it_creates_202_response() {
@@ -546,6 +894,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_creates_202_response_with_text_text() {
+        let response = accepted!(text: "Task accepted");
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "Task accepted");
+        assert_eq!(response.status(), 202);
+    }
+
+    #[tokio::test]
+    async fn it_creates_202_response_with_fmt_text() {
+        let response = accepted!(fmt: "Task accepted");
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "Task accepted");
+        assert_eq!(response.status(), 202);
+    }
+
+    #[tokio::test]
     async fn it_creates_202_response_with_interpolated_text() {
         let task = "Task";
         let response = accepted!("{task} accepted");
@@ -563,6 +937,34 @@ mod tests {
     async fn it_creates_202_response_with_formatted_text() {
         let task = "Task";
         let response = accepted!("{} accepted", task);
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "Task accepted");
+        assert_eq!(response.status(), 202);
+    }
+
+    #[tokio::test]
+    async fn it_creates_202_response_with_fmt_interpolated_text() {
+        let task = "Task";
+        let response = accepted!(fmt: "{task} accepted");
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "Task accepted");
+        assert_eq!(response.status(), 202);
+    }
+
+    #[tokio::test]
+    async fn it_creates_202_response_with_fmt_formatted_text() {
+        let task = "Task";
+        let response = accepted!(fmt: "{} accepted", task);
 
         assert!(response.is_ok());
 
@@ -635,5 +1037,49 @@ mod tests {
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
         assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
         assert_eq!(response.status(), 202);
+    }
+
+    #[tokio::test]
+    async fn it_creates_202_with_fmt_prefixed_capture_and_headers() {
+        let task = "Task";
+        let response = accepted!(fmt: "{task} accepted"; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "Task accepted");
+        assert_eq!(response.status(), 202);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+    }
+
+    #[tokio::test]
+    async fn it_creates_202_with_json_prefixed_response() {
+        let payload = TestPayload { name: "test".into() };
+        let response = accepted!(json: payload);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
+        assert_eq!(response.status(), 202);
+        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+    }
+
+    #[tokio::test]
+    async fn it_creates_202_with_json_prefixed_response_and_headers() {
+        let payload = TestPayload { name: "test".into() };
+        let response = accepted!(json: payload; [("x-req-id", "1")]);
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = body_to_bytes(&mut response).await;
+
+        assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
+        assert_eq!(response.status(), 202);
+        assert_header(&response, "x-req-id", "1");
+        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
     }
 }

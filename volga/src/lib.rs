@@ -30,8 +30,8 @@
 //! ```
 
 mod server;
-pub(crate) mod utils;
 
+pub mod utils;
 pub mod app;
 pub mod http;
 pub mod headers;

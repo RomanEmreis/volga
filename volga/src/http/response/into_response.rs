@@ -79,7 +79,11 @@ where
 impl IntoResponse for &'static str {
     #[inline]
     fn into_response(self) -> HttpResult {
-        Cow::Borrowed(self).into_response()
+        response!(
+            StatusCode::OK,
+            HttpBody::from_static_text(self);
+            [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
+        )
     }
 }
 
@@ -88,7 +92,7 @@ impl IntoResponse for Cow<'static, str> {
     fn into_response(self) -> HttpResult {
         response!(
             StatusCode::OK,
-            HttpBody::from(self);
+            HttpBody::text(self);
             [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
         )
     }
@@ -97,14 +101,22 @@ impl IntoResponse for Cow<'static, str> {
 impl IntoResponse for String {
     #[inline]
     fn into_response(self) -> HttpResult {
-        Cow::<'static, str>::Owned(self).into_response()
+        response!(
+            StatusCode::OK,
+            HttpBody::text(self);
+            [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
+        )
     }
 }
 
 impl IntoResponse for Box<str> {
     #[inline]
     fn into_response(self) -> HttpResult {
-        String::from(self).into_response()
+        response!(
+            StatusCode::OK,
+            HttpBody::text(self.into_string());
+            [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
+        )
     }
 }
 
@@ -222,7 +234,7 @@ macro_rules! impl_into_response {
             fn into_response(self) -> HttpResult {
                 response!(
                     $crate::http::StatusCode::OK,
-                    HttpBody::full(self.to_string());
+                    self.into();
                     [($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8")]
                 )
             }
@@ -231,7 +243,7 @@ macro_rules! impl_into_response {
 }
 
 impl_into_response! {
-    bool,
+    bool, char,
     i8, u8,
     i16, u16,
     i32, u32,

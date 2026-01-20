@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-- No changes yet.
+- Updated `HttpBody::json`/`form` to return Result so serialization errors surface instead of being embedded into the body, and added an Error conversion for `serde_urlencoded` failures.
+- Response helper macros now propagate JSON/form serialization errors, and problem-details responses match on `HttpBody::json` to return `Err` on failure.
+- Added explicit `ok!(text: ... )`/`ok!(fmt: ...)` and `status!(text: ... )`/`status!(fmt: ... )` macros for `text/plain` responses and documented them alongside existing `ok!`/`status!` examples.
+- Removed unnecessary boxing for `HttpBody::full`, `HttpBody::json` and `HttpBody::form`
+- Added additional methods: `HttpBody::text`, `HttpBody::from_static`, `HttpBody::from_static_text`, `HttpBody::from_str` and `HttpBody::from_slice` for better control.
+- Improved performance for all producing response macros and `IntoResponse` implementations.
 
 ## 0.8.0
 

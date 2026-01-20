@@ -125,7 +125,7 @@ macro_rules! ok {
     (text: $body:expr) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full($body.to_string());
+            $body.into();
             [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
         )
     };
@@ -134,7 +134,7 @@ macro_rules! ok {
     (text: $body:expr ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
-            $crate::HttpBody::full($body.to_string());
+            $body.into();
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
                 $( ($key, $value) ),*
@@ -143,12 +143,12 @@ macro_rules! ok {
     };
 
     // =========================
-    // 3) Explicit TEXTF (format!)
+    // 3) Explicit FMT (format!)
     //    Use expr args to avoid capturing headers.
     // =========================
 
-    // ok!(textf: "hello {name}")
-    (textf: $fmt:literal) => {
+    // ok!(fmt: "hello {name}")
+    (fmt: $fmt:literal) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt));
@@ -156,8 +156,8 @@ macro_rules! ok {
         )
     };
 
-    // ok!(textf: "hello {name}"; [headers])
-    (textf: $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    // ok!(fmt: "hello {name}"; [headers])
+    (fmt: $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt));
@@ -168,8 +168,8 @@ macro_rules! ok {
         )
     };
 
-    // ok!(textf: "hello {}", name, 123)
-    (textf: $fmt:literal, $( $arg:expr ),+ $(,)? ) => {
+    // ok!(fmt: "hello {} {}", name, 123)
+    (fmt: $fmt:literal, $( $arg:expr ),+ $(,)? ) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
@@ -177,8 +177,8 @@ macro_rules! ok {
         )
     };
 
-    // ok!(textf: "hello {}", name; [headers])
-    (textf: $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    // ok!(fmt: "hello {}", name; [headers])
+    (fmt: $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
@@ -269,25 +269,48 @@ macro_rules! ok {
     // =========================
 
     // ok!("ok")
-    ($fmt:literal) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt));
-            [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
-        )
-    };
+    ($fmt:literal) => {{
+        const __S: &str = $fmt;
+
+        if $crate::utils::str::memchr_contains(b'{', __S.as_bytes()) {
+            $crate::response!(
+                $crate::http::StatusCode::OK,
+                $crate::HttpBody::full(format!($fmt));
+                [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+            )
+        } else {
+            $crate::response!(
+                $crate::http::StatusCode::OK,
+                $crate::HttpBody::text(__S);
+                [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+            )
+        }
+    }};
 
     // ok!("ok"; [headers])
-    ($fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::response!(
-            $crate::http::StatusCode::OK,
-            $crate::HttpBody::full(format!($fmt));
-            [
-                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                $( ($key, $value) ),*
-            ]
-        )
-    };
+    ($fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+        const __S: &str = $fmt;
+
+        if $crate::utils::str::memchr_contains(b'{', __S.as_bytes()) {
+            $crate::response!(
+                $crate::http::StatusCode::OK,
+                $crate::HttpBody::full(format!($fmt));
+                [
+                    ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                    $( ($key, $value) ),*
+                ]
+            )
+        } else {
+            $crate::response!(
+                $crate::http::StatusCode::OK,
+                $crate::HttpBody::text(__S);
+                [
+                    ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                    $( ($key, $value) ),*
+                ]
+            )
+        }
+    }};
 
     // ok!("Hello {}", name)
     ($fmt:literal, $( $arg:expr ),+ $(,)? ) => {
@@ -772,7 +795,7 @@ mod tests {
     #[tokio::test]
     async fn it_creates_text_prefixed_formatted_response_with_custom_headers() {
         let name = "volga";
-        let response = ok!(textf: "hello {}", name; [
+        let response = ok!(fmt: "hello {}", name; [
             ("x-req-id", "123"),
         ]);
 

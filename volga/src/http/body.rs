@@ -32,6 +32,8 @@ pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, Error>;
 /// A boxed body that is !Sync
 pub type UnsyncBoxBody = http_body_util::combinators::UnsyncBoxBody<Bytes, Error>;
 
+mod into_body;
+
 pin_project! {
     /// Represents a response/request body
     pub struct HttpBody {
@@ -46,6 +48,10 @@ pin_project! {
         Empty {
             #[pin]
             inner: Empty<Bytes>
+        },
+        Full {
+            #[pin]
+            inner: Full<Bytes>
         },
         Incoming {
             #[pin]
@@ -63,6 +69,10 @@ pin_project! {
             #[pin]
             inner: Limited<BoxBody>
         },
+        FullLimited {
+            #[pin]
+            inner: Limited<Full<Bytes>>
+        },
     }   
 }
 
@@ -74,10 +84,12 @@ impl Body for HttpBody {
     fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         match self.project().inner.project() {
             InnerBodyProj::Empty { inner } => inner.poll_frame(cx).map_err(Error::client_error),
+            InnerBodyProj::Full { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Incoming { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Limited { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::BoxedLimited  { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Boxed  { inner } => inner.poll_frame(cx),
+            InnerBodyProj::FullLimited  { inner } => inner.poll_frame(cx).map_err(Error::client_error),
         }
     }
 
@@ -85,10 +97,12 @@ impl Body for HttpBody {
     fn is_end_stream(&self) -> bool {
         match &self.inner {
             InnerBody::Empty { inner } => inner.is_end_stream(),
+            InnerBody::Full { inner } => inner.is_end_stream(),
             InnerBody::Incoming { inner } => inner.is_end_stream(),
             InnerBody::Limited { inner } => inner.is_end_stream(),
             InnerBody::BoxedLimited  { inner } => inner.is_end_stream(),
-            InnerBody::Boxed  { inner } => inner.is_end_stream(),
+            InnerBody::Boxed { inner } => inner.is_end_stream(),
+            InnerBody::FullLimited { inner } => inner.is_end_stream(),
         }
     }
     
@@ -96,10 +110,12 @@ impl Body for HttpBody {
     fn size_hint(&self) -> SizeHint {
         match &self.inner {
             InnerBody::Empty { inner } => inner.size_hint(),
+            InnerBody::Full { inner } => inner.size_hint(),
             InnerBody::Incoming { inner } => inner.size_hint(),
             InnerBody::Limited { inner } => inner.size_hint(),
             InnerBody::BoxedLimited { inner } => inner.size_hint(),
-            InnerBody::Boxed  { inner } => inner.size_hint(),
+            InnerBody::Boxed { inner } => inner.size_hint(),
+            InnerBody::FullLimited { inner } => inner.size_hint(),
         }
     }
 }
@@ -121,8 +137,14 @@ impl HttpBody {
     #[inline]
     pub(crate) fn limited(inner: HttpBody, limit: usize) -> Self {
         match inner.inner {
+            InnerBody::Incoming { inner } => Self { 
+                inner: InnerBody::Limited { inner: Limited::new(inner, limit) }
+            },
             InnerBody::Empty { inner } => Self {
                 inner: InnerBody::Empty { inner }
+            },
+            InnerBody::Full { inner } => Self {
+                inner: InnerBody::FullLimited { inner: Limited::new(inner, limit) }
             },
             InnerBody::Limited { inner } => Self { 
                 inner: InnerBody::Limited { inner }
@@ -133,9 +155,9 @@ impl HttpBody {
             InnerBody::Boxed { inner } => Self { 
                 inner: InnerBody::BoxedLimited { inner: Limited::new(inner, limit) }
             },
-            InnerBody::Incoming { inner } => Self { 
-                inner: InnerBody::Limited { inner: Limited::new(inner, limit) }
-            }
+            InnerBody::FullLimited { inner } => Self { 
+                inner: InnerBody::FullLimited { inner }
+            },
         }
     }
 
@@ -157,6 +179,12 @@ impl HttpBody {
             InnerBody::Empty { inner } => inner
                 .map_err(Error::client_error)
                 .boxed(),
+            InnerBody::Full { inner } => inner
+                .map_err(Error::client_error)
+                .boxed(),
+            InnerBody::FullLimited { inner } => inner
+                .map_err(Error::client_error)
+                .boxed(),
             InnerBody::BoxedLimited { inner } => inner
                 .map_err(Error::client_error)
                 .boxed(),
@@ -169,53 +197,92 @@ impl HttpBody {
         }
     }
 
+    /// Convert this body into boxed representation.
+    #[inline]
+    pub fn into_boxed_http_body(self) -> Self {
+        match self.inner {
+            InnerBody::Boxed { .. } => self,
+            _ => Self::new(self.into_boxed()),
+        }
+    }
+
     /// Consumes this [`HttpBody`] into [`BodyDataStream`]
     #[inline]
     pub fn into_data_stream(self) -> BodyDataStream<HttpBody> {
         BodyExt::into_data_stream(self)
     }
 
-    /// Consumes the [`HttpBody`] and returns the body as a boxed trait object that is !Sync
+    /// Consumes the [`HttpBody`] and returns the body as a boxed trait object that is !Sync.
     #[inline]
     pub fn into_boxed_unsync(self) -> UnsyncBoxBody {
         self.boxed_unsync()
     }
-    
+
+    /// Creates a new [`HttpBody`] from any string object.
+    /// There is no allocating or copying.
+    #[inline]
+    pub fn text<S>(s: S) -> Self
+    where
+        S: Into<Cow<'static, str>>,
+    {
+        match s.into() {
+            Cow::Borrowed(st) => Self::from_static_text(st),
+            Cow::Owned(owned) => Self::full(owned)
+        }
+    }
+
+    /// Creates a new [`HttpBody`] from a static slice of bytes.
+    /// There is no allocating or copying.
+    #[inline(always)]
+    pub fn from_static(s: &'static [u8]) -> Self {
+        Self::full(Bytes::from_static(s))
+    }
+
+    /// Creates a new [`HttpBody`] from a static str.
+    /// There is no allocating or copying.
+    #[inline(always)]
+    pub fn from_static_text(s: &'static str) -> Self {
+        Self::from_static(s.as_bytes())
+    }
+
+    /// Creates a new [`HttpBody`] from `&str` object 
+    /// by copying it without `String` or `Box<str>` allocation.
+    #[inline(always)]
+    pub fn text_ref(s: &str) -> Self {
+        Self::from_slice(s.as_bytes())
+    }
+
+    /// Creates a new [`HttpBody`] from a slice of bytes
+    /// by copying it without `Vec<u8>` or `Box<[u8]>` allocation.
+    #[inline(always)]
+    pub fn from_slice(s: &[u8]) -> Self {
+        Self::full(Bytes::copy_from_slice(s))
+    }
+
     /// Creates a new [`HttpBody`] from JSON object
     #[inline]
     pub fn json<T: Serialize>(content: T) -> Result<HttpBody, Error> {
         let content = serde_json::to_vec(&content)?;
-        let inner = Full::from(content)
-            .map_err(Error::from)
-            .boxed();
-        Ok(Self { inner: InnerBody::Boxed { inner } })
+        Ok(Self { inner: InnerBody::Full { inner: Full::from(content) } })
     }
 
     /// Creates a new [`HttpBody`] from a Form Data object
     #[inline]
     pub fn form<T: Serialize>(content: T) -> Result<HttpBody, Error> {
-        let content = serde_urlencoded::to_string(&content)
-            .map_err(|e| Error::server_error(e.to_string()))?;
-        let inner = Full::from(content)
-            .map_err(Error::from)
-            .boxed();
-        Ok(Self { inner: InnerBody::Boxed { inner } })
+        let content = serde_urlencoded::to_string(&content)?;
+        Ok(Self { inner: InnerBody::Full { inner: Full::from(content) } })
     }
 
     /// Creates a new [`HttpBody`] from an object that is convertable to a byte array
     #[inline]
     pub fn full<T: Into<Bytes>>(chunk: T) -> HttpBody {
-        let inner = Full::new(chunk.into())
-            .map_err(Error::from)
-            .boxed();
-        Self { inner: InnerBody::Boxed { inner } }
+        Self { inner: InnerBody::Full { inner: Full::new(chunk.into()) } }
     }
 
     /// Creates an empty [`HttpBody`]
     #[inline]
     pub fn empty() -> HttpBody {
-        let inner = Empty::<Bytes>::new();
-        Self { inner: InnerBody::Empty { inner } }
+        Self { inner: InnerBody::Empty { inner: Empty::<Bytes>::new() } }
     }
 
     /// Creates a new [`HttpBody`] from [`File`] stream
@@ -240,22 +307,13 @@ impl HttpBody {
     }
 }
 
-impl From<Cow<'static, str>> for HttpBody {
-    #[inline]
-    fn from(value: Cow<'static, str>) -> Self {
-        let inner = Full::from(value)
-            .map_err(Error::from)
-            .boxed();
-        Self { inner: InnerBody::Boxed { inner } }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use http_body_util::BodyExt;
     use hyper::body::Body;
     use serde::{Serialize, Serializer};
     use crate::HttpBody;
+    use std::borrow::Cow;
     
     struct FailStruct;
     
@@ -270,7 +328,7 @@ mod tests {
     
     #[tokio::test]
     async fn it_returns_err_if_body_limit_exceeded() {
-        let body = HttpBody::full("Hello, World!");
+        let body = HttpBody::full("Hello, World!").into_boxed_http_body();
         let body = HttpBody::limited(body, 5);
         
         let collected = body.collect().await;
@@ -314,5 +372,70 @@ mod tests {
         let size = collected.unwrap().size_hint();
         assert_eq!(size.lower(), 0);
         assert_eq!(size.upper(), None)
+    }
+
+    #[tokio::test]
+    async fn it_works_with_static_str() {
+        let body = HttpBody::from_static_text("Hello, World!");
+        
+        let collected = body.collect().await;
+        
+        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn it_works_with_static_bytes() {
+        let body = HttpBody::from_static(b"Hello, World!");
+        
+        let collected = body.collect().await;
+        
+        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn it_works_with_string() {
+        let body = HttpBody::text(String::from("Hello, World!"));
+        
+        let collected = body.collect().await;
+        
+        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn it_works_with_static_str_to_text() {
+        let body = HttpBody::text("Hello, World!");
+        
+        let collected = body.collect().await;
+        
+        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn it_works_with_cow() {
+        let body = HttpBody::text(Cow::<'static, str>::Borrowed("Hello, World!"));
+        
+        let collected = body.collect().await;
+        
+        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn it_works_with_str() {
+        let string = String::from("Hello, World!");
+        let body = HttpBody::text_ref(string.as_str());
+        
+        let collected = body.collect().await;
+        
+        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn it_works_with_slice() {
+        let string = String::from("Hello, World!");
+        let body = HttpBody::from_slice(string.as_bytes());
+        
+        let collected = body.collect().await;
+        
+        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
     }
 }

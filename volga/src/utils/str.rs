@@ -2,6 +2,12 @@
 
 use memchr::memchr_iter;
 
+/// Search for the first occurrence of a byte in a slice using [`memchr::memchr`]
+#[inline(always)]
+pub fn memchr_contains(needle: u8, haystack: &[u8]) -> bool {
+    memchr::memchr(needle, haystack).is_some()
+}
+
 /// Splits a byte slice by a delimiter using [`memchr::memchr_iter`]
 #[inline]
 pub(crate) fn memchr_split(delimiter: u8, value: &[u8]) -> MemchrSplitIter<'_> {
