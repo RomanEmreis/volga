@@ -154,8 +154,8 @@ impl<T: DeserializeOwned> NamedPath<T> {
     /// Parses the slice of tuples `(String, String)` into [`Path<T>`]
     #[inline]
     pub(crate) fn from_slice(route_params: &PathArgs) -> Result<Self, Error> {
-        let route_str = PathArg::make_query_str(route_params)?;
-        serde_urlencoded::from_str::<T>(&route_str)
+        let route_str = route_params.query_str()?;
+        serde_urlencoded::from_str::<T>(route_str)
             .map(Self)
             .map_err(PathError::from_serde_error)
     }
@@ -249,7 +249,7 @@ impl<T: FromPathArgs + Send> FromPayload for Path<T> {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::PathArgs(params) = payload else { unreachable!() };
-        ready(Self::from_slice(&params))
+        ready(Self::from_slice(params))
     }
 
     #[inline]
@@ -266,7 +266,7 @@ impl<T: DeserializeOwned + Send> FromPayload for NamedPath<T> {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::PathArgs(params) = payload else { unreachable!() };
-        ready(Self::from_slice(&params))
+        ready(Self::from_slice(params))
     }
 
     #[inline]
@@ -469,7 +469,7 @@ mod tests {
         smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
-        ]
+        ].into()
     }
 
     #[tokio::test]
@@ -780,7 +780,7 @@ mod tests {
     async fn it_reads_named_path_from_payload() {
         let args = create_path_args();
 
-        let path = NamedPath::<Params>::from_payload(Payload::PathArgs(args)).await.unwrap();
+        let path = NamedPath::<Params>::from_payload(Payload::PathArgs(&args)).await.unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
@@ -790,7 +790,7 @@ mod tests {
     async fn it_reads_path_from_payload() {
         let args = create_path_args();
 
-        let path = Path::<(u32, String)>::from_payload(Payload::PathArgs(args)).await.unwrap().0;
+        let path = Path::<(u32, String)>::from_payload(Payload::PathArgs(&args)).await.unwrap().0;
 
         assert_eq!(path.0, 123u32);
         assert_eq!(path.1, "John")

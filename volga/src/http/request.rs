@@ -373,7 +373,7 @@ mod tests {
         let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
-        ];
+        ].into();
 
         let req = Request::get("/")
             .extension(args)
