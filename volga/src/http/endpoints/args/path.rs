@@ -281,7 +281,7 @@ impl FromPayload for String {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
-        ok(param.value.into_string())
+        ok(param.value.as_ref().to_owned())
     }
     
     #[inline]
@@ -293,7 +293,7 @@ impl FromPayload for String {
 impl FromPathArg for String {
     #[inline]
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
-        Ok(arg.value.to_string())
+        Ok(arg.value.as_ref().to_owned())
     }
 }
 
@@ -303,7 +303,7 @@ impl FromPayload for Cow<'static, str> {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
-        ok(Cow::Owned(param.value.into_string()))
+        ok(Cow::Owned(param.value.as_ref().to_owned()))
     }
 
     #[inline]
@@ -315,7 +315,7 @@ impl FromPayload for Cow<'static, str> {
 impl FromPathArg for Cow<'static, str> {
     #[inline]
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
-        Ok(Cow::Owned(arg.value.to_string()))
+        Ok(Cow::Owned(arg.value.as_ref().to_owned()))
     }
 }
 
@@ -325,7 +325,7 @@ impl FromPayload for Box<str> {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
-        ok(param.value)
+        ok(param.value.as_ref().into())
     }
 
     #[inline]
@@ -337,7 +337,7 @@ impl FromPayload for Box<str> {
 impl FromPathArg for Box<str> {
     #[inline]
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
-        Ok(arg.value.clone())
+        Ok(arg.value.as_ref().into())
     }
 }
 
@@ -347,7 +347,7 @@ impl FromPayload for Box<[u8]> {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
-        ok(param.value.into_boxed_bytes())
+        ok(param.value.as_bytes().into())
     }
 
     #[inline]
@@ -359,7 +359,7 @@ impl FromPayload for Box<[u8]> {
 impl FromPathArg for Box<[u8]> {
     #[inline]
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
-        Ok(arg.value.clone().into_boxed_bytes())
+        Ok(arg.value.as_bytes().into())
     }
 }
 

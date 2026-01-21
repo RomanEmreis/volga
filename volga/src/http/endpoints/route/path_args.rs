@@ -3,6 +3,7 @@
 use smallvec::SmallVec;
 use super::DEFAULT_DEPTH;
 use crate::error::Error;
+use std::sync::Arc;
 
 const QUERY_SEPARATOR: char = '&';
 const QUERY_KEY_VALUE_SEPARATOR: char = '=';
@@ -19,10 +20,10 @@ pub(crate) type PathArgs = SmallVec<[PathArg; DEFAULT_DEPTH]>;
 #[derive(Debug, Clone)]
 pub struct PathArg {
     /// Argument name
-    pub(crate) name: Box<str>,
+    pub(crate) name: Arc<str>,
 
     /// Argument value
-    pub(crate) value: Box<str>,
+    pub(crate) value: Arc<str>,
 }
 
 impl PathArg {

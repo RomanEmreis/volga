@@ -1,8 +1,9 @@
 ﻿//! Endpoints mapping utilities
 
+use std::sync::Arc;
 use hyper::{Method, Uri};
 use super::endpoints::{
-    route::{RouteNode, RoutePipeline, PathArgs, make_allowed_str},
+    route::{RouteNode, RoutePipeline, PathArgs},
     handlers::RouteHandler
 };
 
@@ -27,7 +28,7 @@ pub(crate) struct Endpoints {
 /// Specifies statuses that could be returned after route matching
 pub(crate) enum FindResult {
     RouteNotFound,
-    MethodNotFound(String),
+    MethodNotFound(Arc<str>),
     Ok(Endpoint)
 }
 
@@ -108,7 +109,7 @@ impl Endpoints {
                 return handlers
                     .binary_search_by(|h| h.cmp(&target_method))
                     .map_or_else(
-                        |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
+                        |_| FindResult::MethodNotFound(route_params.route.allowed_methods()),
                         |i| {
                             let handler = &handlers[i];
                             FindResult::Ok(
@@ -126,7 +127,7 @@ impl Endpoints {
         handlers
             .binary_search_by(|h| h.cmp(method))
             .map_or_else(
-                |_| FindResult::MethodNotFound(make_allowed_str(handlers)),
+                |_| FindResult::MethodNotFound(route_params.route.allowed_methods()),
                 |i| {
                     let handler = &handlers[i];
                     FindResult::Ok(
@@ -265,7 +266,7 @@ mod tests {
         );
 
         match post_handler {
-            FindResult::MethodNotFound(allow) => assert_eq!(allow, "GET"),
+            FindResult::MethodNotFound(allow) => assert_eq!(allow.as_ref(), "GET"),
             _ => panic!("`post_handler` must be is the `MethodNotFound` state")
         }
     }
