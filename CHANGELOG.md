@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Removed unnecessary boxing for `HttpBody::full`, `HttpBody::json` and `HttpBody::form`
 - Added additional methods: `HttpBody::text`, `HttpBody::from_static`, `HttpBody::from_static_text`, `HttpBody::from_str` and `HttpBody::from_slice` for better control.
 - Improved performance for all producing response macros and `IntoResponse` implementations.
+- Improved overall extractors' performance + added additional validation for the cases when mixed Path with NamedPath and positional arguments.
+- Added cached query-like path string handling for PathArgs, including into_parts/from_parts, and preserved the cache when cloning to reduce recomputation in extractor/middleware flows.
+- Switched route/allow header internals to Arc<str> and cached Allow values on route nodes to avoid recomputing 405 headers, plus simplified HSTS formatting to avoid intermediate allocation.
+- Added cached query-arg parsing in HttpRequest/HttpRequestMut to reduce repeated query parsing across extractors.
 
 ## 0.8.0
 
