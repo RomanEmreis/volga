@@ -178,18 +178,17 @@ impl Default for TlsConfig {
 impl fmt::Display for HstsConfig {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut str = String::new();
-        str.push_str(&format!("max-age={}", self.max_age.as_secs()));
+        write!(f, "max-age={}", self.max_age.as_secs())?;
         
         if self.include_sub_domains {
-            str.push_str("; includeSubDomains");
+            f.write_str("; includeSubDomains")?;
         }
 
         if self.preload {
-            str.push_str("; preload");
+            f.write_str("; preload")?;
         }
         
-        f.write_str(&str)
+        Ok(())
     }
 }
 

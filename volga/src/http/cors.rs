@@ -393,7 +393,9 @@ impl CorsConfig {
     pub fn max_age(&self) -> Option<HeaderValue> {
         match &self.max_age { 
             None => None,
-            Some(max_age) => HeaderValue::from_str(&max_age.as_secs().to_string()).ok()
+            Some(max_age) => HeaderValue::from_str(
+                itoa::Buffer::new().format(max_age.as_secs())
+            ).ok()
         }
     }
 

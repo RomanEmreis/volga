@@ -405,16 +405,16 @@ mod tests {
 
         let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() }
-        ];
+        ].into();
 
         // Valid path should return Some
-        let result = Option::<NamedPath<Params>>::from_payload(Payload::PathArgs(args)).await;
+        let result = Option::<NamedPath<Params>>::from_payload(Payload::PathArgs(&args)).await;
         assert!(result.is_ok());
         let option_result = result.unwrap();
         assert!(option_result.is_some());
         assert_eq!(option_result.unwrap().id, 123);
 
-        let result = Option::<NamedPath<Params>>::from_payload(Payload::PathArgs(PathArgs::new())).await;
+        let result = Option::<NamedPath<Params>>::from_payload(Payload::PathArgs(&PathArgs::new())).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -427,10 +427,10 @@ mod tests {
         let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
-        ];
+        ].into();
 
         // Valid path should return Some
-        let result = Option::<Path<(i32, String)>>::from_payload(Payload::PathArgs(args)).await;
+        let result = Option::<Path<(i32, String)>>::from_payload(Payload::PathArgs(&args)).await;
         assert!(result.is_ok());
         let option_result = result.unwrap();
         assert!(option_result.is_some());
@@ -440,7 +440,7 @@ mod tests {
         assert_eq!(option_result.0.0, 123);
         assert_eq!(option_result.0.1, "John");
 
-        let result = Option::<Path<(i32, String)>>::from_payload(Payload::PathArgs(PathArgs::new())).await;
+        let result = Option::<Path<(i32, String)>>::from_payload(Payload::PathArgs(&PathArgs::new())).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }

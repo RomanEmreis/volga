@@ -43,7 +43,7 @@ pub(crate) enum Payload<'a> {
     Parts(&'a Parts),
     Path(PathArg),
     Body(HttpBody),
-    PathArgs(PathArgs)
+    PathArgs(&'a PathArgs)
 }
 
 /// Describes a data source for extractors to read from
@@ -187,51 +187,113 @@ macro_rules! define_generic_from_request {
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
             #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
+                let uses_path = false $(|| matches!($T::source(), Source::Path))*;
+                let uses_pathargs = false $(|| matches!($T::source(), Source::PathArgs))*;
+
+                if uses_path && uses_pathargs {
+                    return Err(invalid_extractor_combination());
+                }
+
                 let (mut parts, body) = req.into_parts();
                 
                 let params = parts.extensions
                     .remove::<PathArgs>()
                     .unwrap_or_default();
 
+                let (path_args, cached_query) = params.into_parts();
+
                 let mut parts = Some(parts);
                 let mut body = Some(body);
-                let mut iter = params.into_iter();
+
+                if uses_pathargs {
+                    let params = PathArgs::from_parts(path_args, cached_query);
+                    let tuple = (
+                        $(
+                            {
+                                let payload = payload_for_path_args!($T::source(), parts, body, &params);
+                                $T::from_payload(payload).await?
+                            },
+                        )*
+                    );
+                    return Ok(tuple);
+                }
+
+                let mut iter = path_args.into_iter();
                 let tuple = (
                     $(
-                    $T::from_payload(match $T::source() {
-                        Source::Path => match iter.next() {
-                            Some(param) => Payload::Path(param),
-                            None => Payload::None
+                        {
+                            let payload = payload_for_path!($T::source(), parts, body, iter);
+                            $T::from_payload(payload).await?
                         },
-                        Source::Parts => match &parts {
-                            Some(parts) => Payload::Parts(parts),
-                            None => Payload::None
-                        },
-                        Source::Body => match body.take() {
-                            Some(body) => Payload::Body(body),
-                            None => Payload::None
-                        },
-                        Source::PathArgs => Payload::PathArgs(
-                            std::mem::replace(&mut iter, PathArg::empty()).collect::<PathArgs>()
-                        ),
-                        Source::Full => match (&parts, body.take()) {
-                            (Some(parts), Some(body)) => Payload::Full(parts, body),
-                            _ => Payload::None
-                        },
-                        Source::Request => match (parts.take(), body.take()) {
-                            (Some(parts), Some(body)) => Payload::Request(
-                                Box::new(HttpRequest::from_parts(parts, body))
-                            ),
-                            _ => Payload::None
-                        },
-                        Source::None => Payload::None,
-                    }).await?,
-                    )*    
+                    )*
                 );
                 Ok(tuple)
             }
         }
     }
+}
+
+#[cold]
+#[inline(never)]
+fn invalid_extractor_combination() -> Error {
+    Error::client_error(
+        "Invalid extractor combination: Cannot mix Path and PathArgs in the same handler"
+    )
+}
+
+macro_rules! payload_for_path {
+    ($src:expr, $parts:expr, $body:expr, $iter:expr) => {{
+        match $src {
+            Source::Path => match $iter.next() {
+                Some(arg) => Payload::Path(arg),
+                None => Payload::None,
+            },
+            Source::Parts => match $parts.as_ref() {
+                Some(p) => Payload::Parts(p),
+                None => Payload::None,
+            },
+            Source::Body => match $body.take() {
+                Some(b) => Payload::Body(b),
+                None => Payload::None,
+            },
+            Source::Full => match ($parts.as_ref(), $body.take()) {
+                (Some(p), Some(b)) => Payload::Full(p, b),
+                _ => Payload::None,
+            },
+            Source::Request => match ($parts.take(), $body.take()) {
+                (Some(p), Some(b)) => Payload::Request(Box::new(HttpRequest::from_parts(p, b))),
+                _ => Payload::None,
+            },
+            Source::PathArgs => Payload::None,
+            Source::None => Payload::None,
+        }
+    }}
+}
+
+macro_rules! payload_for_path_args {
+    ($src:expr, $parts:expr, $body:expr, $params:expr) => {{
+        match $src {
+            Source::PathArgs => Payload::PathArgs($params),
+            Source::Parts => match $parts.as_ref() {
+                Some(p) => Payload::Parts(p),
+                None => Payload::None,
+            },
+            Source::Body => match $body.take() {
+                Some(b) => Payload::Body(b),
+                None => Payload::None,
+            },
+            Source::Full => match ($parts.as_ref(), $body.take()) {
+                (Some(p), Some(b)) => Payload::Full(p, b),
+                _ => Payload::None,
+            },
+            Source::Request => match ($parts.take(), $body.take()) {
+                (Some(p), Some(b)) => Payload::Request(Box::new(HttpRequest::from_parts(p, b))),
+                _ => Payload::None,
+            },
+            Source::Path => Payload::None,
+            Source::None => Payload::None,
+        }
+    }}
 }
 
 define_generic_from_request! { T1 }

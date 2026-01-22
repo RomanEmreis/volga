@@ -1,9 +1,8 @@
 ﻿//! HTTP request utilities
 
-use hyper::{
-    body::Incoming,
-};
-
+use query_args::{QueryArgsIter, QueryArgsCache};
+use hyper::body::Incoming;
+use std::sync::OnceLock;
 use crate::{
     error::Error,
     headers::{FromHeaders, Header},
@@ -28,12 +27,14 @@ pub use request_mut::{HttpRequestMut, IntoTapResult};
 
 #[cfg(feature = "middleware")]
 mod request_mut;
+mod query_args;
 pub mod request_body_limit;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
     /// Inner [`Request`]
-    inner: Request<HttpBody>
+    inner: Request<HttpBody>,
+    query_args_cache: OnceLock<QueryArgsCache>,
 }
 
 impl std::fmt::Debug for HttpRequest {
@@ -46,7 +47,10 @@ impl std::fmt::Debug for HttpRequest {
 impl HttpRequest {
     /// Creates a new [`HttpRequest`]
     pub(crate) fn new(request: Request<Incoming>) -> Self {
-        Self { inner: request.map(HttpBody::incoming) }
+        Self { 
+            inner: request.map(HttpBody::incoming),
+            query_args_cache: OnceLock::new()
+        }
     }
 
     /// Returns a reference to the associated URI.
@@ -162,7 +166,10 @@ impl HttpRequest {
     /// Creates a new `HttpRequest` with the given head and body
     pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
         let request = Request::from_parts(parts, body);
-        Self { inner: request }
+        Self { 
+            inner: request, 
+            query_args_cache: OnceLock::new()
+        }
     }
     
     /// Extracts a payload from request parts
@@ -236,14 +243,11 @@ impl HttpRequest {
     /// # }
     /// ```
     pub fn query_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.inner.uri()
-            .query()
-            .into_iter()
-            .flat_map(|query| {
-                query.split('&').filter_map(|arg| {
-                    arg.split_once('=')
-                })
-            })
+        let query = self.inner.uri().query().unwrap_or_default();
+        let cache = self
+            .query_args_cache
+            .get_or_init(|| QueryArgsCache::new(query));
+        QueryArgsIter::new(query, cache)
     }
 
     /// Returns a typed HTTP header value
@@ -373,7 +377,7 @@ mod tests {
         let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
-        ];
+        ].into();
 
         let req = Request::get("/")
             .extension(args)

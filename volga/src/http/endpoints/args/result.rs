@@ -439,16 +439,16 @@ mod tests {
 
         let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() }
-        ];
+        ].into();
 
         // Valid path should return Ok(Ok(value))
-        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(args)).await;
+        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(&args)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
         assert_eq!(inner_result.unwrap().id, 123);
 
-        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(PathArgs::new())).await;
+        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(&PathArgs::new())).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_err());
@@ -462,10 +462,10 @@ mod tests {
         let args: PathArgs = smallvec::smallvec![
             PathArg { name: "id".into(), value: "123".into() },
             PathArg { name: "name".into(), value: "John".into() }
-        ];
+        ].into();
 
         // Valid path should return Some
-        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(args)).await;
+        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(&args)).await;
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.is_ok());
@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(result.0.0, 123);
         assert_eq!(result.0.1, "John");
 
-        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(PathArgs::new())).await;
+        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(&PathArgs::new())).await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_err());
     }

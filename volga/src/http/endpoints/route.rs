@@ -46,6 +46,7 @@
 use hyper::Method;
 use smallvec::SmallVec;
 use crate::utils::str::memchr_split_nonempty;
+use std::sync::Arc;
 
 #[cfg(feature = "middleware")]
 use crate::http::cors::CorsOverride;
@@ -75,7 +76,7 @@ pub(super) struct RouteEndpoint {
 /// Represents route path node
 #[derive(Clone)]
 pub(super) struct RouteEntry {
-    path: Box<str>,
+    path: Arc<str>,
     node: Box<RouteNode>
 }
 
@@ -90,6 +91,9 @@ pub(super) struct RouteNode {
     
     /// Dynamic route
     dynamic_route: Option<RouteEntry>,
+
+    /// Cached allowed methods header value
+    allowed_methods: Option<Arc<str>>,
 }
 
 /// Parameters of a route
@@ -104,7 +108,7 @@ impl RouteEntry {
     fn new(path: &str) -> Self {
         Self { 
             node: Box::new(RouteNode::new()),
-            path: path.into()
+            path: Arc::from(path)
         }
     }
 
@@ -152,6 +156,7 @@ impl RouteNode {
             static_routes: SmallVec::new(),
             handlers: None,
             dynamic_route: None,
+            allowed_methods: None,
         }
     }
 
@@ -192,8 +197,8 @@ impl RouteNode {
 
             if let Some(next) = &current.dynamic_route {
                 params.push(PathArg {
-                    name: next.path.clone(),
-                    value: segment.into()
+                    name: Arc::clone(&next.path),
+                    value: Arc::from(segment)
                 });
                 current = next.node.as_ref();
                 continue;
@@ -280,6 +285,15 @@ impl RouteNode {
         }
     }
 
+    /// Returns allowed HTTP methods for this route
+    #[inline]
+    pub(super) fn allowed_methods(&self) -> Arc<str> {
+        self.allowed_methods
+            .as_ref()
+            .map(Arc::clone)
+            .unwrap_or_else(|| Arc::from(""))
+    }
+
     /// Traverses the route tree and collects all available routes
     /// Returns a vector of tuples containing (HTTP method, route path)
     #[cfg(debug_assertions)]
@@ -364,6 +378,7 @@ impl RouteNode {
             }
         };
         endpoint.insert(handler);
+        self.allowed_methods = Some(make_allowed_str(handlers));
     }
 
     #[inline(always)]
@@ -383,9 +398,9 @@ impl RouteNode {
 }
 
 #[inline(always)]
-pub(super) fn make_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoint; N]>) -> String {
+pub(super) fn make_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoint; N]>) -> Arc<str> {
     if handlers.is_empty() { 
-        return String::new();
+        return Arc::from("");
     } 
     
     let mut allowed = String::with_capacity(handlers.len() * DEFAULT_DEPTH);
@@ -397,7 +412,8 @@ pub(super) fn make_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoin
             allowed.push_str(s);
         }
     }
-    allowed
+
+    Arc::from(allowed)
 }
 
 #[inline(always)]
@@ -723,13 +739,13 @@ mod tests {
         ];
         
         let allowed = make_allowed_str(&handlers);
-        assert_eq!(allowed, "GET,HEAD");
+        assert_eq!(allowed.as_ref(), "GET,HEAD");
     }
 
     #[test]
     fn it_makes_empty_allowed_str_if_no_handlers() {
         let handlers: SmallVec<[RouteEndpoint; DEFAULT_DEPTH]> = smallvec::smallvec![];
         let allowed = make_allowed_str(&handlers);
-        assert_eq!(allowed, "");
+        assert_eq!(allowed.as_ref(), "");
     }
 }
