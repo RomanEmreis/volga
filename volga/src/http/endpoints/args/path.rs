@@ -154,7 +154,7 @@ impl<T: DeserializeOwned> NamedPath<T> {
     /// Parses the slice of tuples `(String, String)` into [`Path<T>`]
     #[inline]
     pub(crate) fn from_slice(route_params: &PathArgs) -> Result<Self, Error> {
-        let route_str = route_params.query_str()?;
+        let route_str = route_params.encoded()?;
         serde_urlencoded::from_str::<T>(route_str)
             .map(Self)
             .map_err(PathError::from_serde_error)
