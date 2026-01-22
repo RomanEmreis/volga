@@ -45,7 +45,10 @@ use crate::http::cors::CorsRegistry;
 use crate::auth::bearer::{BearerAuthConfig, BearerTokenService};
 
 #[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::GlobalRateLimiter;
+use {
+    crate::rate_limiting::GlobalRateLimiter,
+    std::collections::HashSet
+};
 
 #[cfg(feature = "static-files")]
 pub use self::env::HostEnv;
@@ -120,6 +123,10 @@ pub struct App {
     /// Global rate limiter
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<GlobalRateLimiter>,
+
+    /// Trusted proxies for rate limiting IP extraction
+    #[cfg(feature = "rate-limiting")]
+    pub(super) trusted_proxies: Option<HashSet<IpAddr>>,
 
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
@@ -234,6 +241,10 @@ pub(crate) struct AppInstance {
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<Arc<GlobalRateLimiter>>,
 
+    /// Trusted proxies for rate limiting IP extraction
+    #[cfg(feature = "rate-limiting")]
+    pub(super) trusted_proxies: Option<Arc<HashSet<IpAddr>>>,
+
     /// HSTS configuration options
     #[cfg(feature = "tls")]
     pub(super) hsts: Option<HstsHeader>,
@@ -311,6 +322,8 @@ impl TryFrom<App> for AppInstance {
             container: app.container.build(),
             #[cfg(feature = "rate-limiting")]
             rate_limiter: app.rate_limiter.map(Arc::new),
+            #[cfg(feature = "rate-limiting")]
+            trusted_proxies: app.trusted_proxies.map(Arc::new),
             #[cfg(feature = "jwt-auth")]
             bearer_token_service,
             #[cfg(feature = "tracing")]
@@ -373,6 +386,8 @@ impl App {
             auth_config: None,
             #[cfg(feature = "rate-limiting")]
             rate_limiter: None,
+            #[cfg(feature = "rate-limiting")]
+            trusted_proxies: None,
             pipeline: PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),

@@ -3,8 +3,10 @@
 use twox_hash::XxHash64;
 use smallvec::SmallVec;
 use std::{
+    collections::HashSet,
     hash::{Hash, Hasher}, 
-    net::{IpAddr, SocketAddr}, 
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
 };
 use std::fmt::Debug;
 use crate::{
@@ -39,6 +41,10 @@ pub mod by;
 const X_FORWARDED_FOR: &str = "x-forwarded-for";
 const DEFAULT_POLICIES_COUNT: usize = 4;
 const RATE_LIMIT_ERROR_MSG: &str = "Rate limit exceeded. Try again later.";
+
+/// Represents trusted proxies for rate limiting IP extraction
+#[derive(Clone, Debug)]
+pub(crate) struct TrustedProxies(pub(crate) Arc<HashSet<IpAddr>>);
 
 /// A tuple representing a named policy entry: `(policy_name, limiter)`.
 ///
@@ -235,6 +241,25 @@ impl App {
         self.rate_limiter
             .get_or_insert_default()
             .add_sliding_window(policy);
+        self
+    }
+
+    /// Defines a list of trusted proxies used when extracting client IPs
+    /// for rate limiting. Forwarded headers are honored only if the
+    /// incoming connection is from one of these proxies.
+    ///
+    /// If an empty list is provided, forwarded headers will be ignored.
+    pub fn with_trusted_proxies<I, T>(mut self, proxies: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<IpAddr>
+    {
+        let proxies: HashSet<IpAddr> = proxies.into_iter().map(Into::into).collect();
+        self.trusted_proxies = if proxies.is_empty() {
+            None
+        } else {
+            Some(proxies)
+        };
         self
     }
 
@@ -622,14 +647,22 @@ fn stable_hash<T: Hash + ?Sized>(value: &T) -> u64 {
 }
 
 fn extract_client_ip(req: &HttpRequest, remote_addr: SocketAddr) -> IpAddr {
-    // RFC 7239 Forwarded
-    if let Some(ip) = forwarded_header(req) {
-        return ip;
-    }
+    let trusted_proxies = req.extensions()
+        .get::<TrustedProxies>()
+        .map(|trusted| trusted.0.as_ref());
 
-    // X-Forwarded-For
-    if let Some(ip) = x_forwarded_for(req) {
-        return ip;
+    if let Some(trusted_proxies) = trusted_proxies {
+        if trusted_proxies.contains(&remote_addr.ip()) {
+            // RFC 7239 Forwarded
+            if let Some(ip) = forwarded_header(req) {
+                return ip;
+            }
+
+            // X-Forwarded-For
+            if let Some(ip) = x_forwarded_for(req) {
+                return ip;
+            }
+        }
     }
 
     // Fallback
@@ -661,6 +694,8 @@ fn x_forwarded_for(req: &HttpRequest) -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+    use std::sync::Arc;
     use std::net::Ipv4Addr;
     use std::time::Duration;
     use hyper::http::HeaderName;
@@ -677,6 +712,19 @@ mod tests {
         
         HttpRequest::from_parts(parts, body)
     }
+
+    fn create_request_with_trusted_proxy() -> HttpRequest {
+        let (mut parts, body) = Request::get("/")
+            .extension(ClientIp(SocketAddr::new(IpAddr::V4(127_u32.into()), 8080)))
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+
+        let trusted = HashSet::from([IpAddr::V4(127_u32.into())]);
+        parts.extensions.insert(TrustedProxies(Arc::new(trusted)));
+
+        HttpRequest::from_parts(parts, body)
+    }
     
     #[test]
     fn it_extracts_partition_key_from_ip() {
@@ -689,7 +737,7 @@ mod tests {
     
     #[test]
     fn it_extracts_forwarded_ip() {
-        let mut req = create_request();
+        let mut req = create_request_with_trusted_proxy();
         req
             .headers_mut()
             .insert(HeaderName::from_static("forwarded"), "for=192.168.1.1".parse().unwrap());
@@ -701,7 +749,7 @@ mod tests {
 
     #[test]
     fn it_extracts_x_forwarded_for_ip() {
-        let mut req = create_request();
+        let mut req = create_request_with_trusted_proxy();
         req
             .headers_mut()
             .insert(HeaderName::from_static("x-forwarded-for"), "192.168.1.1".parse().unwrap());
@@ -713,7 +761,7 @@ mod tests {
 
     #[test]
     fn it_extracts_prioritized_forwarded_ip() {
-        let mut req = create_request();
+        let mut req = create_request_with_trusted_proxy();
         req
             .headers_mut()
             .insert(HeaderName::from_static("forwarded"), "for=10.24.1.101".parse().unwrap());
@@ -724,6 +772,18 @@ mod tests {
         let key = extract_partition_key_from_ip(&req).unwrap();
 
         assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(10, 24, 1, 101))));
+    }
+
+    #[test]
+    fn it_ignores_forwarded_when_proxy_is_untrusted() {
+        let mut req = create_request();
+        req
+            .headers_mut()
+            .insert(HeaderName::from_static("forwarded"), "for=192.168.1.1".parse().unwrap());
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+
+        assert_eq!(key, stable_hash(&IpAddr::V4(127_u32.into())));
     }
     
     #[test]
