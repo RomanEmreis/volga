@@ -651,17 +651,15 @@ fn extract_client_ip(req: &HttpRequest, remote_addr: SocketAddr) -> IpAddr {
         .get::<TrustedProxies>()
         .map(|trusted| trusted.0.as_ref());
 
-    if let Some(trusted_proxies) = trusted_proxies {
-        if trusted_proxies.contains(&remote_addr.ip()) {
-            // RFC 7239 Forwarded
-            if let Some(ip) = forwarded_header(req) {
-                return ip;
-            }
-
-            // X-Forwarded-For
-            if let Some(ip) = x_forwarded_for(req) {
-                return ip;
-            }
+    if trusted_proxies.is_some_and(|trusted| trusted.contains(&remote_addr.ip())) {
+        // RFC 7239 Forwarded
+        if let Some(ip) = forwarded_header(req) {
+            return ip;
+        }
+        
+        // X-Forwarded-For
+        if let Some(ip) = x_forwarded_for(req) {
+            return ip;
         }
     }
 

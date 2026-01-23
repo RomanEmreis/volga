@@ -56,6 +56,17 @@ pub use self::env::HostEnv;
 #[cfg(feature = "http2")]
 pub use crate::limits::Http2Limits;
 
+#[cfg(any(
+    feature = "decompression-brotli",
+    feature = "decompression-gzip",
+    feature = "decompression-zstd",
+    feature = "decompression-full"
+))]
+use crate::middleware::decompress::{
+    ResolvedDecompressionLimits,
+    DecompressionLimits
+};
+
 #[cfg(feature = "static-files")]
 pub mod env;
 pub mod router;
@@ -139,6 +150,15 @@ pub struct App {
     /// HTTP/2 resource and backpressure limits.
     #[cfg(feature = "http2")]
     pub(super) http2_limits: Http2Limits,
+
+    /// Limits for decompression middleware
+    #[cfg(any(
+        feature = "decompression-brotli",
+        feature = "decompression-gzip",
+        feature = "decompression-zstd",
+        feature = "decompression-full"
+    ))]
+    pub(super) decompression_limits: DecompressionLimits,
 
     /// TCP connection parameters
     connection: Connection,
@@ -269,6 +289,15 @@ pub(crate) struct AppInstance {
     #[cfg(feature = "http2")]
     pub(super) http2_limits: Http2Limits,
 
+    /// Limits for decompression middleware
+    #[cfg(any(
+        feature = "decompression-brotli",
+        feature = "decompression-gzip",
+        feature = "decompression-zstd",
+        feature = "decompression-full"
+    ))]
+    pub(super) decompression_limits: ResolvedDecompressionLimits,
+
     /// Default `Cache-Control` header value
     pub(super) cache_control: Option<HeaderValue>,
 
@@ -316,6 +345,13 @@ impl TryFrom<App> for AppInstance {
             cors: app.cors,
             #[cfg(feature = "http2")]
             http2_limits: app.http2_limits,
+            #[cfg(any(
+                feature = "decompression-brotli",
+                feature = "decompression-gzip",
+                feature = "decompression-zstd",
+                feature = "decompression-full"
+            ))]
+            decompression_limits: app.decompression_limits.resolved(),
             #[cfg(feature = "static-files")]
             host_env: app.host_env,
             #[cfg(feature = "di")]
@@ -399,6 +435,13 @@ impl App {
             cache_control: None,
             #[cfg(feature = "http2")]
             http2_limits: Default::default(),
+            #[cfg(any(
+                feature = "decompression-brotli",
+                feature = "decompression-gzip",
+                feature = "decompression-zstd",
+                feature = "decompression-full"
+            ))]
+            decompression_limits: Default::default(),
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]

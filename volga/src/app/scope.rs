@@ -206,6 +206,16 @@ async fn handle_impl(
                     extensions.insert(bts.clone());
                 }
 
+                #[cfg(any(
+                    feature = "decompression-brotli",
+                    feature = "decompression-gzip",
+                    feature = "decompression-zstd",
+                    feature = "decompression-full"
+                ))]
+                {
+                    extensions.insert(shared.decompression_limits);
+                }
+
                 #[cfg(feature = "rate-limiting")]
                 {
                     if let Some(rate_limiter) = &shared.rate_limiter {
