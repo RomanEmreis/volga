@@ -67,11 +67,12 @@ async fn respond_with_file(
             acc
         });
     let path = env.content_root().join(&path);
-    let response = async {
-        let (path, content_root) = sanitize_path(path, env.content_root()).await?;
-        respond_with_file_or_dir_impl(path, headers, &content_root, env.show_files_listing()).await
-    }
-    .await;
+    let response = respond_with_file_or_dir_impl(
+        path,
+        headers,
+        env.content_root(),
+        env.show_files_listing()
+    ).await;
     match response {
         Ok(response) => Ok(response),
         Err(err) if err.status == StatusCode::NOT_FOUND => fallback(env).await,
@@ -86,10 +87,11 @@ async fn respond_with_file_or_dir_impl(
     content_root: &Path,
     show_files_listing: bool
 ) -> HttpResult {
+    let (path, content_root) = sanitize_path(path, content_root).await?;
     let metadata = metadata(&path).await?;
     match (metadata.is_dir(), show_files_listing) {
         (true, false) => status!(403, "Access is denied."),
-        (true, true) => respond_with_folder_impl(path, content_root, false).await,
+        (true, true) => respond_with_folder_impl(path, &content_root, false).await,
         (false, _) => {
             let caching = ResponseCaching::try_from(&metadata)?;
             if validate_etag(&caching.etag, &headers) ||
