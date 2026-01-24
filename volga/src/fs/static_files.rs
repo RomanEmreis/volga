@@ -67,12 +67,12 @@ async fn respond_with_file(
             acc
         });
     let path = env.content_root().join(&path);
-    let (path, content_root) = match sanitize_path(path, env.content_root()).await {
-        Ok(result) => result,
-        Err(err) if err.status == StatusCode::NOT_FOUND => return fallback(env).await,
-        Err(err) => return Err(err),
-    };
-    match respond_with_file_or_dir_impl(path, headers, &content_root, env.show_files_listing()).await {
+    let response = async {
+        let (path, content_root) = sanitize_path(path, env.content_root()).await?;
+        respond_with_file_or_dir_impl(path, headers, &content_root, env.show_files_listing()).await
+    }
+    .await;
+    match response {
         Ok(response) => Ok(response),
         Err(err) if err.status == StatusCode::NOT_FOUND => fallback(env).await,
         Err(err) => Err(err),
