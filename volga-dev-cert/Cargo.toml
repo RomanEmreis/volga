@@ -14,7 +14,7 @@ categories.workspace = true
 keywords = ["volga", "server", "https", "tls"]
 
 [dependencies]
-rcgen = "0.14.6"
+rcgen = "0.14.7"
 
 [dev-dependencies]
 serial_test = "3.3.1"

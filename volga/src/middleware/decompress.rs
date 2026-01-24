@@ -18,11 +18,11 @@ use tokio_util::io::{
     ReaderStream,
     StreamReader
 };
+use std::fmt::Display;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-
 use crate::{
     App, 
     routing::{Route, RouteGroup}, 
@@ -62,20 +62,26 @@ static SUPPORTED_ENCODINGS: &[Encoding] = &[
     Encoding::Zstd,
 ];
 
-/// Represents current decompressions state
+/// Represents current decompression's state
 #[derive(Debug, Default)]
 struct DecompressionState {
     compressed_bytes: AtomicUsize,
     decompressed_bytes: AtomicUsize,
 }
 
-#[inline]
-fn decompression_error(kind: &str) -> Error {
-    Error::from_parts(
-        StatusCode::PAYLOAD_TOO_LARGE,
-        None,
-        format!("Decompression error: {kind}")
-    )
+impl DecompressionState {
+    #[inline(always)]  
+    fn add_compressed(&self, n: usize) -> usize {
+        self.compressed_bytes.fetch_add(n, Ordering::Relaxed) + n
+    }
+    #[inline(always)]
+    fn add_decompressed(&self, n: usize) -> usize {
+        self.decompressed_bytes.fetch_add(n, Ordering::Relaxed) + n
+    }
+    #[inline(always)]
+    fn compressed(&self) -> usize {
+        self.compressed_bytes.load(Ordering::Relaxed)
+    }
 }
 
 macro_rules! impl_decompressor {
@@ -90,7 +96,7 @@ macro_rules! impl_decompressor {
             let decompressed_body = limited_decompressed_stream(ReaderStream::new(decoder), limits, state);
     
             HttpBody::boxed(StreamBody::new(decompressed_body
-                .map_err(Error::client_error)
+                .map_err(Error::from)
                 .map_ok(Frame::data))
             )
         }
@@ -205,30 +211,24 @@ fn decompress_body(
     }
 }
 
+#[inline]
 fn limited_compressed_stream(
     body: HttpBody,
     limits: ResolvedDecompressionLimits,
     state: Arc<DecompressionState>
 ) -> impl TryStream<Ok = bytes::Bytes, Error = Error, Item = Result<bytes::Bytes, Error>> {
     body.into_data_stream()
-        .map_err(|_| decompression_error("BodyReadFailed"))
         .and_then(move |chunk| {
-            let new_total = state
-                .compressed_bytes
-                .fetch_add(chunk.len(), Ordering::Relaxed) + chunk.len();
-
-            ready(if let Some(limit) = limits.max_compressed_bytes {
-                if new_total > limit {
-                    Err(decompression_error("CompressedBodyTooLarge"))
-                } else {
-                    Ok(chunk)
-                }
-            } else {
-                Ok(chunk)
-            })
+            let total = state.add_compressed(chunk.len());
+            ready(check_max(
+                total, 
+                limits.max_compressed_bytes, 
+                DecompressionError::CompressedBodyTooLarge)
+                .map(|_| chunk))
         })
 }
 
+#[inline]
 fn limited_decompressed_stream<R>(
     stream: R,
     limits: ResolvedDecompressionLimits,
@@ -238,33 +238,72 @@ where
     R: TryStream<Ok = bytes::Bytes, Error = std::io::Error>,
 {
     stream
-        .map_err(|_| decompression_error("DecompressionFailed"))
+        .map_err(Into::into)
         .and_then(move |chunk| {
-            let new_total = state
-                .decompressed_bytes
-                .fetch_add(chunk.len(), Ordering::Relaxed) + chunk.len();
+            let decompressed = state.add_decompressed(chunk.len());
+            let compressed = state.compressed();
 
-            let res = (|| {
-                if limits.max_decompressed_bytes.is_some_and(|limit| new_total > limit) {
-                    return Err(decompression_error("DecompressedBodyTooLarge"));
-                }
-
-                if let Some(ratio) = limits.max_expansion_ratio {
-                    let compressed = state.compressed_bytes.load(Ordering::Relaxed);
-                    let allowed = compressed
-                        .saturating_mul(ratio.ratio)
-                        .saturating_add(ratio.slack_bytes);
-
-                    if new_total > allowed {
-                        return Err(decompression_error("ExpansionRatioExceeded"));
-                    }
-                }
-
-                Ok(chunk)
-            })();
+            let res = check_max(
+                decompressed,
+                limits.max_decompressed_bytes,
+                DecompressionError::DecompressedBodyTooLarge)
+                .and_then(|_| check_ratio(decompressed, compressed, limits.max_expansion_ratio))
+                .map(|_| chunk);
 
             ready(res)
         })
+}
+
+#[inline]
+fn check_max(total: usize, limit: Option<usize>, kind: DecompressionError) -> Result<(), Error> {
+    if limit.is_some_and(|l| total > l) {
+        Err(kind.into())
+    } else {
+        Ok(())
+    }
+}
+
+#[inline]
+fn check_ratio(
+    decompressed: usize,
+    compressed: usize,
+    ratio: Option<ExpansionRatio>,
+) -> Result<(), Error> {
+    if let Some(r) = ratio {
+        let allowed = compressed
+            .saturating_mul(r.ratio)
+            .saturating_add(r.slack_bytes);
+
+        if decompressed > allowed {
+            return Err(DecompressionError::ExpansionRatioExceeded.into());
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy)]
+enum DecompressionError {
+    CompressedBodyTooLarge,
+    DecompressedBodyTooLarge,
+    ExpansionRatioExceeded,
+}
+
+impl Display for DecompressionError {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl From<DecompressionError> for Error {
+    #[inline]
+    fn from(err: DecompressionError) -> Self {
+        Error::from_parts(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            None,
+            format!("Decompression error: {err}")
+        )
+    }
 }
 
 #[cfg(test)]
@@ -272,7 +311,7 @@ mod tests {
     use http_body_util::BodyExt;
     use bytes::Bytes;
     use tokio::io::AsyncWriteExt;
-    use crate::HttpBody;
+    use crate::{HttpBody, Limit};
     use super::*;
 
     #[tokio::test]
@@ -341,5 +380,62 @@ mod tests {
         let body = zstd(body, DecompressionLimits::default().resolved());
 
         assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "decompression-brotli")]
+    async fn it_decompress_with_max_compressed() {
+        use async_compression::tokio::write::BrotliEncoder;
+
+        let data = b"{\"age\":33,\"name\":\"John\"}";
+        let mut encoder = BrotliEncoder::new(Vec::new());
+        encoder.write_all(data).await.unwrap();
+        encoder.shutdown().await.unwrap();
+        let compressed = encoder.into_inner();
+
+        let body = HttpBody::full(compressed);
+        let body = brotli(body, DecompressionLimits::default()
+            .with_max_compressed(Limit::Limited(1))
+            .resolved());
+
+        assert!(body.collect().await.is_err());
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "decompression-brotli")]
+    async fn it_decompress_with_max_decompressed() {
+        use async_compression::tokio::write::BrotliEncoder;
+
+        let data = b"{\"age\":33,\"name\":\"John\"}";
+        let mut encoder = BrotliEncoder::new(Vec::new());
+        encoder.write_all(data).await.unwrap();
+        encoder.shutdown().await.unwrap();
+        let compressed = encoder.into_inner();
+
+        let body = HttpBody::full(compressed);
+        let body = brotli(body, DecompressionLimits::default()
+            .with_max_decompressed(Limit::Limited(1))
+            .resolved());
+
+        assert!(body.collect().await.is_err());
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "decompression-brotli")]
+    async fn it_decompress_with_max_expansion_ratio() {
+        use async_compression::tokio::write::BrotliEncoder;
+
+        let data = vec![b'a'; 64 * 1024];
+        let mut encoder = BrotliEncoder::new(Vec::new());
+        encoder.write_all(&data).await.unwrap();
+        encoder.shutdown().await.unwrap();
+        let compressed = encoder.into_inner();
+
+        let body = HttpBody::full(compressed);
+        let body = brotli(body, DecompressionLimits::default()
+            .with_max_expansion_ratio(ExpansionRatio::new(1, 0))
+            .resolved());
+
+        assert!(body.collect().await.is_err());
     }
 }

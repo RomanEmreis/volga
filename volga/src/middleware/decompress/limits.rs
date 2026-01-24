@@ -113,7 +113,7 @@ impl ExpansionRatio {
 /// # use volga::Limit;
 /// let limits = DecompressionLimits::default()
 ///     .with_max_decompressed(Limit::Limited(8 * 1024 * 1024)) // 8 MiB
-///     .with_max_expansion_ratio(None);
+///     .without_max_expansion_ratio();
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct DecompressionLimits {
@@ -161,13 +161,17 @@ impl DecompressionLimits {
         self
     }
 
-    /// Enables or disables the expansion ratio guard.
-    ///
-    /// - `Some(ratio)` enables the ratio check.
-    /// - `None` disables it entirely.
+    /// Enables the expansion ratio guard.
     #[inline]
-    pub fn with_max_expansion_ratio(mut self, ratio: Option<ExpansionRatio>) -> Self {
-        self.max_expansion_ratio = ratio;
+    pub fn with_max_expansion_ratio(mut self, ratio: ExpansionRatio) -> Self {
+        self.max_expansion_ratio = Some(ratio);
+        self
+    }
+
+    /// Disables the expansion ratio guard.
+    #[inline]
+    pub fn without_max_expansion_ratio(mut self) -> Self {
+        self.max_expansion_ratio = None;
         self
     }
 
@@ -284,7 +288,7 @@ mod tests {
     #[test]
     fn with_max_expansion_ratio_can_disable_ratio_guard() {
         let limits = DecompressionLimits::default()
-            .with_max_expansion_ratio(None);
+            .without_max_expansion_ratio();
 
         assert!(limits.max_expansion_ratio.is_none());
     }
@@ -294,7 +298,7 @@ mod tests {
         let custom = ExpansionRatio::new(7, 999);
 
         let limits = DecompressionLimits::default()
-            .with_max_expansion_ratio(Some(custom));
+            .with_max_expansion_ratio(custom);
 
         let r = limits.max_expansion_ratio.unwrap();
         assert_eq!(r.ratio, 7);

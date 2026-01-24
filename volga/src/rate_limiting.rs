@@ -39,7 +39,10 @@ mod key;
 pub mod by;
 
 const X_FORWARDED_FOR: &str = "x-forwarded-for";
+const MAX_FORWARDED_IPS: usize = 16;
+const MAX_FORWARDED_HEADER_LEN: usize = 2 * 1024;
 const DEFAULT_POLICIES_COUNT: usize = 4;
+const DEFAULT_IPS_COUNT: usize = 4;
 const RATE_LIMIT_ERROR_MSG: &str = "Rate limit exceeded. Try again later.";
 
 /// Represents trusted proxies for rate limiting IP extraction
@@ -647,52 +650,122 @@ fn stable_hash<T: Hash + ?Sized>(value: &T) -> u64 {
 }
 
 fn extract_client_ip(req: &HttpRequest, remote_addr: SocketAddr) -> IpAddr {
-    let trusted_proxies = req.extensions()
-        .get::<TrustedProxies>()
-        .map(|trusted| trusted.0.as_ref());
+    let peer = remote_addr.ip();
 
-    if trusted_proxies.is_some_and(|trusted| trusted.contains(&remote_addr.ip())) {
-        // RFC 7239 Forwarded
-        if let Some(ip) = forwarded_header(req) {
-            return ip;
-        }
-        
-        // X-Forwarded-For
-        if let Some(ip) = x_forwarded_for(req) {
-            return ip;
+    let Some(trusted) = req.extensions().get::<TrustedProxies>() else {
+        return peer;
+    };
+
+    // Don't trust headers unless the direct peer is trusted
+    if !trusted.0.contains(&peer) {
+        return peer;
+    }
+
+    let chain = forwarded_chain(req)
+        .or_else(|| x_forwarded_for_chain(req));
+
+    let Some(mut chain) = chain else {
+        return peer;
+    };
+
+    if chain.last().copied() != Some(peer) {
+        chain.push(peer);
+    }
+
+    for ip in chain.iter() {
+        if !trusted.0.contains(ip) {
+            return *ip;
         }
     }
 
-    // Fallback
-    remote_addr.ip()
+    // all hops trusted - best guess: left-most (original) or peer
+    chain.last().copied().unwrap_or(peer)
 }
 
 #[inline]
-fn forwarded_header(req: &HttpRequest) -> Option<IpAddr> {
+fn forwarded_chain(req: &HttpRequest) -> Option<SmallVec<[IpAddr; DEFAULT_IPS_COUNT]>> {
     let header = req.headers().get(FORWARDED)?.to_str().ok()?;
-    header.split(';')
-        .find_map(|part| {
+    if header.len() > MAX_FORWARDED_HEADER_LEN {
+        return None;
+    }
+    
+    let mut out = SmallVec::new();
+
+    for entry in header.rsplit(',').take(MAX_FORWARDED_IPS) {
+        // entry: for=...;proto=...;by=...
+        for part in entry.split(';') {
             let part = part.trim();
-            part.strip_prefix("for=")
-        })
-        .and_then(|v| {
-            let v = v.trim_matches('"');
-            v.parse::<IpAddr>().ok()
-        })
+            let Some(v) = part.strip_prefix("for=") else { 
+                continue
+            };
+
+            let v = v.trim().trim_matches('"'); // remove quotes
+
+            // RFC allows: for=unknown or obfuscated identifiers; ignore those
+            if v.eq_ignore_ascii_case("unknown") || v.starts_with('_') {
+                continue;
+            }
+
+            // Handle bracketed IPv6, optionally with port: [v6] or [v6]:port
+            if let Some(rest) = v.strip_prefix('[') {
+                if let Some((inside, _port)) = rest.split_once(']') {
+                    // after is "" or ":port" (or garbage). We ignore port.
+                    if let Ok(ip) = inside.parse::<IpAddr>() {
+                        out.push(ip);
+                    }
+                }
+                continue;
+            }
+
+            // Remove port if present:
+            // - IPv4: 1.2.3.4:123
+            // - IPv6 might come as 2001:db8::1 (no port) OR [2001:db8::1]:123 
+            // (brackets already handled above, so the port form should have been bracketed; but be defensive)
+            let ip_str = if let Some((host, _port)) = v.rsplit_once(':') {
+                // Heuristic: only treat as host:port if host parses as IpAddr
+                if host.parse::<IpAddr>().is_ok() { 
+                    host
+                } else {
+                    v
+                }
+            } else {
+                v
+            };
+
+            if let Ok(ip) = ip_str.parse::<IpAddr>() {
+                out.push(ip);
+            }
+        }
+    }
+
+    (!out.is_empty()).then_some(out)
 }
 
 #[inline]
-fn x_forwarded_for(req: &HttpRequest) -> Option<IpAddr> {
+fn x_forwarded_for_chain(req: &HttpRequest) -> Option<SmallVec<[IpAddr; DEFAULT_IPS_COUNT]>> {
     let header = req.headers().get(X_FORWARDED_FOR)?.to_str().ok()?;
-    header.split(',')
-        .next()
-        .map(str::trim)
-        .and_then(|ip| ip.parse::<IpAddr>().ok())
+    if header.len() > MAX_FORWARDED_HEADER_LEN {
+        return None;
+    }
+    
+    let mut out = SmallVec::new();
+
+    for part in header.rsplit(',').take(MAX_FORWARDED_IPS) {
+        let s = part.trim();
+        if s.is_empty() { 
+            continue;
+        }
+        
+        if let Ok(ip) = s.parse::<IpAddr>() {
+            out.push(ip);
+        }
+    }
+
+    (!out.is_empty()).then_some(out)
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
     use std::sync::Arc;
     use std::net::Ipv4Addr;
     use std::time::Duration;
@@ -712,13 +785,23 @@ mod tests {
     }
 
     fn create_request_with_trusted_proxy() -> HttpRequest {
+        create_request_with_specific_trusted_proxy_chain(
+            IpAddr::V4(127_u32.into()), 
+            [IpAddr::V4(127_u32.into())]
+        )
+    }
+
+    fn create_request_with_specific_trusted_proxy_chain(
+        peer: IpAddr,
+        trusted_proxies: impl IntoIterator<Item = IpAddr>
+    ) -> HttpRequest {
         let (mut parts, body) = Request::get("/")
-            .extension(ClientIp(SocketAddr::new(IpAddr::V4(127_u32.into()), 8080)))
+            .extension(ClientIp(SocketAddr::new(peer, 8080)))
             .body(HttpBody::empty())
             .unwrap()
             .into_parts();
 
-        let trusted = HashSet::from([IpAddr::V4(127_u32.into())]);
+        let trusted = trusted_proxies.into_iter().collect();
         parts.extensions.insert(TrustedProxies(Arc::new(trusted)));
 
         HttpRequest::from_parts(parts, body)
@@ -783,7 +866,151 @@ mod tests {
 
         assert_eq!(key, stable_hash(&IpAddr::V4(127_u32.into())));
     }
-    
+
+    #[test]
+    fn it_extracts_forwarded_ip_with_quotes() {
+        let mut req = create_request_with_trusted_proxy();
+        req.headers_mut().insert(
+            HeaderName::from_static("forwarded"),
+            r#"for="192.168.1.1""#.parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn it_extracts_forwarded_ipv6_in_brackets() {
+        let mut req = create_request_with_trusted_proxy();
+        req.headers_mut().insert(
+            HeaderName::from_static("forwarded"),
+            r#"for="[2001:db8::1]""#.parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&"2001:db8::1".parse::<IpAddr>().unwrap()));
+    }
+
+    #[test]
+    fn it_extracts_forwarded_ip_ignoring_port() {
+        let mut req = create_request_with_trusted_proxy();
+        req.headers_mut().insert(
+            HeaderName::from_static("forwarded"),
+            "for=192.168.1.1:1234".parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn it_extracts_forwarded_ipv6_with_port() {
+        let mut req = create_request_with_trusted_proxy();
+        req.headers_mut().insert(
+            HeaderName::from_static("forwarded"),
+            r#"for="[2001:db8::1]:8443""#.parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&"2001:db8::1".parse::<IpAddr>().unwrap()));
+    }
+
+    #[test]
+    fn it_extracts_forwarded_from_multiple_entries_preferring_nearest_tail() {
+        let mut req = create_request_with_trusted_proxy();
+        req.headers_mut().insert(
+            HeaderName::from_static("forwarded"),
+            "for=10.0.0.1, for=192.168.1.1".parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn it_extracts_xff_from_list() {
+        let mut req = create_request_with_trusted_proxy();
+        req.headers_mut().insert(
+            HeaderName::from_static("x-forwarded-for"),
+            "10.0.0.1, 192.168.1.1".parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn it_ignores_xff_unknown_and_parses_next() {
+        let mut req = create_request_with_trusted_proxy();
+        req.headers_mut().insert(
+            HeaderName::from_static("x-forwarded-for"),
+            "unknown, 192.168.1.1".parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn it_ignores_xff_when_proxy_is_untrusted() {
+        let mut req = create_request();
+        req.headers_mut().insert(
+            HeaderName::from_static("x-forwarded-for"),
+            "192.168.1.1".parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(127_u32.into())));
+    }
+
+    #[test]
+    fn it_selects_first_untrusted_before_trusted_proxies_from_xff_chain() {
+        let mut req = create_request_with_specific_trusted_proxy_chain(
+            /* peer */ "10.0.0.3".parse().unwrap(),
+            /* trusted */ ["10.0.0.2".parse().unwrap(), "10.0.0.3".parse().unwrap()],
+        );
+
+        req.headers_mut().insert(
+            HeaderName::from_static("x-forwarded-for"),
+            "192.168.1.1, 10.0.0.2".parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
+    #[test]
+    fn it_falls_back_when_forwarded_header_is_too_long() {
+        let mut req = create_request_with_trusted_proxy();
+        let huge = "for=192.168.1.1;proto=https,".repeat(10_000);
+        req.headers_mut().insert(
+            HeaderName::from_static("forwarded"),
+            huge.parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(127_u32.into())));
+    }
+
+    #[test]
+    fn it_caps_xff_chain_to_max_ips_using_right_tail() {
+        let mut req = create_request_with_trusted_proxy();
+        let mut parts = vec![];
+        for i in 0..50 {
+            parts.push(format!("10.0.0.{i}"));
+        }
+        parts.push("192.168.1.1".into());
+        let header = parts.join(", ");
+
+        req.headers_mut().insert(
+            HeaderName::from_static("x-forwarded-for"),
+            header.parse().unwrap(),
+        );
+
+        let key = extract_partition_key_from_ip(&req).unwrap();
+        assert_eq!(key, stable_hash(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
+    }
+
     #[test]
     fn it_tests_stable_hash() {
         let key = stable_hash(&IpAddr::V4(127_u32.into()));
