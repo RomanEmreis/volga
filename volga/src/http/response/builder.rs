@@ -86,6 +86,21 @@ impl HttpResponseBuilder {
         })
     }
 
+    /// Appends an HTTP header value from a static source.
+    ///
+    /// If a header with the same name already exists, the value is appended
+    ///
+    /// > **Note:** This may result in multiple values for the same header.
+    #[inline]
+    pub fn header_static(self, key: &'static str, value: &'static str) -> Self {
+        self.and_then(|mut inner| {
+            let name = HeaderName::from_static(key);
+            let value = HeaderValue::from_static(value);
+            inner.headers.append(name, value);
+            Ok(inner)
+        })
+    }
+
     /// Finalizes the response with the given body.
     ///
     /// # Errors

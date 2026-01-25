@@ -438,4 +438,13 @@ mod tests {
 
         assert!(body.collect().await.is_err());
     }
+    
+    #[test]
+    fn it_sets_decompression_limit_by_default() {
+        let app = App::new();
+        
+        assert_eq!(app.decompression_limits.max_compressed_bytes, Limit::Limited(5 * 1024 * 1024));
+        assert_eq!(app.decompression_limits.max_decompressed_bytes, Limit::Limited(16 * 1024 * 1024));
+        assert_eq!(app.decompression_limits.max_expansion_ratio, Some(ExpansionRatio::new(100, 1024 * 1024)));
+    }
 }

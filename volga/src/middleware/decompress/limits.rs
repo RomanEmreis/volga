@@ -70,7 +70,7 @@ const DEFAULT_EXPANSION_SLACK_BYTES: usize = 1024 * 1024; // 1 MiB
 /// # use volga::middleware::decompress::ExpansionRatio;
 /// let ratio = ExpansionRatio::new(50, 256 * 1024);
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExpansionRatio {
     pub(super) ratio: usize,
     pub(super) slack_bytes: usize,

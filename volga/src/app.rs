@@ -996,4 +996,14 @@ mod tests {
 
         assert_eq!(format!("{connection:?}"), "Connection { socket: 127.0.0.1:5000 }");
     }
+    
+    #[test]
+    fn it_sets_default_connection_if_ip_is_invalid() {
+        let connection: Connection = "invalid_ip".into();
+
+        #[cfg(target_os = "windows")]
+        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
+    }
 }

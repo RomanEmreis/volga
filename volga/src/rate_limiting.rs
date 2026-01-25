@@ -1086,4 +1086,66 @@ mod tests {
         assert_eq!(default.max_requests(), 10);
         assert_eq!(default.window_size_secs(), 10);
     }
+    
+    #[test]
+    fn it_add_fixed_window_policy() {
+        let app = App::new()
+            .with_fixed_window(FixedWindow::new(10, Duration::from_secs(10)));
+        
+        let limiter = app.rate_limiter
+            .unwrap()
+            .default_fixed_window
+            .unwrap();
+        
+        assert_eq!(limiter.max_requests(), 10);
+        assert_eq!(limiter.window_size_secs(), 10);
+    }
+
+    #[test]
+    fn it_add_named_fixed_window_policy() {
+        let app = App::new()
+            .with_fixed_window(
+                FixedWindow::new(10, Duration::from_secs(10))
+                    .with_name("burst")
+            );
+
+        let global_limiter = app.rate_limiter.unwrap();
+        let limiter = global_limiter
+            .fixed_window(Some("burst"))
+            .unwrap();
+
+        assert_eq!(limiter.max_requests(), 10);
+        assert_eq!(limiter.window_size_secs(), 10);
+    }
+
+    #[test]
+    fn it_add_sliding_window_policy() {
+        let app = App::new()
+            .with_sliding_window(SlidingWindow::new(10, Duration::from_secs(10)));
+
+        let limiter = app.rate_limiter
+            .unwrap()
+            .default_sliding_window
+            .unwrap();
+
+        assert_eq!(limiter.max_requests(), 10);
+        assert_eq!(limiter.window_size_secs(), 10);
+    }
+
+    #[test]
+    fn it_add_named_sliding_window_policy() {
+        let app = App::new()
+            .with_sliding_window(
+                SlidingWindow::new(10, Duration::from_secs(10))
+                    .with_name("burst")
+            );
+
+        let global_limiter = app.rate_limiter.unwrap();
+        let limiter = global_limiter
+            .sliding_window(Some("burst"))
+            .unwrap();
+
+        assert_eq!(limiter.max_requests(), 10);
+        assert_eq!(limiter.window_size_secs(), 10);
+    }
 }

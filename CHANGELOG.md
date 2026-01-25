@@ -5,18 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.1
 
-- Updated `HttpBody::json`/`form` to return Result so serialization errors surface instead of being embedded into the body, and added an Error conversion for `serde_urlencoded` failures.
-- Response helper macros now propagate JSON/form serialization errors, and problem-details responses match on `HttpBody::json` to return `Err` on failure.
-- Added explicit `ok!(text: ... )`/`ok!(fmt: ...)` and `status!(text: ... )`/`status!(fmt: ... )` macros for `text/plain` responses and documented them alongside existing `ok!`/`status!` examples.
-- Removed unnecessary boxing for `HttpBody::full`, `HttpBody::json` and `HttpBody::form`
-- Added additional methods: `HttpBody::text`, `HttpBody::from_static`, `HttpBody::from_static_text`, `HttpBody::from_str` and `HttpBody::from_slice` for better control.
-- Improved performance for all producing response macros and `IntoResponse` implementations.
-- Improved overall extractors' performance + added additional validation for the cases when mixed Path with NamedPath and positional arguments.
-- Added cached query-like path string handling for PathArgs, including into_parts/from_parts, and preserved the cache when cloning to reduce recomputation in extractor/middleware flows.
-- Switched route/allow header internals to Arc<str> and cached Allow values on route nodes to avoid recomputing 405 headers, plus simplified HSTS formatting to avoid intermediate allocation.
-- Added cached query-arg parsing in HttpRequest/HttpRequestMut to reduce repeated query parsing across extractors.
+### Changed
+- HTTP/RFC compliance (#145)
+- `HttpBody` improvements (#146)
+- Performance Improvements (#147)
+-  Security Improvements (#148)
 
 ## 0.8.0
 
