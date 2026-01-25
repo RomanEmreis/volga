@@ -603,26 +603,46 @@ impl App {
     ///  app.run_blocking();
     /// ```
     pub fn run_blocking(self) {
-        if tokio::runtime::Handle::try_current().is_ok() {
-            panic!("`App::run_blocking()` cannot be called inside an existing Tokio runtime. Use `run().await` instead.");
-        }
-
-        let runtime = match tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(err) => {
-                #[cfg(feature = "tracing")]
-                tracing::error!("failed to start the runtime: {err:#}");
-                #[cfg(not(feature = "tracing"))]
-                eprintln!("failed to start the runtime: {err:#}");
-                return;
-            }
+        let Some(runtime) = create_tokio_runtime() else {
+            return;
         };
 
         runtime.block_on(async {
             if let Err(err) = self.run().await {
+                #[cfg(feature = "tracing")]
+                tracing::error!("failed to run the server: {err:#}");
+                #[cfg(not(feature = "tracing"))]
+                eprintln!("failed to run the server: {err:#}");
+            }
+        });
+    }
+
+    /// Starts the [`App`] using the custom [`std::net::TcpListener`] with its own Tokio runtime.
+    ///
+    /// This method is intended for simple use cases where you don't already have a Tokio runtime setup.
+    /// Internally, it creates and runs a multi-threaded Tokio runtime to execute the application.
+    ///
+    /// **Note:** This method **must not** be called from within an existing Tokio runtime
+    /// (e.g., inside an `#[tokio::main]` async function), or it will panic.
+    /// If you are already using Tokio in your application, use [`App::run`] instead.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use std::net::TcpListener;
+    ///
+    /// let app = App::new();
+    /// let listener = TcpListener::bind("localhost:7878");
+    /// 
+    /// app.run_blocking_with_std_listener(listener);
+    /// ```
+    pub fn run_blocking_with_std_listener(self, tcp_listener: std::net::TcpListener) {
+        let Some(runtime) = create_tokio_runtime() else {
+            return;
+        };
+
+        runtime.block_on(async {
+            if let Err(err) = self.run_with_std_listener(tcp_listener).await {
                 #[cfg(feature = "tracing")]
                 tracing::error!("failed to run the server: {err:#}");
                 #[cfg(not(feature = "tracing"))]
@@ -654,9 +674,11 @@ impl App {
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(feature = "middleware")]
-    pub fn run(mut self) -> impl Future<Output = io::Result<()>> {
+    pub async fn run(mut self) -> io::Result<()> {
         self.use_endpoints();
-        self.run_internal()
+        let socket = self.connection.socket;
+        let tcp_listener = TcpListener::bind(socket).await?;
+        self.run_internal(tcp_listener).await
     }
 
     /// Runs the [`App`] using the current asynchronous runtime.
@@ -682,16 +704,161 @@ impl App {
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(not(feature = "middleware"))]
-    pub fn run(self) -> impl Future<Output = io::Result<()>> {
-        self.run_internal()
+    pub async fn run(self) -> io::Result<()> {
+        let socket = self.connection.socket;
+        let tcp_listener = TcpListener::bind(socket).await?;
+        self.run_internal(tcp_listener).await
+    }
+
+    /// Runs the [`App`] using the custom [`tokio::net::TcpListener`] in current asynchronous runtime.
+    ///
+    /// This method must be called inside an existing asynchronous context,
+    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
+    ///
+    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
+    /// It gives you full control over runtime configuration, task execution, and integration
+    /// with other async components.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use tokio::net::TcpListener;
+    /// 
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let app = App::new();
+    /// 
+    ///     let listener = TcpListener::bind("localhost:7878").await?;
+    ///     
+    ///     app.run_with_listener(listener).await
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
+    #[cfg(feature = "middleware")]
+    pub fn run_with_listener(
+        mut self, 
+        tcp_listener: TcpListener
+    ) -> impl Future<Output = io::Result<()>> {
+        self.use_endpoints();
+
+        self.run_internal(tcp_listener)
+    }
+
+    /// Runs the [`App`] using the custom [`tokio::net::TcpListener`] in current asynchronous runtime.
+    ///
+    /// This method must be called inside an existing asynchronous context,
+    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
+    ///
+    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
+    /// It gives you full control over runtime configuration, task execution, and integration
+    /// with other async components.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use tokio::net::TcpListener;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let app = App::new();
+    ///
+    ///     let listener = TcpListener::bind("localhost:7878").await?;
+    ///     
+    ///     app.run_with_listener(listener).await
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
+    #[cfg(not(feature = "middleware"))]
+    pub fn run_with_listener(
+        self,
+        tcp_listener: TcpListener
+    ) -> impl Future<Output = io::Result<()>> {
+        self.run_internal(tcp_listener)
+    }
+
+    /// Runs the [`App`] using the custom [`std::net::TcpListener`] in current asynchronous runtime.
+    ///
+    /// This method must be called inside an existing asynchronous context,
+    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
+    ///
+    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
+    /// It gives you full control over runtime configuration, task execution, and integration
+    /// with other async components.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use std::net::TcpListener;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let app = App::new();
+    ///
+    ///     let listener = TcpListener::bind("localhost:7878")?;
+    ///     
+    ///     app.run_with_listener(listener).await
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
+    #[cfg(feature = "middleware")]
+    pub async fn run_with_std_listener(
+        mut self,
+        tcp_listener: std::net::TcpListener
+    ) -> io::Result<()> {
+        self.use_endpoints();
+
+        tcp_listener.set_nonblocking(true)?;
+        let tcp_listener = TcpListener::from_std(tcp_listener)?;
+        self.run_internal(tcp_listener).await
+    }
+
+    /// Runs the [`App`] using the custom [`std::net::TcpListener`] in current asynchronous runtime.
+    ///
+    /// This method must be called inside an existing asynchronous context,
+    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
+    ///
+    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
+    /// It gives you full control over runtime configuration, task execution, and integration
+    /// with other async components.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    /// use std::net::TcpListener;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let app = App::new();
+    ///
+    ///     let listener = TcpListener::bind("localhost:7878")?;
+    ///     
+    ///     app.run_with_listener(listener).await
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
+    #[cfg(not(feature = "middleware"))]
+    pub async fn run_with_std_listener(
+        self,
+        tcp_listener: std::net::TcpListener
+    ) -> io::Result<()> {
+        tcp_listener.set_nonblocking(true)?;
+        let tcp_listener = TcpListener::from_std(tcp_listener)?;
+        self.run_internal(tcp_listener).await
     }
     
     #[inline]
-    async fn run_internal(self) -> io::Result<()> {
+    async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
         let socket = self.connection.socket;
         let no_delay = self.no_delay;
-        let tcp_listener = TcpListener::bind(socket).await?;
-
+        
         #[cfg(debug_assertions)]
         self.print_welcome();
         
@@ -854,6 +1021,29 @@ impl App {
             .collect();
         println!("{routes}");
     }
+}
+
+#[inline]
+fn create_tokio_runtime() -> Option<tokio::runtime::Runtime> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        panic!("`App::run_blocking()` cannot be called inside an existing Tokio runtime. Use `run().await` instead.");
+    }
+
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(err) => {
+            #[cfg(feature = "tracing")]
+            tracing::error!("failed to start the runtime: {err:#}");
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("failed to start the runtime: {err:#}");
+            return None;
+        }
+    };
+
+    Some(runtime)
 }
 
 #[cfg(test)]
