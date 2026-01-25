@@ -17,6 +17,7 @@
 //! Spans are byte offsets into the original query string. Offsets are created only at ASCII
 //! delimiters (`&` and `=`), which are always valid UTF-8 boundaries, so slicing is safe.
 
+const DEFAULT_PARAMS_COUNT: usize = 4;
 const KV_SEPARATOR: u8 = b'=';
 const PARAM_SEPARATOR: u8 = b'&';
 
@@ -71,7 +72,7 @@ struct QueryArgSpan {
 /// middleware/extractors.
 pub(super) struct QueryArgsCache {
     query_len: usize,
-    pairs: Vec<QueryArgSpan>,
+    pairs: smallvec::SmallVec<[QueryArgSpan; DEFAULT_PARAMS_COUNT]>,
 }
 
 impl QueryArgsCache {
@@ -82,7 +83,7 @@ impl QueryArgsCache {
     /// - Segments are separated by `&`.
     /// - No percent-decoding is performed.
     pub(super) fn new(query: &str) -> Self {
-        let mut pairs = Vec::new();
+        let mut pairs = smallvec::SmallVec::new();
 
         // Single pass over bytes: identify segments split by '&', and first '=' within each segment.
         let bytes = query.as_bytes();

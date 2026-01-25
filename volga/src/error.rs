@@ -35,7 +35,7 @@ pub mod fallback;
 pub mod problem;
 
 pub(crate) type BoxError = Box<
-    dyn StdError 
+    dyn StdError
     + Send 
     + Sync
 >;
@@ -97,29 +97,24 @@ impl From<serde_urlencoded::ser::Error> for Error {
 impl From<IoError> for Error {
     #[inline]
     fn from(err: IoError) -> Self {
-        let status = match err.kind() { 
-            ErrorKind::NotFound => StatusCode::NOT_FOUND,
-            ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
-            ErrorKind::ConnectionRefused => StatusCode::BAD_GATEWAY,
-            ErrorKind::ConnectionReset => StatusCode::BAD_GATEWAY,
-            ErrorKind::ConnectionAborted => StatusCode::BAD_GATEWAY,
-            ErrorKind::NotConnected => StatusCode::BAD_GATEWAY,
-            ErrorKind::AddrInUse => StatusCode::BAD_GATEWAY,
-            ErrorKind::AddrNotAvailable => StatusCode::BAD_GATEWAY,
-            ErrorKind::BrokenPipe => StatusCode::BAD_GATEWAY,
-            ErrorKind::AlreadyExists => StatusCode::CONFLICT,
-            ErrorKind::InvalidInput => StatusCode::BAD_REQUEST,
-            ErrorKind::InvalidData => StatusCode::BAD_REQUEST,
-            ErrorKind::TimedOut => StatusCode::REQUEST_TIMEOUT,
-            ErrorKind::Unsupported => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            _ => StatusCode::INTERNAL_SERVER_ERROR
-        };
-        
-        Self { 
-            instance: None,
-            inner: err.into(),
-            status
+        let kind = err.kind();
+
+        if kind == ErrorKind::Other {
+            if let Some(inner) = err.into_inner() {
+                return match inner.downcast::<Error>() {
+                    Ok(volga) => *volga,
+                    Err(inner) => {
+                        let err = IoError::new(kind, inner);
+                        Error::from_io_error_fallback(err)
+                    }
+                }
+            }
+
+            let err = IoError::new(kind, "io error (Other)");
+            return Error::from_io_error_fallback(err);
         }
+
+        Error::from_io_error_fallback(err)
     }
 }
 
@@ -219,6 +214,35 @@ impl Error {
     #[inline]
     pub fn is_client_error(&self) -> bool {
         self.status.is_client_error()
+    }
+
+    #[inline]
+    fn from_io_error_fallback(err: IoError) -> Self {
+        let status = match err.kind() {
+            ErrorKind::NotFound => StatusCode::NOT_FOUND,
+            ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
+
+            ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::NotConnected
+            | ErrorKind::AddrInUse
+            | ErrorKind::AddrNotAvailable
+            | ErrorKind::BrokenPipe => StatusCode::BAD_GATEWAY,
+
+            ErrorKind::AlreadyExists => StatusCode::CONFLICT,
+            ErrorKind::InvalidInput | ErrorKind::InvalidData => StatusCode::BAD_REQUEST,
+            ErrorKind::TimedOut => StatusCode::REQUEST_TIMEOUT,
+            ErrorKind::Unsupported => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+
+        Self {
+            instance: None,
+            inner: err.into(),
+            status,
+        }
     }
 }
 
@@ -450,6 +474,15 @@ mod tests {
     fn it_converts_from_fmt_error() {
         let fmt_error = std::fmt::Error::default();
         let err = Error::from(fmt_error);
+
+        assert!(err.is_client_error());
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn it_converts_from_io_error_with_inner_volga_error() {
+        let io_error = IoError::other(Error::client_error("some error"));
+        let err = Error::from(io_error);
 
         assert!(err.is_client_error());
         assert_eq!(err.status, StatusCode::BAD_REQUEST);

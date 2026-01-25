@@ -38,6 +38,9 @@ use {
 #[cfg(feature = "middleware")]
 use crate::middleware::HttpContext;
 
+#[cfg(feature = "rate-limiting")]
+use crate::rate_limiting::TrustedProxies;
+
 /// Represents the execution scope of the current connection
 #[derive(Clone)]
 pub(crate) struct Scope {
@@ -203,9 +206,25 @@ async fn handle_impl(
                     extensions.insert(bts.clone());
                 }
 
+                #[cfg(any(
+                    feature = "decompression-brotli",
+                    feature = "decompression-gzip",
+                    feature = "decompression-zstd",
+                    feature = "decompression-full"
+                ))]
+                {
+                    extensions.insert(shared.decompression_limits);
+                }
+
                 #[cfg(feature = "rate-limiting")]
-                if let Some(rate_limiter) = &shared.rate_limiter {
-                    extensions.insert(rate_limiter.clone());
+                {
+                    if let Some(rate_limiter) = &shared.rate_limiter {
+                        extensions.insert(rate_limiter.clone());
+                    }
+                    
+                    if let Some(trusted_proxies) = &shared.trusted_proxies {
+                        extensions.insert(TrustedProxies(trusted_proxies.clone()));
+                    }
                 }
             }
 

@@ -45,13 +45,27 @@ use crate::http::cors::CorsRegistry;
 use crate::auth::bearer::{BearerAuthConfig, BearerTokenService};
 
 #[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::GlobalRateLimiter;
+use {
+    crate::rate_limiting::GlobalRateLimiter,
+    std::collections::HashSet
+};
 
 #[cfg(feature = "static-files")]
 pub use self::env::HostEnv;
 
 #[cfg(feature = "http2")]
 pub use crate::limits::Http2Limits;
+
+#[cfg(any(
+    feature = "decompression-brotli",
+    feature = "decompression-gzip",
+    feature = "decompression-zstd",
+    feature = "decompression-full"
+))]
+use crate::middleware::decompress::{
+    ResolvedDecompressionLimits,
+    DecompressionLimits
+};
 
 #[cfg(feature = "static-files")]
 pub mod env;
@@ -121,6 +135,10 @@ pub struct App {
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<GlobalRateLimiter>,
 
+    /// Trusted proxies for rate limiting IP extraction
+    #[cfg(feature = "rate-limiting")]
+    pub(super) trusted_proxies: Option<HashSet<IpAddr>>,
+
     /// Request/Middleware pipeline builder
     pub(super) pipeline: PipelineBuilder,
 
@@ -132,6 +150,15 @@ pub struct App {
     /// HTTP/2 resource and backpressure limits.
     #[cfg(feature = "http2")]
     pub(super) http2_limits: Http2Limits,
+
+    /// Limits for decompression middleware
+    #[cfg(any(
+        feature = "decompression-brotli",
+        feature = "decompression-gzip",
+        feature = "decompression-zstd",
+        feature = "decompression-full"
+    ))]
+    pub(super) decompression_limits: DecompressionLimits,
 
     /// TCP connection parameters
     connection: Connection,
@@ -234,6 +261,10 @@ pub(crate) struct AppInstance {
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<Arc<GlobalRateLimiter>>,
 
+    /// Trusted proxies for rate limiting IP extraction
+    #[cfg(feature = "rate-limiting")]
+    pub(super) trusted_proxies: Option<Arc<HashSet<IpAddr>>>,
+
     /// HSTS configuration options
     #[cfg(feature = "tls")]
     pub(super) hsts: Option<HstsHeader>,
@@ -257,6 +288,15 @@ pub(crate) struct AppInstance {
     /// HTTP/2 resource and backpressure limits.
     #[cfg(feature = "http2")]
     pub(super) http2_limits: Http2Limits,
+
+    /// Limits for decompression middleware
+    #[cfg(any(
+        feature = "decompression-brotli",
+        feature = "decompression-gzip",
+        feature = "decompression-zstd",
+        feature = "decompression-full"
+    ))]
+    pub(super) decompression_limits: ResolvedDecompressionLimits,
 
     /// Default `Cache-Control` header value
     pub(super) cache_control: Option<HeaderValue>,
@@ -305,12 +345,21 @@ impl TryFrom<App> for AppInstance {
             cors: app.cors,
             #[cfg(feature = "http2")]
             http2_limits: app.http2_limits,
+            #[cfg(any(
+                feature = "decompression-brotli",
+                feature = "decompression-gzip",
+                feature = "decompression-zstd",
+                feature = "decompression-full"
+            ))]
+            decompression_limits: app.decompression_limits.resolved(),
             #[cfg(feature = "static-files")]
             host_env: app.host_env,
             #[cfg(feature = "di")]
             container: app.container.build(),
             #[cfg(feature = "rate-limiting")]
             rate_limiter: app.rate_limiter.map(Arc::new),
+            #[cfg(feature = "rate-limiting")]
+            trusted_proxies: app.trusted_proxies.map(Arc::new),
             #[cfg(feature = "jwt-auth")]
             bearer_token_service,
             #[cfg(feature = "tracing")]
@@ -373,6 +422,8 @@ impl App {
             auth_config: None,
             #[cfg(feature = "rate-limiting")]
             rate_limiter: None,
+            #[cfg(feature = "rate-limiting")]
+            trusted_proxies: None,
             pipeline: PipelineBuilder::new(),
             connection: Default::default(),
             body_limit: Default::default(),
@@ -384,6 +435,13 @@ impl App {
             cache_control: None,
             #[cfg(feature = "http2")]
             http2_limits: Default::default(),
+            #[cfg(any(
+                feature = "decompression-brotli",
+                feature = "decompression-gzip",
+                feature = "decompression-zstd",
+                feature = "decompression-full"
+            ))]
+            decompression_limits: Default::default(),
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
@@ -937,5 +995,15 @@ mod tests {
         let connection: Connection = ([127, 0, 0, 1], 5000).into();
 
         assert_eq!(format!("{connection:?}"), "Connection { socket: 127.0.0.1:5000 }");
+    }
+    
+    #[test]
+    fn it_sets_default_connection_if_ip_is_invalid() {
+        let connection: Connection = "invalid_ip".into();
+
+        #[cfg(target_os = "windows")]
+        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
     }
 }

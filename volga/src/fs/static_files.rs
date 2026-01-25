@@ -1,6 +1,6 @@
 ﻿//! Tools and utilities for handling static files
 
-use tokio::fs::{File, metadata};
+use tokio::fs::{File, canonicalize, metadata};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf}
@@ -12,6 +12,7 @@ use crate::{
     app::HostEnv,
     http::StatusCode,
     routing::RouteGroup,
+    error::Error,
     html_file,
     html,
     status
@@ -30,7 +31,7 @@ mod file_listing;
 async fn index(env: HostEnv) -> HttpResult {
     if env.show_files_listing() {
         let path = env.content_root().to_path_buf();
-        respond_with_folder_impl(path, true).await
+        respond_with_folder_impl(path, env.content_root(), true).await
     } else {
         let index_path = env.index_path().to_path_buf();
         let metadata = metadata(&index_path).await?;
@@ -66,7 +67,13 @@ async fn respond_with_file(
             acc
         });
     let path = env.content_root().join(&path);
-    match respond_with_file_or_dir_impl(path, headers, env.show_files_listing()).await {
+    let response = respond_with_file_or_dir_impl(
+        path,
+        headers,
+        env.content_root(),
+        env.show_files_listing()
+    ).await;
+    match response {
         Ok(response) => Ok(response),
         Err(err) if err.status == StatusCode::NOT_FOUND => fallback(env).await,
         Err(err) => Err(err),
@@ -77,12 +84,14 @@ async fn respond_with_file(
 async fn respond_with_file_or_dir_impl(
     path: PathBuf,
     headers: HttpHeaders,
+    content_root: &Path,
     show_files_listing: bool
 ) -> HttpResult {
+    let (path, content_root) = sanitize_path(path, content_root).await?;
     let metadata = metadata(&path).await?;
     match (metadata.is_dir(), show_files_listing) {
         (true, false) => status!(403, "Access is denied."),
-        (true, true) => respond_with_folder_impl(path, false).await,
+        (true, true) => respond_with_folder_impl(path, &content_root, false).await,
         (false, _) => {
             let caching = ResponseCaching::try_from(&metadata)?;
             if validate_etag(&caching.etag, &headers) ||
@@ -99,8 +108,26 @@ async fn respond_with_file_or_dir_impl(
 }
 
 #[inline]
-async fn respond_with_folder_impl(path: PathBuf, is_root: bool) -> HttpResult {
-    let html = file_listing::generate_html(&path, is_root).await?;
+async fn respond_with_folder_impl(
+    path: PathBuf, 
+    content_root: &Path, 
+    is_root: bool
+) -> HttpResult {
+    let display_path = if is_root {
+        "/".to_string()
+    } else {
+        path.strip_prefix(content_root)
+            .unwrap_or(&path)
+            .display()
+            .to_string()
+    };
+    
+    let html = file_listing::generate_html(
+        &path, 
+        &display_path, 
+        is_root
+    ).await?;
+
     html!(html)
 }
 
@@ -114,6 +141,22 @@ async fn respond_with_file_impl(path: PathBuf, caching: ResponseCaching) -> Http
             (CACHE_CONTROL, caching.cache_control()),
         ])
     }
+}
+
+#[inline]
+async fn sanitize_path(path: PathBuf, content_root: &Path) -> Result<(PathBuf, PathBuf), Error> {
+    let content_root = canonicalize(content_root).await?;
+    let path = canonicalize(&path).await?;
+    if !path.starts_with(&content_root) {
+        return Err(
+            Error::from_parts(
+                StatusCode::FORBIDDEN, 
+                None, 
+                "Access is denied."
+            )
+        );
+    }
+    Ok((path, content_root))
 }
 
 /// Calculates max folders depth for the given root
@@ -348,7 +391,7 @@ mod tests {
     #[tokio::test]
     async fn it_responds_with_folder() {
         let path = PathBuf::from("tests/static");
-        let index_response = respond_with_folder_impl(path, true).await;
+        let index_response = respond_with_folder_impl(path.clone(), &path, true).await;
 
         assert!(index_response.is_ok());
         assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
@@ -358,7 +401,7 @@ mod tests {
     async fn it_responds_with_directory_listing() {
         let path = PathBuf::from("tests/static");
         let headers = HttpHeaders::from(HeaderMap::new());
-        let response = respond_with_file_or_dir_impl(path, headers, true).await;
+        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, true).await;
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
@@ -368,7 +411,7 @@ mod tests {
     async fn it_responds_with_403_as_shows_files_is_false() {
         let path = PathBuf::from("tests/static");
         let headers = HttpHeaders::from(HeaderMap::new());
-        let response = respond_with_file_or_dir_impl(path, headers, false).await;
+        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().status(), 403);
@@ -379,7 +422,7 @@ mod tests {
         let path = PathBuf::from("tests/static/index.html");
         let headers = HeaderMap::new();
         let headers = HttpHeaders::from(headers);
-        let response = respond_with_file_or_dir_impl(path, headers, false).await;
+        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
@@ -394,7 +437,7 @@ mod tests {
         headers.insert(IF_MODIFIED_SINCE, HeaderValue::from_str(&httpdate::fmt_http_date(now)).unwrap());
 
         let headers = HttpHeaders::from(headers);
-        let response = respond_with_file_or_dir_impl(path, headers, false).await;
+        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().status(), 304);
@@ -409,7 +452,7 @@ mod tests {
         headers.insert(IF_NONE_MATCH, caching.etag().try_into().unwrap());
 
         let headers = HttpHeaders::from(headers);
-        let response = respond_with_file_or_dir_impl(path, headers, false).await;
+        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().status(), 304);

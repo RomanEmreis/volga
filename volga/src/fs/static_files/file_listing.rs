@@ -1,13 +1,15 @@
 ﻿use crate::error::Error;
-use chrono::{DateTime, Utc};
 use handlebars::{Handlebars, RenderError, TemplateError};
 use tokio::fs::read_dir;
 use serde::ser::{Serialize, Serializer, SerializeStruct};
 
-use std::{
-    time::UNIX_EPOCH,
-    path::Path
+#[cfg(debug_assertions)]
+use {
+    chrono::{DateTime, Utc},
+    std::time::UNIX_EPOCH
 };
+
+use std::path::Path;
 
 const HTML_TEMPLATE: &str = 
     r#"<html>
@@ -51,7 +53,11 @@ impl Serialize for FileEntry {
 }
 
 #[inline]
-pub(super) async fn generate_html(directory: &Path, is_root: bool) -> Result<String, Error> {
+pub(super) async fn generate_html(
+    directory: &Path,
+    display_directory: &str,
+    is_root: bool
+) -> Result<String, Error> {
     let mut entries = Vec::new();
  
     if !is_root {
@@ -83,8 +89,17 @@ pub(super) async fn generate_html(directory: &Path, is_root: bool) -> Result<Str
                 size = "-".to_string();
             } else { 
                 display_name = name.clone();
-                size = metadata.len().to_string();
+                size = if cfg!(debug_assertions) {
+                    metadata.len().to_string()
+                } else {
+                    "-".to_string()
+                };
             }
+
+            #[cfg(not(debug_assertions))]
+            let modified = "-".to_string();
+
+            #[cfg(debug_assertions)]
             let modified = metadata.modified().ok()
                 .and_then(|time| {
                     let duration = time.duration_since(UNIX_EPOCH).ok()?;
@@ -101,7 +116,7 @@ pub(super) async fn generate_html(directory: &Path, is_root: bool) -> Result<Str
     entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.cmp(&b.name)));
     
     let mut handlebars = Handlebars::new();
-    let data = serde_json::json!({ "directory": directory, "entries": entries });
+    let data = serde_json::json!({ "directory": display_directory, "entries": entries });
     handlebars.register_template_string("directory", HTML_TEMPLATE)?;
     handlebars.render("directory", &data).map_err(Error::from)
 }
@@ -126,7 +141,11 @@ mod tests {
     #[tokio::test]
     async fn it_creates_file_listing_html() {
         let dir = Path::new("tests/resources");
-        let html = generate_html(dir, true).await;
+        let html = generate_html(
+            dir, 
+            "/tests/resources", 
+            true
+        ).await;
         
         assert!(html.is_ok());
     }

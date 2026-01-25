@@ -5,13 +5,14 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_INDEX_FILE: &str = "index.html";
+const DEFAULT_CONTENT_ROOT: &str = "/static";
 
 /// Describes a Web Server's Hosting Environment
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct HostEnv {
     /// Root folder of static content
     /// 
-    /// Default: `/`
+    /// Default: `/static`
     content_root: PathBuf,
     
     /// Path to the `index.html` file
@@ -33,7 +34,7 @@ pub struct HostEnv {
 impl Default for HostEnv {
     #[inline]
     fn default() -> Self {
-        Self::new("/")
+        Self::new(DEFAULT_CONTENT_ROOT)
     }
 }
 
@@ -42,6 +43,8 @@ impl HostEnv {
     #[inline]
     pub fn new<T: ?Sized + AsRef<OsStr>>(content_root: &T) -> Self {
         let content_root = PathBuf::from(content_root);
+        warn_if_root_is_fs_root(&content_root);
+
         let index_path = content_root.join(DEFAULT_INDEX_FILE);
         Self {
             show_directory: false,
@@ -53,7 +56,7 @@ impl HostEnv {
 
     /// Specifies a root folder for static content
     ///
-    /// Default: `/`
+    /// Default: `/static`
     ///
     /// # Example
     /// ```no_run
@@ -64,6 +67,7 @@ impl HostEnv {
     /// ```
     pub fn with_content_root<T: ?Sized + AsRef<OsStr>>(mut self, root: &T) -> Self {
         self.content_root = PathBuf::from(root);
+        warn_if_root_is_fs_root(&self.content_root);
 
         if let Some(file_name) = self
             .index_path
@@ -119,30 +123,35 @@ impl HostEnv {
         self
     }
     
-    /// Enables showing a list of files when root "/" is requested
+    /// Enables showing a list of files when root "/static" is requested
     /// 
     /// Default: `false`
     pub fn with_files_listing(mut self) -> Self {
+        warn_if_listing_enabled_in_release();
+        
         self.show_directory = true;
         self
     }
     
     /// Returns the content root of Web Server
-    /// >Note: the folder could not exist
+    /// 
+    /// > ***Note:*** the folder could not exist
     #[inline]
     pub fn content_root(&self) -> &Path {
         &self.content_root
     }
     
     /// Returns the relative path to the index file. 
-    /// >Note: the file could not exist
+    /// 
+    /// > **Note:** the file could not exist
     #[inline]
     pub fn index_path(&self) -> &Path {
         &self.index_path
     }
 
-    /// Returns the relative path to the fallback file if it's specified. 
-    /// >Note: the file could not exist
+    /// Returns the relative path to the fallback file if it's specified.
+    /// 
+    /// > **Note:** the file could not exist
     #[inline]
     pub fn fallback_path(&self) -> Option<&Path> {
         match &self.fallback_path { 
@@ -162,7 +171,7 @@ impl App {
     /// Configures web server's hosting environment
     ///
     /// Defaults:
-    /// - content_root: `/`
+    /// - content_root: `/static`
     /// - index_path: `index.html`
     pub fn with_host_env<T>(mut self, config: T) -> Self
     where
@@ -175,7 +184,7 @@ impl App {
     /// Configures web server's hosting environment
     ///
     /// Defaults:
-    /// - content_root: `/`
+    /// - content_root: `/static`
     /// - index_path: `index.html`
     pub fn set_host_env(mut self, env: HostEnv) -> Self {
         self.host_env = env;
@@ -183,17 +192,40 @@ impl App {
     }
 }
 
+#[inline]
+fn warn_if_root_is_fs_root(path: &Path) {
+    #[cfg(feature = "tracing")]
+    if path == Path::new("/") {
+        tracing::warn!(
+            "HostEnv content_root is set to '/', which can expose the entire filesystem. Consider using a dedicated static directory."
+        );
+    }
+}
+
+#[inline]
+fn warn_if_listing_enabled_in_release() {
+    #[cfg(not(debug_assertions))]
+    {
+        #[cfg(feature = "tracing")]
+        tracing::warn!(
+            "Static files listing is enabled in release mode; this may leak file metadata. Consider disabling it for production."
+        );
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use crate::app::{App, env::HostEnv};
+    use super::*;
+    use crate::App;
 
     #[test]
     fn it_creates_default_host_env() {
         let env = HostEnv::default();
         
-        assert_eq!(env.content_root, PathBuf::from("/"));
-        assert_eq!(env.index_path, PathBuf::from("/index.html"));
+        assert_eq!(env.content_root, PathBuf::from(DEFAULT_CONTENT_ROOT));
+        assert_eq!(env.index_path, PathBuf::from("/static/index.html"));
         assert_eq!(env.fallback_path, None);
         assert!(!env.show_directory);
     }
