@@ -630,11 +630,13 @@ impl App {
     /// ```no_run
     /// use volga::App;
     /// use std::net::TcpListener;
-    ///
+    /// # fn docs() -> std::io::Result<()> {
     /// let app = App::new();
-    /// let listener = TcpListener::bind("localhost:7878");
+    /// let listener = TcpListener::bind("localhost:7878")?;
     /// 
     /// app.run_blocking_with_std_listener(listener);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn run_blocking_with_std_listener(self, tcp_listener: std::net::TcpListener) {
         let Some(runtime) = create_tokio_runtime() else {
@@ -710,7 +712,7 @@ impl App {
         self.run_internal(tcp_listener).await
     }
 
-    /// Runs the [`App`] using the custom [`tokio::net::TcpListener`] in current asynchronous runtime.
+    /// Runs the [`App`] using the custom [`tokio::net::TcpListener`] in the current asynchronous runtime.
     ///
     /// This method must be called inside an existing asynchronous context,
     /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
@@ -746,7 +748,7 @@ impl App {
         self.run_internal(tcp_listener)
     }
 
-    /// Runs the [`App`] using the custom [`tokio::net::TcpListener`] in current asynchronous runtime.
+    /// Runs the [`App`] using the custom [`tokio::net::TcpListener`] in the current asynchronous runtime.
     ///
     /// This method must be called inside an existing asynchronous context,
     /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
@@ -780,7 +782,7 @@ impl App {
         self.run_internal(tcp_listener)
     }
 
-    /// Runs the [`App`] using the custom [`std::net::TcpListener`] in current asynchronous runtime.
+    /// Runs the [`App`] using the custom [`std::net::TcpListener`] in the current asynchronous runtime.
     ///
     /// This method must be called inside an existing asynchronous context,
     /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
@@ -800,7 +802,7 @@ impl App {
     ///
     ///     let listener = TcpListener::bind("localhost:7878")?;
     ///     
-    ///     app.run_with_listener(listener).await
+    ///     app.run_with_std_listener(listener).await
     /// }
     /// ```
     ///
@@ -818,7 +820,7 @@ impl App {
         self.run_internal(tcp_listener).await
     }
 
-    /// Runs the [`App`] using the custom [`std::net::TcpListener`] in current asynchronous runtime.
+    /// Runs the [`App`] using the custom [`std::net::TcpListener`] in the current asynchronous runtime.
     ///
     /// This method must be called inside an existing asynchronous context,
     /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
@@ -838,7 +840,7 @@ impl App {
     ///
     ///     let listener = TcpListener::bind("localhost:7878")?;
     ///     
-    ///     app.run_with_listener(listener).await
+    ///     app.run_with_std_listener(listener).await
     /// }
     /// ```
     ///
@@ -856,7 +858,9 @@ impl App {
     
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
+        #[cfg(any(feature = "tls", feature = "tracing"))]
         let socket = self.connection.socket;
+        
         let no_delay = self.no_delay;
         
         #[cfg(debug_assertions)]
