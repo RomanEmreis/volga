@@ -219,11 +219,11 @@ fn resolve_limit(limit: Limit<usize>, default: usize) -> Option<usize> {
 }
 
 #[inline]
-fn warn_if_unlimited(name: &str, limit: Limit<usize>) {
+fn warn_if_unlimited(_name: &str, limit: Limit<usize>) {
     if matches!(limit, Limit::Unlimited) {
         #[cfg(feature = "tracing")]
         tracing::warn!(
-            "{name} is set to Unlimited; decompression safety checks are disabled."
+            "{_name} is set to Unlimited; decompression safety checks are disabled."
         );
     }
 }
