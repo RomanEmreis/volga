@@ -41,6 +41,8 @@ use crate::middleware::HttpContext;
 #[cfg(feature = "rate-limiting")]
 use crate::rate_limiting::TrustedProxies;
 
+const REQUEST_HEADERS_TOO_LARGE_MESSAGE: &str = "Request headers too large.";
+
 /// Represents the execution scope of the current connection
 #[derive(Clone)]
 pub(crate) struct Scope {
@@ -144,7 +146,7 @@ async fn handle_impl(
             #[cfg(feature = "tracing")]
             tracing::warn!("Request rejected due to headers exceeding configured limits");
 
-            return status!(431, "Request headers too large");
+            return status!(431, text: REQUEST_HEADERS_TOO_LARGE_MESSAGE);
         }
 
         #[cfg(feature = "http2")]
@@ -153,7 +155,7 @@ async fn handle_impl(
             #[cfg(feature = "tracing")]
             tracing::warn!("Request rejected due to headers exceeding configured limits");
 
-            return status!(431, "Request headers too large");
+            return status!(431, text: REQUEST_HEADERS_TOO_LARGE_MESSAGE);
         }
     }
         

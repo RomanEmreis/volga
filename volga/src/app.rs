@@ -2,7 +2,6 @@
 
 use self::pipeline::PipelineBuilder;
 use hyper_util::rt::TokioIo;
-use std::net::IpAddr;
 use connection::Connection;
 use crate::{
     http::request::request_body_limit::RequestBodyLimit,
@@ -26,7 +25,7 @@ use tokio::{
 #[cfg(feature = "rate-limiting")]
 use {
     crate::rate_limiting::GlobalRateLimiter,
-    std::collections::HashSet
+    std::{net::IpAddr, collections::HashSet}
 };
 
 #[cfg(any(
@@ -36,9 +35,6 @@ use {
     feature = "decompression-full"
 ))]
 use crate::middleware::decompress::DecompressionLimits;
-
-#[cfg(feature = "tls")]
-use crate::tls::TlsConfig;
 
 #[cfg(feature = "di")]
 use crate::di::ContainerBuilder;
@@ -52,13 +48,19 @@ use crate::http::cors::CorsRegistry;
 #[cfg(feature = "jwt-auth")]
 use crate::auth::bearer::BearerAuthConfig;
 
+#[cfg(feature = "tls")]
+use crate::tls::TlsConfig;
+
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
 
 #[cfg(feature = "http2")]
 pub use crate::limits::Http2Limits;
 
-pub(crate) use app_env::{AppEnv, GRACEFUL_SHUTDOWN_TIMEOUT};
+#[cfg(feature = "tls")]
+pub(crate) use app_env::GRACEFUL_SHUTDOWN_TIMEOUT;
+
+pub(crate) use app_env::AppEnv;
 
 pub mod router;
 pub(crate) mod pipeline;
@@ -370,7 +372,7 @@ impl App {
     /// Sets the maximum number of concurrent TCP connections.
     ///
     /// This limit is applied at the transport level and acts as a
-    /// fail-fast mechanism to protect the server under high load.
+    /// fail-fast mechanism to protect the server under a high load.
     ///
     /// - `Default`: No explicit limit is enforced.
     /// - `Limited(n)`: At most `n` concurrent connections are allowed.
@@ -472,8 +474,8 @@ impl App {
     #[cfg(feature = "middleware")]
     pub async fn run(mut self) -> io::Result<()> {
         self.use_endpoints();
-        let socket = self.connection.socket;
-        let tcp_listener = TcpListener::bind(socket).await?;
+        
+        let tcp_listener = TcpListener::bind(self.connection.socket).await?;
         self.run_internal(tcp_listener).await
     }
 
@@ -501,8 +503,7 @@ impl App {
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(not(feature = "middleware"))]
     pub async fn run(self) -> io::Result<()> {
-        let socket = self.connection.socket;
-        let tcp_listener = TcpListener::bind(socket).await?;
+        let tcp_listener = TcpListener::bind(self.connection.socket).await?;
         self.run_internal(tcp_listener).await
     }
 
@@ -653,7 +654,7 @@ impl App {
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
         #[cfg(any(feature = "tls", feature = "tracing"))]
-        let socket = self.connection.socket;
+        let socket = tcp_listener.local_addr()?;
         
         let no_delay = self.no_delay;
         

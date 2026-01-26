@@ -1,19 +1,17 @@
 //! Types and utils for control the Application Environment and runtime.
 
 use super::App;
+use std::io::Error;
 use super::pipeline::Pipeline;
 use hyper_util::server::graceful::GracefulShutdown;
-use std::net::IpAddr;
 use crate::{
     http::request::request_body_limit::RequestBodyLimit,
     headers::HeaderValue,
     Limit
 };
 
-use std::{
-    io::Error,
-    sync::Arc
-};
+#[cfg(any(feature = "tls", feature = "rate-limiting"))]
+use std::sync::Arc;
 
 #[cfg(feature = "di")]
 use crate::di::Container;
@@ -36,7 +34,7 @@ use crate::auth::bearer::BearerTokenService;
 #[cfg(feature = "rate-limiting")]
 use {
     crate::rate_limiting::GlobalRateLimiter,
-    std::collections::HashSet
+    std::{net::IpAddr, collections::HashSet}
 };
 
 #[cfg(feature = "static-files")]

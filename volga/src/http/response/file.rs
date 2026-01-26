@@ -53,17 +53,16 @@ macro_rules! file {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use tokio::fs::File;
-    use crate::test_utils::read_file_bytes;
+    use crate::test::{TempFile, utils::read_file_bytes};
 
     #[tokio::test]
     async fn it_creates_file_with_ok_response() {
-        let path = Path::new("tests/resources/test_file.txt");
-        let file_name = path.file_name().and_then(|name| name.to_str()).unwrap();
-        let file = File::open(path).await.unwrap();
+        let file = TempFile::new("Hello, this is some file content!").await;
+        let file_name = file.file_name().to_string();
+        let file = File::open(file.path).await.unwrap();
 
-        let response = file!(file_name, file);
+        let response = file!(&file_name, file);
 
         assert!(response.is_ok());
 
@@ -76,12 +75,11 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_file_with_ok_and_custom_headers_response() {
-        let path = Path::new("tests/resources/test_file.txt");
-        let file_name = path.file_name().and_then(|name| name.to_str()).unwrap();
+        let file = TempFile::new("Hello, this is some file content!").await;
+        let file_name = file.file_name().to_string();
+        let file = File::open(file.path).await.unwrap();
 
-        let file = File::open(path).await.unwrap();
-
-        let response = file!(file_name, file; [
+        let response = file!(&file_name, file; [
             ("x-api-key", "some api key")
         ]);
 

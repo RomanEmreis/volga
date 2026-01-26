@@ -175,14 +175,14 @@ mod tests {
     use crate::http::body::HttpBody;
     use crate::http::endpoints::args::file::FileStream;
     use crate::http::endpoints::args::{FromPayload, Payload};
-    use crate::test_utils::read_file;
+    use crate::test::{TempFile, utils::read_file};
     use uuid::Uuid;
 
     #[tokio::test]
     async fn it_reads_from_payload() {
-        let path = Path::new("tests/resources/test_file.txt");
+        let file = TempFile::new("Hello, this is some file content!").await;
 
-        let file = tokio::fs::File::open(path).await.unwrap();
+        let file = tokio::fs::File::open(file.path).await.unwrap();
         let req = Request::get("/")
             .header(CONTENT_DISPOSITION, "attachment; filename=test_file.txt")
             .body(HttpBody::file(file))
@@ -194,7 +194,7 @@ mod tests {
 
         assert_eq!(file_stream.name(), Some("test_file.txt"));
 
-        let path = Path::new("tests/resources").join(format!("test_file_{}.txt", Uuid::new_v4()));
+        let path = Path::new("tests").join(format!("test_file_{}.txt", Uuid::new_v4()));
         file_stream.save_as(&path).await.unwrap();
 
         let saved_bytes = read_file(&path).await;
@@ -208,14 +208,14 @@ mod tests {
     
     #[tokio::test]
     async fn it_saves_request_body_to_file() {
-        let path = Path::new("tests/resources/test_file.txt");
+        let file = TempFile::new("Hello, this is some file content!").await;
 
-        let file = tokio::fs::File::open(path).await.unwrap();
+        let file = tokio::fs::File::open(file.path).await.unwrap();
         let body = HttpBody::file(file);
 
         let file_stream = FileStream::new(None, body);
 
-        let path = Path::new("tests/resources").join(format!("test_file_{}.txt", Uuid::new_v4()));
+        let path = Path::new("tests").join(format!("test_file_{}.txt", Uuid::new_v4()));
         file_stream.save_as(&path).await.unwrap();
 
         let saved_bytes = read_file(&path).await;
