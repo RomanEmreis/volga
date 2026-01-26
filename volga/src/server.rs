@@ -3,7 +3,7 @@
 use std::sync::Weak;
 use std::net::SocketAddr;
 use hyper::rt::{Read, Write};
-use crate::app::{AppInstance, scope::Scope};
+use crate::app::{AppEnv, scope::Scope};
 
 #[cfg(all(feature = "http1", not(feature = "http2")))]
 pub(super) mod http1;
@@ -25,9 +25,9 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     }
 
     #[inline]
-    pub(super) async fn serve(self, app_instance: Weak<AppInstance>) {
-        if let Some(instance) = app_instance.upgrade() {
-            let scope = Scope::new(app_instance, self.peer_addr);
+    pub(super) async fn serve(self, env: Weak<AppEnv>) {
+        if let Some(instance) = env.upgrade() {
+            let scope = Scope::new(env, self.peer_addr);
             self.serve_core(scope, instance).await;
         } else {
             #[cfg(feature = "tracing")]

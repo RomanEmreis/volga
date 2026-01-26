@@ -1,6 +1,6 @@
 ﻿use super::Server;
 use crate::limits::{Limit, Http2Limits};
-use crate::app::{AppInstance, scope::Scope};
+use crate::app::{AppEnv, scope::Scope};
 use std::sync::Arc;
 use hyper::rt::{Read, Write};
 use hyper_util::rt::TokioExecutor;
@@ -14,7 +14,7 @@ use hyper::server::conn::http2::Builder;
 /// HTTP/2 impl
 impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     #[inline]
-    pub(super) async fn serve_core(self, scope: Scope, app_instance: Arc<AppInstance>) {
+    pub(super) async fn serve_core(self, scope: Scope, env: Arc<AppEnv>) {
         let scoped_cancellation_token = scope.cancellation_token.clone();
 
         #[cfg(feature = "ws")]
@@ -24,16 +24,16 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             let http2_builder = &mut connection_builder.http2();
             http2_builder.enable_connect_protocol();
             
-            if let Limit::Limited(max_header_size) = app_instance.max_header_size {
+            if let Limit::Limited(max_header_size) = env.max_header_size {
                 http2_builder.max_header_list_size(max_header_size as u32);
             }
             
-            configure_http2(http2_builder, app_instance.http2_limits);
+            configure_http2(http2_builder, env.http2_limits);
 
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
-            let connection = app_instance.graceful_shutdown.watch(connection);
+            let connection = env.graceful_shutdown.watch(connection);
             
-            drop(app_instance);
+            drop(env);
 
             if let Err(_err) = connection.await {
                 #[cfg(feature = "tracing")]
@@ -44,16 +44,16 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         #[cfg(not(feature = "ws"))]
         {
             let mut connection_builder = Builder::new(TokioExecutor::new());
-            if let Limit::Limited(max_header_size) = app_instance.max_header_size {
+            if let Limit::Limited(max_header_size) = env.max_header_size {
                 connection_builder.max_header_list_size(max_header_size as u32);
             }
 
-            configure_http2(&mut connection_builder, app_instance.http2_limits);
+            configure_http2(&mut connection_builder, env.http2_limits);
 
             let connection = connection_builder.serve_connection(self.io, scope);
-            let connection = app_instance.graceful_shutdown.watch(connection);
+            let connection = env.graceful_shutdown.watch(connection);
 
-            drop(app_instance);
+            drop(env);
 
             if let Err(_err) = connection.await {
                 #[cfg(feature = "tracing")]

@@ -1,20 +1,18 @@
 ﻿//! Main application entry point
 
-use self::pipeline::{Pipeline, PipelineBuilder};
-use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
+use self::pipeline::PipelineBuilder;
+use hyper_util::rt::TokioIo;
 use std::net::IpAddr;
-
+use connection::Connection;
 use crate::{
     http::request::request_body_limit::RequestBodyLimit,
-    headers::{cache_control::CacheControl, HeaderValue},
+    headers::cache_control::CacheControl,
     server::Server,
     Limit
 };
 
 use std::{
     future::Future,
-    io::Error,
-    net::SocketAddr,
     sync::{Arc, Weak}
 };
 
@@ -25,15 +23,25 @@ use tokio::{
     sync::{watch, Semaphore}
 };
 
+#[cfg(feature = "rate-limiting")]
+use {
+    crate::rate_limiting::GlobalRateLimiter,
+    std::collections::HashSet
+};
 
-#[cfg(feature = "di")]
-use crate::di::{Container, ContainerBuilder};
+#[cfg(any(
+    feature = "decompression-brotli",
+    feature = "decompression-gzip",
+    feature = "decompression-zstd",
+    feature = "decompression-full"
+))]
+use crate::middleware::decompress::DecompressionLimits;
 
 #[cfg(feature = "tls")]
-use {
-    crate::tls::{TlsConfig, HstsHeader},
-    tokio_rustls::TlsAcceptor
-};
+use crate::tls::TlsConfig;
+
+#[cfg(feature = "di")]
+use crate::di::ContainerBuilder;
 
 #[cfg(feature = "tracing")]
 use crate::tracing::TracingConfig;
@@ -42,39 +50,23 @@ use crate::tracing::TracingConfig;
 use crate::http::cors::CorsRegistry;
 
 #[cfg(feature = "jwt-auth")]
-use crate::auth::bearer::{BearerAuthConfig, BearerTokenService};
-
-#[cfg(feature = "rate-limiting")]
-use {
-    crate::rate_limiting::GlobalRateLimiter,
-    std::collections::HashSet
-};
+use crate::auth::bearer::BearerAuthConfig;
 
 #[cfg(feature = "static-files")]
-pub use self::env::HostEnv;
+pub use self::host_env::HostEnv;
 
 #[cfg(feature = "http2")]
 pub use crate::limits::Http2Limits;
 
-#[cfg(any(
-    feature = "decompression-brotli",
-    feature = "decompression-gzip",
-    feature = "decompression-zstd",
-    feature = "decompression-full"
-))]
-use crate::middleware::decompress::{
-    ResolvedDecompressionLimits,
-    DecompressionLimits
-};
+pub(crate) use app_env::{AppEnv, GRACEFUL_SHUTDOWN_TIMEOUT};
 
-#[cfg(feature = "static-files")]
-pub mod env;
 pub mod router;
 pub(crate) mod pipeline;
 pub(crate) mod scope;
-
-pub(super) const GRACEFUL_SHUTDOWN_TIMEOUT: u64 = 10;
-const DEFAULT_PORT: u16 = 7878;
+mod connection;
+mod app_env;
+#[cfg(feature = "static-files")]
+mod host_env;
 
 /// The main entry point for building and running a Volga application.
 ///
@@ -190,204 +182,6 @@ pub struct App {
 
     /// Maximum number of simultaneous TCP connections.
     max_connections: Limit<usize>,
-}
-
-/// Wraps a socket
-#[derive(Debug)]
-pub struct Connection {
-    socket: SocketAddr
-}
-
-impl Default for Connection {
-    #[inline]
-    fn default() -> Self {
-        #[cfg(target_os = "windows")]
-        let ip = [127, 0, 0, 1];
-        #[cfg(not(target_os = "windows"))]
-        let ip = [0, 0, 0, 0];
-        let socket = (ip, DEFAULT_PORT).into();
-        Self { socket }
-    }
-}
-
-impl From<&str> for Connection {
-    #[inline]
-    fn from(s: &str) -> Self {
-        if let Ok(socket) = s.parse::<SocketAddr>() {
-            Self { socket }
-        } else {
-            Self::default()
-        }
-    }
-}
-
-impl From<String> for Connection {
-    #[inline]
-    fn from(s: String) -> Self {
-        if let Ok(socket) = s.parse::<SocketAddr>() {
-            Self { socket }
-        } else {
-            Self::default()
-        }
-    }
-}
-
-impl<I: Into<IpAddr>> From<(I, u16)> for Connection {
-    #[inline]
-    fn from(value: (I, u16)) -> Self {
-        Self { socket: SocketAddr::from(value) }
-    }
-}
-
-/// Contains a shared resource of running Web Server
-pub(crate) struct AppInstance {
-    /// Incoming TLS connection acceptor
-    #[cfg(feature = "tls")]
-    pub(super) acceptor: Option<TlsAcceptor>,
-    
-    /// Dependency Injection container
-    #[cfg(feature = "di")]
-    container: Container,
-
-    /// Web Server's Hosting Environment
-    #[cfg(feature = "static-files")]
-    pub(super) host_env: HostEnv,
-    
-    /// Service that validates/generates JWTs
-    #[cfg(feature = "jwt-auth")]
-    pub(super) bearer_token_service: Option<BearerTokenService>,
-
-    /// Global rate limiter
-    #[cfg(feature = "rate-limiting")]
-    pub(super) rate_limiter: Option<Arc<GlobalRateLimiter>>,
-
-    /// Trusted proxies for rate limiting IP extraction
-    #[cfg(feature = "rate-limiting")]
-    pub(super) trusted_proxies: Option<Arc<HashSet<IpAddr>>>,
-
-    /// HSTS configuration options
-    #[cfg(feature = "tls")]
-    pub(super) hsts: Option<HstsHeader>,
-    
-    /// Tracing configuration options
-    #[cfg(feature = "tracing")]
-    pub(super) tracing_config: Option<TracingConfig>,
-    
-    /// Graceful shutdown utilities
-    pub(super) graceful_shutdown: GracefulShutdown,
-    
-    /// Request body limit
-    pub(super) body_limit: RequestBodyLimit,
-    
-    /// Maximum total size (in bytes) of HTTP headers per request.
-    pub(super) max_header_size: Limit<usize>,
-
-    /// Maximum number of HTTP headers per request.
-    pub(super) max_header_count: Limit<usize>,
-
-    /// HTTP/2 resource and backpressure limits.
-    #[cfg(feature = "http2")]
-    pub(super) http2_limits: Http2Limits,
-
-    /// Limits for decompression middleware
-    #[cfg(any(
-        feature = "decompression-brotli",
-        feature = "decompression-gzip",
-        feature = "decompression-zstd",
-        feature = "decompression-full"
-    ))]
-    pub(super) decompression_limits: ResolvedDecompressionLimits,
-
-    /// Default `Cache-Control` header value
-    pub(super) cache_control: Option<HeaderValue>,
-
-    /// CORS registry
-    #[cfg(feature = "middleware")]
-    pub(super) cors: CorsRegistry,
-
-    /// Request/Middleware pipeline
-    pipeline: Pipeline,
-}
-
-impl TryFrom<App> for AppInstance {
-    type Error = Error;
-
-    fn try_from(app: App) -> Result<Self, Self::Error> {
-        #[cfg(feature = "tls")]
-        let hsts = app.tls_config
-            .as_ref()
-            .map(|tls| HstsHeader::new(tls.hsts_config.clone()));
-
-        #[cfg(feature = "tls")]
-        let acceptor = {
-            let tls_config = app.tls_config
-                .map(|config| config.build())
-                .transpose()?;
-            tls_config
-                .map(|config| TlsAcceptor::from(Arc::new(config)))
-        };
-
-        #[cfg(feature = "jwt-auth")]
-        let bearer_token_service = app.auth_config.map(Into::into);
-        
-        let default_cache_control = app.cache_control
-            .map(|c| c.try_into())
-            .transpose()?;
-
-        let app_instance = Self {
-            body_limit: app.body_limit,
-            pipeline: app.pipeline.build(),
-            graceful_shutdown: GracefulShutdown::new(),
-            max_header_count: app.max_header_count,
-            max_header_size: app.max_header_size,
-            cache_control: default_cache_control,
-            #[cfg(feature = "middleware")]
-            cors: app.cors,
-            #[cfg(feature = "http2")]
-            http2_limits: app.http2_limits,
-            #[cfg(any(
-                feature = "decompression-brotli",
-                feature = "decompression-gzip",
-                feature = "decompression-zstd",
-                feature = "decompression-full"
-            ))]
-            decompression_limits: app.decompression_limits.resolved(),
-            #[cfg(feature = "static-files")]
-            host_env: app.host_env,
-            #[cfg(feature = "di")]
-            container: app.container.build(),
-            #[cfg(feature = "rate-limiting")]
-            rate_limiter: app.rate_limiter.map(Arc::new),
-            #[cfg(feature = "rate-limiting")]
-            trusted_proxies: app.trusted_proxies.map(Arc::new),
-            #[cfg(feature = "jwt-auth")]
-            bearer_token_service,
-            #[cfg(feature = "tracing")]
-            tracing_config: app.tracing_config,
-            #[cfg(feature = "tls")]
-            acceptor,
-            #[cfg(feature = "tls")]
-            hsts
-        };
-        Ok(app_instance)
-    }
-}
-
-impl AppInstance {
-    /// Gracefully shutdown current instance
-    #[inline]
-    async fn shutdown(self) {
-        tokio::select! {
-            _ = self.graceful_shutdown.shutdown() => {
-                #[cfg(feature = "tracing")]
-                tracing::info!("shutting down the server...");
-            },
-            _ = tokio::time::sleep(std::time::Duration::from_secs(GRACEFUL_SHUTDOWN_TIMEOUT)) => {
-                #[cfg(feature = "tracing")]
-                tracing::warn!("timed out wait for all connections to close");
-            }
-        }
-    }
 }
 
 impl Default for App {
@@ -897,7 +691,7 @@ impl App {
         }
 
         let active_connections = self.active_connections();
-        let app_instance: Arc<AppInstance> = Arc::new(self.try_into()?);
+        let app_instance: Arc<AppEnv> = Arc::new(self.try_into()?);
 
         loop {
             let (stream, _) = tokio::select! {
@@ -965,7 +759,7 @@ impl App {
     }
 
     #[inline]
-    async fn handle_connection(stream: TcpStream, app_instance: Weak<AppInstance>) {
+    async fn handle_connection(stream: TcpStream, app_instance: Weak<AppEnv>) {
         let peer_addr = match stream.peer_addr() { 
             Ok(addr) => addr,
             Err(_err) => {
@@ -1055,42 +849,7 @@ mod tests {
     use std::net::SocketAddr;
     use crate::http::request::request_body_limit::RequestBodyLimit;
     use crate::{App, Limit};
-    use crate::app::{AppInstance, Connection};
 
-    #[test]
-    fn it_creates_connection_with_default_socket() {
-        let connection = Connection::default();
-
-        #[cfg(target_os = "windows")]
-        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
-        #[cfg(not(target_os = "windows"))]
-        assert_eq!(connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
-    }
-
-    #[test]
-    fn it_creates_connection_with_specified_socket() {
-        let connection: Connection = "127.0.0.1:5000".into();
-
-        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 5000)));
-    }
-
-    #[test]
-    fn it_creates_default_connection_from_empty_str() {
-        let connection: Connection = "".into();
-
-        #[cfg(target_os = "windows")]
-        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
-        #[cfg(not(target_os = "windows"))]
-        assert_eq!(connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
-    }
-
-    #[test]
-    fn it_creates_connection_with_specified_socket_from_tuple() {
-        let connection: Connection = ([127, 0, 0, 1], 5000).into();
-
-        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 5000)));
-    }
-    
     #[test]
     fn it_creates_app_with_default_socket() {
         let app = App::new();
@@ -1147,7 +906,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn it_panics_on_arge_value() {
+    fn it_panics_on_large_value() {
         App::new().with_max_header_list_size(Limit::Limited(usize::MAX));
     }
 
@@ -1172,32 +931,5 @@ mod tests {
         let Limit::Limited(limit) = app.max_connections else { unreachable!() };
 
         assert_eq!(limit, 1000)
-    }
-    
-    #[test]
-    fn it_converts_into_app_instance() {
-        let app = App::default();
-        
-        let app_instance: AppInstance = app.try_into().unwrap();
-        let RequestBodyLimit::Enabled(limit) = app_instance.body_limit else { unreachable!() };
-
-        assert_eq!(limit, 5242880);
-    }
-
-    #[test]
-    fn it_debugs_connection() {
-        let connection: Connection = ([127, 0, 0, 1], 5000).into();
-
-        assert_eq!(format!("{connection:?}"), "Connection { socket: 127.0.0.1:5000 }");
-    }
-    
-    #[test]
-    fn it_sets_default_connection_if_ip_is_invalid() {
-        let connection: Connection = "invalid_ip".into();
-
-        #[cfg(target_os = "windows")]
-        assert_eq!(connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
-        #[cfg(not(target_os = "windows"))]
-        assert_eq!(connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
     }
 }

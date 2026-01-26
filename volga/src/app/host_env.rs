@@ -213,7 +213,6 @@ fn warn_if_listing_enabled_in_release() {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;

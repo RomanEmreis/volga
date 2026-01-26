@@ -604,7 +604,7 @@ async fn check_fixed_window(
         if !limiter.check(key) { 
             status!(
                 StatusCode::TOO_MANY_REQUESTS.as_u16(), 
-                RATE_LIMIT_ERROR_MSG
+                text: RATE_LIMIT_ERROR_MSG
             )
         } else {
             next(ctx).await
@@ -625,7 +625,7 @@ async fn check_sliding_window(
         if !limiter.check(key) { 
             status!(
                 StatusCode::TOO_MANY_REQUESTS.as_u16(), 
-                RATE_LIMIT_ERROR_MSG
+                text: RATE_LIMIT_ERROR_MSG
             )
         } else {
             next(ctx).await
