@@ -47,15 +47,15 @@ macro_rules! stream {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use tokio::fs::File;
     use crate::HttpBody;
-    use crate::test_utils::read_file_bytes;
+    use crate::test::TempFile;
+    use crate::test::utils::read_file_bytes;
 
     #[tokio::test]
     async fn it_creates_stream_response() {
-        let path = Path::new("tests/resources/test_file.txt");
-        let file = File::open(path).await.unwrap();
+        let file = TempFile::new("Hello, this is some file content!").await;
+        let file = File::open(file.path).await.unwrap();
         let body = HttpBody::file(file);
 
         let response = stream!(body.into_data_stream());
@@ -71,8 +71,8 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_stream_response_with_custom_headers() {
-        let path = Path::new("tests/resources/test_file.txt");
-        let file = File::open(path).await.unwrap();
+        let file = TempFile::new("Hello, this is some file content!").await;
+        let file = File::open(file.path).await.unwrap();
         let body = HttpBody::file(file);
 
         let response = stream!(body.into_data_stream(); [

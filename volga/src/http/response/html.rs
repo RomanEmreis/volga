@@ -96,7 +96,7 @@ macro_rules! no_content {
 #[cfg(test)]
 mod tests {
     use http_body_util::BodyExt;
-    use crate::test_utils::read_file_bytes;
+    use crate::test::utils::read_file_bytes;
 
     #[tokio::test]
     async fn it_creates_html_response() {

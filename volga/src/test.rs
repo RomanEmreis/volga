@@ -81,3 +81,5 @@ pub mod server;
 pub mod fs;
 #[cfg(feature = "ws")]
 pub mod ws;
+#[cfg(test)]
+pub(crate) mod utils;

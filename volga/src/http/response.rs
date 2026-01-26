@@ -328,7 +328,6 @@ impl HttpResponse {
 #[cfg(test)]
 #[allow(unreachable_pub)]
 mod tests {
-    use std::path::Path;
     use hyper::StatusCode;
     use http_body_util::BodyExt;
     use serde::Serialize;
@@ -336,7 +335,8 @@ mod tests {
     use crate::{response, HttpResponse};
     use crate::headers::{Header, HeaderValue, HeaderName, headers};
     use crate::http::body::HttpBody;
-    use crate::test_utils::read_file_bytes;
+    use crate::test::TempFile;
+    use crate::test::utils::read_file_bytes;
     
     headers! {
         (ApiKey, "x-api-key")
@@ -402,8 +402,8 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_stream_response() {
-        let path = Path::new("tests/resources/test_file.txt");
-        let file = File::open(path).await.unwrap();
+        let file = TempFile::new("Hello, this is some file content!").await;
+        let file = File::open(file.path).await.unwrap();
         
         let mut response = HttpResponse::builder()
             .status(StatusCode::OK)
@@ -418,8 +418,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_file_response_with_custom_headers() {
-        let path = Path::new("tests/resources/test_file.txt");
-        let file = File::open(path).await.unwrap();
+        let file = TempFile::new("Hello, this is some file content!").await;
+        let file = File::open(file.path).await.unwrap();
+        
         let mut response = response!(
             StatusCode::OK,
             HttpBody::file(file);

@@ -27,6 +27,8 @@ use crate::headers::{
 
 mod file_listing;
 
+const ACCESS_DENIED_MESSAGE: &str = "Access is denied.";
+
 #[inline]
 async fn index(env: HostEnv) -> HttpResult {
     if env.show_files_listing() {
@@ -90,7 +92,7 @@ async fn respond_with_file_or_dir_impl(
     let (path, content_root) = sanitize_path(path, content_root).await?;
     let metadata = metadata(&path).await?;
     match (metadata.is_dir(), show_files_listing) {
-        (true, false) => status!(403, "Access is denied."),
+        (true, false) => status!(403, text: ACCESS_DENIED_MESSAGE),
         (true, true) => respond_with_folder_impl(path, &content_root, false).await,
         (false, _) => {
             let caching = ResponseCaching::try_from(&metadata)?;

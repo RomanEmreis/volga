@@ -14,7 +14,7 @@ use hyper::{
 };
 
 use crate::{
-    app::AppInstance, 
+    app::AppEnv, 
     error::{Error, handler::call_weak_err_handler},
     headers::CACHE_CONTROL,
     http::endpoints::FindResult,
@@ -41,10 +41,12 @@ use crate::middleware::HttpContext;
 #[cfg(feature = "rate-limiting")]
 use crate::rate_limiting::TrustedProxies;
 
+const REQUEST_HEADERS_TOO_LARGE_MESSAGE: &str = "Request headers too large.";
+
 /// Represents the execution scope of the current connection
 #[derive(Clone)]
 pub(crate) struct Scope {
-    pub(crate) shared: Weak<AppInstance>,
+    pub(crate) env: Weak<AppEnv>,
     pub(crate) cancellation_token: CancellationToken,
     peer_addr: SocketAddr
 }
@@ -60,7 +62,7 @@ impl Service<Request<Incoming>> for Scope {
             Self::handle_request(
                 request,
                 self.peer_addr,
-                self.shared.clone(),
+                self.env.clone(),
                 self.cancellation_token.clone()
             )
             .map_ok(Into::into)
@@ -69,21 +71,21 @@ impl Service<Request<Incoming>> for Scope {
 }
 
 impl Scope {
-    pub(crate) fn new(shared: Weak<AppInstance>, peer_addr: SocketAddr) -> Self {
+    pub(crate) fn new(env: Weak<AppEnv>, peer_addr: SocketAddr) -> Self {
         Self {
             cancellation_token: CancellationToken::new(),
             peer_addr,
-            shared
+            env
         }
     }
     
     pub(super) async fn handle_request(
         request: Request<Incoming>,
         peer_addr: SocketAddr,
-        shared: Weak<AppInstance>,
+        env: Weak<AppEnv>,
         cancellation_token: CancellationToken
     ) -> HttpResult {
-        let shared = match shared.upgrade() {
+        let env = match env.upgrade() {
             Some(shared) => shared,
             None => {
                 #[cfg(feature = "tracing")]
@@ -94,7 +96,7 @@ impl Scope {
         };
 
         #[cfg(feature = "tracing")]
-        let span = shared
+        let span = env
             .tracing_config
             .as_ref()
             .map(|_| {
@@ -114,14 +116,14 @@ impl Scope {
 
         let response = handle_impl(
             request, 
-            peer_addr, 
-            shared.clone(), 
+            peer_addr,
+            env.clone(), 
             cancellation_token
         ).await;
         
         finalize_response(
             response, 
-            &shared,
+            &env,
             #[cfg(feature = "tracing")]
             span.as_ref().and_then(|s| s.id()),
             #[cfg(feature = "tls")]
@@ -133,49 +135,49 @@ impl Scope {
 async fn handle_impl(        
     request: Request<Incoming>,
     peer_addr: SocketAddr,
-    shared: Arc<AppInstance>,
+    env: Arc<AppEnv>,
     cancellation_token: CancellationToken) -> HttpResult {
     {
         let headers = request.headers();
 
         #[cfg(feature = "http1")]
-        if let Limit::Limited(max_header_size) = shared.max_header_size 
+        if let Limit::Limited(max_header_size) = env.max_header_size 
             && !check_max_header_size(headers, max_header_size) {
             #[cfg(feature = "tracing")]
             tracing::warn!("Request rejected due to headers exceeding configured limits");
 
-            return status!(431, "Request headers too large");
+            return status!(431, text: REQUEST_HEADERS_TOO_LARGE_MESSAGE);
         }
 
         #[cfg(feature = "http2")]
-        if let Limit::Limited(max_header_count) = shared.max_header_count 
+        if let Limit::Limited(max_header_count) = env.max_header_count 
             && !check_max_header_count(headers, max_header_count) {
             #[cfg(feature = "tracing")]
             tracing::warn!("Request rejected due to headers exceeding configured limits");
 
-            return status!(431, "Request headers too large");
+            return status!(431, text: REQUEST_HEADERS_TOO_LARGE_MESSAGE);
         }
     }
         
     #[cfg(feature = "static-files")]
     let request = {
         let mut request = request;
-        request.extensions_mut().insert(shared.host_env.clone());
+        request.extensions_mut().insert(env.host_env.clone());
         request
     };
 
     #[cfg(feature = "di")]
     let request = {
         let mut request = request;
-        request.extensions_mut().insert(shared.container.create_scope());
+        request.extensions_mut().insert(env.container.create_scope());
         request
     };
         
-    let pipeline = &shared.pipeline;
+    let pipeline = &env.pipeline;
     match pipeline.endpoints().find(
         request.method(),
         request.uri(),
-        #[cfg(feature = "middleware")] shared.cors.is_enabled,
+        #[cfg(feature = "middleware")] env.cors.is_enabled,
         #[cfg(feature = "middleware")] request.headers()
     ) {
         FindResult::RouteNotFound => pipeline.fallback(request).await,
@@ -195,14 +197,14 @@ async fn handle_impl(
                 let extensions = &mut parts.extensions;
                 extensions.insert(ClientIp(peer_addr));
                 extensions.insert(cancellation_token);
-                extensions.insert(shared.body_limit);
+                extensions.insert(env.body_limit);
                 extensions.insert(params);
 
                 #[cfg(feature = "ws")]
                 extensions.insert(error_handler.clone());
                     
                 #[cfg(feature = "jwt-auth")]
-                if let Some(bts) = &shared.bearer_token_service {
+                if let Some(bts) = &env.bearer_token_service {
                     extensions.insert(bts.clone());
                 }
 
@@ -213,23 +215,23 @@ async fn handle_impl(
                     feature = "decompression-full"
                 ))]
                 {
-                    extensions.insert(shared.decompression_limits);
+                    extensions.insert(env.decompression_limits);
                 }
 
                 #[cfg(feature = "rate-limiting")]
                 {
-                    if let Some(rate_limiter) = &shared.rate_limiter {
+                    if let Some(rate_limiter) = &env.rate_limiter {
                         extensions.insert(rate_limiter.clone());
                     }
                     
-                    if let Some(trusted_proxies) = &shared.trusted_proxies {
+                    if let Some(trusted_proxies) = &env.trusted_proxies {
                         extensions.insert(TrustedProxies(trusted_proxies.clone()));
                     }
                 }
             }
 
             let request = HttpRequest::new(Request::from_parts(parts.clone(), body))
-                .into_limited(shared.body_limit);
+                .into_limited(env.body_limit);
                 
             #[cfg(feature = "middleware")]
             let response = if pipeline.has_middleware_pipeline() {
@@ -257,7 +259,7 @@ async fn handle_impl(
 #[inline]
 fn finalize_response(
     response: HttpResult,
-    shared: &AppInstance,
+    shared: &AppEnv,
     #[cfg(feature = "tracing")] span_id: Option<Id>,
     #[cfg(feature = "tls")] host: Option<HeaderValue>
 ) -> HttpResult {

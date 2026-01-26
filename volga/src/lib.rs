@@ -53,8 +53,6 @@ pub mod ws;
 pub mod auth;
 #[cfg(feature = "rate-limiting")]
 pub mod rate_limiting;
-#[cfg(test)]
-pub mod test_utils;
 #[cfg(any(test, feature = "test"))]
 pub mod test;
 

@@ -1,7 +1,7 @@
 ﻿//! HTTPS/TLS protocol implementations and middlewares
 
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
-use crate::{App, app::AppInstance, error::Error, headers::HeaderValue};
+use crate::{App, app::AppEnv, error::Error, headers::HeaderValue};
 
 use std::{
     fmt, 
@@ -567,7 +567,7 @@ impl From<tokio_rustls::rustls::server::VerifierBuilderError> for Error {
 }
 
 /// TLS specific impl for [`AppInstance`]
-impl AppInstance {
+impl AppEnv {
     #[inline]
     pub(super) fn acceptor(&self) -> Option<TlsAcceptor> {
         self.acceptor.clone()
