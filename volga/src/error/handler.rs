@@ -48,20 +48,13 @@ where
     #[inline]
     fn call(&self, parts: &Parts, err: Error) -> BoxFuture<'_, HttpResult> {
         let Ok(args) = Args::from_parts(parts) else { 
-            return Box::pin(async move { Err(err) });
+            return Box::pin(default_error_handler(err));
         };
         Box::pin(async move {
             match self.func.call(err, args).await.into_response() {
                 Ok(resp) => Ok(resp),
                 Err(err) => default_error_handler(err).await,
             }
-            //match Args::from_parts(&parts) { 
-            //    Err(err) => err.into_response(),
-            //    Ok(args) => match self.func.call(err, args).await.into_response() {
-            //        Ok(resp) => Ok(resp),
-            //        Err(err) => default_error_handler(err).await,
-            //    }
-            //}
         })
     }
 }
@@ -99,14 +92,14 @@ pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
 }
 
 #[inline]
-pub(crate) async fn call_weak_err_handler(error_handler: WeakErrorHandler, parts: &Parts, mut err: Error) -> HttpResult {
+pub(crate) async fn call_weak_err_handler(error_handler: WeakErrorHandler, parts: Parts, mut err: Error) -> HttpResult {
     if err.instance.is_none() {
         err.instance = Some(parts.uri.to_string());
     }
     error_handler
         .upgrade()
         .ok_or(Error::server_error("Server Error: error handler could not be upgraded"))?
-        .call(parts, err)
+        .call(&parts, err)
         .await
 }
 
@@ -182,7 +175,7 @@ mod tests {
 
         let req = Request::get("/foo/bar?baz").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        let response = call_weak_err_handler(weak_handler, &parts, error).await;
+        let response = call_weak_err_handler(weak_handler, parts, error).await;
         assert!(response.is_ok());
 
         let mut response = response.unwrap();
