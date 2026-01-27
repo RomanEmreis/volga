@@ -154,7 +154,7 @@ impl WebSocketConnection {
                 Ok(upgraded) => TokioIo::new(upgraded),
                 Err(err) => {
                     _ = call_weak_err_handler(
-                        error_handler, &parts,
+                        error_handler, parts,
                         Error::server_error(err)).await;
                     return;
                 }

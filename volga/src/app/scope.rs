@@ -95,12 +95,13 @@ impl Scope {
             }
         };
 
+        let method = request.method().clone();
+        
         #[cfg(feature = "tracing")]
         let span = env
             .tracing_config
             .as_ref()
             .map(|_| {
-                let method = request.method();
                 let uri = request.uri();
                 trace_span!("request", %method, %uri)
             });
@@ -122,6 +123,7 @@ impl Scope {
         ).await;
         
         finalize_response(
+            method,
             response, 
             &env,
             #[cfg(feature = "tracing")]
@@ -244,13 +246,8 @@ async fn handle_impl(
             let response = route_pipeline.call(request).await;
                 
             match response {
-                Ok(response) if parts.method != Method::HEAD => Ok(response),
-                Ok(mut response) => {
-                    keep_content_length(response.size_hint(), response.headers_mut());
-                    *response.body_mut() = HttpBody::empty();
-                    Ok(response)
-                },
-                Err(err) => call_weak_err_handler(error_handler, &parts, err).await,
+                Ok(response) => Ok(response),
+                Err(err) => call_weak_err_handler(error_handler, parts, err).await,
             }
         }
     }
@@ -258,12 +255,18 @@ async fn handle_impl(
 
 #[inline]
 fn finalize_response(
+    method: Method,
     response: HttpResult,
     shared: &AppEnv,
     #[cfg(feature = "tracing")] span_id: Option<Id>,
     #[cfg(feature = "tls")] host: Option<HeaderValue>
 ) -> HttpResult {
     response.map(|mut resp| {
+        if method == Method::HEAD {
+            keep_content_length(resp.size_hint(), resp.headers_mut());
+            *resp.body_mut() = HttpBody::empty();
+        }
+        
         if let Some(hv) = &shared.cache_control {
             apply_default_cache_control(&mut resp, hv.clone());
         }
