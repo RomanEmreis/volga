@@ -7,7 +7,7 @@ use std::{
     time::Duration
 };
 
-const DEFAULT_EVICTION: u64 = 60_000_000; // 1 minute
+const DEFAULT_EVICTION: u64 = 60 * MICROS_PER_SEC; // 1 minute
 
 /// Internal per-key state for the GCRA algorithm.
 ///

@@ -1,26 +1,30 @@
 //! Tools and data structures for a token-bucket rate limiter.
 
-use super::{RateLimiter, SystemTimeSource, TimeSource};
+use super::{RateLimiter, SystemTimeSource, TimeSource, MICROS_PER_SEC};
 use dashmap::DashMap;
 use std::{
     sync::{Arc, atomic::{AtomicU64, Ordering::*}},
     time::Duration
 };
 
-const DEFAULT_SCALE: u64 = 1_000_000;
+const DEFAULT_SCALE: u64 = MICROS_PER_SEC;
+const DEFAULT_EVICTION: u64 = 60 * MICROS_PER_SEC; // 1 minute
 
 /// Internal per-key state for the token bucket algorithm.
 ///
 /// Each entry tracks:
 /// - `available_tokens`: scaled number of available tokens (fixed-point),
-/// - `last_refill_secs`: last time the bucket was refilled.
+/// - `last_refill_us`: last time the bucket was refilled.
 #[derive(Debug)]
 struct Entry {
     /// Current token balance in fixed-point representation.
     available_tokens: AtomicU64,
 
-    /// Last refill time in seconds since UNIX_EPOCH.
-    last_refill_secs: AtomicU64,
+    /// Last refill time in microseconds (monotonic).
+    last_refill_us: AtomicU64,
+
+    /// Last access time in microseconds (for eviction).
+    last_seen_us: AtomicU64,
 }
 
 /// A token-bucket rate limiter.
@@ -66,8 +70,8 @@ pub struct TokenBucketRateLimiter<T: TimeSource = SystemTimeSource> {
     /// Maximum number of tokens in the bucket.
     capacity: u64,
 
-    /// Precalculated: tokens added per second (fixed-point).
-    refill_rate_scaled: u64,
+    /// Precomputed: refill rate in (tokens/sec) * scale.
+    refill_rate_scaled_per_sec: u64,
 
     /// Fixed-point scaling factor for fractional refill rates.
     scale: u64,
@@ -76,7 +80,7 @@ pub struct TokenBucketRateLimiter<T: TimeSource = SystemTimeSource> {
     capacity_scaled: u64,
 
     /// Time after which inactive entries are eligible for eviction.
-    eviction_grace_secs: u64,
+    eviction_grace_us: u64,
 
     /// Time source used to determine the current time.
     time_source: T,
@@ -89,11 +93,12 @@ impl<T: TimeSource> RateLimiter for TokenBucketRateLimiter<T> {
     /// limit has been reached.
     #[inline]
     fn check(&self, key: u64) -> bool {
-        let now = self.time_source.now_secs();
+        let now = self.time_source.now_micros();
 
+        // Lazy eviction based on last_seen, not last_refill.
         if let Some(entry) = self.storage.get(&key) {
-            let last_refill = entry.last_refill_secs.load(Acquire);
-            if now.saturating_sub(last_refill) > self.eviction_grace_secs {
+            let last_seen = entry.last_seen_us.load(Acquire);
+            if now.saturating_sub(last_seen) > self.eviction_grace_us {
                 drop(entry);
                 self.storage.remove(&key);
             }
@@ -101,8 +106,12 @@ impl<T: TimeSource> RateLimiter for TokenBucketRateLimiter<T> {
 
         let entry = self.storage.entry(key).or_insert_with(|| Entry {
             available_tokens: AtomicU64::new(self.capacity_scaled),
-            last_refill_secs: AtomicU64::new(now),
+            last_refill_us: AtomicU64::new(now),
+            last_seen_us: AtomicU64::new(now),
         });
+
+        // Touch last_seen (best-effort).
+        entry.last_seen_us.store(now, Release);
 
         self.refill(entry.value(), now);
 
@@ -155,7 +164,7 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
         let scaled_f = refill_rate * scale as f64;
         assert!(scaled_f <= u64::MAX as f64, "refill_rate too large");
 
-        let refill_rate_scaled = scaled_f.floor() as u64;
+        let refill_rate_scaled_per_sec = scaled_f.round() as u64;
 
         let capacity_scaled = capacity
             .checked_mul(scale)
@@ -164,10 +173,10 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
         Self {
             storage: Arc::new(DashMap::new()),
             capacity,
-            refill_rate_scaled,
+            refill_rate_scaled_per_sec,
             scale,
             capacity_scaled,
-            eviction_grace_secs: 60,
+            eviction_grace_us: DEFAULT_EVICTION,
             time_source,
         }
     }
@@ -178,7 +187,9 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
     /// may be removed during subsequent `check` calls.
     #[inline]
     pub fn set_eviction(&mut self, eviction: Duration) {
-        self.eviction_grace_secs = eviction.as_secs();
+        self.eviction_grace_us = eviction.as_micros()
+            .try_into()
+            .unwrap_or(u64::MAX);
     }
 
     /// Bucket capacity (max tokens).
@@ -190,34 +201,45 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
     /// Tokens added per second.
     #[inline(always)]
     pub fn refill_rate(&self) -> f64 {
-        self.refill_rate_scaled as f64 / self.scale as f64
+        self.refill_rate_scaled_per_sec as f64 / self.scale as f64
     }
 
     /// Time after which inactive entries are eligible for eviction.
     #[inline(always)]
     pub fn eviction_grace_secs(&self) -> u64 {
-        self.eviction_grace_secs
+        self.eviction_grace_us / MICROS_PER_SEC
     }
 
     fn refill(&self, entry: &Entry, now: u64) {
-        let mut last_refill = entry.last_refill_secs.load(Acquire);
+        if self.refill_rate_scaled_per_sec == 0 {
+            return;
+        }
 
+        // Claim the time interval [last_refill, now] using CAS to avoid double-refill.
+        let mut last = entry.last_refill_us.load(Acquire);
         loop {
-            if now <= last_refill {
+            if now <= last {
                 return;
             }
-
+            
             match entry
-                .last_refill_secs
-                .compare_exchange(last_refill, now, AcqRel, Acquire)
+                .last_refill_us
+                .compare_exchange(last, now, AcqRel, Acquire)
             {
                 Ok(_) => break,
-                Err(next) => last_refill = next,
+                Err(next) => last = next,
             }
         }
 
-        let elapsed = now - last_refill;
-        let add = elapsed.saturating_mul(self.refill_rate_scaled);
+        let elapsed_us = now - last;
+        // add_scaled = elapsed_us * (tokens/sec * scale) / 1_000_000
+        let num = (elapsed_us as u128) * (self.refill_rate_scaled_per_sec as u128);
+        let add_u128 = num / (MICROS_PER_SEC as u128);
+        let add = u64::try_from(add_u128).unwrap_or(u64::MAX);
+
+        if add == 0 {
+            return;
+        }
 
         let mut current = entry.available_tokens.load(Relaxed);
         loop {
@@ -226,7 +248,7 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
                 .available_tokens
                 .compare_exchange(current, updated, AcqRel, Relaxed)
             {
-                Ok(_) => break,
+                Ok(_) => return,
                 Err(next) => current = next,
             }
         }
