@@ -31,13 +31,19 @@
 //! Those concerns are intentionally left to higher-level layers.
 
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
 pub use fixed_window::FixedWindowRateLimiter;
 pub use sliding_window::SlidingWindowRateLimiter;
+pub use token_bucket::TokenBucketRateLimiter;
+pub use gcra::GcraRateLimiter;
 
 mod fixed_window;
 mod sliding_window;
+mod token_bucket;
+mod gcra;
+
+const MICROS_PER_SEC: u64 = 1_000_000;
 
 /// A generic rate limiter interface.
 ///
@@ -77,7 +83,13 @@ pub trait RateLimiter {
 ///
 /// This abstraction allows rate limiters to be decoupled from
 /// the system clock, enabling deterministic and fast unit tests.
+///
+/// Time is expressed in **microseconds** and must be **monotonic**
+/// (non-decreasing).
 pub trait TimeSource: Send + Sync {
+    /// Returns a monotonic timestamp in microseconds.
+    fn now_micros(&self) -> u64;
+    
     /// Returns the number of seconds elapsed since [`UNIX_EPOCH`]
     /// (`1970-01-01 00:00:00 UTC`).
     ///
@@ -85,30 +97,46 @@ pub trait TimeSource: Send + Sync {
     ///
     /// - Monotonic (non-decreasing)
     /// - Cheap to compute
-    fn now_secs(&self) -> u64;
+    #[inline(always)]
+    fn now_secs(&self) -> u64 {
+        self.now_micros() / MICROS_PER_SEC
+    }
 }
 
-/// A [`TimeSource`] implementation based on the system clock.
+/// Monotonic system time source backed by `Instant`.
 ///
-/// This is the default time source used by rate limiters in production.
-/// It relies on [`SystemTime`] and returns wall-clock time in seconds.
+/// Uses an internal start anchor and returns elapsed microseconds since that anchor.
+/// This avoids wall-clock jumps (NTP, manual adjustments, etc.).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemTimeSource;
 
+impl SystemTimeSource {
+    #[inline]
+    fn anchor() -> Instant {
+        // `Instant::now()` is cheap and monotonic.
+        // We want a stable anchor shared across calls.
+        // Using `OnceLock` gives us a process-wide start point.
+        static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        *START.get_or_init(Instant::now)
+    }
+}
+
 impl TimeSource for SystemTimeSource {
     #[inline]
-    fn now_secs(&self) -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
+    fn now_micros(&self) -> u64 {
+        let elapsed = Self::anchor().elapsed();
+        // Saturating conversion to be extra defensive (though practically safe).
+        elapsed
+            .as_micros()
+            .try_into()
+            .unwrap_or(u64::MAX)
     }
 }
 
 #[cfg(test)]
 pub(super) mod test_utils {
     use std::sync::{Arc, Mutex};
-    use super::TimeSource;
+    use super::{TimeSource, MICROS_PER_SEC};
 
     #[derive(Clone)]
     pub(super) struct MockTimeSource {
@@ -118,18 +146,18 @@ pub(super) mod test_utils {
     impl MockTimeSource {
         pub(super) fn new(initial_time: u64) -> Self {
             Self {
-                current_time: Arc::new(Mutex::new(initial_time)),
+                current_time: Arc::new(Mutex::new(initial_time * MICROS_PER_SEC)),
             }
         }
 
         pub(super) fn advance(&self, seconds: u64) {
             let mut time = self.current_time.lock().unwrap();
-            *time += seconds;
+            *time += seconds * MICROS_PER_SEC;
         }
     }
 
     impl TimeSource for MockTimeSource {
-        fn now_secs(&self) -> u64 {
+        fn now_micros(&self) -> u64 {
             *self.current_time.lock().unwrap()
         }
     }

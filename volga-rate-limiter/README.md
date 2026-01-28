@@ -5,7 +5,7 @@ A lightweight and efficient rate-limiting library for Rust.
 This crate provides in-memory rate limiting algorithms designed
 for high-performance HTTP services and middleware.
 
-[![latest](https://img.shields.io/badge/latest-0.8.1-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.8.2-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://crates.io/crates/volga)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
@@ -33,15 +33,26 @@ synchronize state across multiple processes or machines.
 
 The following rate-limiting algorithms are provided:
 
-- [`FixedWindowRateLimiter`]
+- `FixedWindowRateLimiter`
   - Counts requests in discrete, fixed-size time windows
   - Very fast and simple
   - May allow short bursts at window boundaries
 
-- [`SlidingWindowRateLimiter`]
+- `SlidingWindowRateLimiter`
   - Uses a sliding time window with linear weighting
   - Provides smoother request distribution
   - Slightly more expensive than a fixed window
+  
+- `TokenBucketRateLimiter`
+  - Allows bursts up to a token bucket capacity
+  - Enforces a steady average refill rate
+  - Simple and flexible for bursty traffic
+
+- `GcraRateLimiter`
+  - Uses the Generic Cell Rate Algorithm (GCRA)
+  - Smooths traffic with explicit burst tolerance
+  - Accurate average rate enforcement
+
 
 ## Time Source Abstraction
 
@@ -52,7 +63,7 @@ This allows:
 - Custom time implementations if needed
 
 The default implementation, [`SystemTimeSource`], is based on
-`std::time::SystemTime`.
+`std::time::Instant`.
 
 ## Concurrency Model
 

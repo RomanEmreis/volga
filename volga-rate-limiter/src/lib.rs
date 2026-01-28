@@ -34,6 +34,16 @@
 //!   - Provides smoother request distribution
 //!   - Slightly more expensive than a fixed window
 //!
+//! - [`TokenBucketRateLimiter`]
+//!   - Allows bursts up to a token bucket capacity
+//!   - Enforces a steady average refill rate
+//!   - Simple and flexible for bursty traffic
+//!
+//! - [`GcraRateLimiter`]
+//!   - Uses the Generic Cell Rate Algorithm (GCRA)
+//!   - Smooths traffic with explicit burst tolerance
+//!   - Accurate average rate enforcement
+//! 
 //! ## Time Source Abstraction
 //!
 //! All rate limiters are built on top of a pluggable [`TimeSource`] abstraction.
@@ -43,7 +53,7 @@
 //! - Custom time implementations if needed
 //!
 //! The default implementation, [`SystemTimeSource`], is based on
-//! `std::time::SystemTime`.
+//! `std::time::Instant`.
 //!
 //! ## Concurrency Model
 //!
@@ -73,6 +83,8 @@ mod rate_limiter;
 pub use rate_limiter::{
     FixedWindowRateLimiter,
     SlidingWindowRateLimiter,
+    TokenBucketRateLimiter,
+    GcraRateLimiter,
     SystemTimeSource,
     TimeSource,
     RateLimiter

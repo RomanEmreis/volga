@@ -24,17 +24,23 @@ use crate::{
 
 pub use fixed_window::FixedWindow;
 pub use sliding_window::SlidingWindow;
+pub use token_bucket::TokenBucket;
+pub use gcra::Gcra;
 pub use key::{RateLimitKey, RateLimitKeyExt, PolicyName, RateLimitBinding};
 pub use by::RateLimitKeySource;
 
 pub use volga_rate_limiter::{
     FixedWindowRateLimiter,
     SlidingWindowRateLimiter,
+    TokenBucketRateLimiter,
+    GcraRateLimiter,
     RateLimiter
 };
 
 mod fixed_window;
 mod sliding_window;
+mod token_bucket;
+mod gcra;
 mod key;
 pub mod by;
 
@@ -74,6 +80,16 @@ pub(crate) struct GlobalRateLimiter {
     default_sliding_window: Option<SlidingWindowRateLimiter>,
     /// Named sliding window rate limiters
     named_sliding_window: SmallVec<[PolicyEntry<SlidingWindowRateLimiter>; DEFAULT_POLICIES_COUNT]>,
+
+    /// Default token bucket rate limiter (used when no policy name is specified)
+    default_token_bucket: Option<TokenBucketRateLimiter>,
+    /// Named token bucket rate limiters
+    named_token_bucket: SmallVec<[PolicyEntry<TokenBucketRateLimiter>; DEFAULT_POLICIES_COUNT]>,
+
+    /// Default GCRA rate limiter (used when no policy name is specified)
+    default_gcra: Option<GcraRateLimiter>,
+    /// Named GCRA rate limiters
+    named_gcra: SmallVec<[PolicyEntry<GcraRateLimiter>; DEFAULT_POLICIES_COUNT]>,
 }
 
 impl GlobalRateLimiter {
@@ -105,6 +121,34 @@ impl GlobalRateLimiter {
         }
     }
 
+    /// Adds a token bucket rate limiting policy to the global configuration.
+    ///
+    /// - If the policy has a `name`, it will be stored in `named_token_bucket`.
+    /// - If the policy has no `name`, it will become the `default_token_bucket`.
+    #[inline]
+    fn add_token_bucket(&mut self, policy: TokenBucket) {
+        let limiter = policy.build();
+        let name = policy.name;
+        match name {
+            None => self.default_token_bucket = Some(limiter),
+            Some(name) => self.named_token_bucket.push((name, limiter))
+        }
+    }
+
+    /// Adds GCRA rate limiting policy to the global configuration.
+    ///
+    /// - If the policy has a `name`, it will be stored in `default_gcra`.
+    /// - If the policy has no `name`, it will become the `named_gcra`.
+    #[inline]
+    fn add_gcra(&mut self, policy: Gcra) {
+        let limiter = policy.build();
+        let name = policy.name;
+        match name {
+            None => self.default_gcra = Some(limiter),
+            Some(name) => self.named_gcra.push((name, limiter))
+        }
+    }
+
     /// Returns a reference to a fixed window rate limiter by policy name.
     ///
     /// - `policy_name = None` -> returns the default fixed window limiter.
@@ -128,6 +172,34 @@ impl GlobalRateLimiter {
         match policy_name {
             None => self.default_sliding_window.as_ref(),
             Some(name) => self.named_sliding_window.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v),
+        }
+    }
+
+    /// Returns a reference to a token bucket rate limiter by policy name.
+    ///
+    /// - `policy_name = None` -> returns the default token bucket limiter.
+    /// - `policy_name = Some(name)` -> returns the named token bucket limiter if it exists.
+    #[inline]
+    pub(crate) fn token_bucket(&self, policy_name: Option<&str>) -> Option<&TokenBucketRateLimiter> {
+        match policy_name {
+            None => self.default_token_bucket.as_ref(),
+            Some(name) => self.named_token_bucket.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v),
+        }
+    }
+
+    /// Returns a reference to GCRA rate limiter by policy name.
+    ///
+    /// - `policy_name = None` -> returns the default GCRA limiter.
+    /// - `policy_name = Some(name)` -> returns the named GCRA limiter if it exists.
+    #[inline]
+    pub(crate) fn gcra(&self, policy_name: Option<&str>) -> Option<&GcraRateLimiter> {
+        match policy_name {
+            None => self.default_gcra.as_ref(),
+            Some(name) => self.named_gcra.iter()
                 .find(|(n, _)| n == name)
                 .map(|(_, v)| v),
         }
@@ -237,13 +309,125 @@ impl App {
     /// ## See also
     ///
     /// - [`SlidingWindow`] - fixed window policy definition
-    /// - [`App::use_sliding_window`] - enabling fixed-window rate limiting middleware
-    /// - [`Route::sliding_window`] - enabling fixed-window rate limiting middleware for a particular route
-    /// - [`RouteGroup::sliding_window`] - enabling fixed-window rate limiting middleware for a route group
+    /// - [`App::use_sliding_window`] - enabling sliding-window rate limiting middleware
+    /// - [`Route::sliding_window`] - enabling sliding-window rate limiting middleware for a particular route
+    /// - [`RouteGroup::sliding_window`] - enabling sliding-window rate limiting middleware for a route group
     pub fn with_sliding_window(mut self, policy: SlidingWindow) -> Self {
         self.rate_limiter
             .get_or_insert_default()
             .add_sliding_window(policy);
+        self
+    }
+
+    /// Registers a token bucket rate limiting policy.
+    ///
+    /// This method defines **how** rate limiting should work (limits, capacity,
+    /// eviction behavior), but does **not** enable rate limiting by itself.
+    /// To actually apply the policy to incoming requests, it must be referenced
+    /// from rate-limiting middleware (see [`App::use_token_bucket`] or [`Route::token_bucket`]).
+    ///
+    /// ## Named vs. default policy
+    ///
+    /// - If the policy has a name (`TokenBucket::with_name`), it is registered
+    ///   as a **named policy** and can be referenced explicitly by name.
+    /// - If no name is provided, the policy becomes the **default token bucket
+    ///   policy**, used when no policy name is specified in middleware.
+    ///
+    /// Registering a policy with the same name multiple times will override
+    /// the previously registered policy.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{
+    ///     App,
+    ///     rate_limiting::{by, TokenBucket, RateLimitKeyExt},
+    /// };
+    ///
+    /// # fn main() {
+    /// // Define a token bucket rate-limiting policy
+    /// let token_bucket = TokenBucket::new(100, 1.0)
+    ///     .with_name("burst");
+    ///
+    /// // Register the policy in the application
+    /// let mut app = App::new()
+    ///     .with_token_bucket(token_bucket);
+    ///
+    /// // Enable token bucket rate limiting using the "burst" policy,
+    /// // partitioned by the client IP address
+    /// app.use_token_bucket(by::ip().using("burst"));
+    ///
+    /// # app.run_blocking();
+    /// # }
+    /// ```
+    ///
+    /// ## See also
+    ///
+    /// - [`TokenBucket`] - token_bucket policy definition
+    /// - [`App::use_token_bucket`] - enabling token_bucket rate limiting middleware
+    /// - [`Route::token_bucket`] - enabling token_bucket rate limiting middleware for a particular route
+    /// - [`RouteGroup::token_bucket`] - enabling token_bucket rate limiting middleware for a route group
+    pub fn with_token_bucket(mut self, policy: TokenBucket) -> Self {
+        self.rate_limiter
+            .get_or_insert_default()
+            .add_token_bucket(policy);
+        self
+    }
+
+    /// Registers GCRA rate limiting policy.
+    ///
+    /// This method defines **how** rate limiting should work (limits, rate, burst,
+    /// eviction behavior), but does **not** enable rate limiting by itself.
+    /// To actually apply the policy to incoming requests, it must be referenced
+    /// from rate-limiting middleware (see [`App::use_gcra`] or [`Route::gcra`]).
+    ///
+    /// ## Named vs. default policy
+    ///
+    /// - If the policy has a name (`Gcra::with_name`), it is registered
+    ///   as a **named policy** and can be referenced explicitly by name.
+    /// - If no name is provided, the policy becomes the **default GCRA
+    ///   policy**, used when no policy name is specified in middleware.
+    ///
+    /// Registering a policy with the same name multiple times will override
+    /// the previously registered policy.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{
+    ///     App,
+    ///     rate_limiting::{by, Gcra, RateLimitKeyExt},
+    /// };
+    ///
+    /// # fn main() {
+    /// // Define a GCRA rate-limiting policy
+    /// let gcra = Gcra::new(10.0, 3)
+    ///     .with_name("burst");
+    ///
+    /// // Register the policy in the application
+    /// let mut app = App::new()
+    ///     .with_gcra(gcra);
+    ///
+    /// // Enable GCRA rate limiting using the "burst" policy,
+    /// // partitioned by the client IP address
+    /// app.use_gcra(by::ip().using("burst"));
+    ///
+    /// # app.run_blocking();
+    /// # }
+    /// ```
+    ///
+    /// ## See also
+    ///
+    /// - [`Gcra`] - GCRA policy definition
+    /// - [`App::use_gcra`] - enabling GCRA rate limiting middleware
+    /// - [`Route::gcra`] - enabling GCRA rate limiting middleware for a particular route
+    /// - [`RouteGroup::gcra`] - enabling GCRA rate limiting middleware for a route group
+    pub fn with_gcra(mut self, policy: Gcra) -> Self {
+        self.rate_limiter
+            .get_or_insert_default()
+            .add_gcra(policy);
         self
     }
 
@@ -414,12 +598,168 @@ impl App {
     ///
     /// ## See also
     ///
-    /// - [`SlidingWindow`] — fixed window policy definition
-    /// - [`App::with_sliding_window`] — registering fixed-window policies
+    /// - [`SlidingWindow`] — sliding window policy definition
+    /// - [`App::with_sliding_window`] — registering sliding-window policies
     /// - [`RateLimitKeyExt`] — binding partition keys to policies
     pub fn use_sliding_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
+    }
+
+    /// Enables token bucket rate limiting for incoming requests.
+    ///
+    /// This method installs a **global middleware** that applies a token bucket
+    /// rate limiter to all requests passing through the application.
+    ///
+    /// The provided `source` defines:
+    /// - **How requests are partitioned** (e.g. by IP, user, header, path)
+    /// - **Which rate-limiting policy is used** (default or named)
+    ///
+    /// The middleware will look up a previously registered [`TokenBucket`]
+    /// policy and apply it to each request. If no matching policy is found,
+    /// the middleware is a no-op.
+    ///
+    /// ## Partition keys
+    ///
+    /// The partition key determines how requests are grouped for rate limiting.
+    /// Common examples include:
+    /// - Client IP address
+    /// - Authenticated user ID
+    /// - API key or header value
+    /// - Route or tenant identifier
+    ///
+    /// ## Policy selection
+    ///
+    /// - If the key is bound **without** a policy name, the **default token bucket
+    ///   policy** is used.
+    /// - If the key is bound **with** `.using(name)`, the named policy with the
+    ///   corresponding name is applied.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{
+    ///     App,
+    ///     rate_limiting::{by, TokenBucket, RateLimitKeyExt},
+    /// };
+    ///
+    /// # fn main() {
+    /// let mut app = App::new()
+    ///     // Register a default token bucket policy
+    ///     .with_token_bucket(
+    ///         TokenBucket::new(100, 1.0)
+    ///     )
+    ///     // Register a named policy for burst traffic
+    ///     .with_token_bucket(
+    ///         TokenBucket::new(200, 2.0)
+    ///             .with_name("burst")
+    ///     );
+    ///
+    /// // Apply rate limiting by client IP using the default policy
+    /// app.use_token_bucket(by::ip());
+    ///
+    /// // Apply rate limiting by user ID using the "burst" policy
+    /// app.use_token_bucket(by::header("x-tenant-id").using("burst"));
+    ///
+    /// # app.run_blocking()
+    /// # }
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - This middleware is **global** and affects all routes registered
+    ///   after it is applied.
+    /// - Multiple rate-limiting middlewares may be installed, each with
+    ///   its own partition key and policy.
+    /// - Rate limiting failures result in an HTTP `429 Too Many Requests` response.
+    ///
+    /// ## See also
+    ///
+    /// - [`TokenBucket`] — token bucket policy definition
+    /// - [`App::with_token_bucket`] — registering token bucket policies
+    /// - [`RateLimitKeyExt`] — binding partition keys to policies
+    pub fn use_token_bucket<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
+        let binding = source.bind();
+        self.wrap(move |ctx, next| check_token_bucket(ctx, binding.clone(), next))
+    }
+
+    /// Enables GCRA rate limiting for incoming requests.
+    ///
+    /// This method installs a **global middleware** that applies GCRA
+    /// rate limiter to all requests passing through the application.
+    ///
+    /// The provided `source` defines:
+    /// - **How requests are partitioned** (e.g. by IP, user, header, path)
+    /// - **Which rate-limiting policy is used** (default or named)
+    ///
+    /// The middleware will look up a previously registered [`Gcra`]
+    /// policy and apply it to each request. If no matching policy is found,
+    /// the middleware is a no-op.
+    ///
+    /// ## Partition keys
+    ///
+    /// The partition key determines how requests are grouped for rate limiting.
+    /// Common examples include:
+    /// - Client IP address
+    /// - Authenticated user ID
+    /// - API key or header value
+    /// - Route or tenant identifier
+    ///
+    /// ## Policy selection
+    ///
+    /// - If the key is bound **without** a policy name, the **default GCRA
+    ///   policy** is used.
+    /// - If the key is bound **with** `.using(name)`, the named policy with the
+    ///   corresponding name is applied.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{
+    ///     App,
+    ///     rate_limiting::{by, Gcra, RateLimitKeyExt},
+    /// };
+    ///
+    /// # fn main() {
+    /// let mut app = App::new()
+    ///     // Register a default GCRA policy
+    ///     .with_gcra(
+    ///         Gcra::new(5.0, 3)
+    ///     )
+    ///     // Register a named policy for burst traffic
+    ///     .with_gcra(
+    ///         Gcra::new(10.0, 10)
+    ///             .with_name("burst")
+    ///     );
+    ///
+    /// // Apply rate limiting by client IP using the default policy
+    /// app.use_gcra(by::ip());
+    ///
+    /// // Apply rate limiting by user ID using the "burst" policy
+    /// app.use_gcra(by::header("x-tenant-id").using("burst"));
+    ///
+    /// # app.run_blocking()
+    /// # }
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - This middleware is **global** and affects all routes registered
+    ///   after it is applied.
+    /// - Multiple rate-limiting middlewares may be installed, each with
+    ///   its own partition key and policy.
+    /// - Rate limiting failures result in an HTTP `429 Too Many Requests` response.
+    ///
+    /// ## See also
+    ///
+    /// - [`Gcra`] — GCRA policy definition
+    /// - [`App::with_gcra`] — registering GCRA policies
+    /// - [`RateLimitKeyExt`] — binding partition keys to policies
+    pub fn use_gcra<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
+        let binding = source.bind();
+        self.wrap(move |ctx, next| check_gcra(ctx, binding.clone(), next))
     }
 }
 
@@ -513,6 +853,96 @@ impl<'a> Route<'a> {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
     }
+
+    /// Enables token bucket rate limiting for this route.
+    ///
+    /// This method installs a **route-scoped middleware** that applies a
+    /// token bucket rate limiter **only** to requests handled by this route.
+    ///
+    /// The provided `source` defines:
+    /// - How requests are partitioned (e.g. by IP, user, header, path)
+    /// - Which token bucket policy is used (default or named)
+    ///
+    /// ## Policy resolution
+    ///
+    /// - If the partition key is bound **without** a policy name, the
+    ///   default token bucket policy is used.
+    /// - If `using(name)` is specified, the named policy with the
+    ///   corresponding name is applied.
+    ///
+    /// ## Middleware order
+    ///
+    /// Route-level rate limiting is executed:
+    /// - **after global middleware**
+    /// - **after route group middleware**
+    /// - **before the route handler**
+    ///
+    /// This allows route-specific limits to refine or override
+    /// broader rate-limiting rules.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use volga::rate_limiting::{by, RateLimitKeyExt};
+    ///
+    /// # let mut app = volga::App::new();
+    /// app.map_get("/api/private", || async { /*...*/ })
+    ///     .token_bucket(by::ip().using("burst"));
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - Multiple rate-limiting middlewares may be attached to the same route.
+    /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
+    pub fn token_bucket<K: RateLimitKeyExt>(self, source: K) -> Self {
+        let binding = source.bind();
+        self.wrap(move |ctx, next| check_token_bucket(ctx, binding.clone(), next))
+    }
+
+    /// Enables GCRA rate limiting for this route.
+    ///
+    /// This method installs a **route-scoped middleware** that applies a
+    /// GCRA rate limiter **only** to requests handled by this route.
+    ///
+    /// The provided `source` defines:
+    /// - How requests are partitioned (e.g. by IP, user, header, path)
+    /// - Which GCRA policy is used (default or named)
+    ///
+    /// ## Policy resolution
+    ///
+    /// - If the partition key is bound **without** a policy name, the
+    ///   default GCRA policy is used.
+    /// - If `using(name)` is specified, the named policy with the
+    ///   corresponding name is applied.
+    ///
+    /// ## Middleware order
+    ///
+    /// Route-level rate limiting is executed:
+    /// - **after global middleware**
+    /// - **after route group middleware**
+    /// - **before the route handler**
+    ///
+    /// This allows route-specific limits to refine or override
+    /// broader rate-limiting rules.
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use volga::rate_limiting::{by, RateLimitKeyExt};
+    ///
+    /// # let mut app = volga::App::new();
+    /// app.map_get("/api/private", || async { /*...*/ })
+    ///     .gcra(by::ip().using("burst"));
+    /// ```
+    ///
+    /// ## Notes
+    ///
+    /// - Multiple rate-limiting middlewares may be attached to the same route.
+    /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
+    pub fn gcra<K: RateLimitKeyExt>(self, source: K) -> Self {
+        let binding = source.bind();
+        self.wrap(move |ctx, next| check_gcra(ctx, binding.clone(), next))
+    }
 }
 
 impl<'a> RouteGroup<'a> {
@@ -564,7 +994,7 @@ impl<'a> RouteGroup<'a> {
     ///
     /// ## Policy resolution
     ///
-    /// - Uses the default fixed-window policy unless overridden with `using(name)`.
+    /// - Uses the default sliding-window policy unless overridden with `using(name)`.
     /// - Named policies must be registered via [`App::with_sliding_window`].
     ///
     /// ## Middleware order
@@ -590,6 +1020,82 @@ impl<'a> RouteGroup<'a> {
     pub fn sliding_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         let binding = source.bind();
         self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
+    }
+
+    /// Enables token bucket rate limiting for all routes in this group.
+    ///
+    /// This method installs a **group-scoped middleware** that applies a
+    /// token bucket rate limiter to every route contained within the group.
+    ///
+    /// Group-level rate limiting allows sharing a common rate-limiting
+    /// strategy across multiple related routes.
+    ///
+    /// ## Policy resolution
+    ///
+    /// - Uses the default token bucket policy unless overridden with `using(name)`.
+    /// - Named policies must be registered via [`App::with_token_bucket`].
+    ///
+    /// ## Middleware order
+    ///
+    /// Group-level rate limiting is executed:
+    /// - **after global middleware**
+    /// - **before route-level middleware**
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use volga::rate_limiting::{by, RateLimitKeyExt};
+    ///
+    /// # let mut app = volga::App::new();
+    /// app.group("/api", |api| {
+    ///     api.token_bucket(by::ip());
+    ///
+    ///     api.map_get("/status", || async { /*...*/ });
+    ///     api.map_post("/upload", || async { /*...*/ })
+    ///         .sliding_window(by::header("x-tenant-id").using("burst"));
+    /// });
+    /// ```
+    pub fn token_bucket<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
+        let binding = source.bind();
+        self.wrap(move |ctx, next| check_token_bucket(ctx, binding.clone(), next))
+    }
+
+    /// Enables GCRA rate limiting for all routes in this group.
+    ///
+    /// This method installs a **group-scoped middleware** that applies
+    /// GCRA rate limiter to every route contained within the group.
+    ///
+    /// Group-level rate limiting allows sharing a common rate-limiting
+    /// strategy across multiple related routes.
+    ///
+    /// ## Policy resolution
+    ///
+    /// - Uses the default GCRA policy unless overridden with `using(name)`.
+    /// - Named policies must be registered via [`App::with_gcra`].
+    ///
+    /// ## Middleware order
+    ///
+    /// Group-level rate limiting is executed:
+    /// - **after global middleware**
+    /// - **before route-level middleware**
+    ///
+    /// ## Example
+    ///
+    /// ```no_run
+    /// use volga::rate_limiting::{by, RateLimitKeyExt};
+    ///
+    /// # let mut app = volga::App::new();
+    /// app.group("/api", |api| {
+    ///     api.gcra(by::ip());
+    ///
+    ///     api.map_get("/status", || async { /*...*/ });
+    ///     api.map_post("/upload", || async { /*...*/ })
+    ///         .gcra(by::header("x-tenant-id").using("burst"));
+    /// });
+    /// ```
+    pub fn gcra<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
+        let binding = source.bind();
+        self.wrap(move |ctx, next| check_gcra(ctx, binding.clone(), next))
     }
 }
 
@@ -631,6 +1137,48 @@ async fn check_sliding_window(
             next(ctx).await
         }
     } else { 
+        next(ctx).await
+    }
+}
+
+#[inline]
+async fn check_token_bucket(
+    ctx: HttpContext,
+    binding: RateLimitBinding,
+    next: NextFn
+) -> HttpResult {
+    if let Some(limiter) = ctx.token_bucket_rate_limiter(binding.policy.as_deref()) {
+        let key = binding.key.extract(ctx.request())?;
+        if !limiter.check(key) {
+            status!(
+                StatusCode::TOO_MANY_REQUESTS.as_u16(), 
+                text: RATE_LIMIT_ERROR_MSG
+            )
+        } else {
+            next(ctx).await
+        }
+    } else {
+        next(ctx).await
+    }
+}
+
+#[inline]
+async fn check_gcra(
+    ctx: HttpContext,
+    binding: RateLimitBinding,
+    next: NextFn
+) -> HttpResult {
+    if let Some(limiter) = ctx.gcra_rate_limiter(binding.policy.as_deref()) {
+        let key = binding.key.extract(ctx.request())?;
+        if !limiter.check(key) {
+            status!(
+                StatusCode::TOO_MANY_REQUESTS.as_u16(), 
+                text: RATE_LIMIT_ERROR_MSG
+            )
+        } else {
+            next(ctx).await
+        }
+    } else {
         next(ctx).await
     }
 }
@@ -1050,6 +1598,38 @@ mod tests {
     }
 
     #[test]
+    fn it_adds_default_token_bucket_policy() {
+        let mut global_limiter = GlobalRateLimiter {
+            ..Default::default()
+        };
+
+        global_limiter.add_token_bucket(
+            TokenBucket::new(10, 1.0)
+        );
+
+        let default = global_limiter.token_bucket(None).unwrap();
+
+        assert_eq!(default.capacity(), 10);
+        assert_eq!(default.refill_rate(), 1.0);
+    }
+
+    #[test]
+    fn it_adds_default_gcra_policy() {
+        let mut global_limiter = GlobalRateLimiter {
+            ..Default::default()
+        };
+
+        global_limiter.add_gcra(
+            Gcra::new(10.0, 1)
+        );
+
+        let default = global_limiter.gcra(None).unwrap();
+
+        assert_eq!(default.rate_per_second(), 10.0);
+        assert_eq!(default.burst(), 1);
+    }
+
+    #[test]
     fn it_adds_named_fixed_window_policy() {
         let mut global_limiter = GlobalRateLimiter {
             ..Default::default()
@@ -1085,6 +1665,44 @@ mod tests {
 
         assert_eq!(default.max_requests(), 10);
         assert_eq!(default.window_size_secs(), 10);
+    }
+
+    #[test]
+    fn it_adds_named_token_bucket_policy() {
+        let mut global_limiter = GlobalRateLimiter {
+            ..Default::default()
+        };
+
+        global_limiter.add_token_bucket(
+            TokenBucket::new(10, 1.0)
+                .with_name("burst")
+        );
+
+        assert!(global_limiter.default_token_bucket.is_none());
+
+        let default = global_limiter.token_bucket(Some("burst")).unwrap();
+
+        assert_eq!(default.capacity(), 10);
+        assert_eq!(default.refill_rate(), 1.);
+    }
+
+    #[test]
+    fn it_adds_named_gcra_policy() {
+        let mut global_limiter = GlobalRateLimiter {
+            ..Default::default()
+        };
+
+        global_limiter.add_gcra(
+            Gcra::new(10.0, 1)
+                .with_name("burst")
+        );
+
+        assert!(global_limiter.default_gcra.is_none());
+
+        let default = global_limiter.gcra(Some("burst")).unwrap();
+
+        assert_eq!(default.rate_per_second(), 10.0);
+        assert_eq!(default.burst(), 1);
     }
     
     #[test]
@@ -1147,5 +1765,67 @@ mod tests {
 
         assert_eq!(limiter.max_requests(), 10);
         assert_eq!(limiter.window_size_secs(), 10);
+    }
+
+    #[test]
+    fn it_add_token_bucket_policy() {
+        let app = App::new()
+            .with_token_bucket(TokenBucket::new(10, 1.0));
+
+        let limiter = app.rate_limiter
+            .unwrap()
+            .default_token_bucket
+            .unwrap();
+
+        assert_eq!(limiter.capacity(), 10);
+        assert_eq!(limiter.refill_rate(), 1.0);
+    }
+
+    #[test]
+    fn it_add_named_token_bucket_policy() {
+        let app = App::new()
+            .with_token_bucket(
+                TokenBucket::new(10, 1.0)
+                    .with_name("burst")
+            );
+
+        let global_limiter = app.rate_limiter.unwrap();
+        let limiter = global_limiter
+            .token_bucket(Some("burst"))
+            .unwrap();
+
+        assert_eq!(limiter.capacity(), 10);
+        assert_eq!(limiter.refill_rate(), 1.0);
+    }
+
+    #[test]
+    fn it_add_gcra_policy() {
+        let app = App::new()
+            .with_gcra(Gcra::new(10.0, 3));
+
+        let limiter = app.rate_limiter
+            .unwrap()
+            .default_gcra
+            .unwrap();
+
+        assert_eq!(limiter.rate_per_second(), 10.);
+        assert_eq!(limiter.burst(), 3);
+    }
+
+    #[test]
+    fn it_add_named_gcra_policy() {
+        let app = App::new()
+            .with_gcra(
+                Gcra::new(10., 3)
+                    .with_name("burst")
+            );
+
+        let global_limiter = app.rate_limiter.unwrap();
+        let limiter = global_limiter
+            .gcra(Some("burst"))
+            .unwrap();
+
+        assert_eq!(limiter.rate_per_second(), 10.);
+        assert_eq!(limiter.burst(), 3);
     }
 }

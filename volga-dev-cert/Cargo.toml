@@ -1,6 +1,6 @@
 [package]
 name = "volga-dev-cert"
-version = "0.8.1"
+version = "0.8.2"
 readme = "README.md"
 description = "A Rust library for generating self-signed TLS certificates for local development."
 edition.workspace = true

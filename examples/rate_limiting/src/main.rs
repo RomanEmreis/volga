@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use volga::{
     auth::{Claims, roles, DecodingKey}, 
-    rate_limiting::{FixedWindow, SlidingWindow, by},
+    rate_limiting::{FixedWindow, SlidingWindow, TokenBucket, Gcra, by},
     App
 };
 
@@ -26,20 +26,25 @@ fn main() {
         .with_sliding_window(
             SlidingWindow::new(100, Duration::from_secs(15))
         )
-        .with_sliding_window(
-            SlidingWindow::new(100, Duration::from_secs(30))
+        .with_token_bucket(
+            TokenBucket::new(100, 1.0)
+        )
+        .with_gcra(
+            Gcra::new(50.0, 10)
                 .with_name("burst")
         );
 
-    app.use_fixed_window(by::ip());
+    app.use_token_bucket(by::ip());
     
     app.group("/api", |api| {
-        api.sliding_window(by::header("x-api-key"));
+        api.fixed_window(by::header("x-api-key"));
         
         api.map_get("/fixed", async || "Hello from fixed window!");
         api.map_get("/sliding", async || "Hello from sliding window!")
+            .sliding_window(by::header("x-api-key"));
+        api.map_get("/gcra", async || "Hello from GCRA!")
             .authorize::<Claims>(roles(["admin", "user"]))
-            .sliding_window(by::user(|c: &Claims| c.sub.as_str()).using("burst")); 
+            .gcra(by::user(|c: &Claims| c.sub.as_str()).using("burst")); 
     });
 
     app.run_blocking();
