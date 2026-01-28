@@ -8,6 +8,9 @@ exclude-files = [
     
     # This is covered implicitly in integration tests
     "volga/src/server/*",
+    
+    # Exclude the trybuild tests
+    "volga-macro/tests/*"
 ]
 
 ignore-tests = true
