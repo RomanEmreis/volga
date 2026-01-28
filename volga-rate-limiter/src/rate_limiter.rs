@@ -35,9 +35,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub use fixed_window::FixedWindowRateLimiter;
 pub use sliding_window::SlidingWindowRateLimiter;
+pub use token_bucket::TokenBucketRateLimiter;
 
 mod fixed_window;
 mod sliding_window;
+mod token_bucket;
 
 /// A generic rate limiter interface.
 ///

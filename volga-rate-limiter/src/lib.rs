@@ -73,6 +73,7 @@ mod rate_limiter;
 pub use rate_limiter::{
     FixedWindowRateLimiter,
     SlidingWindowRateLimiter,
+    TokenBucketRateLimiter,
     SystemTimeSource,
     TimeSource,
     RateLimiter
