@@ -1,5 +1,0 @@
-error: expected a string literal or an identifier
- --> tests/ui/http_header_invalid.rs:5:15
-  |
-5 | #[http_header(123)]
-  |               ^^^
