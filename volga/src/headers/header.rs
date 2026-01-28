@@ -113,15 +113,12 @@ impl FromRequestRef for HttpHeaders {
 impl FromPayload for HttpHeaders {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 
@@ -292,15 +289,12 @@ impl<T: FromHeaders + Send> FromRequestRef for Header<T> {
 impl<T: FromHeaders + Send> FromPayload for Header<T> {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 

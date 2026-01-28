@@ -47,17 +47,14 @@ where
 {
     type Future = ExtractVecFromPayloadFut<T, <Json<Vec<T>> as FromPayload>::Future>;
 
+    const SOURCE: Source = Source::Body;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         ExtractVecFromPayloadFut {
             inner: Json::<Vec<T>>::from_payload(payload),
             _marker: PhantomData
         }
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Body
     }
 }
 

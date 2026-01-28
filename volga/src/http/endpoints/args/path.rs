@@ -246,15 +246,12 @@ impl<T: DeserializeOwned + Send> FromRequestRef for NamedPath<T> {
 impl<T: FromPathArgs + Send> FromPayload for Path<T> {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::PathArgs;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::PathArgs(params) = payload else { unreachable!() };
         ready(Self::from_slice(params))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::PathArgs
     }
 }
 
@@ -263,30 +260,24 @@ impl<T: FromPathArgs + Send> FromPayload for Path<T> {
 impl<T: DeserializeOwned + Send> FromPayload for NamedPath<T> {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::PathArgs;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::PathArgs(params) = payload else { unreachable!() };
         ready(Self::from_slice(params))
     }
-
-    #[inline]
-    fn source() -> Source {
-        Source::PathArgs
-    }
 }
 
 impl FromPayload for String {
     type Future = Ready<Result<Self, Error>>;
+
+    const SOURCE: Source = Source::Path;
     
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
         ok(param.value.as_ref().to_owned())
-    }
-    
-    #[inline]
-    fn source() -> Source {
-        Source::Path
     }
 }
 
@@ -300,15 +291,12 @@ impl FromPathArg for String {
 impl FromPayload for Cow<'static, str> {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Path;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
         ok(Cow::Owned(param.value.as_ref().to_owned()))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Path
     }
 }
 
@@ -322,15 +310,12 @@ impl FromPathArg for Cow<'static, str> {
 impl FromPayload for Box<str> {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Path;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
         ok(param.value.as_ref().into())
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Path
     }
 }
 
@@ -343,16 +328,13 @@ impl FromPathArg for Box<str> {
 
 impl FromPayload for Box<[u8]> {
     type Future = Ready<Result<Self, Error>>;
-
+    
+    const SOURCE: Source = Source::Path;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
         ok(param.value.as_bytes().into())
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Path
     }
 }
 
@@ -374,14 +356,11 @@ macro_rules! impl_from_payload {
         })*
         $(impl FromPayload for $type {
             type Future = Ready<Result<Self, Error>>;
+            const SOURCE: Source = Source::Path;
             #[inline]
             fn from_payload(payload: Payload<'_>) -> Self::Future {
                 let Payload::Path(arg) = payload else { unreachable!() };
                 ready(<$type as FromPathArg>::from_path_arg(&arg))
-            }
-            #[inline]
-            fn source() -> Source {
-                Source::Path
             }
         })*
     };

@@ -104,15 +104,12 @@ impl<T: DeserializeOwned + Send> Future for ExtractFormPayloadFut<T> {
 impl<T: DeserializeOwned + Send> FromPayload for Form<T> {
     type Future = ExtractFormPayloadFut<T>;
 
+    const SOURCE: Source = Source::Body;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Body(body) = payload else { unreachable!() };
         ExtractFormPayloadFut { fut: body.collect(), _marker: PhantomData }
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Body
     }
 }
 

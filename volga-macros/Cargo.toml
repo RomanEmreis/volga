@@ -21,6 +21,11 @@ quote = "1.0.44"
 syn = { version = "2.0.114", features = ["full"] }
 proc-macro2 = "1.0.106"
 
+[dev-dependencies]
+trybuild = "1.0.96"
+serde = { version = "1.0.219", features = ["derive"] }
+volga = { path = "../volga", features = ["jwt-auth"] }
+
 [features]
 default = []
 jwt-auth-derive = []

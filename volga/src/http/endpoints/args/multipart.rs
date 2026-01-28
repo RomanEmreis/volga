@@ -200,18 +200,15 @@ impl<'a> TryFrom<Payload<'a>> for Multipart {
     }
 }
 
-/// Extracts a file stream from request body
+/// Extracts a file stream from the request body
 impl FromPayload for Multipart {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Full;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         ready(payload.try_into())
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Full
     }
 }
 

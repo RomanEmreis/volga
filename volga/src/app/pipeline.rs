@@ -139,3 +139,38 @@ impl Pipeline {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::status;
+    use crate::error::{
+        ErrorFunc,
+        FallbackFunc,
+        fallback::PipelineFallbackHandler,
+        handler::PipelineErrorHandler,
+    };
+    use super::PipelineBuilder;
+
+    #[test]
+    fn it_sets_error_and_fallback_handlers() {
+        let mut builder = PipelineBuilder::new();
+
+        let error_handler: PipelineErrorHandler = ErrorFunc::new(|_err| async { status!(418) }).into();
+        builder.set_error_handler(error_handler.clone());
+        assert!(std::sync::Arc::ptr_eq(&builder.error_handler, &error_handler));
+
+        let fallback_handler: PipelineFallbackHandler = FallbackFunc::new(|| async { status!(404) }).into();
+        builder.set_fallback_handler(fallback_handler.clone());
+        assert!(std::sync::Arc::ptr_eq(&builder.fallback_handler, &fallback_handler));
+    }
+
+    #[cfg(feature = "middleware")]
+    #[test]
+    fn it_builds_without_middleware_pipeline() {
+        let builder = PipelineBuilder::new();
+        assert!(!builder.has_middleware_pipeline());
+
+        let pipeline = builder.build();
+        assert!(!pipeline.has_middleware_pipeline());
+    }
+}

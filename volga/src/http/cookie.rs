@@ -135,15 +135,12 @@ impl FromRawRequest for Cookies {
 impl FromPayload for Cookies {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 
@@ -259,6 +256,6 @@ mod tests {
 
     #[test]
     fn it_returns_parts_source() {
-        assert_eq!(Cookies::source(), Source::Parts);
+        assert_eq!(Cookies::SOURCE, Source::Parts);
     }
 }

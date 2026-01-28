@@ -67,3 +67,29 @@ async fn it_works_with_custom_protocol() {
     
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn it_allows_ws_sink_stream_into_inner() {
+    use futures_util::{SinkExt, StreamExt};
+
+    let server = TestServer::spawn(|app| {
+        app.map_ws("/ws", |ws: volga::ws::WebSocket| async move {
+            let (write, read) = ws.split();
+            let mut inner_sink = write.into_inner();
+            let mut inner_stream = read.into_inner();
+            if let Some(Ok(msg)) = inner_stream.next().await {
+                inner_sink.send(msg).await.unwrap();
+            }
+        });
+    }).await;
+
+    let mut ws = server.ws("/ws").await;
+
+    ws.send_text("hello").await;
+    let response = ws.recv_text().await;
+
+    assert_eq!(response, "hello");
+
+    server.shutdown().await;
+}
+

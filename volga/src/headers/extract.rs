@@ -58,3 +58,32 @@ define_header! {
     (UserAgent, USER_AGENT), (Vary, VARY), (Via, VIA), (Warning, WARNING), (WwwAuthenticate, WWW_AUTHENTICATE), (XContentTypeOptions, X_CONTENT_TYPE_OPTIONS),
     (XDnsPrefetchControl, X_DNS_PREFETCH_CONTROL), (XFrameOptions, X_FRAME_OPTIONS), (XXssProtection, X_XSS_PROTECTION)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ContentType, Host};
+    use crate::headers::{FromHeaders, HeaderMap, HeaderValue, HOST, CONTENT_TYPE};
+
+    #[test]
+    fn it_extracts_headers_from_map() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_static("example.com"));
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        assert_eq!(
+            Host::from_headers(&headers).unwrap(),
+            &HeaderValue::from_static("example.com")
+        );
+        assert_eq!(
+            ContentType::from_headers(&headers).unwrap(),
+            &HeaderValue::from_static("application/json")
+        );
+    }
+
+    #[test]
+    fn it_returns_none_when_header_missing() {
+        let headers = HeaderMap::new();
+        assert!(Host::from_headers(&headers).is_none());
+        assert!(ContentType::from_headers(&headers).is_none());
+    }
+}

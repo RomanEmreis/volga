@@ -48,42 +48,36 @@ impl FromRequestRef for Method {
 impl FromPayload for Uri {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ok(parts.uri.clone())
-    }
-
-    fn source() -> Source {
-        Source::Parts
     }
 }
 
 impl FromPayload for Method {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ok(parts.method.clone())
-    }
-
-    fn source() -> Source {
-        Source::Parts
     }
 }
 
 impl FromPayload for HttpRequest {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Request;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Request(req) = payload else { unreachable!() };
         ok(*req)
-    }
-
-    fn source() -> Source {
-        Source::Request
     }
 }
 
