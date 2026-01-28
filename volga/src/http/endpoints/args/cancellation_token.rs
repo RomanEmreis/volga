@@ -113,15 +113,12 @@ impl FromRequestRef for TokenGuard {
 impl FromPayload for TokenGuard {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ok(parts.into())
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 

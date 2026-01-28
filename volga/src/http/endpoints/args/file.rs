@@ -128,10 +128,12 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     }
 }
 
-/// Extracts a file stream from request body
+/// Extracts a file stream from the request body
 impl FromPayload for File {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Full;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Full(parts, body) = payload else { unreachable!() };
@@ -140,11 +142,6 @@ impl FromPayload for File {
             .and_then(|header| header.to_str().ok())
             .and_then(Self::parse_file_name);
         ok(FileStream::new(name, body))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Full
     }
 }
 

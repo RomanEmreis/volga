@@ -171,3 +171,45 @@ macro_rules! response {
             .body($body)
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use http_body_util::BodyExt;
+    use crate::HttpBody;
+    use super::RESPONSE_ERROR;
+
+    #[tokio::test]
+    async fn builder_sets_status_headers_and_body() {
+        let response = builder!(201)
+            .header("x-test", "1")
+            .body(HttpBody::from("hello"))
+            .expect("response should build");
+
+        let response = response.into_inner();
+        assert_eq!(response.status(), 201);
+        assert_eq!(response.headers().get("x-test").unwrap(), "1");
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body, "hello");
+    }
+
+    #[tokio::test]
+    async fn response_macro_builds_with_body() {
+        let response = response!(200, HttpBody::from("ok")).expect("response should build");
+        let response = response.into_inner();
+
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body, "ok");
+    }
+
+    #[test]
+    fn builder_returns_error_for_invalid_header() {
+        let result = builder!()
+            .header("invalid header", "value")
+            .body(HttpBody::from("ignored"));
+
+        let err = result.expect_err("expected invalid header error");
+        assert!(err.to_string().contains(RESPONSE_ERROR) || err.to_string().contains("header"));
+    }
+}

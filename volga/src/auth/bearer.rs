@@ -351,16 +351,13 @@ impl FromRequestRef for Bearer {
 
 impl FromPayload for Bearer {
     type Future = Ready<Result<Self, Error>>;
+
+    const SOURCE: Source = Source::Parts;
     
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 
@@ -393,15 +390,12 @@ impl FromRequestRef for BearerTokenService {
 impl FromPayload for BearerTokenService {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 

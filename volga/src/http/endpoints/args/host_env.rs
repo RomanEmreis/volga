@@ -39,16 +39,13 @@ impl FromRequestParts for HostEnv {
 
 impl FromPayload for HostEnv {
     type Future = Ready<Result<Self, Error>>;
+
+    const SOURCE: Source = Source::Parts;
     
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(HostEnv::from_parts(parts))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 
@@ -59,7 +56,7 @@ mod tests {
     use crate::HttpBody;
 
     #[test]
-    fn it_returns_hostenv_when_present_in_extensions() {
+    fn it_returns_host_env_when_present_in_extensions() {
         let mut ext = Extensions::new();
         ext.insert(HostEnv::new("root"));
 
@@ -148,6 +145,6 @@ mod tests {
 
     #[test]
     fn it_source_returns_parts_variant() {
-        assert!(matches!(HostEnv::source(), Source::Parts));
+        assert!(matches!(HostEnv::SOURCE, Source::Parts));
     }
 }

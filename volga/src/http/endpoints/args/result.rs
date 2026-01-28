@@ -67,16 +67,13 @@ impl<T: FromRequestParts> FromRequestParts for Result<T, Error> {
 impl<T: FromPayload> FromPayload for Result<T, Error> {
     type Future = ResultFromPayloadFuture<T::Future>;
 
+    const SOURCE: Source = T::SOURCE;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         ResultFromPayloadFuture {
             inner: T::from_payload(payload),
         }
-    }
-
-    #[inline]
-    fn source() -> Source {
-        T::source()
     }
 }
 #[cfg(test)]
@@ -93,12 +90,10 @@ mod tests {
     impl FromPayload for SuccessExtractor {
         type Future = Ready<Result<Self, Error>>;
 
+        const SOURCE: Source = Source::Parts;
+
         fn from_payload(_: Payload<'_>) -> Self::Future {
             ok(SuccessExtractor)
-        }
-
-        fn source() -> Source {
-            Source::Parts
         }
     }
 
@@ -119,12 +114,10 @@ mod tests {
     impl FromPayload for FailureExtractor {
         type Future = Ready<Result<Self, Error>>;
 
+        const SOURCE: Source = Source::Parts;
+
         fn from_payload(_: Payload<'_>) -> Self::Future {
             err(Error::client_error("Test error"))
-        }
-
-        fn source() -> Source {
-            Source::Parts
         }
     }
 
@@ -145,15 +138,13 @@ mod tests {
     impl FromPayload for BodyExtractor {
         type Future = Ready<Result<Self, Error>>;
 
+        const SOURCE: Source = Source::Body;
+
         fn from_payload(payload: Payload<'_>) -> Self::Future {
             match payload {
                 Payload::Body(_) => ok(BodyExtractor("body content".to_string())),
                 _ => err(Error::client_error("Expected body payload"))
             }
-        }
-
-        fn source() -> Source {
-            Source::Body
         }
     }
 
@@ -162,6 +153,8 @@ mod tests {
     impl FromPayload for PathExtractor {
         type Future = Ready<Result<Self, Error>>;
 
+        const SOURCE: Source = Source::Path;
+        
         fn from_payload(payload: Payload<'_>) -> Self::Future {
             let Payload::Path(param) = payload else {
                 return err(Error::client_error("Expected path payload"));
@@ -171,10 +164,6 @@ mod tests {
                 Ok(id) => ok(PathExtractor(id)),
                 Err(_) => err(Error::client_error("Invalid path parameter"))
             }
-        }
-
-        fn source() -> Source {
-            Source::Path
         }
     }
 
@@ -254,9 +243,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_result_preserves_source() {
-        assert_eq!(Result::<SuccessExtractor, Error>::source(), Source::Parts);
-        assert_eq!(Result::<BodyExtractor, Error>::source(), Source::Body);
-        assert_eq!(Result::<PathExtractor, Error>::source(), Source::Path);
+        assert_eq!(Result::<SuccessExtractor, Error>::SOURCE, Source::Parts);
+        assert_eq!(Result::<BodyExtractor, Error>::SOURCE, Source::Body);
+        assert_eq!(Result::<PathExtractor, Error>::SOURCE, Source::Path);
     }
 
     #[tokio::test]
@@ -488,12 +477,10 @@ mod tests {
         impl FromPayload for CustomExtractor {
             type Future = Ready<Result<Self, Error>>;
 
+            const SOURCE: Source = Source::Parts;
+
             fn from_payload(_: Payload<'_>) -> Self::Future {
                 err(Error::server_error("Custom internal error"))
-            }
-
-            fn source() -> Source {
-                Source::Parts
             }
         }
 
@@ -518,12 +505,10 @@ mod tests {
         impl FromPayload for ValueExtractor {
             type Future = Ready<Result<Self, Error>>;
 
+            const SOURCE: Source = Source::Parts;
+            
             fn from_payload(_: Payload<'_>) -> Self::Future {
                 ok(ValueExtractor(42))
-            }
-
-            fn source() -> Source {
-                Source::Parts
             }
         }
 

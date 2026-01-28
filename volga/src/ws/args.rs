@@ -290,9 +290,10 @@ define_generic_message_handler! { T1 T2 T3 T4 T5 }
 
 #[cfg(test)]
 mod tests {
-    use super::Message;
+    use super::{Message, MessageHandler};
     use bytes::Bytes;
     use std::borrow::Cow;
+    use tokio_tungstenite::tungstenite;
 
     #[test]
     fn it_handles_string_messages() {
@@ -385,4 +386,22 @@ mod tests {
 
         assert_eq!(vec, expected);
     }
+
+    #[test]
+    fn it_formats_message_display() {
+        let message = Message(tungstenite::Message::text("hello"));
+        assert_eq!(message.to_string(), "hello");
+    }
+
+    #[tokio::test]
+    async fn message_handler_invokes_function_with_args() {
+        let handler = |msg: String, tag: &'static str| async move {
+            format!("{tag}:{msg}")
+        };
+        let message: Message = "ping".try_into().unwrap();
+        let output = MessageHandler::call(&handler, String::try_from(message).unwrap(), ("ws",)).await;
+
+        assert_eq!(output, "ws:ping");
+    }
+
 }

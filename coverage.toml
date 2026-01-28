@@ -7,7 +7,7 @@ exclude-files = [
     "volga-macros/src/*",
     
     # This is covered implicitly in integration tests
-    "volga/src/server/*",
+    "volga/src/server/*"
 ]
 
 ignore-tests = true

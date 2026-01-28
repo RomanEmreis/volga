@@ -140,3 +140,47 @@ impl RoutePipeline {
         *self = Self::Middleware(next)
     }
 }
+
+#[cfg(all(test, not(feature = "middleware")))]
+mod tests {
+    use std::sync::Arc;
+    use futures_util::future::BoxFuture;
+    use crate::{HttpRequest, HttpResult, status};
+    use crate::http::endpoints::handlers::{Handler, RouteHandler};
+    use super::{Layer, RoutePipeline};
+
+    struct NoopHandler;
+
+    impl Handler for NoopHandler {
+        fn call(&self, _req: HttpRequest) -> BoxFuture<'_, HttpResult> {
+            Box::pin(async { status!(204) })
+        }
+    }
+
+    #[test]
+    fn pipeline_from_layer_contains_handler() {
+        let handler: RouteHandler = Arc::new(NoopHandler);
+        let pipeline = RoutePipeline::from(Layer::from(handler.clone()));
+
+        match pipeline {
+            RoutePipeline::Handler(Some(inner)) => {
+                assert!(Arc::ptr_eq(&inner, &handler));
+            }
+            _ => panic!("expected handler pipeline"),
+        }
+    }
+
+    #[test]
+    fn insert_sets_handler_in_pipeline() {
+        let handler: RouteHandler = Arc::new(NoopHandler);
+        let mut pipeline = RoutePipeline::new();
+        pipeline.insert(Layer::from(handler.clone()));
+
+        match pipeline {
+            RoutePipeline::Handler(Some(inner)) => {
+                assert!(Arc::ptr_eq(&inner, &handler));
+            }
+            _ => panic!("expected handler pipeline"),
+        }
+    }
+}

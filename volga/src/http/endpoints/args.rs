@@ -98,14 +98,12 @@ pub(crate) trait FromPathArg: Sized {
 /// depending on payload's [`Source`]
 pub(crate) trait FromPayload: Send + Sized {
     type Future: Future<Output = Result<Self, Error>> + Send;
+
+    /// Represents a [`Source`] where the payload should be extracted from
+    const SOURCE: Source = Source::None;
     
     /// Extracts data from give [`Payload`]
     fn from_payload(payload: Payload<'_>) -> Self::Future;
-
-    /// Returns a [`Source`] where the payload should be extracted from
-    fn source() -> Source {
-        Source::None
-    }
 }
 
 impl FromRequest for () {
@@ -187,8 +185,8 @@ macro_rules! define_generic_from_request {
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
             #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
-                let uses_path = false $(|| matches!($T::source(), Source::Path))*;
-                let uses_pathargs = false $(|| matches!($T::source(), Source::PathArgs))*;
+                let uses_path = false $(|| matches!($T::SOURCE, Source::Path))*;
+                let uses_pathargs = false $(|| matches!($T::SOURCE, Source::PathArgs))*;
 
                 if uses_path && uses_pathargs {
                     return Err(invalid_extractor_combination());
@@ -210,7 +208,7 @@ macro_rules! define_generic_from_request {
                     let tuple = (
                         $(
                             {
-                                let payload = payload_for_path_args!($T::source(), parts, body, &params);
+                                let payload = payload_for_path_args!($T::SOURCE, parts, body, &params);
                                 $T::from_payload(payload).await?
                             },
                         )*
@@ -222,7 +220,7 @@ macro_rules! define_generic_from_request {
                 let tuple = (
                     $(
                         {
-                            let payload = payload_for_path!($T::source(), parts, body, iter);
+                            let payload = payload_for_path!($T::SOURCE, parts, body, iter);
                             $T::from_payload(payload).await?
                         },
                     )*
@@ -244,12 +242,12 @@ fn invalid_extractor_combination() -> Error {
 macro_rules! payload_for_path {
     ($src:expr, $parts:expr, $body:expr, $iter:expr) => {{
         match $src {
-            Source::Path => match $iter.next() {
-                Some(arg) => Payload::Path(arg),
-                None => Payload::None,
-            },
             Source::Parts => match $parts.as_ref() {
                 Some(p) => Payload::Parts(p),
+                None => Payload::None,
+            },
+            Source::Path => match $iter.next() {
+                Some(arg) => Payload::Path(arg),
                 None => Payload::None,
             },
             Source::Body => match $body.take() {
@@ -273,11 +271,11 @@ macro_rules! payload_for_path {
 macro_rules! payload_for_path_args {
     ($src:expr, $parts:expr, $body:expr, $params:expr) => {{
         match $src {
-            Source::PathArgs => Payload::PathArgs($params),
             Source::Parts => match $parts.as_ref() {
                 Some(p) => Payload::Parts(p),
                 None => Payload::None,
             },
+            Source::PathArgs => Payload::PathArgs($params),
             Source::Body => match $body.take() {
                 Some(b) => Payload::Body(b),
                 None => Payload::None,
@@ -327,6 +325,6 @@ mod tests {
     async fn it_reads_none_from_payload() {
         let extraction = TestNone::from_payload(Payload::None).await;
         assert!(extraction.is_ok());
-        assert_eq!(TestNone::source(), Source::None);
+        assert_eq!(TestNone::SOURCE, Source::None);
     }
 }

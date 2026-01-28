@@ -129,14 +129,12 @@ impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
 impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
-    }
-
-    fn source() -> Source {
-        Source::Parts
     }
 }
 

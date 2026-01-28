@@ -132,3 +132,26 @@ define_generic_handler! { T1 T2 T3 T4 T5 T6 T7 }
 define_generic_handler! { T1 T2 T3 T4 T5 T6 T7 T8 }
 define_generic_handler! { T1 T2 T3 T4 T5 T6 T7 T8 T9 }
 define_generic_handler! { T1 T2 T3 T4 T5 T6 T7 T8 T9 T10 }
+
+#[cfg(test)]
+mod tests {
+    use super::{GenericHandler, MapErrHandler};
+    use crate::error::Error;
+
+    #[tokio::test]
+    async fn generic_handler_invokes_function_with_arguments() {
+        let handler = |a: i32, b: i32| async move { a + b };
+        let result = GenericHandler::call(&handler, (2, 3)).await;
+
+        assert_eq!(result, 5);
+    }
+
+    #[tokio::test]
+    async fn map_err_handler_invokes_function_with_error_and_args() {
+        let handler = |err: Error, code: u16| async move { (err.status.as_u16(), code) };
+        let err = Error::client_error("bad");
+
+        let result = MapErrHandler::call(&handler, err, (42,)).await;
+        assert_eq!(result, (400, 42));
+    }
+}

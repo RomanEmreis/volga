@@ -125,22 +125,19 @@ where
     }
 }
 
-/// Extracts `Authenticated<T>` from request payload
+/// Extracts `Authenticated<T>` from the request payload
 impl<T> FromPayload for Authenticated<T>
 where
     T: AuthClaims + Send + Sync + 'static
 {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(parts.try_into())
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 

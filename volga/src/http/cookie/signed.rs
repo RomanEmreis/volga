@@ -205,15 +205,12 @@ impl FromRequestParts for SignedCookies {
 impl FromPayload for SignedCookies {
     type Future = Ready<Result<Self, Error>>;
 
+    const SOURCE: Source = Source::Parts;
+    
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(Self::from_parts(parts))
-    }
-
-    #[inline]
-    fn source() -> Source {
-        Source::Parts
     }
 }
 
@@ -432,7 +429,7 @@ mod tests {
 
     #[test]
     fn if_return_parts_source() {
-        assert_eq!(SignedCookies::source(), Source::Parts);
+        assert_eq!(SignedCookies::SOURCE, Source::Parts);
     }
     
     #[tokio::test]
