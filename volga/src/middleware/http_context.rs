@@ -136,6 +136,24 @@ impl HttpContext {
             .sliding_window(policy)
     }
 
+    /// Returns a reference to a Token Bucket Rate Limiter
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub(crate) fn token_bucket_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
+        self.request.extensions()
+            .get::<Arc<GlobalRateLimiter>>()?
+            .token_bucket(policy)
+    }
+
+    /// Returns a reference to a GCRA Rate Limiter
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub(crate) fn gcra_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
+        self.request.extensions()
+            .get::<Arc<GlobalRateLimiter>>()?
+            .gcra(policy)
+    }
+
     /// Returns a read-only view of the request.
     ///
     /// This is the preferred way to inspect request data

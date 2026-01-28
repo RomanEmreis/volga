@@ -292,4 +292,41 @@ mod tests {
         assert!(!limiter.check(1));
         assert!(limiter.check(2));
     }
+
+    #[test]
+    #[should_panic(expected = "capacity * scale overflow")]
+    fn panics_when_capacity_scaled_overflows() {
+        // scale = 1_000_000
+        // overflow if capacity > u64::MAX / scale
+        let scale = 1_000_000u64;
+        let capacity = (u64::MAX / scale) + 1;
+
+        let _ = TokenBucketRateLimiter::with_time_source(capacity, 1.0, SystemTimeSource);
+    }
+
+    #[test]
+    #[should_panic(expected = "refill_rate must be finite")]
+    fn panics_when_refill_rate_is_nan() {
+        let _ = TokenBucketRateLimiter::with_time_source(1, f64::NAN, SystemTimeSource);
+    }
+
+    #[test]
+    #[should_panic(expected = "refill_rate must be finite")]
+    fn panics_when_refill_rate_is_infinite() {
+        let _ = TokenBucketRateLimiter::with_time_source(1, f64::INFINITY, SystemTimeSource);
+    }
+
+    #[test]
+    #[should_panic(expected = "refill_rate must be >= 0")]
+    fn panics_when_refill_rate_is_negative() {
+        let _ = TokenBucketRateLimiter::with_time_source(1, -0.1, SystemTimeSource);
+    }
+
+    #[test]
+    #[should_panic(expected = "refill_rate too large")]
+    fn panics_when_refill_rate_scaled_exceeds_u64_max() {
+        // scale = 1_000_000, so anything > u64::MAX / 1e6 will overflow after scaling.
+        // Using a very large value avoids edge cases with f64 rounding.
+        let _ = TokenBucketRateLimiter::with_time_source(1, 1e30, SystemTimeSource);
+    }
 }

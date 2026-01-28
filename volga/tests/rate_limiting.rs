@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use volga::rate_limiting::{by, FixedWindow, SlidingWindow};
+use volga::rate_limiting::{by, FixedWindow, SlidingWindow, TokenBucket, Gcra};
 use volga::test::TestServer;
 
 const RATE_LIMIT_MESSAGE: &str = "Rate limit exceeded. Try again later.";
@@ -216,6 +216,333 @@ async fn it_rate_limits_sliding_window_per_route_group() {
     let response = client.get(&url).send().await.unwrap();
     assert_eq!(response.status().as_u16(), 429);
     assert_eq!(response.text().await.unwrap(), RATE_LIMIT_MESSAGE);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_rate_limits_by_header_with_named_policy_token_bucket() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_token_bucket(
+                TokenBucket::new(2, 0.0) // capacity=2, no refill
+                    .with_name("burst"),
+            )
+        })
+        .setup(|app| {
+            app.use_token_bucket(by::header("x-api-key").using("burst"));
+            app.map_get("/limited", || async { "ok" });
+        })
+        .build()
+        .await;
+
+    let client = server.client();
+    let url = server.url("/limited");
+
+    for _ in 0..2 {
+        let response = client
+            .get(&url)
+            .header("x-api-key", "alpha")
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.status().is_success());
+        assert_eq!(response.text().await.unwrap(), "ok");
+    }
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "alpha")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 429);
+    assert_eq!(response.text().await.unwrap(), RATE_LIMIT_MESSAGE);
+
+    // another key has its own bucket
+    let response = client
+        .get(&url)
+        .header("x-api-key", "beta")
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "ok");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_rate_limits_by_header_token_bucket_for_route() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_token_bucket(
+                TokenBucket::new(2, 0.0)
+            )
+        })
+        .setup(|app| {
+            app.map_get("/limited", || async { "ok" })
+                .token_bucket(by::header("x-api-key"));
+        })
+        .build()
+        .await;
+
+    let client = server.client();
+    let url = server.url("/limited");
+
+    for _ in 0..2 {
+        let response = client
+            .get(&url)
+            .header("x-api-key", "alpha")
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.status().is_success());
+        assert_eq!(response.text().await.unwrap(), "ok");
+    }
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "alpha")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 429);
+    assert_eq!(response.text().await.unwrap(), RATE_LIMIT_MESSAGE);
+
+    // another key has its own bucket
+    let response = client
+        .get(&url)
+        .header("x-api-key", "beta")
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "ok");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_rate_limits_by_header_token_bucket_for_route_group() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_token_bucket(
+                TokenBucket::new(2, 0.0),
+            )
+        })
+        .setup(|app| {
+            app.group("/tests", |g| {
+                g.token_bucket(by::header("x-api-key"));
+                g.map_get("/limited", || async { "ok" });
+            });
+        })
+        .build()
+        .await;
+
+    let client = server.client();
+    let url = server.url("/tests/limited");
+
+    for _ in 0..2 {
+        let response = client
+            .get(&url)
+            .header("x-api-key", "alpha")
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.status().is_success());
+        assert_eq!(response.text().await.unwrap(), "ok");
+    }
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "alpha")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 429);
+    assert_eq!(response.text().await.unwrap(), RATE_LIMIT_MESSAGE);
+
+    // another key has its own bucket
+    let response = client
+        .get(&url)
+        .header("x-api-key", "beta")
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "ok");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_rate_limits_by_header_with_named_policy_gcra() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_gcra(
+                Gcra::new(1.0, 2) // 1 rps average, burst=2
+                    .with_name("burst"),
+            )
+        })
+        .setup(|app| {
+            app.use_gcra(by::header("x-api-key").using("burst"));
+            app.map_get("/limited", || async { "ok" });
+        })
+        .build()
+        .await;
+
+    let client = server.client();
+    let url = server.url("/limited");
+
+    for _ in 0..2 {
+        let response = client
+            .get(&url)
+            .header("x-api-key", "alpha")
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.status().is_success());
+        assert_eq!(response.text().await.unwrap(), "ok");
+    }
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "alpha")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 429);
+    assert_eq!(response.text().await.unwrap(), RATE_LIMIT_MESSAGE);
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "beta")
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "ok");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_rate_limits_by_header_gcra_for_route() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_gcra(
+                Gcra::new(1.0, 2),
+            )
+        })
+        .setup(|app| {
+            app.map_get("/limited", || async { "ok" })
+                .gcra(by::header("x-api-key"));
+        })
+        .build()
+        .await;
+
+    let client = server.client();
+    let url = server.url("/limited");
+
+    for _ in 0..2 {
+        let response = client
+            .get(&url)
+            .header("x-api-key", "alpha")
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.status().is_success());
+        assert_eq!(response.text().await.unwrap(), "ok");
+    }
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "alpha")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 429);
+    assert_eq!(response.text().await.unwrap(), RATE_LIMIT_MESSAGE);
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "beta")
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "ok");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_rate_limits_by_header_gcra_for_route_group() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_gcra(
+                Gcra::new(1.0, 2),
+            )
+        })
+        .setup(|app| {
+            app.group("/tests", |g| {
+                g.gcra(by::header("x-api-key"));
+                g.map_get("/limited", || async { "ok" });
+            });
+        })
+        .build()
+        .await;
+
+    let client = server.client();
+    let url = server.url("/tests/limited");
+
+    for _ in 0..2 {
+        let response = client
+            .get(&url)
+            .header("x-api-key", "alpha")
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.status().is_success());
+        assert_eq!(response.text().await.unwrap(), "ok");
+    }
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "alpha")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 429);
+    assert_eq!(response.text().await.unwrap(), RATE_LIMIT_MESSAGE);
+
+    let response = client
+        .get(&url)
+        .header("x-api-key", "beta")
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "ok");
 
     server.shutdown().await;
 }
