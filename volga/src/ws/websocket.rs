@@ -45,34 +45,45 @@ pub struct WebSocket {
 
 /// A [`Sink`] half of a split [`WebSocket`].
 ///
-/// This type is produced by [`WebSocket::split`]. It can be moved to a separate task and used
-/// to send application messages or to complete the WebSocket close handshake.
+/// This type is produced by [`WebSocket::split`] and is responsible for sending messages
+/// and completing the WebSocket close handshake.
 ///
-/// ## Close handshake
-/// When the peer requests closing (i.e. the [`WsStream`] yields [`WsEvent::Close`]),
-/// you should typically respond by calling [`WsSink::close`] with the received frame.
-/// This will send a `Close` control message (echoing the provided frame) and then close the sink.
+/// ## Close semantics
+///
+/// In split mode, when the read half ([`WsStream`]) observes an incoming `Close` frame,
+/// the underlying WebSocket implementation (`tungstenite`) may already have queued or
+/// sent the close reply internally. Sending another `Close` frame in that case would
+/// result in a protocol error (`SendAfterClosing`).
+///
+/// For this reason:
+///
+/// - Use [`WsSink::close`] to **finish closing the sink** after a peer-initiated close.
+///   This method does **not** send an additional `Close` frame.
+/// - Use [`WsSink::send_close`] only when **initiating** a close from the server side,
+///   and then call [`WsSink::close`] to shut down the sink.
+///
+/// This ensures protocol-correct behavior for both peer-initiated and server-initiated
+/// closes.
 pub struct WsSink(SplitSink<WebSocketStream<TokioIo<Upgraded>>, WsMessage>);
 
 /// A [`Stream`] half of a split [`WebSocket`].
 ///
-/// This type is produced by [`WebSocket::split`]. It can be moved to a separate task and used
-/// to receive messages.
+/// This type yields [`WsEvent`] values, allowing callers to distinguish between
+/// application data and protocol-level close events.
 ///
-/// Unlike [`WebSocket::recv`], which is data-only, [`WsStream::recv`] yields [`WsEvent`] to
-/// allow the caller to observe close frames and coordinate the close handshake with [`WsSink`].
+/// When a [`WsEvent::Close`] is received, callers should stop reading and typically
+/// call [`WsSink::close`] to complete shutdown. No additional close frame needs to
+/// be sent in response.
 pub struct WsStream(SplitStream<WebSocketStream<TokioIo<Upgraded>>>);
 
-/// Represents a single WebSocket event produced by [`WsStream::recv`].
+/// Represents a WebSocket event produced by [`WsStream::recv`].
 ///
-/// WebSocket communication includes both **data** messages and **control** messages.
-/// In split mode, control messages (such as `Close`) must be surfaced so the caller can
-/// coordinate protocol-correct behavior (e.g. echoing the close frame via [`WsSink::close`]).
+/// In split mode, WebSocket communication includes both application data and
+/// protocol-level events that must be handled explicitly.
 ///
-/// - [`WsEvent::Data`] contains an application-level message deserialized from an incoming
-///   WebSocket data frame (text or binary).
-/// - [`WsEvent::Close`] is emitted when a close control message is received. After this event
-///   the caller should typically reply with [`WsSink::close`] and stop reading.
+/// - [`WsEvent::Data`] contains a deserialized application message.
+/// - [`WsEvent::Close`] indicates that the peer has initiated closing. After this
+///   event, callers should stop reading and close the corresponding [`WsSink`].
 #[derive(Debug)]
 pub enum WsEvent<T> {
     /// Application-level message deserialized from an incoming data frame.
@@ -122,16 +133,36 @@ impl WsSink {
             .map_err(Error::from)
     }
 
-    /// Completes the close handshake and closes the sink.
+    /// Gracefully closes the sink.
     ///
-    /// This method first attempts to send a `Close` control message to the peer, echoing the
-    /// provided `frame` if present, and then closes the underlying sink.
+    /// This method completes the close handshake and shuts down the underlying sink.
+    /// It does **not** send a `Close` control frame.
     ///
-    /// Typical usage is to call this after [`WsStream::recv`] yields [`WsEvent::Close`].
+    /// This is the correct method to call after [`WsStream::recv`] yields
+    /// [`WsEvent::Close`], as the close reply may have already been handled internally
+    /// by the WebSocket implementation.
+    ///
+    /// Expected close-related errors (e.g. peer already disconnected) are filtered
+    /// and treated as a successful close.
     #[inline]
-    pub async fn close(&mut self, frame: Option<CloseFrame>) -> Result<(), Error> {
-        self.0.send(tungstenite::Message::Close(frame)).await?;
+    pub async fn close(&mut self) -> Result<(), Error> {
         match self.0.close().await {
+            Ok(()) => Ok(()),
+            Err(e) if is_expected_close_error(&e) => Ok(()),
+            Err(e) => Err(Error::from(e)),
+        }
+    }
+
+    /// Sends a `Close` control frame to the peer.
+    ///
+    /// This method should be used only when **initiating** a close from the server side.
+    /// After sending the close frame, callers should invoke [`WsSink::close`] to shut
+    /// down the sink.
+    ///
+    /// Sending a close frame after the peer has already initiated closing may result
+    /// in a protocol error (`SendAfterClosing`), which is treated as an expected outcome.
+    pub async fn send_close(&mut self, frame: Option<CloseFrame>) -> Result<(), Error> {
+        match self.0.send(WsMessage::Close(frame)).await {
             Ok(()) => Ok(()),
             Err(e) if is_expected_close_error(&e) => Ok(()),
             Err(e) => Err(Error::from(e)),
