@@ -29,7 +29,7 @@ async fn it_works_with_split() {
             while let Some(Ok(msg)) = read.recv::<String>().await {
                 match msg { 
                     WsEvent::Data(msg) => write.send(msg).await.unwrap(),
-                    WsEvent::Close(frame) => write.close(frame).await.unwrap()
+                    WsEvent::Close(_frame) => write.close().await.unwrap()
                 }
             }
         });
@@ -57,7 +57,7 @@ async fn it_works_with_custom_protocol() {
                 while let Some(Ok(msg)) = read.recv::<String>().await {
                     match msg { 
                         WsEvent::Data(msg) => write.send(format!("[{protocol}]: {msg}")).await.unwrap(),
-                        WsEvent::Close(frame) => write.close(frame).await.unwrap()
+                        WsEvent::Close(_frame) => write.close().await.unwrap()
                     }
                 }
             })
