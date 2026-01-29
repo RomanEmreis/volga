@@ -268,8 +268,8 @@ impl WebSocket {
                     );
                     continue;
                 },
-                WsMessage::Close(frame) => {
-                    if let Err(_close_err) = self.close(frame).await {
+                WsMessage::Close(_) => {
+                    if let Err(_close_err) = self.finish_close().await {
                         #[cfg(feature = "tracing")]
                         tracing::warn!("WebSocket close failed: {_close_err}");
                     }
@@ -333,7 +333,7 @@ impl WebSocket {
                 #[cfg(feature = "tracing")]
                 tracing::error!("Error sending message: {_e}");
 
-                if let Err(_close_err) = self.close(None).await {
+                if let Err(_close_err) = self.finish_close().await {
                     #[cfg(feature = "tracing")]
                     tracing::warn!("WebSocket close failed: {_close_err}");
                 }
@@ -350,6 +350,20 @@ impl WebSocket {
     #[inline]
     pub async fn close(&mut self, frame: Option<CloseFrame>) -> Result<(), Error> {
         match self.inner.close(frame).await {
+            Ok(()) => Ok(()),
+            Err(e) if is_expected_close_error(&e) => Ok(()),
+            Err(e) => Err(Error::from(e)),
+        }
+    }
+
+    /// Drives the close handshake to completion by closing the sink.
+    ///
+    /// This does not attempt to send an extra `Close` frame. It is intended to be used
+    /// after receiving a peer-initiated `Close`, where tungstenite may have already queued
+    /// a close reply that must be flushed.
+    #[inline]
+    async fn finish_close(&mut self) -> Result<(), Error> {
+        match SinkExt::close(&mut self.inner).await {
             Ok(()) => Ok(()),
             Err(e) if is_expected_close_error(&e) => Ok(()),
             Err(e) => Err(Error::from(e)),
