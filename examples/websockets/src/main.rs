@@ -9,7 +9,7 @@ use volga::{
     HttpResult,
     Json,
     di::Dc,
-    ws::{WebSocketConnection, WebSocket}
+    ws::{WebSocketConnection, WebSocket, WsEvent}
 };
 
 use std::sync::{Arc, RwLock};
@@ -47,7 +47,10 @@ async fn main() -> std::io::Result<()> {
         tokio::task::spawn(async move {
             while let Some(Ok(msg)) = receiver.recv::<String>().await {
                 let value = inc(&counter).await;
-                tracing::info!("received: {msg}; msg #{value}")
+                match msg { 
+                    WsEvent::Data(msg) => tracing::info!("received: {msg}; msg #{value}"),
+                    WsEvent::Close(frame) => tracing::info!("close: {frame:?}"),
+                }
             }
         });
     });

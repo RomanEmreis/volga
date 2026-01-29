@@ -1,4 +1,4 @@
-//! WebSockets and WebTransport protocol implementation and tools
+//! WebSockets and WebSocket-over-HTTP/2 protocol implementation and tools
 
 use crate::{App, error::Error, HttpRequest};
 use crate::http::IntoResponse;
@@ -9,7 +9,7 @@ use crate::http::endpoints::{
 
 pub use self::{
     connection::WebSocketConnection,
-    websocket::WebSocket,
+    websocket::{WebSocket, WsEvent, WsSink, WsStream},
     args::{
         Message,
         MessageHandler, 
@@ -57,6 +57,16 @@ impl WebSocketError {
     }
 
     #[inline]
+    fn invalid_method() -> Error {
+        Error::client_error("WebSocket error: invalid request method")
+    }
+
+    #[inline]
+    fn invalid_connect_protocol() -> Error {
+        Error::client_error("WebSocket error: invalid or missing \":protocol\" value")
+    }
+
+    #[inline]
     fn not_upgradable_connection() -> Error {
         Error::client_error("WebSocket error: connection is not upgradable")
     }
@@ -64,7 +74,7 @@ impl WebSocketError {
 
 impl App {
     /// Adds a `handler` that has to be called when a bidirectional connection to WebSocket 
-    /// or WebTransport protocol is requested.
+    /// or WebSocket-over-HTTP/2 protocol is requested.
     /// 
     /// # Example
     /// ```no_run
@@ -98,7 +108,7 @@ impl App {
         )))]
         self.map_get(pattern, handler);
 
-        // Using CONNECT for WebTransport protocol and HTTP/2
+        // Using CONNECT for WebSocket-over-HTTP/2 protocol and HTTP/2
         #[cfg(any(
             all(feature = "http1", feature = "http2"),
             all(feature = "http2", not(feature = "http1"))

@@ -21,13 +21,16 @@ async fn it_works() {
 
 #[tokio::test]
 async fn it_works_with_split() {
-    use volga::ws::WebSocket;
+    use volga::ws::{WebSocket, WsEvent};
 
     let server = TestServer::spawn(|app| {
         app.map_ws("/ws", |ws: WebSocket| async move {
             let (mut write, mut read) = ws.split();
             while let Some(Ok(msg)) = read.recv::<String>().await {
-                write.send(msg).await.unwrap();
+                match msg { 
+                    WsEvent::Data(msg) => write.send(msg).await.unwrap(),
+                    WsEvent::Close(_frame) => write.close().await.unwrap()
+                }
             }
         });
     }).await;
@@ -44,7 +47,7 @@ async fn it_works_with_split() {
 
 #[tokio::test]
 async fn it_works_with_custom_protocol() {
-    use volga::ws::{WebSocketConnection, WebSocket};
+    use volga::ws::{WebSocketConnection, WebSocket, WsEvent};
 
     let server = TestServer::spawn(|app| {
         app.map_conn("/ws", |conn: WebSocketConnection| async {
@@ -52,7 +55,10 @@ async fn it_works_with_custom_protocol() {
                 let protocol = ws.protocol().unwrap().to_str().unwrap().to_string();
                 let (mut write, mut read) = ws.split();
                 while let Some(Ok(msg)) = read.recv::<String>().await {
-                    write.send(format!("[{protocol}]: {msg}")).await.unwrap();
+                    match msg { 
+                        WsEvent::Data(msg) => write.send(format!("[{protocol}]: {msg}")).await.unwrap(),
+                        WsEvent::Close(_frame) => write.close().await.unwrap()
+                    }
                 }
             })
         });
