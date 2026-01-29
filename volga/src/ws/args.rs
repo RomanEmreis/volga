@@ -18,7 +18,7 @@ use std::{
 pub struct Message(pub(super) tungstenite::Message);
 
 impl Message {
-    /// Unwwraps the inner message
+    /// Unwraps the inner message
     #[inline]
     pub fn into_inner(self) -> tungstenite::Message {
         self.0
@@ -215,27 +215,27 @@ impl TryFrom<Message> for Bytes {
     }
 }
 
-/// Describes a generic WebSocket/WebTransport handler that could take a [`WebSocket`] 
+/// Describes a generic WebSocket/WebSocket-over-HTTP/2 handler that could take a [`WebSocket`] 
 /// and 0 or N parameters of types
 pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
-    /// The type of valure returned from a WebSocket/WebTransport handler
+    /// The type of value returned from a WebSocket handler
     type Output;
-    /// Output future of a WebSocket/WebTransport handler
+    /// Output future of a WebSocket handler
     type Future: Future<Output = Self::Output> + Send;
 
-    /// Calls a WebSocket/WebTransport handler
+    /// Calls a WebSocket handler
     fn call(&self, ws: WebSocket, args: Args) -> Self::Future;
 }
 
-/// Describes a generic WebSocket/WebTransport message handler that could take a message 
+/// Describes a generic WebSocket/WebSocket-over-HTTP/2 message handler that could take a message 
 /// in a format that implements the[`FromMessage`] and 0 or N parameters of types
 pub trait MessageHandler<M: TryFrom<Message>, Args>: Clone + Send + Sync + 'static {
-    /// The type of valure returned from a WebSocket/WebTransport message handler
+    /// The type of valure returned from a WebSocket message handler
     type Output;
-    /// Output future of a WebSocket/WebTransport message handler
+    /// Output future of a WebSocket message handler
     type Future: Future<Output = Self::Output> + Send;
 
-    /// Calls a WebSocket/WebTransport message handler
+    /// Calls a WebSocket message handler
     fn call(&self, msg: M, args: Args) -> Self::Future;
 }
 

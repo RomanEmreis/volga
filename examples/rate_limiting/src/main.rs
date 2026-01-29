@@ -27,7 +27,7 @@ fn main() {
             SlidingWindow::new(100, Duration::from_secs(15))
         )
         .with_token_bucket(
-            TokenBucket::new(100, 1.0)
+            TokenBucket::new(10, 5.0)
         )
         .with_gcra(
             Gcra::new(50.0, 10)

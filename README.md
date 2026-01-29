@@ -37,7 +37,7 @@ Volga is a good fit if you:
 - Composable async middlewares
 - Dependency Injection without derive macros
 - Typed request extraction
-- WebSockets and WebTransport
+- WebSockets and WebSocket-over-HTTP/2
 - Streaming-friendly HTTP
 - Full **Tokio** compatibility
 - Runs on stable Rust **1.90+**

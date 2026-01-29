@@ -1,4 +1,4 @@
-//! WebSocket connection extractors and uutils
+//! WebSocket connection extractors and utils
 
 use super::{WebSocket, WebSocketError};
 use hyper_util::rt::TokioIo;
@@ -8,7 +8,7 @@ use sha1::{Digest, Sha1};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 use hyper::{
-    http::{request::Parts, Version},
+    http::{request::Parts, Method, Version},
     upgrade::OnUpgrade
 };
 
@@ -146,9 +146,11 @@ impl WebSocketConnection {
             on_upgrade,
             error_handler,
             sec_websocket_key,
-            sec_websocket_protocol
+            sec_websocket_protocol: _
         } = self;
 
+        let response_protocol = protocol.clone();
+        
         tokio::spawn(async move {
             let upgraded = match on_upgrade.await {
                 Ok(upgraded) => TokioIo::new(upgraded),
@@ -181,13 +183,13 @@ impl WebSocketConnection {
             ok!()
         };
 
-        match (http_response, sec_websocket_protocol) {
+        match (http_response, response_protocol) {
             (Ok(response), None) => Ok(response),
             (Err(err), _) => Err(err),
-            (Ok(mut response), Some(sec_websocket_protocol)) => {
+            (Ok(mut response), Some(protocol)) => {
                 response
                     .headers_mut()
-                    .insert(SEC_WEBSOCKET_PROTOCOL, sec_websocket_protocol);
+                    .insert(SEC_WEBSOCKET_PROTOCOL, protocol);
                 Ok(response)
             }
         }
@@ -202,16 +204,54 @@ impl WebSocketConnection {
     }
 }
 
+#[inline]
+fn header_contains_token(value: &HeaderValue, token: &str) -> bool {
+    let bytes = value.as_bytes();
+    let token = token.as_bytes();
+    
+    let mut start = 0;
+
+    while start < bytes.len() {
+        let mut end = start;
+        while end < bytes.len() && bytes[end] != b',' {
+            end += 1;
+        }
+
+        let mut slice = &bytes[start..end];
+        while slice.first().is_some_and(|b| b.is_ascii_whitespace()) {
+            slice = &slice[1..];
+        }
+        while slice.last().is_some_and(|b| b.is_ascii_whitespace()) {
+            slice = &slice[..slice.len() - 1];
+        }
+
+        if slice.len() == token.len() && slice.iter()
+            .zip(token.iter())
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        {
+            return true;
+        }
+
+        start = end + 1;
+    }
+
+    false
+}
+
 impl TryFrom<&Parts> for WebSocketConnection {
     type Error = Error;
 
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
         let sec_websocket_key = if parts.version <= Version::HTTP_11 {
-            if !matches!(parts.headers.get(&UPGRADE), Some(upgrade) if upgrade.as_bytes().eq_ignore_ascii_case(super::WEBSOCKET.as_bytes())) {
-                return Err(WebSocketError::invalid_upgrade_header()); 
+            if parts.method != Method::GET {
+                return Err(WebSocketError::invalid_method());
             }
 
-            if !matches!(parts.headers.get(&CONNECTION), Some(conn) if conn.as_bytes().eq_ignore_ascii_case(super::UPGRADE.as_bytes())) {
+            if !matches!(parts.headers.get(&UPGRADE), Some(upgrade) if header_contains_token(upgrade, super::WEBSOCKET)) {
+                return Err(WebSocketError::invalid_upgrade_header());
+            }
+
+            if !matches!(parts.headers.get(&CONNECTION), Some(conn) if header_contains_token(conn, super::UPGRADE)) {
                 return Err(WebSocketError::invalid_connection_header()); 
             }
 
@@ -225,6 +265,19 @@ impl TryFrom<&Parts> for WebSocketConnection {
                 .clone();
             Some(key)
         } else {
+            if parts.method != Method::CONNECT {
+                return Err(WebSocketError::invalid_method());
+            }
+
+            let protocol = parts
+                .extensions
+                .get::<hyper::ext::Protocol>()
+                .ok_or(WebSocketError::invalid_connect_protocol())?;
+
+            if !protocol.as_str().eq_ignore_ascii_case(super::WEBSOCKET) {
+                return Err(WebSocketError::invalid_connect_protocol());
+            }
+
             None
         };
         
@@ -458,6 +511,8 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
+        req.extensions_mut()
+            .insert(hyper::ext::Protocol::from_static("websocket"));
         req.extensions_mut().insert(Arc::downgrade(&error_handler));
 
         let (parts, _) = req.into_parts();

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+- Tightened WebSocket handshake validation (method checks, header token parsing, HTTP/2 `:protocol` enforcement) 
+and ensured only negotiated subprotocols are echoed in responses.
+- Added graceful close attempts when recv/send fails during WebSocket message handling.
+- Introduced `WsEvent<T>` for split WebSockets to distinguish data messages from close events.
+- Made `WebSocket::recv<T>` data-only; ping/pong and close frames are handled internally.
+- Centralized raw message receiving to avoid parsing control frames as application data.
+- Implemented best-effort close handshakes with proper error filtering for expected disconnects.
+- Added protocol invariants (`debug_assert!`) for unexpected raw frames.
+
 ## 0.8.2
 
 ### Added

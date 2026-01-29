@@ -1,4 +1,4 @@
-//! WebSocket streaming and messsaging utils
+//! WebSocket streaming and messaging utils
 
 use crate::{error::Error, headers::HeaderValue};
 use super::Message;
@@ -20,12 +20,69 @@ use std::{
 };
 
 use tokio_tungstenite::{tungstenite, WebSocketStream};
+use tokio_tungstenite::tungstenite::{
+    Message as WsMessage,
+    Error as WsError,
+    protocol::CloseFrame
+};
 
-/// A [`Sink`] part of [`WebSocket`] split 
-pub struct WsSink(SplitSink<WebSocketStream<TokioIo<Upgraded>>, tungstenite::Message>);
+/// A WebSocket connection.
+///
+/// This is a `Stream + Sink` abstraction over a WebSocket transport. It provides convenient,
+/// data-oriented APIs for typical server-side usage.
+///
+/// - [`WebSocket::recv`] is **data-only**: it yields messages deserialized from text/binary frames
+///   and transparently ignores ping/pong. If a close frame is received, it performs a graceful close
+///   and ends the stream.
+/// - For split ownership between tasks, use [`WebSocket::split`], which yields [`WsSink`] and
+///   [`WsStream`]. In split mode, [`WsStream::recv`] yields [`WsEvent`] so close frames can be
+///   coordinated with the sink.
+#[derive(Debug)]
+pub struct WebSocket {
+    inner: WebSocketStream<TokioIo<Upgraded>>,
+    protocol: Option<HeaderValue>,
+}
 
-/// A [`Stream`] part of [`WebSocket`] split
+/// A [`Sink`] half of a split [`WebSocket`].
+///
+/// This type is produced by [`WebSocket::split`]. It can be moved to a separate task and used
+/// to send application messages or to complete the WebSocket close handshake.
+///
+/// ## Close handshake
+/// When the peer requests closing (i.e. the [`WsStream`] yields [`WsEvent::Close`]),
+/// you should typically respond by calling [`WsSink::close`] with the received frame.
+/// This will send a `Close` control message (echoing the provided frame) and then close the sink.
+pub struct WsSink(SplitSink<WebSocketStream<TokioIo<Upgraded>>, WsMessage>);
+
+/// A [`Stream`] half of a split [`WebSocket`].
+///
+/// This type is produced by [`WebSocket::split`]. It can be moved to a separate task and used
+/// to receive messages.
+///
+/// Unlike [`WebSocket::recv`], which is data-only, [`WsStream::recv`] yields [`WsEvent`] to
+/// allow the caller to observe close frames and coordinate the close handshake with [`WsSink`].
 pub struct WsStream(SplitStream<WebSocketStream<TokioIo<Upgraded>>>);
+
+/// Represents a single WebSocket event produced by [`WsStream::recv`].
+///
+/// WebSocket communication includes both **data** messages and **control** messages.
+/// In split mode, control messages (such as `Close`) must be surfaced so the caller can
+/// coordinate protocol-correct behavior (e.g. echoing the close frame via [`WsSink::close`]).
+///
+/// - [`WsEvent::Data`] contains an application-level message deserialized from an incoming
+///   WebSocket data frame (text or binary).
+/// - [`WsEvent::Close`] is emitted when a close control message is received. After this event
+///   the caller should typically reply with [`WsSink::close`] and stop reading.
+#[derive(Debug)]
+pub enum WsEvent<T> {
+    /// Application-level message deserialized from an incoming data frame.
+    Data(T),
+
+    /// A close control message received from the peer.
+    ///
+    /// The contained [`CloseFrame`] (if any) carries the close code and reason.
+    Close(Option<CloseFrame>),
+}
 
 impl std::fmt::Debug for WsSink {
     #[inline]
@@ -44,17 +101,41 @@ impl std::fmt::Debug for WsStream {
 impl WsSink {
     /// Unwraps the inner [`Sink`]
     #[inline]
-    pub fn into_inner(self) -> SplitSink<WebSocketStream<TokioIo<Upgraded>>, tungstenite::Message> {
+    pub fn into_inner(self) -> SplitSink<WebSocketStream<TokioIo<Upgraded>>, WsMessage> {
         self.0
     }
-    
-    /// Sends a message.
+
+    /// Sends a message to the peer.
+    ///
+    /// The message type `T` is converted into a WebSocket [`Message`] via [`TryInto`].
+    ///
+    /// This method is intended for application data (text/binary), but may also be used to send
+    /// control messages if your higher-level protocol requires it.
+    ///
+    /// # Errors
+    /// Returns an error if message conversion fails or if the underlying sink fails to send.
     #[inline]
     pub async fn send<T: TryInto<Message, Error = Error>>(&mut self, msg: T) -> Result<(), Error> {
         let msg = msg.try_into()?.into();
         self.0.send(msg)
             .await
             .map_err(Error::from)
+    }
+
+    /// Completes the close handshake and closes the sink.
+    ///
+    /// This method first attempts to send a `Close` control message to the peer, echoing the
+    /// provided `frame` if present, and then closes the underlying sink.
+    ///
+    /// Typical usage is to call this after [`WsStream::recv`] yields [`WsEvent::Close`].
+    #[inline]
+    pub async fn close(&mut self, frame: Option<CloseFrame>) -> Result<(), Error> {
+        self.0.send(tungstenite::Message::Close(frame)).await?;
+        match self.0.close().await {
+            Ok(()) => Ok(()),
+            Err(e) if is_expected_close_error(&e) => Ok(()),
+            Err(e) => Err(Error::from(e)),
+        }
     }
 }
 
@@ -64,23 +145,55 @@ impl WsStream {
     pub fn into_inner(self) -> SplitStream<WebSocketStream<TokioIo<Upgraded>>> {
         self.0
     }
-    
-    /// Receives a message.
-    #[inline]
-    pub async fn recv<T: TryFrom<Message, Error = Error>>(&mut self) -> Option<Result<T, Error>> {
-        self.0.next()
-            .await
-            .map(|result| result
-                .map_err(Error::from)
-                .and_then(|msg| T::try_from(Message(msg))))
-    }    
-}
 
-/// Represents a stream of WebSocket messages.
-#[derive(Debug)]
-pub struct WebSocket {
-    inner: WebSocketStream<TokioIo<Upgraded>>,
-    protocol: Option<HeaderValue>,
+    /// Receives the next WebSocket event.
+    ///
+    /// This method yields:
+    /// - [`WsEvent::Data`] for text/binary frames that successfully deserialize into `T`.
+    /// - [`WsEvent::Close`] when a close control message is received.
+    ///
+    /// Ping/pong frames are ignored (they are handled at the protocol level by the underlying
+    /// WebSocket implementation).
+    ///
+    /// # Errors
+    /// Returns an error if the underlying stream fails, or if deserializing a data frame into `T`
+    /// fails.
+    ///
+    /// # Close behavior
+    /// On [`WsEvent::Close`], callers should typically respond by calling [`WsSink::close`] with
+    /// the received frame and then stop reading.
+    pub async fn recv<T>(&mut self) -> Option<Result<WsEvent<T>, Error>>
+    where
+        T: TryFrom<Message, Error = Error>,
+    {
+        loop {
+            let msg = match self.recv_raw().await? { 
+                Ok(msg) => msg,
+                Err(err) => return Some(Err(err))
+            };
+
+            match msg.0 {
+                WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+                WsMessage::Close(frame) => return Some(Ok(WsEvent::Close(frame))),
+                WsMessage::Text(_) | WsMessage::Binary(_) => {
+                    return Some(T::try_from(msg).map(WsEvent::Data));
+                },
+                WsMessage::Frame(_) => {
+                    debug_assert!(
+                        false,
+                        "tungstenite returned a raw Frame while reading messages"
+                    );
+                    continue;
+                },
+            }
+        }
+    }
+
+    /// Receives a raw [`Message`]
+    #[inline]
+    async fn recv_raw(&mut self) -> Option<Result<Message, Error>> {
+        recv_raw_from(&mut self.0).await
+    }
 }
 
 impl WebSocket {
@@ -93,15 +206,54 @@ impl WebSocket {
         Self { inner, protocol }
     }
 
-    /// Receives a message.
-    #[inline]
-    pub async fn recv<T: TryFrom<Message, Error = Error>>(&mut self) -> Option<Result<T, Error>> {
-        self.next()
-            .await
-            .map(|r| r.and_then(|msg| T::try_from(msg)))
+    /// Receives the next application message.
+    ///
+    /// This is a data-oriented API: it yields messages deserialized from text/binary frames into `T`.
+    /// Ping/pong frames are ignored.
+    ///
+    /// If a close control message is received, this method attempts a graceful close and then ends
+    /// the stream by returning `None`.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying socket fails, or if deserializing a data frame into `T`
+    /// fails.
+    pub async fn recv<T>(&mut self) -> Option<Result<T, Error>>
+    where
+        T: TryFrom<Message, Error = Error>,
+    {
+        loop {
+            let msg = match self.recv_raw().await? {
+                Ok(msg) => msg,
+                Err(err) => return Some(Err(err))
+            };
+
+            match msg.0 {
+                WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+                WsMessage::Text(_) | WsMessage::Binary(_) => return Some(T::try_from(msg)),
+                WsMessage::Frame(_) => {
+                    debug_assert!(
+                        false,
+                        "tungstenite returned a raw Frame while reading messages"
+                    );
+                    continue;
+                },
+                WsMessage::Close(frame) => {
+                    if let Err(_close_err) = self.close(frame).await {
+                        #[cfg(feature = "tracing")]
+                        tracing::warn!("WebSocket close failed: {_close_err}");
+                    }
+                    return None;
+                }
+            }
+        }
     }
 
-    /// Sends a message.
+    /// Sends a message to the peer.
+    ///
+    /// The message type `T` is converted into a WebSocket [`Message`] via [`TryInto`].
+    ///
+    /// # Errors
+    /// Returns an error if message conversion fails or if the underlying sink fails to send.
     #[inline]
     pub async fn send<T: TryInto<Message, Error = Error>>(&mut self, msg: T) -> Result<(), Error> {
         let msg = msg.try_into()?;
@@ -140,19 +292,79 @@ impl WebSocket {
                 Err(_e) => {
                     #[cfg(feature = "tracing")]
                     tracing::error!("Error receiving message: {_e}");
-                    return;
+                    continue;
                 }
             };
 
             let response = handler(msg).await;
+            
             if let Err(_e) = self.send(response).await {
                 #[cfg(feature = "tracing")]
                 tracing::error!("Error sending message: {_e}");
+
+                if let Err(_close_err) = self.close(None).await {
+                    #[cfg(feature = "tracing")]
+                    tracing::warn!("WebSocket close failed: {_close_err}");
+                }
+                
                 return;
             }
         }
     }
+
+    /// Closes the WebSocket connection.
+    ///
+    /// This attempts to perform a graceful close handshake using the provided close `frame`
+    /// (if any). If the close handshake fails, the error is logged when `tracing` is enabled.
+    #[inline]
+    pub async fn close(&mut self, frame: Option<CloseFrame>) -> Result<(), Error> {
+        match self.inner.close(frame).await {
+            Ok(()) => Ok(()),
+            Err(e) if is_expected_close_error(&e) => Ok(()),
+            Err(e) => Err(Error::from(e)),
+        }
+    }
+
+    /// Receives a raw [`Message`]
+    #[inline]
+    async fn recv_raw(&mut self) -> Option<Result<Message, Error>> {
+        recv_raw_from(&mut self.inner).await
+    }
 }
+
+/// Receives the next raw WebSocket message from any tungstenite-backed stream.
+#[inline]
+async fn recv_raw_from<S>(stream: &mut S) -> Option<Result<Message, Error>>
+where
+    S: Stream<Item = Result<WsMessage, tungstenite::Error>> + Unpin,
+{
+    stream
+        .next()
+        .await
+        .map(|r| 
+            r.map(Message).map_err(Error::from)
+        )
+}
+
+#[inline]
+fn is_expected_close_error(e: &WsError) -> bool {
+    match e {
+        WsError::ConnectionClosed => true,
+        WsError::AlreadyClosed => true,
+        WsError::Protocol(p) => matches!(
+            p, 
+            tungstenite::error::ProtocolError::SendAfterClosing
+        ),
+        WsError::Io(io) => matches!(
+            io.kind(),
+            std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::NotConnected
+        ),
+        _ => false,
+    }
+}
+
 
 impl Stream for WebSocket {
     type Item = Result<Message, Error>;
@@ -164,7 +376,7 @@ impl Stream for WebSocket {
                 None => return Poll::Ready(None),
                 Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                 Some(Ok(msg)) => {
-                    let tungstenite::Message::Frame(_) = msg else { return Poll::Ready(Some(Ok(Message(msg)))) };
+                    let WsMessage::Frame(_) = msg else { return Poll::Ready(Some(Ok(Message(msg)))) };
                 }
             }
         }

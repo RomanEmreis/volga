@@ -7,7 +7,7 @@
 //! * Robust routing
 //! * Custom middlewares
 //! * Dependency Injection
-//! * WebSockets and WebTransport
+//! * WebSockets and WebSocket-over-HTTP/2
 //! * Full [Tokio](https://tokio.rs/) compatibility
 //! * Runs on stable Rust 1.80+
 //! 
