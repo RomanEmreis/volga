@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.8.2
+
+### Added
+- Added ability to override TCP Listener (#149)
+- Add Token Bucket and GCRA rate limiting algorithms (#152)
+
+### Changed
+- `HEAD` request handling improvements (#150) 
+- `FromPayload` improvements (#151)
+
 ## 0.8.1
 
 ### Changed

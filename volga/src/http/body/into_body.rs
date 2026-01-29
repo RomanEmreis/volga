@@ -123,13 +123,12 @@ impl_int_into_body! {
 }
 
 #[cfg(test)]
-mod from_tryfrom_tests {
+mod tests {
     use super::*;
     use bytes::Bytes;
     use http_body_util::BodyExt;
     use std::borrow::Cow;
 
-    // Собираем body целиком в Bytes
     async fn collect_bytes(body: HttpBody) -> Bytes {
         let collected = body
             .collect()
@@ -285,14 +284,12 @@ mod from_tryfrom_tests {
 
     #[tokio::test]
     async fn try_from_json_serializes_to_json_bytes() {
-        // Если у тебя Json не tuple-struct, замени на Json::new(...)
         let payload = TestJson { name: "volga", value: 42 };
         let body = HttpBody::try_from(Json(payload)).expect("json serialization must succeed");
 
         let bytes = collect_bytes(body).await;
         let s = std::str::from_utf8(&bytes).unwrap();
 
-        // порядок полей в serde_json обычно соответствует порядку в struct
         assert!(s.contains("\"name\":\"volga\""));
         assert!(s.contains("\"value\":42"));
         assert!(s.starts_with('{') && s.ends_with('}'));
@@ -312,8 +309,6 @@ mod from_tryfrom_tests {
         let bytes = collect_bytes(body).await;
         let s = std::str::from_utf8(&bytes).unwrap();
 
-        // порядок обычно стабильный по полям структуры, но чтобы тест был устойчивым —
-        // проверяем вхождение обоих пар.
         assert!(s.contains("a=1"));
         assert!(s.contains("b=two"));
         assert!(s.contains('&') || s == "a=1" || s == "b=two");
