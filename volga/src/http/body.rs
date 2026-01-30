@@ -292,6 +292,17 @@ impl HttpBody {
         Self::stream(reader_stream)
     }
 
+    /// Creates a new [`HttpBody`] from a `Stream<Item = Bytes>`.
+    #[inline]
+    pub fn stream_bytes<S>(stream: S) -> HttpBody
+    where
+        S: futures_util::Stream<Item = Bytes> + Send + Sync + 'static,
+    {
+        use futures_util::StreamExt;
+        
+        Self::stream(stream.map(Ok::<_, Error>))
+    }
+
     /// Creates a new [`HttpBody`] from stream
     #[inline]
     pub fn stream<S>(stream: S) -> HttpBody

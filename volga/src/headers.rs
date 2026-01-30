@@ -58,6 +58,12 @@ pub mod quality;
 pub mod etag;
 pub mod cache_control;
 
+/// Identifying the originating IP address of a client connecting to a web server through a proxy server.
+pub const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+
+/// Controls proxy response buffering (required for SSE).
+pub const X_ACCEL_BUFFERING: HeaderName = HeaderName::from_static("x-accel-buffering");
+
 /// Describes a way to extract a specific HTTP header
 pub trait FromHeaders: Clone {
     /// Returns current [`HeaderName`]

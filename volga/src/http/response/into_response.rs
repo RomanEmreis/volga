@@ -1,12 +1,14 @@
 ﻿//! [`From ] trait implementations from various types into HTTP response
 
 use super::{HttpResponse, HttpResult, HttpBody};
-use crate::{Json, Form, ok, status, form, response};
+use crate::{Json, Form, ok, status, form, response, sse};
 use crate::error::Error;
-use crate::http::StatusCode;
+use crate::http::{sse::SseStream, StatusCode};
 use crate::headers::{HeaderMap, CONTENT_TYPE};
 use mime::TEXT_PLAIN_UTF_8;
 use serde::Serialize;
+use bytes::Bytes;
+use futures_util::Stream;
 
 #[cfg(feature = "cookie")]
 use crate::http::{Cookies, cookie::set_cookies};
@@ -227,6 +229,16 @@ where
     }
 }
 
+impl<S> IntoResponse for SseStream<S>
+where
+    S: Stream<Item = Bytes> + Send + Sync + 'static
+{
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        sse!(self)
+    }
+}
+
 macro_rules! impl_into_response {
     { $($type:ident),* $(,)? } => {
         $(impl IntoResponse for $type {
@@ -263,6 +275,7 @@ mod tests {
     use crate::error::Error;
     use crate::headers::HeaderMap;
     use super::IntoResponse;
+    use crate::http::sse::Message;
     #[cfg(feature = "cookie")]
     use crate::http::Cookies;
 
@@ -270,7 +283,25 @@ mod tests {
     struct TestPayload {
         name: String
     }
-    
+
+    #[tokio::test]
+    async fn it_converts_sse_stream_into_response() {
+        let stream = Message::new().data("hi!").once();
+        let response = stream.into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "data: hi!\n\n");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/event-stream; charset=utf-8");
+        assert_eq!(response.headers().get("Cache-Control").unwrap(), "no-cache");
+        #[cfg(all(not(feature = "http2"), feature = "http1"))]
+        assert_eq!(response.headers().get("Connection").unwrap(), "keep-alive");
+        assert_eq!(response.headers().get("x-accel-buffering").unwrap(), "no");
+        assert_eq!(response.status(), 200);
+    }
+
     #[tokio::test]
     async fn it_converts_into_response() {
         let response = ().into_response();

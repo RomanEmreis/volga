@@ -14,6 +14,10 @@ and ensured only negotiated subprotocols are echoed in responses.
 - Centralized raw message receiving to avoid parsing control frames as application data.
 - Implemented best-effort close handshakes with proper error filtering for expected disconnects.
 - Added protocol invariants (`debug_assert!`) for unexpected raw frames.
+- Updated SSE message handling to store multiple fields while preserving replace semantics for data/event/id/retry and allowing dynamic comments, plus fixed append to split multi-line data correctly.
+- Expanded SSE response headers to include charset, keep-alive, and proxy buffering control, with tests updated to match.
+- Added `SseStream` that implements `IntoResponse`, and can be created from `Message` by calling `once`/`repeat` methods.
+
 
 ## 0.8.2
 
