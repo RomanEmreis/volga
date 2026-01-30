@@ -275,8 +275,9 @@ mod tests {
     use crate::error::Error;
     use crate::headers::HeaderMap;
     use super::IntoResponse;
+    use crate::http::sse::Message;
     #[cfg(feature = "cookie")]
-    use crate::http::{Cookies, sse::Message};
+    use crate::http::Cookies;
 
     #[derive(Serialize)]
     struct TestPayload {
