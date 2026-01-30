@@ -296,6 +296,7 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(body), "data: hi!\n\n");
         assert_eq!(response.headers().get("Content-Type").unwrap(), "text/event-stream; charset=utf-8");
         assert_eq!(response.headers().get("Cache-Control").unwrap(), "no-cache");
+        #[cfg(all(not(feature = "http2"), feature = "http1"))]
         assert_eq!(response.headers().get("Connection").unwrap(), "keep-alive");
         assert_eq!(response.headers().get("x-accel-buffering").unwrap(), "no");
         assert_eq!(response.status(), 200);

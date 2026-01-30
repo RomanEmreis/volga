@@ -37,8 +37,32 @@ impl<S> Debug for SseStream<S> {
 impl<S> SseStream<S> {
     /// Creates a new [`SseStream`] from an inner stream.
     #[inline]
-    pub fn new(inner: S) -> Self {
+    pub(crate) fn new(inner: S) -> Self {
         Self { inner }
+    }
+
+    /// Creates a new [`SseStream`] from an inner stream.
+    /// 
+    /// **Note:** takes **pre-encoded SSE** bytes (caller ensures validity).
+    #[inline]
+    pub fn from_bytes<T>(stream: T) -> SseStream<T>
+    where
+        T: Stream<Item = Bytes> + Send + Sync + 'static,
+    {
+        SseStream::new(stream)
+    }
+
+    /// Creates a new [`SseStream`] from an inner stream.
+    /// 
+    /// Safe: takes `Message` items and encodes them to SSE bytes.
+    #[inline]
+    pub fn from_messages<T>(stream: T) -> SseStream<impl Stream<Item = Bytes> + Send + Sync + 'static>
+    where
+        T: Stream<Item = Message> + Send + Sync + 'static,
+    {
+        use futures_util::StreamExt;
+        
+        SseStream::new(stream.map(Bytes::from))
     }
 
     /// Consumes the wrapper and returns the inner stream.
