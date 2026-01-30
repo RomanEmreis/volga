@@ -1,6 +1,6 @@
 [package]
 name = "volga-di"
-version = "0.8.2"
+version = "0.8.3"
 readme = "README.md"
 description = "Dependency Injection tools for Volga Web Framework"
 edition.workspace = true

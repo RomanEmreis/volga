@@ -1,7 +1,7 @@
 ﻿//! Extractors for default HTTP headers
 
 use super::FromHeaders;
-
+use super::{X_ACCEL_BUFFERING, X_FORWARDED_FOR};
 use hyper::header::{
     ACCEPT, ACCEPT_CHARSET, ACCEPT_ENCODING, ACCEPT_LANGUAGE, ACCEPT_RANGES,
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -56,7 +56,7 @@ define_header! {
     (SecWebSocketKey, SEC_WEBSOCKET_KEY), (SecWebSocketProtocol, SEC_WEBSOCKET_PROTOCOL), (SecWebSocketVersion, SEC_WEBSOCKET_VERSION), (Server, SERVER), (SetCookie, SET_COOKIE),
     (StrictTransportSecurity, STRICT_TRANSPORT_SECURITY), (Te, TE), (Trailer, TRAILER), (TransferEncoding, TRANSFER_ENCODING), (Upgrade, UPGRADE), (UpgradeInsecureRequests, UPGRADE_INSECURE_REQUESTS),
     (UserAgent, USER_AGENT), (Vary, VARY), (Via, VIA), (Warning, WARNING), (WwwAuthenticate, WWW_AUTHENTICATE), (XContentTypeOptions, X_CONTENT_TYPE_OPTIONS),
-    (XDnsPrefetchControl, X_DNS_PREFETCH_CONTROL), (XFrameOptions, X_FRAME_OPTIONS), (XXssProtection, X_XSS_PROTECTION)
+    (XDnsPrefetchControl, X_DNS_PREFETCH_CONTROL), (XFrameOptions, X_FRAME_OPTIONS), (XXssProtection, X_XSS_PROTECTION), (XAccelBuffering, X_ACCEL_BUFFERING), (XForwardedFor, X_FORWARDED_FOR)
 }
 
 #[cfg(test)]

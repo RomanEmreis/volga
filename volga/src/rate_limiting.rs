@@ -17,7 +17,7 @@ use crate::{
     routing::{Route, RouteGroup},
     middleware::{HttpContext, NextFn},
     http::StatusCode,
-    headers::FORWARDED,
+    headers::{FORWARDED, X_FORWARDED_FOR},
     error::Error,
     status
 };
@@ -44,7 +44,6 @@ mod gcra;
 mod key;
 pub mod by;
 
-const X_FORWARDED_FOR: &str = "x-forwarded-for";
 const MAX_FORWARDED_IPS: usize = 16;
 const MAX_FORWARDED_HEADER_LEN: usize = 2 * 1024;
 const DEFAULT_POLICIES_COUNT: usize = 4;

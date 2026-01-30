@@ -1,16 +1,64 @@
 ﻿//! Utilities for SSE (Server-Sent Events)
 
-use crate::utils::str::memchr_split;
-use indexmap::IndexMap;
+use std::fmt::Debug;
+use crate::{utils::str::memchr_split};
+use futures_util::stream::Stream;
 use std::time::Duration;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use bytes::{BufMut, Bytes, BytesMut};
 use serde::Serialize;
+use pin_project_lite::pin_project;
 
 const ID: &str = "id";
 const EVENT: &str = "event";
 const DATA: &str = "data";
-const RETRY: &str = "retry";
+const RETRY: &[u8] = b"retry:";
 const ERROR: &str = "error";
+const NEW_LINE: u8 = b'\n';
+const EMPTY: &[u8] = b":\n";
+
+pin_project! {
+    /// Wrapper type for SSE streams.
+    //#[derive(Clone)]
+    pub struct SseStream<S> {
+        #[pin]
+        inner: S,
+    }
+}
+
+impl<S> Debug for SseStream<S> {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SseStream(...)").finish()
+    }
+}
+
+impl<S> SseStream<S> {
+    /// Creates a new [`SseStream`] from an inner stream.
+    #[inline]
+    pub fn new(inner: S) -> Self {
+        Self { inner }
+    }
+
+    /// Consumes the wrapper and returns the inner stream.
+    #[inline]
+    pub fn into_inner(self) -> S {
+        self.inner
+    }
+}
+
+impl<S> Stream for SseStream<S>
+where
+    S: Stream<Item = Bytes>,
+{
+    type Item = Bytes;
+
+    #[inline]
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.project().inner.poll_next(cx)
+    }
+}
 
 /// Represents a single SSE message
 /// 
@@ -23,7 +71,24 @@ const ERROR: &str = "error";
 /// ```
 #[derive(Debug, Default, Clone)]
 pub struct Message {
-    fields: IndexMap<&'static str, Bytes>,
+    fields: Vec<SseField>,
+}
+
+/// Represents a field kind in an SSE message
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FieldKind {
+    Comment,
+    Data,
+    Event,
+    Id,
+    Retry,
+}
+
+/// Represents a single field in an SSE message
+#[derive(Debug, Clone)]
+struct SseField {
+    kind: FieldKind,
+    bytes: Bytes,
 }
 
 impl Message {
@@ -32,16 +97,31 @@ impl Message {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
+    /// Creates a stream that yields this message once.
+    #[inline]
+    pub fn once(self) -> SseStream<impl Stream<Item = Bytes> + Send + Sync> {
+        let bytes: Bytes = self.into();
+        SseStream::new(futures_util::stream::iter([bytes]))
+    }
+
+    /// Creates a stream that produces this message repeatedly.
+    #[inline]
+    pub fn repeat(self) -> SseStream<impl Stream<Item = Bytes> + Send + Sync> {
+        let bytes: Bytes = self.into();
+        SseStream::new(futures_util::stream::repeat(bytes))
+    }
+
     /// Creates an empty [`Message`] (":\n")
     /// 
     /// This can be useful as a keep-alive mechanism if messages might not be sent regularly.
     #[inline]
     pub fn empty() -> Self {
         let mut msg = Self::default();
-        let empty_msg = ":\n";
-        msg.fields
-            .insert(empty_msg, Bytes::from_static(empty_msg.as_bytes()));
+        msg.fields.push(SseField {
+            kind: FieldKind::Comment,
+            bytes: Bytes::from_static(EMPTY),
+        });
         msg
     }
     
@@ -57,11 +137,14 @@ impl Message {
     #[inline]
     pub fn data(mut self, value: impl AsRef<[u8]>) -> Self {
         let mut buffer = BytesMut::new();
-        for line in memchr_split(b'\n', value.as_ref()) {
+        for line in memchr_split(NEW_LINE, value.as_ref()) {
             buffer.extend(Self::field(DATA, line));
         }
-        self.fields
-            .insert(DATA, buffer.freeze());
+        self.remove_fields(FieldKind::Data);
+        self.fields.push(SseField {
+            kind: FieldKind::Data,
+            bytes: buffer.freeze(),
+        });
         self
     }
 
@@ -77,15 +160,15 @@ impl Message {
     /// ```
     #[inline]
     pub fn append(mut self, value: impl AsRef<[u8]>) -> Self {
-        if let Some(data) = self.fields.swap_remove(DATA) {
-            let mut data = BytesMut::from(data);
-            data.extend(Self::field(DATA, value));
-            self.fields
-                .insert(DATA, data.freeze());
-            self
-        } else { 
-            self.data(value)
+        let mut buffer = BytesMut::new();
+        for line in memchr_split(NEW_LINE, value.as_ref()) {
+            buffer.extend(Self::field(DATA, line));
         }
+        self.fields.push(SseField {
+            kind: FieldKind::Data,
+            bytes: buffer.freeze(),
+        });
+        self
     }
 
     /// Specifies a JSON `data` for a [`Message`]
@@ -127,8 +210,11 @@ impl Message {
     /// ```
     #[inline]
     pub fn event(mut self, name: &str) -> Self {
-        self.fields
-            .insert(EVENT, Self::field(EVENT, name));
+        self.remove_fields(FieldKind::Event);
+        self.fields.push(SseField {
+            kind: FieldKind::Event,
+            bytes: Self::field(EVENT, name),
+        });
         self
     }
 
@@ -145,8 +231,11 @@ impl Message {
     /// ``` 
     #[inline]
     pub fn id(mut self, value: impl AsRef<[u8]>) -> Self {
-        self.fields
-            .insert(ID, Self::field(ID, value));
+        self.remove_fields(FieldKind::Id);
+        self.fields.push(SseField {
+            kind: FieldKind::Id,
+            bytes: Self::field(ID, value),
+        });
         self
     }
 
@@ -168,12 +257,15 @@ impl Message {
     pub fn retry(mut self, duration: Duration) -> Self {
         let mut buffer = BytesMut::new();
 
-        buffer.extend_from_slice(b"retry:");
+        buffer.extend_from_slice(RETRY);
         buffer.extend_from_slice(itoa::Buffer::new().format(duration.as_millis()).as_ref());
-        buffer.put_u8(b'\n');
+        buffer.put_u8(NEW_LINE);
 
-        self.fields
-            .insert(RETRY,  buffer.freeze());
+        self.remove_fields(FieldKind::Retry);
+        self.fields.push(SseField {
+            kind: FieldKind::Retry,
+            bytes: buffer.freeze(),
+        });
         self
     }
 
@@ -191,12 +283,18 @@ impl Message {
     ///     .comment("comment 2");
     /// ``` 
     #[inline]
-    pub fn comment(mut self, value: &'static str) -> Self {
-        self.fields
-            .insert(
-                value, 
-                Self::field("", value));
+    pub fn comment(mut self, value: impl AsRef<[u8]>) -> Self {
+        self.fields.push(SseField {
+            kind: FieldKind::Comment,
+            bytes: Self::field("", value),
+        });
         self
+    }
+
+    /// Removes all fields of a given kind from a [`Message`]
+    #[inline]
+    fn remove_fields(&mut self, kind: FieldKind) {
+        self.fields.retain(|field| field.kind != kind);
     }
 
     /// Encodes bytes into SSE message format
@@ -208,7 +306,7 @@ impl Message {
         buffer.put_u8(b':');
         buffer.put_u8(b' ');
         buffer.extend_from_slice(value.as_ref());
-        buffer.put_u8(b'\n');
+        buffer.put_u8(NEW_LINE);
         
         buffer.freeze()
     }
@@ -226,23 +324,31 @@ impl From<Message> for Bytes {
     fn from(message: Message) -> Self {
         let mut buffer = BytesMut::new();
 
-        for (_, bytes) in message.fields {
-            buffer.extend(bytes);
+        for field in message.fields {
+            buffer.extend(field.bytes);
         }
         
-        buffer.put_u8(b'\n');
+        buffer.put_u8(NEW_LINE);
         buffer.freeze()
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
     use bytes::Bytes;
+    use futures_util::{pin_mut, StreamExt};
     use serde::Serialize;
     use super::Message;
+
+    #[tokio::test]
+    async fn it_creates_message_stream() {
+        let stream = Message::new().data("hi!").repeat();
+        pin_mut!(stream);
+        let bytes = stream.next().await.unwrap();
+
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+    }
 
     #[test]
     fn it_creates_default_message() {
