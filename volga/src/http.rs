@@ -11,9 +11,9 @@ pub(crate) use hyper::{
     Request, Response
 };
 
-pub use body::{BoxBody, HttpBody, UnsyncBoxBody};
+pub use body::{BoxBody, HttpBody, UnsyncBoxBody, HttpBodyStream};
 pub use endpoints::{
-    args::{FromRawRequest, FromRequest, FromRequestParts, FromRequestRef, sse},
+    args::{FromRawRequest, FromRequest, FromRequestParts, FromRequestRef, byte_stream::IntoByteResult, sse},
     handlers::{GenericHandler, MapErrHandler}
 };
 pub use request::HttpRequest;

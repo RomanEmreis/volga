@@ -29,7 +29,7 @@ pub mod option;
 pub mod result;
 pub mod vec;
 pub mod client_ip;
-
+pub mod byte_stream;
 #[cfg(feature = "multipart")]
 pub mod multipart;
 #[cfg(feature = "static-files")]

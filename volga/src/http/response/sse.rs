@@ -75,7 +75,6 @@ mod tests {
         #[cfg(all(not(feature = "http2"), feature = "http1"))]
         assert_eq!(response.headers().get(&CONNECTION).unwrap(), "keep-alive");
         assert_eq!(response.headers().get(&X_ACCEL_BUFFERING).unwrap(), "no");
-
     }
 
     #[tokio::test]

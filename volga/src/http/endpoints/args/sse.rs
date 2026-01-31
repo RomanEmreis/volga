@@ -20,7 +20,6 @@ const EMPTY: &[u8] = b":\n";
 
 pin_project! {
     /// Wrapper type for SSE streams.
-    //#[derive(Clone)]
     pub struct SseStream<S> {
         #[pin]
         inner: S,
@@ -82,6 +81,16 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.project().inner.poll_next(cx)
     }
+}
+
+/// Creates an asynchronous SSE stream
+#[macro_export]
+macro_rules! sse_stream {
+    { $($tt:tt)* } => {{
+        $crate::http::sse::SseStream::<()>::from_messages(
+            $crate::__async_stream::stream! { $($tt)* }
+        )
+    }};
 }
 
 /// Represents a single SSE message
@@ -366,12 +375,67 @@ mod tests {
     use super::Message;
 
     #[tokio::test]
-    async fn it_creates_message_stream() {
+    async fn it_creates_message_repeat_stream() {
         let stream = Message::new().data("hi!").repeat();
+        pin_mut!(stream);
+        let bytes = stream.next().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+        
+        let bytes = stream.next().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+    }
+
+    #[tokio::test]
+    async fn it_creates_message_once_stream() {
+        let stream = Message::new().data("hi!").once();
         pin_mut!(stream);
         let bytes = stream.next().await.unwrap();
 
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_creates_sse_stream() {
+        let stream = sse_stream! {
+            yield Message::new().data("hi!");
+            yield Message::new().data("hi!");
+            yield Message::new().data("hi!");
+        };
+        
+        pin_mut!(stream);
+        
+        let bytes = stream.next().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+        
+        let bytes = stream.next().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+        
+        let bytes = stream.next().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+        
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_creates_sse_stream_with_loop() {
+        let stream = sse_stream! {
+            loop {
+                yield Message::new().data("hi!");
+            }
+        };
+
+        pin_mut!(stream);
+
+        let bytes = stream.next().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+
+        let bytes = stream.next().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+
+        let bytes = stream.next().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+
     }
 
     #[test]

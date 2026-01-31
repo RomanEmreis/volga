@@ -66,7 +66,8 @@ pub use crate::http::{
         path::{Path, NamedPath},
         query::Query,
         form::Form,
-        client_ip::ClientIp
+        client_ip::ClientIp,
+        byte_stream::ByteStream
     },
     BoxBody,
     UnsyncBoxBody,
@@ -89,4 +90,5 @@ pub mod routing {
     pub use crate::app::router::{RouteGroup, Route};
 }
 
-
+#[doc(hidden)]
+pub use async_stream as __async_stream;

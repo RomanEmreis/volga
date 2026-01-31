@@ -6,7 +6,7 @@ use pin_project_lite::pin_project;
 use serde::Serialize;
 use tokio_util::io::ReaderStream;
 use tokio::fs::File;
-use crate::error::{BoxError, Error};
+use crate::{ByteStream, error::{BoxError, Error}};
 use futures_util::{TryStream, TryStreamExt};
 
 use http_body_util::{
@@ -31,6 +31,9 @@ pub type BoxBody = http_body_util::combinators::BoxBody<Bytes, Error>;
 
 /// A boxed body that is !Sync
 pub type UnsyncBoxBody = http_body_util::combinators::UnsyncBoxBody<Bytes, Error>;
+
+/// Represents a [`ByteStream`] of [`HttpBody`]
+pub type HttpBodyStream = ByteStream<BodyDataStream<HttpBody>>;
 
 mod into_body;
 

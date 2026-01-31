@@ -1,7 +1,8 @@
 ﻿//! [`From ] trait implementations from various types into HTTP response
 
 use super::{HttpResponse, HttpResult, HttpBody};
-use crate::{Json, Form, ok, status, form, response, sse};
+use crate::{Json, Form, ByteStream, ok, status, form, response, sse, stream};
+use crate::http::endpoints::args::byte_stream::IntoByteResult;
 use crate::error::Error;
 use crate::http::{sse::SseStream, StatusCode};
 use crate::headers::{HeaderMap, CONTENT_TYPE};
@@ -239,6 +240,17 @@ where
     }
 }
 
+impl<S, I> IntoResponse for ByteStream<S>
+where
+    S: Stream<Item = I> + Send + Sync + 'static,
+    I: IntoByteResult
+{
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        stream!(self)
+    }
+}
+
 macro_rules! impl_into_response {
     { $($type:ident),* $(,)? } => {
         $(impl IntoResponse for $type {
@@ -272,6 +284,7 @@ mod tests {
     use http_body_util::BodyExt;
     use hyper::StatusCode;
     use serde::Serialize;
+    use crate::ByteStream;
     use crate::error::Error;
     use crate::headers::HeaderMap;
     use super::IntoResponse;
@@ -284,6 +297,22 @@ mod tests {
         name: String
     }
 
+    #[tokio::test]
+    async fn it_converts_bytes_stream_into_response() {
+        let stream = ByteStream::new(
+            futures_util::stream::iter(["hi!".to_string()])
+        );
+        
+        let response = stream.into_response();
+
+        assert!(response.is_ok());
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "hi!");
+        assert_eq!(response.status(), 200);
+    }
+    
     #[tokio::test]
     async fn it_converts_sse_stream_into_response() {
         let stream = Message::new().data("hi!").once();
