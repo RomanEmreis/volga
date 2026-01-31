@@ -17,6 +17,8 @@ and ensured only negotiated subprotocols are echoed in responses.
 - Updated SSE message handling to store multiple fields while preserving replace semantics for data/event/id/retry and allowing dynamic comments, plus fixed append to split multi-line data correctly.
 - Expanded SSE response headers to include charset, keep-alive, and proxy buffering control, with tests updated to match.
 - Added `SseStream` that implements `IntoResponse`, and can be created from `Message` by calling `once`/`repeat` methods.
+- Added implementations of async-stream for SSE and byte stream responses;
+- Added zero-cost incoming HTTP body stream extractor
 
 
 ## 0.8.2

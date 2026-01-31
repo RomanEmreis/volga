@@ -4,7 +4,7 @@
 //! cargo run -p trace_request
 //! ```
 
-use volga::{App, HttpRequest, stream};
+use volga::{App, http::HttpBodyStream, stream};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -16,10 +16,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     // Example of TRACE handler
-    app.map_trace("/", |req: HttpRequest| async move {
-        let body_stream = req
-            .into_body()
-            .into_data_stream();
+    app.map_trace("/", |body_stream: HttpBodyStream| async move {
         stream!(body_stream; [
             ("content-type", "message/http")
         ])
