@@ -13,7 +13,7 @@ macro_rules! sse {
     ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::stream_bytes($body);
+            $crate::HttpBody::stream($body);
             [
                 ($crate::headers::CONTENT_TYPE, "text/event-stream; charset=utf-8"),
                 ($crate::headers::CACHE_CONTROL, "no-cache"),
@@ -37,7 +37,7 @@ macro_rules! sse {
     ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
-            $crate::HttpBody::stream_bytes($body);
+            $crate::HttpBody::stream($body);
             [
                 ($crate::headers::CONTENT_TYPE, "text/event-stream; charset=utf-8"),
                 ($crate::headers::CACHE_CONTROL, "no-cache"),
@@ -55,6 +55,7 @@ mod tests {
     use http_body_util::BodyExt;
     use futures_util::stream::{repeat_with, StreamExt};
     use crate::http::sse::Message;
+    use crate::error::Error;
 
     #[cfg(all(not(feature = "http2"), feature = "http1"))]
     use crate::headers::CONNECTION;
@@ -79,7 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_sse_response_with_headers() {
-        let stream = repeat_with(|| "data: hi!\n\n".into())
+        let stream = repeat_with(|| Ok::<_, Error>("data: hi!\n\n"))
             .take(1);
 
         let mut response = sse!(stream; [

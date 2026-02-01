@@ -8,7 +8,6 @@ use crate::http::{sse::SseStream, StatusCode};
 use crate::headers::{HeaderMap, CONTENT_TYPE};
 use mime::TEXT_PLAIN_UTF_8;
 use serde::Serialize;
-use bytes::Bytes;
 use futures_util::Stream;
 
 #[cfg(feature = "cookie")]
@@ -230,9 +229,10 @@ where
     }
 }
 
-impl<S> IntoResponse for SseStream<S>
+impl<S, I> IntoResponse for SseStream<S>
 where
-    S: Stream<Item = Bytes> + Send + Sync + 'static
+    S: Stream<Item = I> + Send + Sync + 'static,
+    I: IntoByteResult
 {
     #[inline]
     fn into_response(self) -> HttpResult {

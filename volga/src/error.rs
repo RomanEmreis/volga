@@ -267,7 +267,7 @@ impl App {
     where
         F: MapErrHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestParts + Send + Sync + 'static,
+        Args: FromRequestParts + Send + 'static,
     {
         self.pipeline
             .set_error_handler(ErrorFunc::new(handler).into());
@@ -293,7 +293,7 @@ impl App {
     pub fn map_fallback<F, Args, R>(&mut self, handler: F) -> &mut Self
     where
         F: GenericHandler<Args, Output = R>,
-        Args: FromRawRequest + Send + Sync + 'static,
+        Args: FromRawRequest + Send + 'static,
         R: IntoResponse
     {
         self.pipeline

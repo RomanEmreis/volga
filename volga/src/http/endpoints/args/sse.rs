@@ -1,7 +1,7 @@
 ﻿//! Utilities for SSE (Server-Sent Events)
 
 use std::fmt::Debug;
-use crate::{utils::str::memchr_split};
+use crate::{utils::str::memchr_split, http::IntoByteResult, error::Error};
 use futures_util::stream::Stream;
 use std::time::Duration;
 use std::pin::Pin;
@@ -44,9 +44,10 @@ impl<S> SseStream<S> {
     /// 
     /// **Note:** takes **pre-encoded SSE** bytes (caller ensures validity).
     #[inline]
-    pub fn from_bytes<T>(stream: T) -> SseStream<T>
+    pub fn from_bytes<T, I>(stream: T) -> SseStream<T>
     where
-        T: Stream<Item = Bytes> + Send + Sync + 'static,
+        T: Stream<Item = I> + Send + Sync + 'static,
+        I: IntoByteResult,
     {
         SseStream::new(stream)
     }
@@ -55,13 +56,16 @@ impl<S> SseStream<S> {
     /// 
     /// Safe: takes `Message` items and encodes them to SSE bytes.
     #[inline]
-    pub fn from_messages<T>(stream: T) -> SseStream<impl Stream<Item = Bytes> + Send + Sync + 'static>
+    pub fn from_messages<T, I>(stream: T) -> SseStream<
+        impl Stream<Item = Result<Message, Error>> + Send + Sync + 'static
+    >
     where
-        T: Stream<Item = Message> + Send + Sync + 'static,
+        T: Stream<Item = I> + Send + Sync + 'static,
+        I: Into<Result<Message, Error>> + 'static,
     {
         use futures_util::StreamExt;
         
-        SseStream::new(stream.map(Bytes::from))
+        SseStream::new(stream.map(Into::into))
     }
 
     /// Consumes the wrapper and returns the inner stream.
@@ -71,15 +75,27 @@ impl<S> SseStream<S> {
     }
 }
 
-impl<S> Stream for SseStream<S>
+impl<S, I> Stream for SseStream<S>
 where
-    S: Stream<Item = Bytes>,
+    S: Stream<Item = I>,
+    I: IntoByteResult
 {
-    type Item = Bytes;
+    type Item = Result<Bytes, Error>;
 
     #[inline]
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().inner.poll_next(cx)
+        match self.project().inner.poll_next(cx) {
+            Poll::Ready(Some(item)) => Poll::Ready(Some(item.into_byte_result())),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl From<Message> for Result<Message, Error> {
+    #[inline]
+    fn from(msg: Message) -> Self {
+        Ok(msg)
     }
 }
 
@@ -378,10 +394,10 @@ mod tests {
     async fn it_creates_message_repeat_stream() {
         let stream = Message::new().data("hi!").repeat();
         pin_mut!(stream);
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
         
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
     }
 
@@ -389,7 +405,7 @@ mod tests {
     async fn it_creates_message_once_stream() {
         let stream = Message::new().data("hi!").once();
         pin_mut!(stream);
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
 
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
         assert!(stream.next().await.is_none());
@@ -405,13 +421,13 @@ mod tests {
         
         pin_mut!(stream);
         
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
         
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
         
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
         
         assert!(stream.next().await.is_none());
@@ -427,13 +443,13 @@ mod tests {
 
         pin_mut!(stream);
 
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
 
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
 
-        let bytes = stream.next().await.unwrap();
+        let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
 
     }

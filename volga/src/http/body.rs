@@ -66,11 +66,11 @@ pin_project! {
         },
         Boxed {
             #[pin]
-            inner: BoxBody
+            inner: UnsyncBoxBody
         },
         BoxedLimited {
             #[pin]
-            inner: Limited<BoxBody>
+            inner: Limited<UnsyncBoxBody>
         },
         FullLimited {
             #[pin]
@@ -126,7 +126,7 @@ impl Body for HttpBody {
 impl HttpBody {
     /// Creates a new [`HttpBody`]
     #[inline]
-    pub fn new(inner: BoxBody) -> Self {
+    pub fn new(inner: UnsyncBoxBody) -> Self {
         Self { inner: InnerBody::Boxed { inner } }
     }
 
@@ -168,39 +168,39 @@ impl HttpBody {
     #[allow(dead_code)]
     pub(crate) fn boxed<B>(inner: B) -> Self
     where 
-        B: Body<Data = Bytes, Error = Error> + Send + Sync + 'static
+        B: Body<Data = Bytes, Error = Error> + Send + 'static
     {
-        let inner = inner.boxed();
+        let inner = inner.boxed_unsync();
         Self { inner: InnerBody::Boxed { inner } }
     }
 
     /// Consumes the [`HttpBody`] and returns the body as a boxed trait object
     #[inline]
-    pub fn into_boxed(self) -> BoxBody {
+    pub fn into_boxed(self) -> UnsyncBoxBody {
         match self.inner {
             InnerBody::Boxed { inner } => inner,
             InnerBody::Empty { inner } => inner
                 .map_err(Error::client_error)
-                .boxed(),
+                .boxed_unsync(),
             InnerBody::Full { inner } => inner
                 .map_err(Error::client_error)
-                .boxed(),
+                .boxed_unsync(),
             InnerBody::FullLimited { inner } => inner
                 .map_err(Error::client_error)
-                .boxed(),
+                .boxed_unsync(),
             InnerBody::BoxedLimited { inner } => inner
                 .map_err(Error::client_error)
-                .boxed(),
+                .boxed_unsync(),
             InnerBody::Limited { inner } => inner
                 .map_err(Error::client_error)
-                .boxed(),
+                .boxed_unsync(),
             InnerBody::Incoming { inner } => inner
                 .map_err(Error::client_error)
-                .boxed(),
+                .boxed_unsync(),
         }
     }
 
-    /// Convert this body into boxed representation.
+    /// Convert this body into a boxed representation.
     #[inline]
     pub fn into_boxed_http_body(self) -> Self {
         match self.inner {
@@ -299,7 +299,7 @@ impl HttpBody {
     #[inline]
     pub fn stream_bytes<S>(stream: S) -> HttpBody
     where
-        S: futures_util::Stream<Item = Bytes> + Send + Sync + 'static,
+        S: futures_util::Stream<Item = Bytes> + Send + 'static,
     {
         use futures_util::StreamExt;
         
@@ -310,14 +310,14 @@ impl HttpBody {
     #[inline]
     pub fn stream<S>(stream: S) -> HttpBody
     where 
-        S: TryStream + Send + Sync + 'static,
+        S: TryStream + Send + 'static,
         S::Ok: Into<Bytes>,
         S::Error: Into<BoxError>
     {
         let stream_body = StreamBody::new(stream
             .map_err(Error::client_error)
             .map_ok(|msg| Frame::data(msg.into())));
-        Self { inner: InnerBody::Boxed { inner: stream_body.boxed() } }
+        Self { inner: InnerBody::Boxed { inner: stream_body.boxed_unsync() } }
     }
 }
 

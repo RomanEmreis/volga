@@ -99,7 +99,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static
+        Args: FromRequest + Send + 'static
     {
         // Using GET for WebSocket protocol and HTTP/1
         #[cfg(all(
@@ -137,7 +137,7 @@ impl App {
     pub fn map_ws<F, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
         F: WebSocketHandler<Args, Output = ()>,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
@@ -172,7 +172,7 @@ impl App {
     pub fn map_msg<F, M, Args, R>(&mut self, pattern: &str, handler: F) -> &mut Self 
     where
         F: MessageHandler<M, Args, Output = R> + 'static,
-        Args: FromRequest + Clone + Send + Sync + 'static,
+        Args: FromRequest + Clone + Send + 'static,
         M: TryFrom<Message, Error = Error> + Send,
         R: TryInto<Message, Error = Error> + Send
     {

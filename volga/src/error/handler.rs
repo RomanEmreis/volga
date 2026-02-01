@@ -19,17 +19,17 @@ pub struct ErrorFunc<F, R, Args>
 where
     F: MapErrHandler<Args, Output = R>,
     R: IntoResponse,
-    Args: FromRequestParts + Send + Sync
+    Args: FromRequestParts + Send
 {
     func: F,
-    _marker: std::marker::PhantomData<Args>,
+    _marker: std::marker::PhantomData<fn(Args)>,
 }
 
 impl<F, R, Args> ErrorFunc<F, R, Args>
 where
     F: MapErrHandler<Args, Output = R>,
     R: IntoResponse,
-    Args: FromRequestParts + Send + Sync
+    Args: FromRequestParts + Send
 {
     pub(crate) fn new(func: F) -> Self {
         Self {
@@ -43,7 +43,7 @@ impl<F, R, Args> ErrorHandler for ErrorFunc<F, R, Args>
 where
     F: MapErrHandler<Args, Output = R>,
     R: IntoResponse + 'static,
-    Args: FromRequestParts + Send + Sync + 'static,
+    Args: FromRequestParts + Send + 'static,
 {
     #[inline]
     fn call(&self, parts: &Parts, err: Error) -> BoxFuture<'_, HttpResult> {
@@ -63,7 +63,7 @@ impl<F, R, Args> From<ErrorFunc<F, R, Args>> for PipelineErrorHandler
 where
     F: MapErrHandler<Args, Output = R>,
     R: IntoResponse + 'static,
-    Args: FromRequestParts + Send + Sync + 'static,
+    Args: FromRequestParts + Send + 'static,
 {
     #[inline]
     fn from(func: ErrorFunc<F, R, Args>) -> Self {

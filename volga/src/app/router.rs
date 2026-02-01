@@ -74,7 +74,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static
+        Args: FromRequest + Send + 'static
     {
         self.map_route(Method::GET, pattern, handler)
     }
@@ -100,7 +100,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::POST, pattern, handler)
     }
@@ -125,7 +125,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::PUT, pattern, handler)
     }
@@ -150,7 +150,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::PATCH, pattern, handler)
     }
@@ -175,7 +175,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::DELETE, pattern, handler)
     }
@@ -200,7 +200,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::HEAD, pattern, handler)
     }
@@ -225,7 +225,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::OPTIONS, pattern, handler)
     }
@@ -250,7 +250,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::TRACE, pattern, handler)
     }
@@ -275,7 +275,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::CONNECT, pattern, handler)
     }
@@ -290,7 +290,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route_impl(method, Cow::Borrowed(pattern), handler)
     }
@@ -305,7 +305,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         self.map_route_impl(method, Cow::Owned(pattern), handler)
     }
@@ -320,7 +320,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + Sync + 'static,
+        Args: FromRequest + Send + 'static,
     {
         let handler = Func::new(handler);
         let endpoints = self.pipeline.endpoints_mut();
@@ -415,7 +415,7 @@ macro_rules! define_route_group_methods {
             where
                 F: GenericHandler<Args, Output = R>,
                 R: IntoResponse + 'static,
-                Args: FromRequest + Send + Sync + 'static,
+                Args: FromRequest + Send + 'static,
             {
                 let pattern = [self.prefix, pattern].concat();
 

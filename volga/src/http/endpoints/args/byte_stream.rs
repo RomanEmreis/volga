@@ -1,6 +1,7 @@
 //! Types and tools for working with byte streams
 
 use crate::{error::Error, http::endpoints::args::{FromPayload, Source, Payload}, HttpBody};
+use crate::http::sse::Message;
 use bytes::{Bytes, BytesMut};
 use futures_util::{Stream, future::{Ready, ok}};
 use http_body_util::BodyDataStream;
@@ -72,7 +73,7 @@ impl FromPayload for ByteStream<BodyDataStream<HttpBody>> {
 
 /// A helper trait for types that are suitable for byte stream
 pub trait IntoByteResult {
-    /// Converts a type into a bytes
+    /// Converts a type into bytes
     fn into_byte_result(self) -> Result<Bytes, Error>;
 }
 
@@ -112,7 +113,8 @@ macro_rules! impl_into_byte_result_with {
 }
 
 impl_into_byte_result! {
-    String, Box<[u8]>, Vec<u8>, BytesMut, Bytes
+    String, Box<[u8]>, Vec<u8>, 
+    BytesMut, Bytes, Message
 }
 
 impl_into_byte_result_with!(

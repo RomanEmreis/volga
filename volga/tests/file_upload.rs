@@ -1,7 +1,7 @@
 ﻿#![allow(missing_docs)]
 #![cfg(feature = "test")]
 
-use volga::{File, HttpBody, ok};
+use volga::{File, ok};
 use volga::test::{TestServer, TempFile};
 
 #[tokio::test]
@@ -24,11 +24,10 @@ async fn it_saves_uploaded_file() {
     let file = tokio::fs::File::open(temp_file.path)
         .await
         .unwrap();
-    let body = HttpBody::file(file);
-
+    
     let response = server.client()
         .post(server.url("/upload"))
-        .body(reqwest::Body::wrap(body))
+        .body(reqwest::Body::from(file))
         .send()
         .await
         .unwrap();

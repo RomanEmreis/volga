@@ -19,6 +19,8 @@ and ensured only negotiated subprotocols are echoed in responses.
 - Added `SseStream` that implements `IntoResponse`, and can be created from `Message` by calling `once`/`repeat` methods.
 - Added implementations of async-stream for SSE and byte stream responses;
 - Added zero-cost incoming HTTP body stream extractor
+- Relaxed requirements for middleware and handler args, they no longer needed to be `Sync`.
+- Relaxed requirements for stream and box bodies, they no longer needed to be `Sync`.
 
 
 ## 0.8.2
