@@ -1,6 +1,7 @@
 //! Types and tools for working with byte streams
 
 use crate::{error::Error, http::endpoints::args::{FromPayload, Source, Payload}, HttpBody};
+use crate::http::sse::Message;
 use bytes::{Bytes, BytesMut};
 use futures_util::{Stream, future::{Ready, ok}};
 use http_body_util::BodyDataStream;
@@ -72,18 +73,17 @@ impl FromPayload for ByteStream<BodyDataStream<HttpBody>> {
 
 /// A helper trait for types that are suitable for byte stream
 pub trait IntoByteResult {
-    /// Converts a type into a bytes
+    /// Converts a type into bytes
     fn into_byte_result(self) -> Result<Bytes, Error>;
 }
 
-impl<T, E> IntoByteResult for Result<T, E>
+impl<T> IntoByteResult for Result<T, Error>
 where
     T: Into<Bytes>,
-    E: Into<Error>,
 {
     #[inline]
     fn into_byte_result(self) -> Result<Bytes, Error> {
-        self.map(Into::into).map_err(Into::into)
+        self.map(Into::into)
     }
 }
 
@@ -112,7 +112,8 @@ macro_rules! impl_into_byte_result_with {
 }
 
 impl_into_byte_result! {
-    String, Box<[u8]>, Vec<u8>, BytesMut, Bytes
+    String, Box<[u8]>, Vec<u8>, 
+    BytesMut, Bytes, Message
 }
 
 impl_into_byte_result_with!(
@@ -123,11 +124,31 @@ impl_into_byte_result_with!(
 );
 
 /// Creates an asynchronous stream
+///
+/// # Example
+/// ```no_run
+/// use volga::{error::Error, byte_stream};
+/// # use futures_util::stream::StreamExt;
+///
+/// # async fn docs() {
+/// let stream = byte_stream! {
+///     // ...
+/// # let some_error = false;
+///     if some_error {
+///         Err(Error::client_error("some error"))?; // terminate stream
+///     }
+///
+///     yield "ok";
+/// };
+/// # tokio::pin!(stream);
+/// # let _ = stream.next().await;
+/// # }
+/// ```
 #[macro_export]
 macro_rules! byte_stream {
     {$($tt:tt)*} => {{
         $crate::ByteStream::new(
-            $crate::__async_stream::stream! { $($tt)* }
+            $crate::__async_stream::try_stream! { $($tt)* }
         )
     }};
 }
@@ -177,7 +198,22 @@ mod tests {
 
         let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "hi!");
+    }
 
+    #[tokio::test]
+    #[allow(clippy::never_loop)]
+    async fn it_creates_byte_stream_with_error() {
+        let stream = byte_stream! {
+            loop {
+                Err(Error::client_error("test error"))?;
+                yield "hi!";
+            }
+        };
+
+        pin_mut!(stream);
+
+        let bytes = stream.next().await.unwrap();
+        assert!(bytes.is_err());
     }
 
     #[tokio::test]

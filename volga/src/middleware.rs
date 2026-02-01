@@ -172,7 +172,7 @@ impl App {
     where
         F: MapOkHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + Sync + 'static,
+        Args: FromRequestRef + Send + 'static,
     {
         self.pipeline
             .middlewares_mut()
@@ -218,7 +218,7 @@ impl App {
     where
         F: TapReqHandler<Args, Output = R>,
         R: IntoTapResult,
-        Args: FromContainer + Send + Sync + 'static,
+        Args: FromContainer + Send + 'static,
     {
         self.pipeline
             .middlewares_mut()
@@ -297,7 +297,7 @@ impl App {
     where 
         F: MiddlewareHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + Sync + 'static,
+        Args: FromRequestRef + Send + 'static,
     {
         self.pipeline
             .middlewares_mut()
@@ -366,7 +366,7 @@ impl<'a> Route<'a> {
     where
         F: GenericHandler<Args, Output = R>,
         R: Into<FilterResult> + 'static,
-        Args: FromRequestRef + Send + Sync + 'static
+        Args: FromRequestRef + Send + 'static
     {
         let filter_fn = make_filter_fn(filter);
         self.map_middleware(filter_fn)
@@ -400,7 +400,7 @@ impl<'a> Route<'a> {
     where
         F: MapOkHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + Sync + 'static,
+        Args: FromRequestRef + Send + 'static,
     {
         let map_ok_fn = make_map_ok_fn(map);
         self.map_middleware(map_ok_fn)
@@ -430,7 +430,7 @@ impl<'a> Route<'a> {
     where
         F: MapErrHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + Sync + 'static,
+        Args: FromRequestRef + Send + 'static,
     {
         let map_err_fn = make_map_err_fn(map);
         self.map_middleware(map_err_fn)
@@ -474,7 +474,7 @@ impl<'a> Route<'a> {
     where
         F: TapReqHandler<Args, Output = R>,
         R: IntoTapResult,
-        Args: FromContainer + Send + Sync + 'static,
+        Args: FromContainer + Send + 'static,
     {
         let map_err_fn = make_tap_req_fn(map);
         self.map_middleware(map_err_fn)
@@ -549,7 +549,7 @@ impl<'a> Route<'a> {
     where
         F: MiddlewareHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + Sync + 'static,
+        Args: FromRequestRef + Send + 'static,
     {
         let with_fn = make_with_fn(middleware);
         self.map_middleware(with_fn)
@@ -617,7 +617,7 @@ impl<'a> RouteGroup<'a> {
     where
         F: GenericHandler<Args, Output = R>,
         R: Into<FilterResult> + 'static,
-        Args: FromRequestRef + Send + Sync + 'static
+        Args: FromRequestRef + Send + 'static
     {
         let filter_fn = make_filter_fn(filter);
         self.middleware.push(filter_fn);
@@ -654,7 +654,7 @@ impl<'a> RouteGroup<'a> {
     where
         F: MapOkHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + Sync + 'static,
+        Args: FromRequestRef + Send + 'static,
     {
         let map_ok_fn = make_map_ok_fn(map);
         self.middleware.push(map_ok_fn);
@@ -687,7 +687,7 @@ impl<'a> RouteGroup<'a> {
     where
         F: MapErrHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + Sync + 'static,
+        Args: FromRequestRef + Send + 'static,
     {
         let map_err_fn = make_map_err_fn(map);
         self.middleware.push(map_err_fn);
@@ -734,7 +734,7 @@ impl<'a> RouteGroup<'a> {
     where
         F: TapReqHandler<Args, Output = R>,
         R: IntoTapResult,
-        Args: FromContainer + Send + Sync + 'static,
+        Args: FromContainer + Send + 'static,
     {
         let map_err_fn = make_tap_req_fn(map);
         self.middleware.push(map_err_fn);
@@ -817,7 +817,7 @@ impl<'a> RouteGroup<'a> {
     where
         F: MiddlewareHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + Sync + 'static,
+        Args: FromRequestRef + Send + 'static,
     {
         let with_fn = make_with_fn(middleware);
         self.middleware.push(with_fn);

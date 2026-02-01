@@ -8,7 +8,6 @@ use crate::http::{sse::SseStream, StatusCode};
 use crate::headers::{HeaderMap, CONTENT_TYPE};
 use mime::TEXT_PLAIN_UTF_8;
 use serde::Serialize;
-use bytes::Bytes;
 use futures_util::Stream;
 
 #[cfg(feature = "cookie")]
@@ -23,6 +22,7 @@ use std::{
     convert::Infallible,
     borrow::Cow
 };
+use crate::http::sse::Message;
 
 /// Trait for types that can be returned from request handlers
 pub trait IntoResponse {
@@ -232,17 +232,17 @@ where
 
 impl<S> IntoResponse for SseStream<S>
 where
-    S: Stream<Item = Bytes> + Send + Sync + 'static
+    S: Stream<Item = Result<Message, Error>> + Send + 'static
 {
     #[inline]
     fn into_response(self) -> HttpResult {
-        sse!(self)
+        sse!(self.into_bytes())
     }
 }
 
 impl<S, I> IntoResponse for ByteStream<S>
 where
-    S: Stream<Item = I> + Send + Sync + 'static,
+    S: Stream<Item = I> + Send + 'static,
     I: IntoByteResult
 {
     #[inline]

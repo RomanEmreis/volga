@@ -55,7 +55,7 @@ pub(super) fn make_filter_fn<F, R, Args>(filter: F) -> MiddlewareFn
 where
     F: GenericHandler<Args, Output = R>,
     R: Into<FilterResult> + 'static,
-    Args: FromRequestRef + Send + Sync + 'static
+    Args: FromRequestRef + Send + 'static
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let filter = filter.clone();
@@ -81,7 +81,7 @@ pub(super) fn make_map_ok_fn<F, R, Args>(map: F) -> MiddlewareFn
 where
     F: MapOkHandler<Args, Output = R>,
     R: IntoResponse + 'static,
-    Args: FromRequestRef + Send + Sync + 'static,
+    Args: FromRequestRef + Send + 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
@@ -106,7 +106,7 @@ pub(super) fn make_map_err_fn<F, R, Args>(map: F) -> MiddlewareFn
 where
     F: MapErrHandler<Args, Output = R>,
     R: IntoResponse + 'static,
-    Args: FromRequestRef + Send + Sync + 'static,
+    Args: FromRequestRef + Send + 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
@@ -130,7 +130,7 @@ pub(super) fn make_tap_req_fn<F, Args, R>(map: F) -> MiddlewareFn
 where
     F: TapReqHandler<Args, Output = R>,
     R: IntoTapResult,
-    Args: FromContainer + Send + Sync + 'static,
+    Args: FromContainer + Send + 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
@@ -175,7 +175,7 @@ pub(super) fn make_with_fn<F, R, Args>(middleware: F) -> MiddlewareFn
 where
     F: MiddlewareHandler<Args, Output = R>,
     R: IntoResponse + 'static,
-    Args: FromRequestRef + Send + Sync + 'static,
+    Args: FromRequestRef + Send + 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let middleware = middleware.clone();

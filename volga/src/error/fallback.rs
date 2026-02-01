@@ -19,12 +19,12 @@ pub trait FallbackHandler {
 
 /// Owns a closure that handles a 404
 #[derive(Debug)]
-pub struct FallbackFunc<F, Args>(pub(crate) F, PhantomData<Args>);
+pub struct FallbackFunc<F, Args>(pub(crate) F, PhantomData<fn(Args)>);
 
 impl<F, Args, R> FallbackFunc<F, Args>
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRawRequest + Send + Sync + 'static,
+    Args: FromRawRequest + Send + 'static,
     R: IntoResponse
 {
     pub(crate) fn new(func: F) -> Self {
@@ -35,7 +35,7 @@ where
 impl<F, Args, R> FallbackHandler for FallbackFunc<F, Args>
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRawRequest + Send + Sync + 'static,
+    Args: FromRawRequest + Send + 'static,
     R: IntoResponse
 {
     #[inline]
@@ -56,7 +56,7 @@ where
 impl<F, Args, R> From<FallbackFunc<F, Args>> for PipelineFallbackHandler
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRawRequest + Send + Sync + 'static,
+    Args: FromRawRequest + Send + 'static,
     R: IntoResponse
 {
     #[inline]

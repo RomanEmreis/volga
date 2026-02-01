@@ -27,7 +27,7 @@ where
     Args: FromRequest
 {
     func: F,
-    _marker: std::marker::PhantomData<Args>,
+    _marker: std::marker::PhantomData<fn(Args)>,
 }
 
 impl<F, R ,Args> Func<F, R, Args>
@@ -53,7 +53,7 @@ impl<F, R, Args> Handler for Func<F, R, Args>
 where
     F: GenericHandler<Args, Output = R>,
     R: IntoResponse,
-    Args: FromRequest + Send + Sync
+    Args: FromRequest + Send
 {
     #[inline]
     fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult> {
