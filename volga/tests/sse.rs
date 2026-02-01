@@ -31,15 +31,13 @@ async fn it_tests_sse_text_stream() {
 }
 
 #[tokio::test]
-async fn it_tests_sse_message_stream() {
+async fn it_tests_sse_message_response() {
     let server = TestServer::spawn(|app| {
         app.map_get("/events", || async {
-            let stream = Message::new()
+            Message::new()
                 .comment("test")
                 .data("Pass!")
-                .repeat()
-                .take(2);
-            sse!(stream)
+                .once()
         });
     }).await;
 
@@ -50,7 +48,7 @@ async fn it_tests_sse_message_stream() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), ": test\ndata: Pass!\n\n: test\ndata: Pass!\n\n");
+    assert_eq!(response.text().await.unwrap(), ": test\ndata: Pass!\n\n");
 
     server.shutdown().await;
 }
@@ -83,7 +81,7 @@ async fn it_tests_sse_stream_result_response() {
         app.map_get("/events", async || sse_stream! {
             for _ in 0..2 {
                 get_result()?;
-                yield Ok(Message::new().data("Pass!"));
+                yield Message::new().data("Pass!");
             }
         });
     }).await;
@@ -106,7 +104,7 @@ async fn it_tests_sse_stream_error_response() {
         app.map_get("/events", async || sse_stream! {
             for _ in 0..2 {
                 get_error()?;
-                yield Ok(Message::new().data("Pass!"));
+                yield Message::new().data("Pass!");
             }
         });
     }).await;
@@ -116,8 +114,30 @@ async fn it_tests_sse_stream_error_response() {
         .send()
         .await;
 
-    println!("{:?}", response);
-    
+    assert!(response.is_err());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[allow(clippy::never_loop)]
+async fn it_tests_sse_stream_return_err_response() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/events", async || sse_stream! {
+            loop {
+                get_result()?;
+                Err(Error::client_error("test error"))?;
+                
+                yield Message::new().data("Pass!");
+            }
+        });
+    }).await;
+
+    let response = server.client()
+        .get(server.url("/events"))
+        .send()
+        .await;
+
     assert!(response.is_err());
 
     server.shutdown().await;

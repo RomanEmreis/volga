@@ -22,6 +22,7 @@ use std::{
     convert::Infallible,
     borrow::Cow
 };
+use crate::http::sse::Message;
 
 /// Trait for types that can be returned from request handlers
 pub trait IntoResponse {
@@ -229,20 +230,19 @@ where
     }
 }
 
-impl<S, I> IntoResponse for SseStream<S>
+impl<S> IntoResponse for SseStream<S>
 where
-    S: Stream<Item = I> + Send + Sync + 'static,
-    I: IntoByteResult
+    S: Stream<Item = Result<Message, Error>> + Send + 'static
 {
     #[inline]
     fn into_response(self) -> HttpResult {
-        sse!(self)
+        sse!(self.into_bytes())
     }
 }
 
 impl<S, I> IntoResponse for ByteStream<S>
 where
-    S: Stream<Item = I> + Send + Sync + 'static,
+    S: Stream<Item = I> + Send + 'static,
     I: IntoByteResult
 {
     #[inline]

@@ -22,7 +22,6 @@ and ensured only negotiated subprotocols are echoed in responses.
 - Relaxed requirements for middleware and handler args, they no longer needed to be `Sync`.
 - Relaxed requirements for stream and box bodies, they no longer needed to be `Sync`.
 
-
 ## 0.8.2
 
 ### Added

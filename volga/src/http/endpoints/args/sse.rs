@@ -1,8 +1,8 @@
 ﻿//! Utilities for SSE (Server-Sent Events)
 
 use std::fmt::Debug;
-use crate::{utils::str::memchr_split, http::IntoByteResult, error::Error};
-use futures_util::stream::Stream;
+use crate::{ByteStream, utils::str::memchr_split, error::Error};
+use futures_util::stream::{Stream, TryStream};
 use std::time::Duration;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -33,39 +33,43 @@ impl<S> Debug for SseStream<S> {
     }
 }
 
-impl<S> SseStream<S> {
-    /// Creates a new [`SseStream`] from an inner stream.
-    #[inline]
-    pub(crate) fn new(inner: S) -> Self {
-        Self { inner }
-    }
-
-    /// Creates a new [`SseStream`] from an inner stream.
-    /// 
-    /// **Note:** takes **pre-encoded SSE** bytes (caller ensures validity).
-    #[inline]
-    pub fn from_bytes<T, I>(stream: T) -> SseStream<T>
-    where
-        T: Stream<Item = I> + Send + Sync + 'static,
-        I: IntoByteResult,
-    {
-        SseStream::new(stream)
-    }
-
+impl SseStream<()> {
     /// Creates a new [`SseStream`] from an inner stream.
     /// 
     /// Safe: takes `Message` items and encodes them to SSE bytes.
     #[inline]
-    pub fn from_messages<T, I>(stream: T) -> SseStream<
-        impl Stream<Item = Result<Message, Error>> + Send + Sync + 'static
+    pub fn from_try_messages<T>(stream: T) -> SseStream<
+        impl Stream<Item = Result<Message, Error>> + Send + 'static
     >
     where
-        T: Stream<Item = I> + Send + Sync + 'static,
-        I: Into<Result<Message, Error>> + 'static,
+        T: TryStream<Ok = Message, Error = Error> + Send + 'static,
     {
+        use futures_util::TryStreamExt;
+        SseStream::new(stream.into_stream())
+    }
+}
+
+impl<S> SseStream<S>
+where
+    S: Stream<Item = Result<Message, Error>> + Send + 'static,
+{
+    /// Creates a new [`SseStream`].
+    #[inline]
+    pub fn new(inner: S) -> Self {
+        Self { inner }
+    }
+    
+    /// Consumes the stream of SSE messages and returns the stream of bytes.
+    #[inline]
+    pub fn into_bytes(self) -> impl Stream<Item = Result<Bytes, Error>> + Send + 'static {
         use futures_util::StreamExt;
-        
-        SseStream::new(stream.map(Into::into))
+        self.map(|m| m.map(Bytes::from))
+    }
+    
+    /// Consumes the stream of SSE messages and returns the [`ByteStream`].
+    #[inline]
+    pub fn into_byte_stream(self) -> ByteStream<impl Stream<Item = Result<Bytes, Error>> + Send + 'static> {
+        ByteStream::new(self.into_bytes())
     }
 
     /// Consumes the wrapper and returns the inner stream.
@@ -75,36 +79,45 @@ impl<S> SseStream<S> {
     }
 }
 
-impl<S, I> Stream for SseStream<S>
+impl<S> Stream for SseStream<S>
 where
-    S: Stream<Item = I>,
-    I: IntoByteResult
+    S: Stream<Item = Result<Message, Error>> + Send + 'static,
 {
-    type Item = Result<Bytes, Error>;
+    type Item = Result<Message, Error>;
 
     #[inline]
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.project().inner.poll_next(cx) {
-            Poll::Ready(Some(item)) => Poll::Ready(Some(item.into_byte_result())),
+            Poll::Ready(Some(item)) => Poll::Ready(Some(item)),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }
     }
 }
 
-impl From<Message> for Result<Message, Error> {
-    #[inline]
-    fn from(msg: Message) -> Self {
-        Ok(msg)
-    }
-}
-
 /// Creates an asynchronous SSE stream
+/// 
+/// # Example
+/// ```no_run
+/// use volga::{http::sse::Message, error::Error, sse_stream};
+/// 
+/// # async fn docs() {
+/// let stream = sse_stream! {
+///     // ...
+/// # let some_error = false;
+///     if some_error {
+///         Err(Error::client_error("some error"))?; // terminate SSE
+///     }
+///
+///     yield Message::new().data("ok");
+/// };
+/// # }
+/// ```
 #[macro_export]
 macro_rules! sse_stream {
     { $($tt:tt)* } => {{
-        $crate::http::sse::SseStream::<()>::from_messages(
-            $crate::__async_stream::stream! { $($tt)* }
+        $crate::http::sse::SseStream::from_try_messages(
+            $crate::__async_stream::try_stream! { $($tt)* }
         )
     }};
 }
@@ -149,16 +162,14 @@ impl Message {
 
     /// Creates a stream that yields this message once.
     #[inline]
-    pub fn once(self) -> SseStream<impl Stream<Item = Bytes> + Send + Sync> {
-        let bytes: Bytes = self.into();
-        SseStream::new(futures_util::stream::iter([bytes]))
+    pub fn once(self) -> SseStream<impl Stream<Item = Result<Message, Error>> + Send> {
+        SseStream::new(futures_util::stream::iter([Ok(self)]))
     }
 
     /// Creates a stream that produces this message repeatedly.
     #[inline]
-    pub fn repeat(self) -> SseStream<impl Stream<Item = Bytes> + Send + Sync> {
-        let bytes: Bytes = self.into();
-        SseStream::new(futures_util::stream::repeat(bytes))
+    pub fn repeat(self) -> SseStream<impl Stream<Item = Result<Message, Error>> + Send> {
+        SseStream::new(futures_util::stream::repeat_with(move || Ok(self.clone())))
     }
 
     /// Creates an empty [`Message`] (":\n")
@@ -224,6 +235,7 @@ impl Message {
     ///
     /// # Example
     /// ```no_run
+    /// use futures_util::TryStreamExt;
     /// use volga::http::sse::Message;
     /// use serde::Serialize;
     /// 
@@ -386,7 +398,7 @@ impl From<Message> for Bytes {
 mod tests {
     use std::time::Duration;
     use bytes::Bytes;
-    use futures_util::{pin_mut, StreamExt};
+    use futures_util::{pin_mut, StreamExt, TryStreamExt};
     use serde::Serialize;
     use super::Message;
 
@@ -394,10 +406,10 @@ mod tests {
     async fn it_creates_message_repeat_stream() {
         let stream = Message::new().data("hi!").repeat();
         pin_mut!(stream);
-        let bytes = stream.next().await.unwrap().unwrap();
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
-        
-        let bytes = stream.next().await.unwrap().unwrap();
+
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
     }
 
@@ -405,7 +417,8 @@ mod tests {
     async fn it_creates_message_once_stream() {
         let stream = Message::new().data("hi!").once();
         pin_mut!(stream);
-        let bytes = stream.next().await.unwrap().unwrap();
+        
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
 
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
         assert!(stream.next().await.is_none());
@@ -420,14 +433,14 @@ mod tests {
         };
         
         pin_mut!(stream);
-        
-        let bytes = stream.next().await.unwrap().unwrap();
+
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
-        
-        let bytes = stream.next().await.unwrap().unwrap();
+
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
-        
-        let bytes = stream.next().await.unwrap().unwrap();
+
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
         
         assert!(stream.next().await.is_none());
@@ -443,15 +456,65 @@ mod tests {
 
         pin_mut!(stream);
 
-        let bytes = stream.next().await.unwrap().unwrap();
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
+
+    }
+
+    #[tokio::test]
+    async fn it_modifies_sse_stream() {
+        let stream = sse_stream! {
+            yield Message::new().data("hi!");
+        };
+
+        let stream = stream.map_ok(|msg| {
+            msg.comment("some comment")
+        });
+        
+        pin_mut!(stream);
+
+        let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
+        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n: some comment\n\n");
+
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_converts_into_bytes() {
+        let stream = sse_stream! {
+            yield Message::new().data("hi!");
+        };
+
+        let stream = stream.into_bytes();
+        
+        pin_mut!(stream);
 
         let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
 
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn it_converts_into_byte_stream() {
+        let stream = sse_stream! {
+            yield Message::new().data("hi!");
+        };
+
+        let stream = stream.into_byte_stream();
+
+        pin_mut!(stream);
+
         let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
 
+        assert!(stream.next().await.is_none());
     }
 
     #[test]
