@@ -5,22 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
-- Tightened WebSocket handshake validation (method checks, header token parsing, HTTP/2 `:protocol` enforcement) 
-and ensured only negotiated subprotocols are echoed in responses.
-- Added graceful close attempts when recv/send fails during WebSocket message handling.
-- Introduced `WsEvent<T>` for split WebSockets to distinguish data messages from close events.
-- Made `WebSocket::recv<T>` data-only; ping/pong and close frames are handled internally.
-- Centralized raw message receiving to avoid parsing control frames as application data.
-- Implemented best-effort close handshakes with proper error filtering for expected disconnects.
-- Added protocol invariants (`debug_assert!`) for unexpected raw frames.
-- Updated SSE message handling to store multiple fields while preserving replace semantics for data/event/id/retry and allowing dynamic comments, plus fixed append to split multi-line data correctly.
-- Expanded SSE response headers to include charset, keep-alive, and proxy buffering control, with tests updated to match.
-- Added `SseStream` that implements `IntoResponse`, and can be created from `Message` by calling `once`/`repeat` methods.
-- Added implementations of async-stream for SSE and byte stream responses;
-- Added zero-cost incoming HTTP body stream extractor
-- Relaxed requirements for middleware and handler args, they no longer needed to be `Sync`.
-- Relaxed requirements for stream and box bodies, they no longer needed to be `Sync`.
+## 0.8.3
+
+### Added
+* New async stream macro, helpers and extractors (#155)
+
+### Changed
+* WebSocket improvements (#153)
+* SSE Improvements (#154)
+* SSE improvements + relaxed Sync requirements for middleware and handers (#156)
 
 ## 0.8.2
 
