@@ -99,7 +99,7 @@ mod tests {
     fn it_creates_header_from_static() {
         assert_eq!(
             ContentType::from_static("text/plain").as_ref(),
-            &HeaderValue::from_static("application/json")
+            &HeaderValue::from_static("text/plain")
         );
     }
 }
