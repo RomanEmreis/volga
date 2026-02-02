@@ -117,6 +117,15 @@ macro_rules! ok {
         )
     };
 
+    // ok!([header, ...])   -- headers on empty body
+    ([ $( $header:expr ),* $(,)? ]) => {
+        $crate::response!(
+            $crate::http::StatusCode::OK,
+            $crate::HttpBody::empty();
+            [ $( $header ),* ]
+        )
+    };
+
     // =========================
     // 2) Explicit TEXT (ToString)
     // =========================
@@ -138,6 +147,18 @@ macro_rules! ok {
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
                 $( ($key, $value) ),*
+            ]
+        )
+    };
+
+    // ok!(text: expr; [headers])
+    (text: $body:expr ; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::response!(
+            $crate::http::StatusCode::OK,
+            $body.into();
+            [
+                $crate::headers::ContentType::from_static("text/plain; charset=utf-8"),
+                $( $header ),*
             ]
         )
     };
@@ -366,13 +387,21 @@ macro_rules! ok {
 }
 
 #[cfg(test)]
+#[allow(unreachable_pub)]
 mod tests {
     use http_body_util::BodyExt;
     use serde::Serialize;
 
+    use crate::headers;
+
     #[derive(Serialize)]
     struct TestPayload {
         name: String
+    }
+
+    headers! {
+        (ApiKey, "x-api-key"),
+        (RequestId, "x-req-id")
     }
 
     #[tokio::test]
@@ -703,6 +732,25 @@ mod tests {
     #[tokio::test]
     async fn it_creates_empty_ok_response_with_headers() {
         let response = ok!([
+            ApiKey::from_static("some api key"),
+            RequestId::from_static("some req id")
+        ]);
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(body.len(), 0);
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
+        assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
+        assert!(response.headers().get("Content-Type").is_none());
+    }
+
+    #[tokio::test]
+    async fn it_creates_empty_ok_response_with_raw_headers() {
+        let response = ok!([
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
         ]);
@@ -775,6 +823,28 @@ mod tests {
         let response = ok!(text: "ok"; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
+        ]);
+
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(body), "ok");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
+        assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
+    }
+
+    #[tokio::test]
+    async fn it_creates_text_prefixed_response_with_headers() {
+        let response = ok!(text: "ok"; [
+            ApiKey::from_static("some api key"),
+            RequestId::from_static("some req id")
         ]);
 
         assert!(response.is_ok());

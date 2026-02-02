@@ -351,8 +351,8 @@ mod tests {
     async fn in_creates_text_response_with_custom_headers() {       
         let mut response = HttpResponse::builder()
             .status(400)
-            .header("x-api-key", "some api key")
-            .header("Content-Type", "text/plain")
+            .header_raw("x-api-key", "some api key")
+            .header_raw("Content-Type", "text/plain")
             .body(HttpBody::full(String::from("Hello World!")))
             .unwrap();
 
@@ -368,8 +368,8 @@ mod tests {
     async fn in_creates_str_text_response_with_custom_headers() {
         let mut response = HttpResponse::builder()
             .status(200)
-            .header("x-api-key", "some api key")
-            .header("Content-Type", "text/plain")
+            .header_raw("x-api-key", "some api key")
+            .header_raw("Content-Type", "text/plain")
             .body(HttpBody::full("Hello World!"))
             .unwrap();
 
@@ -387,8 +387,8 @@ mod tests {
         
         let mut response = HttpResponse::builder()
             .status(200)
-            .header("x-api-key", "some api key")
-            .header("Content-Type", "application/json")
+            .header_raw("x-api-key", "some api key")
+            .header_raw("Content-Type", "application/json")
             .body(HttpBody::json(content).unwrap())
             .unwrap();
 

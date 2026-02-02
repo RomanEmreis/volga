@@ -19,6 +19,22 @@ macro_rules! headers {
             #[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord, Hash)]
             pub struct $struct_name;
 
+            impl $struct_name {
+                /// Creates a new instance of [`Header<T>`] from a `static str`
+                ///
+                /// # Examples
+                /// ```no_run
+                /// use volga::headers::ContentType;
+                ///
+                /// let content_type_header = ContentType::from_static("text/plain");
+                /// assert_eq!(content_type_header.as_ref(), "text/plain");
+                /// ```
+                #[inline(always)]
+                pub const fn from_static(value: &'static str) -> $crate::headers::Header<$struct_name> {
+                    $crate::headers::Header::<$struct_name>::from_static(value)
+                }
+            }
+
             impl $crate::headers::FromHeaders for $struct_name {
                 const NAME: $crate::headers::HeaderName = $crate::headers::HeaderName::from_static($header_name);
                 

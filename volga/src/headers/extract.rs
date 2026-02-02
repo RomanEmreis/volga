@@ -28,6 +28,14 @@ macro_rules! define_header {
             #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub struct $struct_name;
 
+            impl $struct_name {
+                /// Creates a new instance of [`Header<T>`] from a `static str`
+                #[inline(always)]
+                pub const fn from_static(value: &'static str) -> $crate::headers::Header<$struct_name> {
+                    $crate::headers::Header::<$struct_name>::from_static(value)
+                }
+            }
+
             impl FromHeaders for $struct_name {
                 const NAME: $crate::headers::HeaderName = $header_name;
                 
@@ -85,5 +93,13 @@ mod tests {
         let headers = HeaderMap::new();
         assert!(Host::from_headers(&headers).is_none());
         assert!(ContentType::from_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn it_creates_header_from_static() {
+        assert_eq!(
+            ContentType::from_static("text/plain").as_ref(),
+            &HeaderValue::from_static("application/json")
+        );
     }
 }
