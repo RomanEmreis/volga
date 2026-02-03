@@ -36,11 +36,11 @@ macro_rules! stream {
     ($body:expr) => {
         $crate::stream!($body; [])
     };
-    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
             $crate::HttpBody::stream($body);
-            [ $( ($key, $value) ),* ]
+            [ $( $header ),* ]
         )
     };
 }

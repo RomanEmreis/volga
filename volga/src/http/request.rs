@@ -255,7 +255,7 @@ impl HttpRequest {
     pub fn get_header<T: FromHeaders>(&self) -> Option<Header<T>> {
         self.headers()
             .get(T::NAME)
-            .map(Header::new)
+            .map(Header::from_ref)
     }
 
     /// Returns a view of all values associated with this HTTP header.
@@ -264,7 +264,7 @@ impl HttpRequest {
         self.headers()
             .get_all(T::NAME)
             .iter()
-            .map(Header::new)
+            .map(Header::from_ref)
     }
 }
 

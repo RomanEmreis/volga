@@ -14,10 +14,10 @@ macro_rules! redirect {
     ($url:expr) => {
         $crate::redirect!($url; [])
     };
-    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($url:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::status!(301; [
             ($crate::headers::LOCATION, $url),
-            $( ($key, $value) ),*
+            $( $header ),*
         ])
     };
 }
@@ -36,10 +36,10 @@ macro_rules! found {
     ($url:expr) => {
         $crate::found!($url; [])
     };
-    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($url:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::status!(302; [
             ($crate::headers::LOCATION, $url),
-            $( ($key, $value) ),*
+            $( $header ),*
         ])
     };
 }
@@ -58,10 +58,10 @@ macro_rules! see_other {
     ($url:expr) => {
         $crate::see_other!($url; [])
     };
-    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($url:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::status!(303; [
             ($crate::headers::LOCATION, $url),
-            $( ($key, $value) ),*
+            $( $header ),*
         ])
     };
 }
@@ -80,10 +80,10 @@ macro_rules! temp_redirect {
     ($url:expr) => {
         $crate::temp_redirect!($url; [])
     };
-    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($url:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::status!(307; [
             ($crate::headers::LOCATION, $url),
-            $( ($key, $value) ),*
+            $( $header ),*
         ])
     };
 }
@@ -102,10 +102,10 @@ macro_rules! permanent_redirect {
     ($url:expr) => {
         $crate::permanent_redirect!($url; [])
     };
-    ($url:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($url:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::status!(308; [
             ($crate::headers::LOCATION, $url),
-            $( ($key, $value) ),*
+            $( $header ),*
         ])
     };
 }

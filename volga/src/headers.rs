@@ -41,7 +41,7 @@ pub use self::{
     cache_control::{CacheControl, ResponseCaching},
     encoding::Encoding,
     extract::*,
-    header::{Header, HttpHeaders},
+    header::{Header, HttpHeaders, TryIntoHeaderPair},
     quality::Quality,
     macros::headers
 };

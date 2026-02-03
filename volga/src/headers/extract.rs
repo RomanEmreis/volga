@@ -34,6 +34,24 @@ macro_rules! define_header {
                 pub const fn from_static(value: &'static str) -> $crate::headers::Header<$struct_name> {
                     $crate::headers::Header::<$struct_name>::from_static(value)
                 }
+                
+                /// Construct a typed header from bytes (validated).
+                #[inline]
+                pub fn from_bytes(bytes: &[u8]) -> Result<$crate::headers::Header<$struct_name>, $crate::error::Error> {
+                    $crate::headers::Header::<$struct_name>::from_bytes(bytes)
+                }
+
+                /// Wrap an owned raw HeaderValue (validated elsewhere).
+                #[inline]
+                pub fn new(value: $crate::headers::HeaderValue) -> $crate::headers::Header<$struct_name> {
+                    $crate::headers::Header::<$struct_name>::new(value)
+                }
+
+                /// Wrap a borrowed raw HeaderValue (validated elsewhere).
+                #[inline]
+                pub fn from_ref(value: &$crate::headers::HeaderValue) -> $crate::headers::Header<$struct_name> {
+                    $crate::headers::Header::<$struct_name>::from_ref(value)
+                }
             }
 
             impl FromHeaders for $struct_name {

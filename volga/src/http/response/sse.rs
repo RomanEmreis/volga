@@ -10,7 +10,7 @@ macro_rules! sse {
             []
         )
     };
-    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
             $crate::HttpBody::stream($body);
@@ -18,7 +18,7 @@ macro_rules! sse {
                 ($crate::headers::CONTENT_TYPE, "text/event-stream; charset=utf-8"),
                 ($crate::headers::CACHE_CONTROL, "no-cache"),
                 ($crate::headers::X_ACCEL_BUFFERING, "no"),
-                $( ($key, $value) ),*
+                $( $header ),*
             ]
         )
     };
@@ -34,7 +34,7 @@ macro_rules! sse {
             []
         )
     };
-    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::OK, 
             $crate::HttpBody::stream($body);
@@ -43,7 +43,7 @@ macro_rules! sse {
                 ($crate::headers::CACHE_CONTROL, "no-cache"),
                 ($crate::headers::CONNECTION, "keep-alive"),
                 ($crate::headers::X_ACCEL_BUFFERING, "no"),
-                $( ($key, $value) ),*
+                $( $header ),*
             ]
         )
     };

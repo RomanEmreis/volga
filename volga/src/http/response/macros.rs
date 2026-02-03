@@ -20,59 +20,59 @@ macro_rules! not_found {
     () => {
         $crate::status!(404)
     };
-    ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404; [ $( ($key, $value) ),* ])
+    ([ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404; [ $( $header ),* ])
     };
 
     (text: $body:expr) => {
         $crate::status!(404, text: $body)
     };
-    (text: $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, text: $body; [ $( ($key, $value) ),* ])
+    (text: $body:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404, text: $body; [ $( $header ),* ])
     };
 
     (fmt: $body:literal) => {
         $crate::status!(404, fmt: $body)
     };
-    (fmt: $body:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, fmt: $body; [ $( ($key, $value) ),* ])
+    (fmt: $body:literal; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404, fmt: $body; [ $( $header ),* ])
     };
     (fmt: $body:literal, $( $arg:expr ),+ $(,)? ) => {
         $crate::status!(404, fmt: $body, $( $arg ),+)
     };
-    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, fmt: $body, $( $arg ),+ ; [ $( ($key, $value) ),* ])
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404, fmt: $body, $( $arg ),+ ; [ $( $header ),* ])
     };
 
     (json: $text:expr) => {
         $crate::status!(404, json: $text)
     };
-    (json: $text:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, json: $text; [ $( ($key, $value) ),* ])
+    (json: $text:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404, json: $text; [ $( $header ),* ])
     };
 
     ({ $($json:tt)* }) => {
         $crate::status!(404, { $($json)* })
     };
-    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, { $($json)* }; [ $( ($key, $value) ),* ])
+    ({ $($json:tt)* }; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404, { $($json)* }; [ $( $header ),* ])
     };
 
     ($text:literal) => {
         $crate::status!(404, $text)
     };
-    ($text:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, $text; [ $( ($key, $value) ),* ])
+    ($text:literal; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404, $text; [ $( $header ),* ])
     };
     ($text:literal, $( $arg:expr ),+ $(,)?) => {
         $crate::status!(404, $text, $( $arg ),+)
     };
-    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, $text, $( $arg ),+; [ $( ($key, $value) ),* ])
+    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404, $text, $( $arg ),+; [ $( $header ),* ])
     };
 
-    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(404, $body; [ $( ($key, $value) ),* ])
+    ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(404, $body; [ $( $header ),* ])
     };
     ($body:expr) => {
         $crate::status!(404, $body)
@@ -99,59 +99,59 @@ macro_rules! bad_request {
     () => {
         $crate::status!(400)
     };
-    ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400; [ $( ($key, $value) ),* ])
+    ([ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400; [ $( $header ),* ])
     };
 
     (text: $body:expr) => {
         $crate::status!(400, text: $body)
     };
-    (text: $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, text: $body; [ $( ($key, $value) ),* ])
+    (text: $body:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400, text: $body; [ $( $header ),* ])
     };
 
     (fmt: $body:literal) => {
         $crate::status!(400, fmt: $body)
     };
-    (fmt: $body:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, fmt: $body; [ $( ($key, $value) ),* ])
+    (fmt: $body:literal; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400, fmt: $body; [ $( $header ),* ])
     };
     (fmt: $body:literal, $( $arg:expr ),+ $(,)? ) => {
         $crate::status!(400, fmt: $body, $( $arg ),+)
     };
-    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, fmt: $body, $( $arg ),+ ; [ $( ($key, $value) ),* ])
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400, fmt: $body, $( $arg ),+ ; [ $( $header ),* ])
     };
 
     (json: $text:expr) => {
         $crate::status!(400, json: $text)
     };
-    (json: $text:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, json: $text; [ $( ($key, $value) ),* ])
+    (json: $text:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400, json: $text; [ $( $header ),* ])
     };
 
     ({ $($json:tt)* }) => {
         $crate::status!(400, { $($json)* })
     };
-    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, { $($json)* }; [ $( ($key, $value) ),* ])
+    ({ $($json:tt)* }; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400, { $($json)* }; [ $( $header ),* ])
     };
 
     ($text:literal) => {
         $crate::status!(400, $text)
     };
-    ($text:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, $text; [ $( ($key, $value) ),* ])
+    ($text:literal; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400, $text; [ $( $header ),* ])
     };
     ($text:literal, $( $arg:expr ),+ $(,)?) => {
         $crate::status!(400, $text, $( $arg ),+)
     };
-    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, $text, $( $arg ),+; [ $( ($key, $value) ),* ])
+    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400, $text, $( $arg ),+; [ $( $header ),* ])
     };
 
-    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(400, $body; [ $( ($key, $value) ),* ])
+    ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(400, $body; [ $( $header ),* ])
     };
     ($body:expr) => {
         $crate::status!(400, $body)
@@ -178,59 +178,59 @@ macro_rules! created {
     () => {
         $crate::status!(201)
     };
-    ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201; [ $( ($key, $value) ),* ])
+    ([ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201; [ $( $header ),* ])
     };
 
     (text: $body:expr) => {
         $crate::status!(201, text: $body)
     };
-    (text: $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, text: $body; [ $( ($key, $value) ),* ])
+    (text: $body:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201, text: $body; [ $( $header ),* ])
     };
 
     (fmt: $body:literal) => {
         $crate::status!(201, fmt: $body)
     };
-    (fmt: $body:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, fmt: $body; [ $( ($key, $value) ),* ])
+    (fmt: $body:literal; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201, fmt: $body; [ $( $header ),* ])
     };
     (fmt: $body:literal, $( $arg:expr ),+ $(,)? ) => {
         $crate::status!(201, fmt: $body, $( $arg ),+)
     };
-    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, fmt: $body, $( $arg ),+ ; [ $( ($key, $value) ),* ])
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201, fmt: $body, $( $arg ),+ ; [ $( $header ),* ])
     };
 
     (json: $text:expr) => {
         $crate::status!(201, json: $text)
     };
-    (json: $text:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, json: $text; [ $( ($key, $value) ),* ])
+    (json: $text:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201, json: $text; [ $( $header ),* ])
     };
 
     ({ $($json:tt)* }) => {
         $crate::status!(201, { $($json)* })
     };
-    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, { $($json)* }; [ $( ($key, $value) ),* ])
+    ({ $($json:tt)* }; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201, { $($json)* }; [ $( $header ),* ])
     };
 
     ($text:literal) => {
         $crate::status!(201, $text)
     };
-    ($text:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, $text; [ $( ($key, $value) ),* ])
+    ($text:literal; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201, $text; [ $( $header ),* ])
     };
     ($text:literal, $( $arg:expr ),+ $(,)?) => {
         $crate::status!(201, $text, $( $arg ),+)
     };
-    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, $text, $( $arg ),+; [ $( ($key, $value) ),* ])
+    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201, $text, $( $arg ),+; [ $( $header ),* ])
     };
 
-    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(201, $body; [ $( ($key, $value) ),* ])
+    ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(201, $body; [ $( $header ),* ])
     };
     ($body:expr) => {
         $crate::status!(201, $body)
@@ -257,59 +257,59 @@ macro_rules! accepted {
     () => {
         $crate::status!(202)
     };
-    ([ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202; [ $( ($key, $value) ),* ])
+    ([ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202; [ $( $header ),* ])
     };
 
     (text: $body:expr) => {
         $crate::status!(202, text: $body)
     };
-    (text: $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, text: $body; [ $( ($key, $value) ),* ])
+    (text: $body:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202, text: $body; [ $( $header ),* ])
     };
 
     (fmt: $body:literal) => {
         $crate::status!(202, fmt: $body)
     };
-    (fmt: $body:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, fmt: $body; [ $( ($key, $value) ),* ])
+    (fmt: $body:literal; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202, fmt: $body; [ $( $header ),* ])
     };
     (fmt: $body:literal, $( $arg:expr ),+ $(,)? ) => {
         $crate::status!(202, fmt: $body, $( $arg ),+)
     };
-    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, fmt: $body, $( $arg ),+ ; [ $( ($key, $value) ),* ])
+    (fmt: $body:literal, $( $arg:expr ),+ $(,)? ; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202, fmt: $body, $( $arg ),+ ; [ $( $header ),* ])
     };
 
     (json: $text:expr) => {
         $crate::status!(202, json: $text)
     };
-    (json: $text:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, json: $text; [ $( ($key, $value) ),* ])
+    (json: $text:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202, json: $text; [ $( $header ),* ])
     };
 
     ({ $($json:tt)* }) => {
         $crate::status!(202, { $($json)* })
     };
-    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, { $($json)* }; [ $( ($key, $value) ),* ])
+    ({ $($json:tt)* }; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202, { $($json)* }; [ $( $header ),* ])
     };
 
     ($text:literal) => {
         $crate::status!(202, $text)
     };
-    ($text:literal; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, $text; [ $( ($key, $value) ),* ])
+    ($text:literal; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202, $text; [ $( $header ),* ])
     };
     ($text:literal, $( $arg:expr ),+ $(,)?) => {
         $crate::status!(202, $text, $( $arg ),+)
     };
-    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, $text, $( $arg ),+; [ $( ($key, $value) ),* ])
+    ($text:literal, $( $arg:expr ),+ $(,)?; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202, $text, $( $arg ),+; [ $( $header ),* ])
     };
 
-    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::status!(202, $body; [ $( ($key, $value) ),* ])
+    ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
+        $crate::status!(202, $body; [ $( $header ),* ])
     };
     ($body:expr) => {
         $crate::status!(202, $body)

@@ -83,11 +83,11 @@ macro_rules! status {
     };
 
     // status!(404; [("k","v"), ...])
-    ($status:expr ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($status:expr ; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::empty();
-            [ $( ($key, $value) ),* ]
+            [ $( $header ),* ]
         )
     };
 
@@ -105,13 +105,13 @@ macro_rules! status {
     };
 
     // status!(401, text: expr; [headers])
-    ($status:expr, text: $body:expr ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($status:expr, text: $body:expr ; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $body.into();
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                $( ($key, $value) ),*
+                $( $header ),*
             ]
         )
     };
@@ -131,13 +131,13 @@ macro_rules! status {
     };
 
     // status!(401, fmt: "literal"; [headers])
-    ($status:expr, fmt: $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($status:expr, fmt: $fmt:literal ; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::full(format!($fmt));
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                $( ($key, $value) ),*
+                $( $header ),*
             ]
         )
     };
@@ -152,13 +152,13 @@ macro_rules! status {
     };
 
     // status!(401, fmt: "literal", args...; [headers])
-    ($status:expr, fmt: $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($status:expr, fmt: $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                $( ($key, $value) ),*
+                $( $header ),*
             ]
         )
     };
@@ -180,14 +180,14 @@ macro_rules! status {
     }};
 
     // status!(401, json: expr; [headers])
-    ($status:expr, json: $body:expr ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+    ($status:expr, json: $body:expr ; [ $( $header:expr ),* $(,)? ]) => {{
         match $crate::HttpBody::json($body) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
                 body;
                 [
                     ($crate::headers::CONTENT_TYPE, "application/json"),
-                    $( ($key, $value) ),*
+                    $( $header ),*
                 ]
             ),
             Err(err) => Err(err),
@@ -211,14 +211,14 @@ macro_rules! status {
     }};
 
     // status!(401, { ... }; [headers])
-    ($status:expr, { $($json:tt)* } ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+    ($status:expr, { $($json:tt)* } ; [ $( $header:expr ),* $(,)? ]) => {{
         match $crate::HttpBody::json($crate::json::json_internal!({ $($json)* })) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
                 body;
                 [
                     ($crate::headers::CONTENT_TYPE, "application/json"),
-                    $( ($key, $value) ),*
+                    $( $header ),*
                 ]
             ),
             Err(err) => Err(err),
@@ -250,7 +250,7 @@ macro_rules! status {
     }};
 
     // status!(401, "Unauthorized!"; [headers])
-    ($status:expr, $fmt:literal ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+    ($status:expr, $fmt:literal ; [ $( $header:expr ),* $(,)? ]) => {{
         const __S: &str = $fmt;
         
         if $crate::utils::str::memchr_contains(b'{', __S.as_bytes()) {
@@ -259,7 +259,7 @@ macro_rules! status {
                 $crate::HttpBody::full(format!($fmt));
                 [
                     ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                    $( ($key, $value) ),*
+                    $( $header ),*
                 ]
             )
         } else {
@@ -268,7 +268,7 @@ macro_rules! status {
                 $crate::HttpBody::text(__S);
                 [
                     ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                    $( ($key, $value) ),*
+                    $( $header ),*
                 ]
             )
         }
@@ -284,13 +284,13 @@ macro_rules! status {
     };
 
     // status!(401, "Unauthorized: {}", reason; [headers])
-    ($status:expr, $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($status:expr, $fmt:literal, $( $arg:expr ),+ $(,)? ; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
             $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
             [
                 ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
-                $( ($key, $value) ),*
+                $( $header ),*
             ]
         )
     };
@@ -312,14 +312,14 @@ macro_rules! status {
     }};
 
     // status!(401, expr; [headers])
-    ($status:expr, $body:expr ; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+    ($status:expr, $body:expr ; [ $( $header:expr ),* $(,)? ]) => {{
         match $crate::HttpBody::json($body) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
                 body;
                 [
                     ($crate::headers::CONTENT_TYPE, "application/json"),
-                    $( ($key, $value) ),*
+                    $( $header ),*
                 ]
             ),
             Err(err) => Err(err),

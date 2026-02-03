@@ -3,7 +3,7 @@
 use std::fmt::{Debug, Formatter};
 use crate::{
     error::Error,
-    headers::{Header, HeaderName, HeaderValue, HeaderMap, FromHeaders},
+    headers::{HeaderName, HeaderValue, HeaderMap, TryIntoHeaderPair},
     http::{HttpBody, HttpResponse, Response, StatusCode}
 };
 
@@ -67,17 +67,11 @@ impl HttpResponseBuilder {
     ///
     /// > **Note:** This may result in multiple values for the same header.
     #[inline]
-    pub fn header<T>(self, header: impl TryInto<Header<T>, Error = impl Into<Error>>) -> Self
-    where 
-        T: FromHeaders
-    {
+    pub fn header(self, header: impl TryIntoHeaderPair) -> Self {
         self.and_then(move |mut inner| {
-            let header = header
-                .try_into()
-                .map_err(Into::into)?;
-
+            let (name, value) = header.try_into_pair()?;
             inner.headers
-                .try_append(T::NAME, header.into_inner())
+                .try_append(name, value)
                 .map_err(Error::from)?;
             Ok(inner)
         })
@@ -185,13 +179,6 @@ macro_rules! response {
     ($status:expr, $body:expr) => {
         $crate::response!($status, $body; [])
     };
-    ($status:expr, $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
-        $crate::builder!($status)
-        $(
-            .header_raw($key, $value)
-        )*
-            .body($body)
-    };
     ($status:expr, $body:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::builder!($status)
         $(
@@ -211,7 +198,7 @@ mod tests {
     #[tokio::test]
     async fn builder_sets_status_headers_and_body() {
         let response = builder!(200)
-            .header::<ContentType>("text/plain")
+            .header(ContentType::from_static("text/plain"))
             .body(HttpBody::from("hello"))
             .expect("response should build");
 
