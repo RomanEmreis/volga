@@ -1,6 +1,6 @@
 [package]
 name = "volga-rate-limiter"
-version = "0.8.3"
+version = "0.8.4"
 readme = "README.md"
 description = "Macros for Volga Web Framework"
 edition.workspace = true

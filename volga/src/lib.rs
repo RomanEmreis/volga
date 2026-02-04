@@ -53,6 +53,8 @@ pub mod ws;
 pub mod auth;
 #[cfg(feature = "rate-limiting")]
 pub mod rate_limiting;
+#[cfg(feature = "openapi")]
+pub mod openapi;
 #[cfg(any(test, feature = "test"))]
 pub mod test;
 

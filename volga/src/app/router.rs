@@ -10,6 +10,9 @@ use crate::http::endpoints::{
     handlers::{Func, GenericHandler},
 };
 
+#[cfg(feature = "openapi")]
+use crate::openapi::OpenApiRouteConfig;
+
 #[cfg(feature = "middleware")]
 use {
     crate::middleware::MiddlewareFn,
@@ -329,6 +332,11 @@ impl App {
         let pat: &str = pattern.as_ref();
         endpoints.map_route(method.clone(), pat, handler.clone());
 
+        #[cfg(feature = "openapi")]
+        if let Some(registry) = self.openapi.as_ref() {
+            registry.register_route(&method, pat);
+        }
+
         if self.implicit_head && method == Method::GET {
             let head = Method::HEAD;
             if !endpoints.contains(&head, pat) {
@@ -338,9 +346,9 @@ impl App {
 
         Route {
             app: self,
-            #[cfg(feature = "middleware")]
+            #[cfg(any(feature = "middleware", feature = "openapi"))]
             method,
-            #[cfg(feature = "middleware")]
+            #[cfg(any(feature = "middleware", feature = "openapi"))]
             pattern,
         }
     }
@@ -349,9 +357,9 @@ impl App {
 /// Represents a route reference
 pub struct Route<'a> {
     pub(crate) app: &'a mut App,
-    #[cfg(feature = "middleware")]
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
     pub(crate) method: Method,
-    #[cfg(feature = "middleware")]
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
     pub(crate) pattern: Cow<'a, str>,
 }
 
@@ -362,7 +370,9 @@ pub struct RouteGroup<'a> {
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
     #[cfg(feature = "middleware")]
-    pub(crate) cors: CorsOverride
+    pub(crate) cors: CorsOverride,
+    #[cfg(feature = "openapi")]
+    pub(crate) openapi_config: OpenApiRouteConfig,
 }
 
 impl std::fmt::Debug for Route<'_> {
@@ -395,6 +405,35 @@ impl<'a> DerefMut for Route<'a> {
     }
 }
 
+#[cfg(feature = "openapi")]
+impl<'a> Route<'a> {
+    /// Configures OpenAPI metadata for this route.
+    pub fn with_openapi<T>(self, config: T) -> Self
+    where
+        T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
+    {
+        let Some(registry) = self.app.openapi.as_ref() else {
+            return self;
+        };
+
+        let config = config(OpenApiRouteConfig::default());
+        registry.apply_route_config(&self.method, self.pattern.as_ref(), &config);
+        self
+    }
+}
+
+#[cfg(feature = "openapi")]
+impl<'a> RouteGroup<'a> {
+    /// Configures OpenAPI metadata for this route group.
+    pub fn with_openapi<T>(&mut self, config: T) -> &mut Self
+    where
+        T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
+    {
+        self.openapi_config = config(self.openapi_config.clone());
+        self
+    }
+}
+
 macro_rules! define_route_group_methods {
     ($(($fn_name:ident, $http_method:expr))*) => {
         impl<'a> RouteGroup<'a> {
@@ -406,6 +445,8 @@ macro_rules! define_route_group_methods {
                     middleware: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
                     cors: CorsOverride::Inherit,
+                    #[cfg(feature = "openapi")]
+                    openapi_config: OpenApiRouteConfig::default(),
                 }
             }
 
@@ -430,12 +471,27 @@ macro_rules! define_route_group_methods {
                         route = route.map_middleware(filter.clone());
                     }
 
+                    #[cfg(feature = "openapi")]
+                    {
+                        let openapi_config = self.openapi_config.clone();
+                        route = route.with_openapi(|config| config.merge(&openapi_config));
+                    }
+
                     route
                 }
 
                 #[cfg(not(feature = "middleware"))]
                 {
-                    self.app.map_route_owned($http_method, pattern, handler)
+                    let route = self.app.map_route_owned($http_method, pattern, handler);
+
+                    #[cfg(feature = "openapi")]
+                    let route = {
+                        let openapi_config = self.openapi_config.clone();
+                        route.with_openapi(|config| config.merge(&openapi_config))
+                    };
+
+                    route
+
                 }
             }
             )*

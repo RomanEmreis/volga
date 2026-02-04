@@ -51,6 +51,9 @@ use crate::auth::bearer::BearerAuthConfig;
 #[cfg(feature = "tls")]
 use crate::tls::TlsConfig;
 
+#[cfg(feature = "openapi")]
+use crate::openapi::{OpenApiConfig, OpenApiRegistry};
+
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
 
@@ -154,6 +157,14 @@ pub struct App {
     ))]
     pub(super) decompression_limits: DecompressionLimits,
 
+    /// OpenAPI registry and configuration.
+    #[cfg(feature = "openapi")]
+    pub(super) openapi: Option<OpenApiRegistry>,
+
+    /// OpenAPI configuration.
+    #[cfg(feature = "openapi")]
+    pub(super) openapi_config: Option<OpenApiConfig>,
+
     /// TCP connection parameters
     connection: Connection,
     
@@ -238,6 +249,10 @@ impl App {
                 feature = "decompression-full"
             ))]
             decompression_limits: Default::default(),
+            #[cfg(feature = "openapi")]
+            openapi: None,
+            #[cfg(feature = "openapi")]
+            openapi_config: None,
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
