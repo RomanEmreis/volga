@@ -50,7 +50,7 @@ macro_rules! headers {
                 
                 #[inline]
                 fn from_headers(headers: &$crate::headers::HeaderMap) -> Option<&$crate::headers::HeaderValue> {
-                    headers.get($header_name)
+                    headers.get(Self::NAME)
                 }
             }
         )*
@@ -66,7 +66,7 @@ mod test {
     use hyper::header::HeaderValue;
     use hyper::HeaderMap;
     use crate::headers::{Header, FromHeaders};
-
+    
     headers! {
         (ApiKey, "x-api-key")
     }

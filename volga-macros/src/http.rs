@@ -42,7 +42,7 @@ pub(super) fn expand_http_header(header: &attr::HeaderInput, input: &syn::ItemSt
             
             #[inline]
             fn from_headers(headers: &::volga::headers::HeaderMap) -> Option<&::volga::headers::HeaderValue> {
-                headers.get(#header_expr)
+                headers.get(Self::NAME)
             }
         }
     })

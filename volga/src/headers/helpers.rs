@@ -3,6 +3,7 @@ use httpdate::parse_http_date;
 
 use crate::headers::{
     ETag,
+    ETagRef,
     HttpHeaders,
     IF_MODIFIED_SINCE,
     IF_NONE_MATCH
@@ -11,9 +12,21 @@ use crate::headers::{
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn validate_etag(etag: &ETag, headers: &HttpHeaders) -> bool {
-    headers.get_raw(&IF_NONE_MATCH)
-        .and_then(|if_none_match| if_none_match.to_str().ok())
-        .is_some_and(|value| value.split(',').any(|v| v.trim() == etag.as_ref()))
+    let Some(hv) = headers.get_raw(&IF_NONE_MATCH) else {
+        return false;
+    };
+
+    let Ok(s) = hv.to_str() else {
+        return false;
+    };
+
+     let target_tag = etag.tag();
+
+    s.split(',')
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
+        .filter_map(|raw| ETagRef::parse(raw).ok())
+        .any(|candidate| candidate.weak_eq_tag(target_tag))
 }
 
 #[inline]
@@ -42,7 +55,7 @@ mod tests {
         
         let headers = HttpHeaders::from(headers);
         
-        assert!(validate_etag(&ETag::new("123"), &headers));
+        assert!(validate_etag(&ETag::strong("123"), &headers));
     }
 
     #[test]
@@ -52,7 +65,7 @@ mod tests {
 
         let headers = HttpHeaders::from(headers);
 
-        assert!(!validate_etag(&ETag::new("555"), &headers));
+        assert!(!validate_etag(&ETag::strong("555"), &headers));
     }
 
     #[test]
@@ -62,7 +75,7 @@ mod tests {
 
         let headers = HttpHeaders::from(headers);
 
-        assert!(validate_etag(&ETag::new("123"), &headers));
+        assert!(validate_etag(&ETag::strong("123"), &headers));
     }
 
     #[test]
@@ -72,14 +85,14 @@ mod tests {
 
         let headers = HttpHeaders::from(headers);
 
-        assert!(!validate_etag(&ETag::new("555"), &headers));
+        assert!(!validate_etag(&ETag::strong("555"), &headers));
     }
 
     #[test]
     fn it_validates_etag_when_if_none_match_missing() {
         let headers = HttpHeaders::from(HeaderMap::new());
 
-        assert!(!validate_etag(&ETag::new("123"), &headers));
+        assert!(!validate_etag(&ETag::strong("123"), &headers));
     }
     
     #[test]

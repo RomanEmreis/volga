@@ -7,9 +7,9 @@ use hyper::header::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
     ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE,
     ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, AGE, ALLOW, ALT_SVC,
-    AUTHORIZATION, CACHE_CONTROL, CONNECTION, CONTENT_DISPOSITION, CONTENT_ENCODING,
+    AUTHORIZATION, CONNECTION, CONTENT_DISPOSITION, CONTENT_ENCODING,
     CONTENT_LANGUAGE, CONTENT_LENGTH, CONTENT_LOCATION, CONTENT_RANGE, CONTENT_SECURITY_POLICY,
-    CONTENT_SECURITY_POLICY_REPORT_ONLY, CONTENT_TYPE, COOKIE, DATE, DNT, ETAG, EXPECT, EXPIRES,
+    CONTENT_SECURITY_POLICY_REPORT_ONLY, CONTENT_TYPE, COOKIE, DATE, DNT, EXPECT, EXPIRES,
     FORWARDED, FROM, HOST, IF_MATCH, IF_MODIFIED_SINCE, IF_NONE_MATCH, IF_RANGE,
     IF_UNMODIFIED_SINCE, LAST_MODIFIED, LINK, LOCATION, MAX_FORWARDS, ORIGIN, PRAGMA,
     PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, PUBLIC_KEY_PINS, PUBLIC_KEY_PINS_REPORT_ONLY, RANGE,
@@ -59,7 +59,7 @@ macro_rules! define_header {
                 
                 #[inline]
                 fn from_headers(headers: &$crate::headers::HeaderMap) -> Option<&$crate::headers::HeaderValue> {
-                    headers.get($header_name)
+                    headers.get(Self::NAME)
                 }
             }
         )*
@@ -72,9 +72,9 @@ define_header! {
     (AccessControlAllowMethods, ACCESS_CONTROL_ALLOW_METHODS), (AccessControlAllowOrigin, ACCESS_CONTROL_ALLOW_ORIGIN),
     (AccessControlAllowExposeHeaders, ACCESS_CONTROL_EXPOSE_HEADERS), (AccessControlAllowMaxAge, ACCESS_CONTROL_MAX_AGE),
     (AccessControlRequestHeaders, ACCESS_CONTROL_REQUEST_HEADERS), (AccessControlRequestMethod, ACCESS_CONTROL_REQUEST_METHOD), (Age, AGE), (Allow, ALLOW), (AltSvc, ALT_SVC),
-    (Authorization, AUTHORIZATION), (CacheControl, CACHE_CONTROL), (Connection, CONNECTION), (ContentDisposition, CONTENT_DISPOSITION), (ContentEncoding, CONTENT_ENCODING),
+    (Authorization, AUTHORIZATION), (Connection, CONNECTION), (ContentDisposition, CONTENT_DISPOSITION), (ContentEncoding, CONTENT_ENCODING),
     (ContentLanguage, CONTENT_LANGUAGE), (ContentLength, CONTENT_LENGTH), (ContentLocation, CONTENT_LOCATION), (ContentRange, CONTENT_RANGE), (ContentSecurityPolicy, CONTENT_SECURITY_POLICY),
-    (ContentSecurityPolicyReportOnly, CONTENT_SECURITY_POLICY_REPORT_ONLY), (ContentType, CONTENT_TYPE), (Cookie, COOKIE), (Date, DATE), (Dnt, DNT), (Etag, ETAG), (Expect, EXPECT), (Expires, EXPIRES),
+    (ContentSecurityPolicyReportOnly, CONTENT_SECURITY_POLICY_REPORT_ONLY), (ContentType, CONTENT_TYPE), (Cookie, COOKIE), (Date, DATE), (Dnt, DNT), (Expect, EXPECT), (Expires, EXPIRES),
     (Forwarded, FORWARDED), (From, FROM), (Host, HOST), (IfMatch, IF_MATCH), (IfModifiedSince, IF_MODIFIED_SINCE), (IfNoneMatch, IF_NONE_MATCH), (IfRange, IF_RANGE),
     (IfUnmodifiedSince, IF_UNMODIFIED_SINCE), (LastModified, LAST_MODIFIED), (Link, LINK), (Location, LOCATION), (MaxForwards, MAX_FORWARDS), (Origin, ORIGIN), (Pragma, PRAGMA),
     (ProxyAuthenticate, PROXY_AUTHENTICATE), (ProxyAuthorization, PROXY_AUTHORIZATION), (PublicKeyPins, PUBLIC_KEY_PINS), (PublicKeyPinsReportOnly, PUBLIC_KEY_PINS_REPORT_ONLY), (Range, RANGE),

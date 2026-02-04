@@ -25,7 +25,7 @@ macro_rules! form {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                    $crate::headers::ContentType::form(),
                 ]
             ),
             Err(err) => Err(err),
@@ -39,7 +39,7 @@ macro_rules! form {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                    $crate::headers::ContentType::form(),
                     $( $header ),*
                 ]
             ),
@@ -54,7 +54,7 @@ macro_rules! form {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                    $crate::headers::ContentType::form(),
                     $( $header ),*
                 ]
             ),
@@ -69,7 +69,7 @@ macro_rules! form {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                    $crate::headers::ContentType::form(),
                 ]
             ),
             Err(err) => Err(err),

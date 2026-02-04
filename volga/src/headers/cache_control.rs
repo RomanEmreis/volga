@@ -2,7 +2,15 @@
 
 use std::{fmt, time::SystemTime};
 use crate::{
-    headers::{HeaderValue, ETag},
+    headers::{
+        CACHE_CONTROL, 
+        FromHeaders,
+        HeaderMap, 
+        HeaderName, 
+        HeaderValue,
+        Header, 
+        ETag
+    },
     error::Error
 };
 
@@ -13,8 +21,7 @@ use std::fs::Metadata;
 use {
     crate::{
         App, HttpResponse, HttpResult, 
-        routing::{Route, RouteGroup}, 
-        headers::CACHE_CONTROL
+        routing::{Route, RouteGroup}
     },
     std::future::Future
 };
@@ -44,7 +51,7 @@ pub const IMMUTABLE: &str = "immutable";
 /// Represents the HTTP [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
 /// header holds directives (instructions) in both requests and responses that control caching 
 /// in browsers and shared caches (e.g., Proxies, CDNs).
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CacheControl {
     /// The `no-cache` response directive indicates that the response can be stored in caches, 
     /// but the response must be validated with the origin server before each reuse, 
@@ -91,6 +98,15 @@ pub struct CacheControl {
     /// The `immutable` response directive indicates that the response will not be updated 
     /// while it's fresh.
     immutable: bool,
+}
+
+impl FromHeaders for CacheControl {
+    const NAME: HeaderName = CACHE_CONTROL;
+
+    #[inline]
+    fn from_headers(headers: &HeaderMap) -> Option<&HeaderValue> {
+        headers.get(Self::NAME)
+    }
 }
 
 impl fmt::Display for CacheControl {
@@ -148,6 +164,30 @@ impl TryFrom<CacheControl> for HeaderValue {
 }
 
 impl CacheControl {
+    /// Creates a new instance of [`Header<T>`] from a `static str`
+    #[inline(always)]
+    pub const fn from_static(value: &'static str) -> Header<Self> {
+        Header::<Self>::from_static(value)
+    }
+                
+    /// Construct a typed header from bytes (validated).
+    #[inline]
+    pub fn from_bytes(bytes: &[u8]) -> Result<Header<Self>, Error> {
+        Header::<Self>::from_bytes(bytes)
+    }
+
+    /// Wrap an owned raw HeaderValue (validated elsewhere).
+    #[inline]
+    pub fn new(value: HeaderValue) -> Header<Self> {
+        Header::<Self>::new(value)
+    }
+
+    /// Wrap a borrowed raw HeaderValue (validated elsewhere).
+    #[inline]
+    pub fn from_ref(value: &HeaderValue) -> Header<Self> {
+        Header::<Self>::from_ref(value)
+    }
+
     /// Enables `no-cache`: forces caches to validate with origin server before reuse.
     /// Disables `immutable`, since they contradict each other.
     pub fn with_no_cache(mut self) -> Self {
@@ -444,7 +484,7 @@ mod tests {
     #[test]
     fn if_returns_etag() {
         let caching = ResponseCaching {
-          etag: ETag::new("123"), 
+          etag: ETag::strong("123"), 
           last_modified: SystemTime::now(), 
           cache_control: Default::default()
         };
@@ -456,7 +496,7 @@ mod tests {
     fn if_returns_last_modified_string() {
         let now = SystemTime::now();
         let caching = ResponseCaching {
-            etag: ETag::new("123"),
+            etag: ETag::strong("123"),
             last_modified: now,
             cache_control: Default::default()
         };
@@ -474,7 +514,7 @@ mod tests {
         };
         
         let caching = ResponseCaching {
-            etag: ETag::new("123"),
+            etag: ETag::strong("123"),
             last_modified: SystemTime::now(),
             cache_control
         };

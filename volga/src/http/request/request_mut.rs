@@ -458,6 +458,7 @@ mod sealed {
 
 #[cfg(test)]
 #[allow(unreachable_pub)]
+#[allow(unused)]
 mod tests {
     use super::*;
     use crate::headers::headers;

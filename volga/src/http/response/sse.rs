@@ -15,8 +15,8 @@ macro_rules! sse {
             $crate::http::StatusCode::OK, 
             $crate::HttpBody::stream($body);
             [
-                ($crate::headers::CONTENT_TYPE, "text/event-stream; charset=utf-8"),
-                ($crate::headers::CACHE_CONTROL, "no-cache"),
+                $crate::headers::ContentType::events(),
+                $crate::headers::CacheControl::no_cache(),
                 ($crate::headers::X_ACCEL_BUFFERING, "no"),
                 $( $header ),*
             ]
@@ -39,8 +39,8 @@ macro_rules! sse {
             $crate::http::StatusCode::OK, 
             $crate::HttpBody::stream($body);
             [
-                ($crate::headers::CONTENT_TYPE, "text/event-stream; charset=utf-8"),
-                ($crate::headers::CACHE_CONTROL, "no-cache"),
+                $crate::headers::ContentType::events(),
+                $crate::headers::CacheControl::no_cache(),
                 ($crate::headers::CONNECTION, "keep-alive"),
                 ($crate::headers::X_ACCEL_BUFFERING, "no"),
                 $( $header ),*
@@ -71,7 +71,7 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert_eq!(String::from_utf8_lossy(body), "data: hi!\n\n");
-        assert_eq!(response.headers().get(&CONTENT_TYPE).unwrap(), "text/event-stream; charset=utf-8");
+        assert_eq!(response.headers().get(&CONTENT_TYPE).unwrap(), "text/event-stream");
         assert_eq!(response.headers().get(&CACHE_CONTROL).unwrap(), "no-cache");
         #[cfg(all(not(feature = "http2"), feature = "http1"))]
         assert_eq!(response.headers().get(&CONNECTION).unwrap(), "keep-alive");
@@ -90,7 +90,7 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert_eq!(String::from_utf8_lossy(body), "data: hi!\n\n");
-        assert_eq!(response.headers().get(&CONTENT_TYPE).unwrap(), "text/event-stream; charset=utf-8");
+        assert_eq!(response.headers().get(&CONTENT_TYPE).unwrap(), "text/event-stream");
         assert_eq!(response.headers().get(&CACHE_CONTROL).unwrap(), "no-cache");
         #[cfg(all(not(feature = "http2"), feature = "http1"))]
         assert_eq!(response.headers().get(&CONNECTION).unwrap(), "keep-alive");

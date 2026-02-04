@@ -31,7 +31,7 @@ macro_rules! html {
             $crate::http::StatusCode::OK, 
             $crate::HttpBody::full($body);
             [
-                ($crate::headers::CONTENT_TYPE, "text/html; charset=utf-8"),
+                $crate::headers::ContentType::html_utf_8(),
                 $( $header ),*
             ]
         )

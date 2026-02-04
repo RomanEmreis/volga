@@ -270,6 +270,7 @@ impl HttpRequest {
 
 #[cfg(test)]
 #[allow(unreachable_pub)]
+#[allow(unused)]
 mod tests {
     use http_body_util::BodyExt;
     use crate::headers::{Header, Vary, headers};

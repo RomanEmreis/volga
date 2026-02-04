@@ -5,8 +5,7 @@ use crate::{Json, Form, ByteStream, ok, status, form, response, sse, stream};
 use crate::http::endpoints::args::byte_stream::IntoByteResult;
 use crate::error::Error;
 use crate::http::{sse::SseStream, StatusCode};
-use crate::headers::{HeaderMap, CONTENT_TYPE};
-use mime::TEXT_PLAIN_UTF_8;
+use crate::headers::{HeaderMap, ContentType};
 use serde::Serialize;
 use futures_util::Stream;
 
@@ -85,7 +84,7 @@ impl IntoResponse for &'static str {
         response!(
             StatusCode::OK,
             HttpBody::from_static_text(self);
-            [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
+            [ContentType::text_utf_8()]
         )
     }
 }
@@ -96,7 +95,7 @@ impl IntoResponse for Cow<'static, str> {
         response!(
             StatusCode::OK,
             HttpBody::text(self);
-            [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
+            [ContentType::text_utf_8()]
         )
     }
 }
@@ -107,7 +106,7 @@ impl IntoResponse for String {
         response!(
             StatusCode::OK,
             HttpBody::text(self);
-            [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
+            [ContentType::text_utf_8()]
         )
     }
 }
@@ -118,7 +117,7 @@ impl IntoResponse for Box<str> {
         response!(
             StatusCode::OK,
             HttpBody::text(self.into_string());
-            [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
+            [ContentType::text_utf_8()]
         )
     }
 }
@@ -259,7 +258,7 @@ macro_rules! impl_into_response {
                 response!(
                     $crate::http::StatusCode::OK,
                     self.into();
-                    [($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8")]
+                    [ContentType::text_utf_8()]
                 )
             }
         })*
@@ -323,7 +322,7 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "data: hi!\n\n");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/event-stream; charset=utf-8");
+        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/event-stream");
         assert_eq!(response.headers().get("Cache-Control").unwrap(), "no-cache");
         #[cfg(all(not(feature = "http2"), feature = "http1"))]
         assert_eq!(response.headers().get("Connection").unwrap(), "keep-alive");

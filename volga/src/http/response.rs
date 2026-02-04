@@ -327,6 +327,7 @@ impl HttpResponse {
 
 #[cfg(test)]
 #[allow(unreachable_pub)]
+#[allow(unused)]
 mod tests {
     use hyper::StatusCode;
     use http_body_util::BodyExt;

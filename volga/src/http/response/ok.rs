@@ -126,7 +126,7 @@ macro_rules! ok {
         $crate::response!(
             $crate::http::StatusCode::OK,
             $body.into();
-            [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+            [ $crate::headers::ContentType::text_utf_8() ]
         )
     };
 
@@ -136,7 +136,7 @@ macro_rules! ok {
             $crate::http::StatusCode::OK,
             $body.into();
             [
-                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                $crate::headers::ContentType::text_utf_8(),
                 $( $header ),*
             ]
         )
@@ -152,7 +152,7 @@ macro_rules! ok {
         $crate::response!(
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt));
-            [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+            [ $crate::headers::ContentType::text_utf_8() ]
         )
     };
 
@@ -162,7 +162,7 @@ macro_rules! ok {
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt));
             [
-                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                $crate::headers::ContentType::text_utf_8(),
                 $( $header ),*
             ]
         )
@@ -173,7 +173,7 @@ macro_rules! ok {
         $crate::response!(
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
-            [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+            [ $crate::headers::ContentType::text_utf_8() ]
         )
     };
 
@@ -183,7 +183,7 @@ macro_rules! ok {
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
             [
-                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                $crate::headers::ContentType::text_utf_8(),
                 $( $header ),*
             ]
         )
@@ -199,7 +199,7 @@ macro_rules! ok {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
                 body;
-                [ ($crate::headers::CONTENT_TYPE, "application/json") ]
+                [ $crate::headers::ContentType::json() ]
             ),
             Err(err) => Err(err),
         }
@@ -212,7 +212,7 @@ macro_rules! ok {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                    $crate::headers::ContentType::json(),
                     $( $header ),*
                 ]
             ),
@@ -230,7 +230,7 @@ macro_rules! ok {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
                 body;
-                [ ($crate::headers::CONTENT_TYPE, "application/json") ]
+                [ $crate::headers::ContentType::json() ]
             ),
             Err(err) => Err(err),
         }
@@ -242,7 +242,7 @@ macro_rules! ok {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
                 body;
-                [ ($crate::headers::CONTENT_TYPE, "application/json") ]
+                [ $crate::headers::ContentType::json() ]
             ),
             Err(err) => Err(err),
         }
@@ -255,7 +255,7 @@ macro_rules! ok {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                    $crate::headers::ContentType::json(),
                     $( $header ),*
                 ]
             ),
@@ -276,13 +276,13 @@ macro_rules! ok {
             $crate::response!(
                 $crate::http::StatusCode::OK,
                 $crate::HttpBody::full(format!($fmt));
-                [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+                [ $crate::headers::ContentType::text_utf_8() ]
             )
         } else {
             $crate::response!(
                 $crate::http::StatusCode::OK,
                 $crate::HttpBody::text(__S);
-                [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+                [ $crate::headers::ContentType::text_utf_8() ]
             )
         }
     }};
@@ -296,7 +296,7 @@ macro_rules! ok {
                 $crate::http::StatusCode::OK,
                 $crate::HttpBody::full(format!($fmt));
                 [
-                    ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                    $crate::headers::ContentType::text_utf_8(),
                     $( $header ),*
                 ]
             )
@@ -305,7 +305,7 @@ macro_rules! ok {
                 $crate::http::StatusCode::OK,
                 $crate::HttpBody::text(__S);
                 [
-                    ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                    $crate::headers::ContentType::text_utf_8(),
                     $( $header ),*
                 ]
             )
@@ -317,7 +317,7 @@ macro_rules! ok {
         $crate::response!(
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
-            [ ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8") ]
+            [ $crate::headers::ContentType::text_utf_8() ]
         )
     };
 
@@ -327,7 +327,7 @@ macro_rules! ok {
             $crate::http::StatusCode::OK,
             $crate::HttpBody::full(format!($fmt, $( $arg ),+));
             [
-                ($crate::headers::CONTENT_TYPE, "text/plain; charset=utf-8"),
+                $crate::headers::ContentType::text_utf_8(),
                 $( $header ),*
             ]
         )
@@ -343,7 +343,7 @@ macro_rules! ok {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
                 body;
-                [ ($crate::headers::CONTENT_TYPE, "application/json") ]
+                [ $crate::headers::ContentType::json() ]
             ),
             Err(err) => Err(err),
         }
@@ -356,7 +356,7 @@ macro_rules! ok {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/json"),
+                    $crate::headers::ContentType::json(),
                     $( $header ),*
                 ]
             ),
@@ -367,6 +367,7 @@ macro_rules! ok {
 
 #[cfg(test)]
 #[allow(unreachable_pub)]
+#[allow(unused)]
 mod tests {
     use http_body_util::BodyExt;
     use serde::Serialize;
