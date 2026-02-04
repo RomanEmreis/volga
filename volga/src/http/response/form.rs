@@ -25,7 +25,7 @@ macro_rules! form {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                    $crate::headers::ContentType::form(),
                 ]
             ),
             Err(err) => Err(err),
@@ -33,14 +33,14 @@ macro_rules! form {
     };
     
     // handles form!({ "key": "value" }; [("key", "val")])
-    ({ $($json:tt)* }; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ({ $($json:tt)* }; [ $( $header:expr ),* $(,)? ]) => {
         match $crate::HttpBody::form($crate::json::json_internal!({ $($json)* })) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
-                    $( ($key, $value) ),*
+                    $crate::headers::ContentType::form(),
+                    $( $header ),*
                 ]
             ),
             Err(err) => Err(err),
@@ -48,14 +48,14 @@ macro_rules! form {
     };
     
     // handles form!(object; [("key", "val")])
-    ($body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
         match $crate::HttpBody::form($body) {
             Ok(body) => $crate::response!(
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
-                    $( ($key, $value) ),*
+                    $crate::headers::ContentType::form(),
+                    $( $header ),*
                 ]
             ),
             Err(err) => Err(err),
@@ -69,7 +69,7 @@ macro_rules! form {
                 $crate::http::StatusCode::OK,
                 body;
                 [
-                    ($crate::headers::CONTENT_TYPE, "application/x-www-form-urlencoded"),
+                    $crate::headers::ContentType::form(),
                 ]
             ),
             Err(err) => Err(err),

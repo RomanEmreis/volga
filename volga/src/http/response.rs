@@ -154,7 +154,7 @@ impl HttpResponse {
     pub fn get_header<T: FromHeaders>(&self) -> Option<Header<T>> {
         self.headers()
             .get(T::NAME)
-            .map(Header::new)
+            .map(Header::from_ref)
     }
 
     /// Returns a view of all values associated with this HTTP header.
@@ -163,7 +163,7 @@ impl HttpResponse {
         self.headers()
             .get_all(T::NAME)
             .iter()
-            .map(Header::new)
+            .map(Header::from_ref)
     }
 
     /// Inserts the header into the response, replacing any existing values
@@ -327,6 +327,7 @@ impl HttpResponse {
 
 #[cfg(test)]
 #[allow(unreachable_pub)]
+#[allow(unused)]
 mod tests {
     use hyper::StatusCode;
     use http_body_util::BodyExt;
@@ -351,8 +352,8 @@ mod tests {
     async fn in_creates_text_response_with_custom_headers() {       
         let mut response = HttpResponse::builder()
             .status(400)
-            .header("x-api-key", "some api key")
-            .header("Content-Type", "text/plain")
+            .header_raw("x-api-key", "some api key")
+            .header_raw("Content-Type", "text/plain")
             .body(HttpBody::full(String::from("Hello World!")))
             .unwrap();
 
@@ -368,8 +369,8 @@ mod tests {
     async fn in_creates_str_text_response_with_custom_headers() {
         let mut response = HttpResponse::builder()
             .status(200)
-            .header("x-api-key", "some api key")
-            .header("Content-Type", "text/plain")
+            .header_raw("x-api-key", "some api key")
+            .header_raw("Content-Type", "text/plain")
             .body(HttpBody::full("Hello World!"))
             .unwrap();
 
@@ -387,8 +388,8 @@ mod tests {
         
         let mut response = HttpResponse::builder()
             .status(200)
-            .header("x-api-key", "some api key")
-            .header("Content-Type", "application/json")
+            .header_raw("x-api-key", "some api key")
+            .header_raw("Content-Type", "application/json")
             .body(HttpBody::json(content).unwrap())
             .unwrap();
 

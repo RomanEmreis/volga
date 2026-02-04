@@ -121,7 +121,7 @@ impl Basic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::headers::{HeaderMap, HeaderValue, Header, Authorization, AUTHORIZATION};
+    use crate::headers::{HeaderMap, HeaderValue, Authorization, AUTHORIZATION};
     use base64::engine::general_purpose::STANDARD;
     use base64::Engine;
     use hyper::Request;
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn it_tests_try_from_authorization_header() {
         let header_value = create_basic_auth_header("testuser", "testpass");
-        let auth_header = Header::<Authorization>::new(&header_value);
+        let auth_header = Authorization::new(header_value);
         let basic = Basic::try_from(auth_header).unwrap();
 
         let expected = STANDARD.encode("testuser:testpass");

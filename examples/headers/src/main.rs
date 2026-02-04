@@ -41,8 +41,8 @@ async fn main() -> std::io::Result<()> {
     app.map_get("/hello-again", || async {
         HttpResponse::builder()
             .status(200)
-            .header("x-api-key", "some api key")
-            .header("Content-Type", "text/plain")
+            .header_raw("x-api-key", "some api key")
+            .header_raw("Content-Type", "text/plain")
             .body(HttpBody::full("Hello World!"))
     });
 

@@ -1,4 +1,5 @@
 ﻿#![allow(missing_docs)]
+#![allow(unused)]
 #![cfg(all(feature = "test", feature = "middleware"))]
 
 use hyper::StatusCode;

@@ -37,7 +37,7 @@ macro_rules! file {
         $crate::file!($file_name, $body; [])
     };
     
-    ($file_name:expr, $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {{
+    ($file_name:expr, $body:expr; [ $( $header:expr),* $(,)? ]) => {{
         let mime = $crate::fs::get_mime_or_octet_stream($file_name);
         $crate::response!(
             $crate::http::StatusCode::OK, 
@@ -45,7 +45,7 @@ macro_rules! file {
             [
                 ($crate::headers::CONTENT_TYPE, mime.as_ref()),
                 ($crate::headers::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", $file_name)),
-                $( ($key, $value) ),*
+                $( $header ),*
             ]
         )
     }};

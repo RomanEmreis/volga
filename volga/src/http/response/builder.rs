@@ -3,7 +3,7 @@
 use std::fmt::{Debug, Formatter};
 use crate::{
     error::Error,
-    headers::{HeaderName, HeaderValue, HeaderMap},
+    headers::{HeaderName, HeaderValue, HeaderMap, TryIntoHeaderPair},
     http::{HttpBody, HttpResponse, Response, StatusCode}
 };
 
@@ -67,7 +67,23 @@ impl HttpResponseBuilder {
     ///
     /// > **Note:** This may result in multiple values for the same header.
     #[inline]
-    pub fn header<K, V>(self, key: K, value: V) -> Self
+    pub fn header(self, header: impl TryIntoHeaderPair) -> Self {
+        self.and_then(move |mut inner| {
+            let (name, value) = header.try_into_pair()?;
+            inner.headers
+                .try_append(name, value)
+                .map_err(Error::from)?;
+            Ok(inner)
+        })
+    }
+
+    /// Appends an HTTP header value.
+    ///
+    /// If a header with the same name already exists, the value is appended
+    ///
+    /// > **Note:** This may result in multiple values for the same header.
+    #[inline]
+    pub fn header_raw<K, V>(self, key: K, value: V) -> Self
     where
         HeaderName: TryFrom<K>,
         HeaderValue: TryFrom<V>,
@@ -135,7 +151,7 @@ impl HttpResponseBuilder {
 #[cfg(debug_assertions)]
 pub fn make_builder() -> HttpResponseBuilder {
     HttpResponse::builder()
-        .header(crate::headers::SERVER, SERVER_NAME)
+        .header_raw(crate::headers::SERVER, SERVER_NAME)
 }
 
 /// Creates a response builder
@@ -163,10 +179,10 @@ macro_rules! response {
     ($status:expr, $body:expr) => {
         $crate::response!($status, $body; [])
     };
-    ($status:expr, $body:expr; [ $( ($key:expr, $value:expr) ),* $(,)? ]) => {
+    ($status:expr, $body:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::builder!($status)
         $(
-            .header($key, $value)
+            .header($header)
         )*
             .body($body)
     };
@@ -176,12 +192,45 @@ macro_rules! response {
 mod tests {
     use http_body_util::BodyExt;
     use crate::HttpBody;
+    use crate::headers::{Header, ContentType};
     use super::RESPONSE_ERROR;
 
     #[tokio::test]
     async fn builder_sets_status_headers_and_body() {
+        let response = builder!(200)
+            .header(ContentType::from_static("text/plain"))
+            .body(HttpBody::from("hello"))
+            .expect("response should build");
+
+        let response = response.into_inner();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain");
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body, "hello");
+    }
+
+    #[tokio::test]
+    async fn it_creates_response_with_headers_and_body() {
+        let header = Header::<ContentType>::from_static("text/plain");
+        let response = response!(
+            200, 
+            HttpBody::from("hello");
+            [header]
+        );
+
+        let response = response.expect("response should build").into_inner();
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain");
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(body, "hello");
+    }
+
+    #[tokio::test]
+    async fn builder_sets_status_headers_raw_and_body() {
         let response = builder!(201)
-            .header("x-test", "1")
+            .header_raw("x-test", "1")
             .body(HttpBody::from("hello"))
             .expect("response should build");
 
@@ -206,7 +255,7 @@ mod tests {
     #[test]
     fn builder_returns_error_for_invalid_header() {
         let result = builder!()
-            .header("invalid header", "value")
+            .header_raw("invalid header", "value")
             .body(HttpBody::from("ignored"));
 
         let err = result.expect_err("expected invalid header error");

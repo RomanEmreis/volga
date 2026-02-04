@@ -19,6 +19,10 @@ use std::{
     marker::PhantomData,
 };
 
+pub use try_into_header::TryIntoHeaderPair;
+
+mod try_into_header;
+
 /// Represents a snapshot of HTTP request headers.
 ///
 /// This type is intended for read-only access and does not allow
@@ -50,7 +54,7 @@ impl HttpHeaders {
     /// Returns a typed HTTP header value
     #[inline]
     pub fn get<T: FromHeaders>(&self) -> Option<Header<T>> {
-        T::from_headers(&self.inner).map(Header::new)
+        T::from_headers(&self.inner).map(Header::from_ref)
     }
 
     /// Returns a typed HTTP header value or an error
@@ -66,7 +70,7 @@ impl HttpHeaders {
         self.inner
             .get_all(T::NAME)
             .iter()
-            .map(Header::new)
+            .map(Header::from_ref)
     }
 
     /// Returns a view of all rawvalues associated with this HTTP header.
@@ -179,8 +183,13 @@ impl<T: FromHeaders> Display for Header<T> {
 
 impl<T: FromHeaders> Header<T> {
     /// Creates a new instance of [`Header<T>`] from [`HeaderValue`]
-    pub fn new(header_value: &HeaderValue) -> Self {
-        header_value.clone().into()
+    pub fn new(header_value: HeaderValue) -> Self {
+        header_value.into()
+    }
+
+    /// Creates a new instance of [`Header<T>`] from a reference to [`HeaderValue`]
+    pub fn from_ref(header_value: &HeaderValue) -> Self {
+        Self::new(header_value.clone())
     }
 
     /// Creates a new instance of [`Header<T>`] from a `static str`
@@ -262,7 +271,7 @@ impl<T: FromHeaders> Header<T> {
     pub(super) fn from_headers_map(headers: &HeaderMap) -> Result<Self, Error> {
         T::from_headers(headers)
             .ok_or_else(HeaderError::header_missing::<T>)
-            .map(Self::new)
+            .map(Self::from_ref)
     }
 }
 

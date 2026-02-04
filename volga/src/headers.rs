@@ -35,13 +35,15 @@ pub use hyper::{
     HeaderMap
 };
 
+pub(crate) use self::etag::ETagRef;
+
 pub use self::{
     super::http::StatusCode,
     etag::ETag,
     cache_control::{CacheControl, ResponseCaching},
     encoding::Encoding,
     extract::*,
-    header::{Header, HttpHeaders},
+    header::{Header, HttpHeaders, TryIntoHeaderPair},
     quality::Quality,
     macros::headers
 };
@@ -49,6 +51,7 @@ pub use self::{
 #[cfg(feature = "macros")]
 pub use volga_macros::http_header;
 
+mod known_heades;
 pub(crate) mod helpers;
 pub mod extract;
 pub mod encoding;
@@ -144,6 +147,7 @@ impl core::convert::From<ToStrError> for Error {
 
 #[cfg(test)]
 #[allow(unreachable_pub)]
+#[allow(unused)]
 mod tests {
     use super::*;
     use crate::http::StatusCode;

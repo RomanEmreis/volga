@@ -7,9 +7,9 @@ use hyper::header::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
     ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE,
     ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, AGE, ALLOW, ALT_SVC,
-    AUTHORIZATION, CACHE_CONTROL, CONNECTION, CONTENT_DISPOSITION, CONTENT_ENCODING,
+    AUTHORIZATION, CONNECTION, CONTENT_DISPOSITION, CONTENT_ENCODING,
     CONTENT_LANGUAGE, CONTENT_LENGTH, CONTENT_LOCATION, CONTENT_RANGE, CONTENT_SECURITY_POLICY,
-    CONTENT_SECURITY_POLICY_REPORT_ONLY, CONTENT_TYPE, COOKIE, DATE, DNT, ETAG, EXPECT, EXPIRES,
+    CONTENT_SECURITY_POLICY_REPORT_ONLY, CONTENT_TYPE, COOKIE, DATE, DNT, EXPECT, EXPIRES,
     FORWARDED, FROM, HOST, IF_MATCH, IF_MODIFIED_SINCE, IF_NONE_MATCH, IF_RANGE,
     IF_UNMODIFIED_SINCE, LAST_MODIFIED, LINK, LOCATION, MAX_FORWARDS, ORIGIN, PRAGMA,
     PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, PUBLIC_KEY_PINS, PUBLIC_KEY_PINS_REPORT_ONLY, RANGE,
@@ -28,12 +28,38 @@ macro_rules! define_header {
             #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub struct $struct_name;
 
+            impl $struct_name {
+                /// Creates a new instance of [`Header<T>`] from a `static str`
+                #[inline(always)]
+                pub const fn from_static(value: &'static str) -> $crate::headers::Header<$struct_name> {
+                    $crate::headers::Header::<$struct_name>::from_static(value)
+                }
+                
+                /// Construct a typed header from bytes (validated).
+                #[inline]
+                pub fn from_bytes(bytes: &[u8]) -> Result<$crate::headers::Header<$struct_name>, $crate::error::Error> {
+                    $crate::headers::Header::<$struct_name>::from_bytes(bytes)
+                }
+
+                /// Wrap an owned raw HeaderValue (validated elsewhere).
+                #[inline]
+                pub fn new(value: $crate::headers::HeaderValue) -> $crate::headers::Header<$struct_name> {
+                    $crate::headers::Header::<$struct_name>::new(value)
+                }
+
+                /// Wrap a borrowed raw HeaderValue (validated elsewhere).
+                #[inline]
+                pub fn from_ref(value: &$crate::headers::HeaderValue) -> $crate::headers::Header<$struct_name> {
+                    $crate::headers::Header::<$struct_name>::from_ref(value)
+                }
+            }
+
             impl FromHeaders for $struct_name {
                 const NAME: $crate::headers::HeaderName = $header_name;
                 
                 #[inline]
                 fn from_headers(headers: &$crate::headers::HeaderMap) -> Option<&$crate::headers::HeaderValue> {
-                    headers.get($header_name)
+                    headers.get(Self::NAME)
                 }
             }
         )*
@@ -46,9 +72,9 @@ define_header! {
     (AccessControlAllowMethods, ACCESS_CONTROL_ALLOW_METHODS), (AccessControlAllowOrigin, ACCESS_CONTROL_ALLOW_ORIGIN),
     (AccessControlAllowExposeHeaders, ACCESS_CONTROL_EXPOSE_HEADERS), (AccessControlAllowMaxAge, ACCESS_CONTROL_MAX_AGE),
     (AccessControlRequestHeaders, ACCESS_CONTROL_REQUEST_HEADERS), (AccessControlRequestMethod, ACCESS_CONTROL_REQUEST_METHOD), (Age, AGE), (Allow, ALLOW), (AltSvc, ALT_SVC),
-    (Authorization, AUTHORIZATION), (CacheControl, CACHE_CONTROL), (Connection, CONNECTION), (ContentDisposition, CONTENT_DISPOSITION), (ContentEncoding, CONTENT_ENCODING),
+    (Authorization, AUTHORIZATION), (Connection, CONNECTION), (ContentDisposition, CONTENT_DISPOSITION), (ContentEncoding, CONTENT_ENCODING),
     (ContentLanguage, CONTENT_LANGUAGE), (ContentLength, CONTENT_LENGTH), (ContentLocation, CONTENT_LOCATION), (ContentRange, CONTENT_RANGE), (ContentSecurityPolicy, CONTENT_SECURITY_POLICY),
-    (ContentSecurityPolicyReportOnly, CONTENT_SECURITY_POLICY_REPORT_ONLY), (ContentType, CONTENT_TYPE), (Cookie, COOKIE), (Date, DATE), (Dnt, DNT), (Etag, ETAG), (Expect, EXPECT), (Expires, EXPIRES),
+    (ContentSecurityPolicyReportOnly, CONTENT_SECURITY_POLICY_REPORT_ONLY), (ContentType, CONTENT_TYPE), (Cookie, COOKIE), (Date, DATE), (Dnt, DNT), (Expect, EXPECT), (Expires, EXPIRES),
     (Forwarded, FORWARDED), (From, FROM), (Host, HOST), (IfMatch, IF_MATCH), (IfModifiedSince, IF_MODIFIED_SINCE), (IfNoneMatch, IF_NONE_MATCH), (IfRange, IF_RANGE),
     (IfUnmodifiedSince, IF_UNMODIFIED_SINCE), (LastModified, LAST_MODIFIED), (Link, LINK), (Location, LOCATION), (MaxForwards, MAX_FORWARDS), (Origin, ORIGIN), (Pragma, PRAGMA),
     (ProxyAuthenticate, PROXY_AUTHENTICATE), (ProxyAuthorization, PROXY_AUTHORIZATION), (PublicKeyPins, PUBLIC_KEY_PINS), (PublicKeyPinsReportOnly, PUBLIC_KEY_PINS_REPORT_ONLY), (Range, RANGE),
@@ -85,5 +111,13 @@ mod tests {
         let headers = HeaderMap::new();
         assert!(Host::from_headers(&headers).is_none());
         assert!(ContentType::from_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn it_creates_header_from_static() {
+        assert_eq!(
+            ContentType::from_static("text/plain").as_ref(),
+            &HeaderValue::from_static("text/plain")
+        );
     }
 }
