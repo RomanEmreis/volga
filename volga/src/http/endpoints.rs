@@ -186,7 +186,7 @@ impl Endpoints {
 
     /// Traverses the route tree and collects all available routes.
     /// Returns a vector of tuples containing (HTTP method, route path)
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "openapi"))]
     pub(crate) fn collect(&self) -> meta::RoutesInfo {
         self.routes.collect()
     }

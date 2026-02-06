@@ -87,6 +87,14 @@ impl RouteInfo {
     pub(crate) fn new(method: Method, path: &str) -> Self {
         Self { method, path: path.into() }
     }
+
+    pub(crate) fn method(&self) -> &Method {
+        &self.method
+    }
+
+    pub(crate) fn path(&self) -> &str {
+        &self.path
+    }
 }
 
 #[cfg(test)]

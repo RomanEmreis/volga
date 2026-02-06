@@ -51,6 +51,9 @@ use crate::auth::bearer::BearerAuthConfig;
 #[cfg(feature = "tls")]
 use crate::tls::TlsConfig;
 
+#[cfg(feature = "openapi")]
+use crate::openapi::{OpenApiConfig, OpenApiRegistry, swagger_ui_html};
+
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
 
@@ -154,6 +157,14 @@ pub struct App {
     ))]
     pub(super) decompression_limits: DecompressionLimits,
 
+    /// OpenAPI registry and configuration.
+    #[cfg(feature = "openapi")]
+    pub(super) openapi: Option<OpenApiRegistry>,
+
+    /// OpenAPI configuration.
+    #[cfg(feature = "openapi")]
+    pub(super) openapi_config: Option<OpenApiConfig>,
+
     /// TCP connection parameters
     connection: Connection,
     
@@ -238,6 +249,10 @@ impl App {
                 feature = "decompression-full"
             ))]
             decompression_limits: Default::default(),
+            #[cfg(feature = "openapi")]
+            openapi: None,
+            #[cfg(feature = "openapi")]
+            openapi_config: None,
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
@@ -380,6 +395,101 @@ impl App {
     pub fn with_max_connections(mut self, count: Limit<usize>) -> Self {
         self.max_connections = count;
         self
+    }
+
+    /// Configures OpenAPI registry with custom settings.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// let app = App::new()
+    ///     .with_open_api(|config| config
+    ///         .with_title("Example API")
+    ///         .with_version("1.0.0"));
+    /// ```
+    #[cfg(feature = "openapi")]
+    pub fn with_open_api<T>(mut self, config: T) -> Self
+    where
+        T: FnOnce(OpenApiConfig) -> OpenApiConfig,
+    {
+        let config = config(self.openapi_config.unwrap_or_default());
+        let registry = OpenApiRegistry::new(config.clone());
+
+        self.openapi_config = Some(config);
+        self.openapi = Some(registry);
+
+        self.register_existing_openapi_routes();
+        self
+    }
+
+    /// Sets OpenAPI registry with the provided configuration.
+    #[cfg(feature = "openapi")]
+    pub fn set_open_api(mut self, config: OpenApiConfig) -> Self {
+        self.openapi = Some(OpenApiRegistry::new(config.clone()));
+        self.openapi_config = Some(config);
+        self.register_existing_openapi_routes();
+        self
+    }
+
+    /// Registers the OpenAPI JSON endpoint.
+    #[cfg(feature = "openapi")]
+    pub fn use_open_api(&mut self) -> &mut Self {
+        if self.openapi.is_none() {
+            let config = self.openapi_config.clone().unwrap_or_default();
+            self.openapi = Some(OpenApiRegistry::new(config.clone()));
+            self.openapi_config = Some(config);
+        }
+
+        let Some(registry) = self.openapi.clone() else {
+            return self;
+        };
+
+        let spec_path = self
+            .openapi_config
+            .as_ref()
+            .map(|config| config.spec_path().to_string())
+            .unwrap_or_else(|| OpenApiConfig::default().spec_path().to_string());
+
+        self.map_get(&spec_path, move || {
+            let registry = registry.clone();
+            async move { crate::Json(registry.document()) }
+        });
+
+        if self
+            .openapi_config
+            .as_ref()
+            .is_some_and(|config| config.ui_enabled())
+        {
+            let ui_path = self
+                .openapi_config
+                .as_ref()
+                .map(|config| config.ui_path().to_string())
+                .unwrap_or_else(|| OpenApiConfig::default().ui_path().to_string());
+            let ui_html = swagger_ui_html(&spec_path);
+            self.map_get(&ui_path, move || {
+                let ui_html = ui_html.clone();
+                async move {
+                    crate::HttpResponse::builder()
+                        .header_static("content-type", "text/html; charset=utf-8")
+                        .body(ui_html.into())
+                }
+            });
+        }
+
+        self
+    }
+
+    #[cfg(feature = "openapi")]
+    fn register_existing_openapi_routes(&mut self) {
+        let Some(registry) = self.openapi.as_ref() else {
+            return;
+        };
+
+        let routes = self.pipeline.endpoints().collect();
+        for route in routes.iter() {
+            registry.register_route(route.method(), route.path());
+        }
     }
 
     /// Starts the [`App`] with its own Tokio runtime.

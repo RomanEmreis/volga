@@ -62,6 +62,11 @@ pub(crate) enum Source {
 pub trait FromRequest: Sized {
     /// Extracts data from HTTP request
     fn from_request(req: HttpRequest) -> impl Future<Output = Result<Self, Error>> + Send;
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config
+    }
 }
 
 /// Specifies extractors to read data from raw HTTP request
@@ -104,12 +109,22 @@ pub(crate) trait FromPayload: Send + Sized {
     
     /// Extracts data from give [`Payload`]
     fn from_payload(payload: Payload<'_>) -> Self::Future;
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config
+    }
 }
 
 impl FromRequest for () {
     #[inline]
     async fn from_request(_: HttpRequest) -> Result<Self, Error> {
         Ok(())
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config
     }
 }
 
@@ -226,6 +241,15 @@ macro_rules! define_generic_from_request {
                     )*
                 );
                 Ok(tuple)
+            }
+
+            #[cfg(feature = "openapi")]
+            fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+                let mut config = config;
+                $(
+                    config = $T::describe_openapi(config);
+                )*
+                config
             }
         }
     }

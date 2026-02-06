@@ -129,6 +129,11 @@ impl<T: DeserializeOwned + Send> FromPayload for Query<T> {
         let Payload::Parts(parts) = payload else { unreachable!() };
         ready(parts.try_into())
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config
+    }
 }
 
 /// Describes errors of query extractor

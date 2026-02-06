@@ -111,6 +111,11 @@ impl<T: DeserializeOwned + Send> FromPayload for Form<T> {
         let Payload::Body(body) = payload else { unreachable!() };
         ExtractFormPayloadFut { fut: body.collect(), _marker: PhantomData }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_form_request()
+    }
 }
 
 /// Describes errors of form data extractor

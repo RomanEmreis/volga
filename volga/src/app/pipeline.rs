@@ -93,7 +93,7 @@ impl PipelineBuilder {
         &mut self.endpoints
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, feature = "openapi"))]
     pub(crate) fn endpoints(&self) -> &Endpoints {
         &self.endpoints
     }

@@ -39,6 +39,8 @@ pub mod json;
 pub mod error;
 pub mod fs;
 pub mod limits;
+#[cfg(feature = "openapi")]
+pub mod openapi;
 #[cfg(feature = "di")]
 pub mod di;
 #[cfg(feature = "middleware")]
@@ -81,6 +83,9 @@ pub use crate::http::{
 pub use http::HttpRequestMut;
 
 pub use limits::Limit;
+
+#[cfg(feature = "openapi")]
+pub use openapi::{OpenApiConfig, OpenApiRouteConfig, OpenApiSchema};
 
 #[cfg(feature = "multipart")]
 pub use crate::http::endpoints::args::multipart::Multipart;

@@ -28,6 +28,11 @@ use crate::http::sse::Message;
 pub trait IntoResponse {
     /// Converts object into response
     fn into_response(self) -> HttpResult;
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config
+    }
 }
 
 impl IntoResponse for HttpResponse {
@@ -41,6 +46,11 @@ impl IntoResponse for () {
     #[inline]
     fn into_response(self) -> HttpResult {
         ok!()
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config
     }
 }
 
@@ -88,6 +98,11 @@ impl IntoResponse for &'static str {
             [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
         )
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_text_response()
+    }
 }
 
 impl IntoResponse for Cow<'static, str> {
@@ -110,6 +125,11 @@ impl IntoResponse for String {
             [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
         )
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_text_response()
+    }
 }
 
 impl IntoResponse for Box<str> {
@@ -121,6 +141,11 @@ impl IntoResponse for Box<str> {
             [(CONTENT_TYPE, TEXT_PLAIN_UTF_8.as_ref())]
         )
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_text_response()
+    }
 }
 
 impl<T: IntoResponse> IntoResponse for Option<T> {
@@ -131,12 +156,22 @@ impl<T: IntoResponse> IntoResponse for Option<T> {
             None => status!(404)
         }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        T::describe_openapi(config)
+    }
 }
 
 impl<T: Serialize> IntoResponse for Json<T> {
     #[inline]
     fn into_response(self) -> HttpResult {
         ok!(self.into_inner())
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_json_response()
     }
 }
 
@@ -145,7 +180,13 @@ impl<T: Serialize> IntoResponse for Form<T> {
     fn into_response(self) -> HttpResult {
         form!(self.into_inner())
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_form_response()
+    }
 }
+
 
 impl IntoResponse for StatusCode {
     #[inline]
