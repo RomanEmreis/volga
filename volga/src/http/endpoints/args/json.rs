@@ -122,6 +122,11 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
         let Payload::Body(body) = payload else { unreachable!() };
         ExtractJsonPayloadFut { fut: body.collect(), _marker: PhantomData }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_request_type_from_deserialize::<T>("application/json")
+    }
 }
 
 #[cfg(feature = "ws")]

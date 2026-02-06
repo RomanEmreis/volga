@@ -296,14 +296,14 @@ impl RouteNode {
 
     /// Traverses the route tree and collects all available routes
     /// Returns a vector of tuples containing (HTTP method, route path)
-    #[cfg(any(debug_assertions, feature = "openapi"))]
+    #[cfg(debug_assertions)]
     pub(super) fn collect(&self) -> super::meta::RoutesInfo {
         let mut routes = Vec::new();
         self.traverse_routes(&mut routes, String::new());
         super::meta::RoutesInfo(routes)
     }
 
-    #[cfg(any(debug_assertions, feature = "openapi"))]
+    #[cfg(debug_assertions)]
     fn traverse_routes(
         &self, 
         routes: &mut Vec<super::meta::RouteInfo>, 

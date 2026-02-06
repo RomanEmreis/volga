@@ -335,6 +335,9 @@ impl App {
         #[cfg(feature = "openapi")]
         if let Some(registry) = self.openapi.as_ref() {
             registry.register_route(&method, pat);
+            let auto = Args::describe_openapi(OpenApiRouteConfig::default());
+            let auto = R::describe_openapi(auto);
+            registry.apply_route_config(&method, pat, &auto);
         }
 
         if self.implicit_head && method == Method::GET {
