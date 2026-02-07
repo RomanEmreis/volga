@@ -65,6 +65,7 @@ pub trait FromRequest: Sized {
 
     /// Describes Open API schema
     #[cfg(feature = "openapi")]
+    #[doc(hidden)]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
         config
     }

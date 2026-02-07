@@ -1,10 +1,22 @@
 //! OpenAPI registry and configuration.
 
 use std::{collections::BTreeMap, sync::{Arc, Mutex}};
-use serde::Serialize;
-use serde::de::{DeserializeOwned, Deserializer, Error as DeError, Visitor};
-use crate::{App, http::Method, headers::ContentType};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
+use crate::{App, http::Method, headers::ContentType};
+use schema::Probe;
+use mime::{
+    TEXT_PLAIN_UTF_8, 
+    APPLICATION_JSON, 
+    APPLICATION_WWW_FORM_URLENCODED,
+    MULTIPART_FORM_DATA,
+    TEXT_EVENT_STREAM,
+    APPLICATION_OCTET_STREAM
+};
+
+pub use schema::OpenApiSchema;
+
+mod schema;
 
 const DEFAULT_OPENAPI_VERSION: &str = "3.0.0";
 const DEFAULT_SPEC_PATH: &str = "/openapi.json";
@@ -60,18 +72,24 @@ impl OpenApiConfig {
     }
 
     /// Sets the path where the OpenAPI JSON document is served.
+    /// 
+    /// Default: `/openapi.json`
     pub fn with_spec_path(mut self, path: impl Into<String>) -> Self {
         self.spec_path = path.into();
         self
     }
 
     /// Enables or disables the OpenAPI UI.
-    pub fn with_ui(mut self, enabled: bool) -> Self {
-        self.ui_enabled = enabled;
+    /// 
+    /// Default: `false`
+    pub fn with_ui(mut self) -> Self {
+        self.ui_enabled = true;
         self
     }
 
     /// Sets the path where the OpenAPI UI is served.
+    /// 
+    /// Default: `/openapi`
     pub fn with_ui_path(mut self, path: impl Into<String>) -> Self {
         self.ui_path = path.into();
         self
@@ -147,61 +165,159 @@ impl OpenApiRouteConfig {
         self
     }
 
-    /// Generates request schema and example from `T::default()` using `serde`.
-    pub fn with_request_type<T: Serialize + Default>(mut self) -> Self {
-        let example = serde_json::to_value(T::default()).unwrap_or_else(|_| json!({}));
-        self.request_schema = Some(OpenApiSchema::from_example(&example));
-        self.request_example = Some(example);
-        self.request_content_type = Some("application/json".to_string());
-        self
-    }
-
     /// Sets the response schema for this operation.
     pub fn with_response_schema(mut self, schema: OpenApiSchema) -> Self {
         self.response_schema = Some(schema);
         self
     }
 
-    /// Generates response schema and example from `T::default()` using `serde`.
-    pub fn with_response_type<T: Serialize + Default>(mut self) -> Self {
-        let example = serde_json::to_value(T::default()).unwrap_or_else(|_| json!({}));
+    /// Generates JSON request schema and example.
+    pub fn consumes_json<T: DeserializeOwned>(self) -> Self {
+        self.with_request_type_from_deserialize::<T>(APPLICATION_JSON.as_ref())
+    }
+
+    /// Generates form request schema and example.
+    pub fn consumes_form<T: DeserializeOwned>(self) -> Self {
+        self.with_request_type_from_deserialize::<T>(APPLICATION_WWW_FORM_URLENCODED.as_ref())
+    }
+    
+    /// Generates multipart request schema.
+    #[cfg(feature = "multipart")]
+    pub fn consumes_multipart(self) -> Self {
+        self.with_multipart_request()
+    }
+
+    /// Generates stream request schema.
+    pub fn consumes_stream(self) -> Self {
+        self.with_stream_request()
+    }
+
+    /// Generates JSON response schema and example from `T::default()`.
+    pub fn produces_json<T: Serialize + Default>(self) -> Self {
+        self.produces_json_example(T::default())
+    }
+
+    /// Generates form response schema and example from `T::default()`.
+    pub fn produces_form<T: Serialize + Default>(self) -> Self {
+        self.produces_form_example(T::default())
+    }
+
+    /// Generates stream response schema.
+    pub fn produces_stream(self) -> Self {
+        self.with_stream_response()
+    }
+
+    /// Generates SSE stream response schema.
+    pub fn produces_sse(self) -> Self {
+        self.with_sse_response()
+    }
+
+    /// Generates JSON response schema and example.
+    pub fn produces_json_example<T: Serialize>(mut self, example: T) -> Self {
+        let example = serde_json::to_value(example).unwrap_or_else(|_| json!({}));
+
         self.response_schema = Some(OpenApiSchema::from_example(&example));
         self.response_example = Some(example);
-        self.response_content_type = Some("application/json".to_string());
+        self.response_content_type = Some(APPLICATION_JSON.to_string());
+       
         self
     }
 
+    /// Generates form response schema and example.
+    pub fn produces_form_example<T: Serialize>(mut self, example: T) -> Self {
+        let example = serde_json::to_value(example).unwrap_or_else(|_| json!({}));
+
+        let encoded = match &example {
+            Value::Object(map) => serde_urlencoded::to_string(map).unwrap_or_default(),
+            _ => String::new(),
+        };
+
+        self.response_schema = Some(OpenApiSchema::string());
+        self.response_example = Some(Value::String(encoded));
+        
+        self.response_content_type = Some(APPLICATION_WWW_FORM_URLENCODED.to_string());
+
+        self
+    }
+
+    /// Generates default JSON request schema
+    #[allow(unused)]
     pub(crate) fn with_json_request(mut self) -> Self {
         self.request_schema
             .get_or_insert_with(OpenApiSchema::object);
-        self.request_content_type = Some("application/json".to_string());
+        self.request_content_type = Some(APPLICATION_JSON.to_string());
         self
     }
 
+    /// Generates default form request schema
+    #[allow(unused)]
     pub(crate) fn with_form_request(mut self) -> Self {
         self.request_schema
             .get_or_insert_with(OpenApiSchema::object);
-        self.request_content_type = Some("application/x-www-form-urlencoded".to_string());
+        self.request_content_type = Some(APPLICATION_WWW_FORM_URLENCODED.to_string());
         self
     }
 
+    /// Generates default Multipart request schema
+    #[cfg(feature = "multipart")]
+    pub(crate) fn with_multipart_request(mut self) -> Self {
+        self.request_schema
+            .get_or_insert_with(OpenApiSchema::multipart);
+        self.request_content_type = Some(MULTIPART_FORM_DATA.to_string());
+        self
+    }
+
+    /// Generates default stream request schema
+    pub(crate) fn with_stream_request(mut self) -> Self {
+        self.request_schema
+            .get_or_insert_with(OpenApiSchema::binary);
+        self.request_content_type = Some(APPLICATION_OCTET_STREAM.to_string());
+        self
+    }
+
+    /// Generates default JSON response schema
     pub(crate) fn with_json_response(mut self) -> Self {
         self.response_schema
             .get_or_insert_with(OpenApiSchema::object);
-        self.response_content_type = Some("application/json".to_string());
+        self.response_content_type = Some(APPLICATION_JSON.to_string());
         self
     }
 
+    /// Generates default form response schema
     pub(crate) fn with_form_response(mut self) -> Self {
         self.response_schema
             .get_or_insert_with(OpenApiSchema::object);
-        self.response_content_type = Some("application/x-www-form-urlencoded".to_string());
+        self.response_content_type = Some(APPLICATION_WWW_FORM_URLENCODED.to_string());
         self
     }
 
+    /// Generates default text response schema
     pub(crate) fn with_text_response(mut self) -> Self {
-        self.response_schema = Some(OpenApiSchema::string());
-        self.response_content_type = Some("text/plain; charset=utf-8".to_string());
+        self.response_schema
+            .get_or_insert_with(OpenApiSchema::string);
+        self.response_content_type = Some(TEXT_PLAIN_UTF_8.to_string());
+        self
+    }
+
+    /// Generates SSE stream response schema
+    pub(crate) fn with_sse_response(mut self) -> Self {
+        self.response_schema
+            .get_or_insert_with(|| OpenApiSchema::string().with_title("SSE stream"));
+        self.response_content_type = Some(TEXT_EVENT_STREAM.to_string());
+        self
+    }
+
+    /// Generates default stream response schema
+    pub(crate) fn with_stream_response(mut self) -> Self {
+        self.response_schema
+            .get_or_insert_with(OpenApiSchema::binary);
+        self.response_content_type = Some(APPLICATION_OCTET_STREAM.to_string());
+        self
+    }
+
+    pub(crate) fn with_empty_response(mut self) -> Self {
+        self.response_schema = None;
+        self.response_content_type = None;
         self
     }
 
@@ -220,7 +336,7 @@ impl OpenApiRouteConfig {
         content_type: &str,
     ) -> Self {
         if let Some((schema, example)) = schema_and_example_from_deserialize::<T>() {
-            self.request_schema = Some(schema);
+            self.request_schema = Some(schema.with_title(type_display_name::<T>()));
             self.request_example = Some(example);
         }
         self.request_content_type = Some(content_type.to_string());
@@ -228,11 +344,10 @@ impl OpenApiRouteConfig {
     }
 
     pub(crate) fn with_query_parameters_from_deserialize<T: DeserializeOwned>(mut self) -> Self {
-        if let Some((schema, _)) = schema_and_example_from_deserialize::<T>() {
-            if let Some(properties) = schema.properties {
-                for (name, property_schema) in properties {
-                    self = self.with_query_parameter(name, property_schema);
-                }
+        if let Some((schema, _)) = schema_and_example_from_deserialize::<T>() 
+            && let Some(properties) = schema.properties {
+            for (name, property_schema) in properties {
+                self = self.with_query_parameter(name, property_schema);
             }
         }
         self
@@ -277,139 +392,78 @@ impl OpenApiRouteConfig {
         self
     }
 
-    fn apply_to(&self, operation: &mut OpenApiOperation) {
-        if let Some(summary) = &self.summary {
-            operation.summary = Some(summary.clone());
-        }
-        if let Some(description) = &self.description {
-            operation.description = Some(description.clone());
-        }
-        if let Some(operation_id) = &self.operation_id {
-            operation.operation_id = Some(operation_id.clone());
-        }
-        if !self.tags.is_empty() {
-            operation
-                .tags
-                .get_or_insert_with(Vec::new)
-                .extend(self.tags.clone());
-        }
+    fn apply_to_with_doc(
+        &self,
+        operation: &mut OpenApiOperation,
+        schemas: &mut BTreeMap<String, OpenApiSchema>
+    ) {
         if self.request_schema.is_some() || self.request_example.is_some() {
-            let schema = self
-                .request_schema
-                .clone()
-                .unwrap_or_else(OpenApiSchema::object);
+            let mut schema = self.request_schema.clone().unwrap_or_else(OpenApiSchema::object);
             let example = self.request_example.clone();
-            let content_type = self
-                .request_content_type
-                .as_deref()
-                .unwrap_or("application/json");
+            let content_type = self.request_content_type.as_deref().unwrap_or(APPLICATION_JSON.as_ref());
+
+            schema = intern_schema_if_object_named(schema, schemas);
             operation.set_request_body(schema, example, content_type);
         }
+
         if self.response_schema.is_some() || self.response_example.is_some() {
-            let schema = self
-                .response_schema
-                .clone()
-                .unwrap_or_else(OpenApiSchema::object);
+            let mut schema = self.response_schema.clone().unwrap_or_else(OpenApiSchema::object);
             let example = self.response_example.clone();
-            let content_type = self
-                .response_content_type
-                .as_deref()
-                .unwrap_or("application/json");
+            let content_type = self.response_content_type.as_deref().unwrap_or(APPLICATION_JSON.as_ref());
+
+            schema = intern_schema_if_object_named(schema, schemas);
             operation.set_response_body(schema, example, content_type);
         }
-
-        if !self.extra_parameters.is_empty() {
-            operation
-                .parameters
-                .get_or_insert_with(Vec::new)
-                .extend(self.extra_parameters.clone());
-        }
     }
+}
+
+fn intern_schema_if_object_named(
+    mut schema: OpenApiSchema,
+    schemas: &mut BTreeMap<String, OpenApiSchema>
+) -> OpenApiSchema {
+    if schema.schema_ref.is_some() {
+        return schema;
+    }
+
+    let base = match schema.title.clone() {
+        Some(t) if !t.is_empty() => t,
+        _ => return schema,
+    };
+    
+    if schema.properties.is_none() {
+        return schema;
+    }
+
+    let mut name = base.clone();
+    if schemas.contains_key(&name) {
+        let mut i = 2;
+        while schemas.contains_key(&format!("{base}_{i}")) {
+            i += 1;
+        }
+        name = format!("{base}_{i}");
+    }
+
+    schema.title = None;
+    
+    schemas
+        .entry(name.clone())
+        .or_insert(schema);
+
+    OpenApiSchema::reference(&name)
 }
 
 fn schema_and_example_from_deserialize<T: DeserializeOwned>() -> Option<(OpenApiSchema, Value)> {
-    let fields = collect_struct_field_names::<T>()?;
-    if fields.is_empty() {
-        return Some((OpenApiSchema::object(), json!({})));
-    }
-
-    let mut schema = OpenApiSchema::object();
-    let mut example = serde_json::Map::new();
-
-    for field in &fields {
-        schema = schema.with_property(field.clone(), OpenApiSchema::string());
-        example.insert(field.clone(), Value::String(String::new()));
-    }
-
-    Some((schema.with_required(fields), Value::Object(example)))
+    let mut probe = Probe::new();
+    let _ = T::deserialize(&mut probe);
+    probe.finish()
 }
 
-fn collect_struct_field_names<T: DeserializeOwned>() -> Option<Vec<String>> {
-    #[derive(Debug)]
-    struct CollectError(String);
-
-    impl std::fmt::Display for CollectError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str(&self.0)
-        }
-    }
-    impl std::error::Error for CollectError {}
-
-    impl DeError for CollectError {
-        fn custom<M: std::fmt::Display>(msg: M) -> Self {
-            CollectError(msg.to_string())
-        }
-    }
-
-    struct FieldCollector {
-        fields: Option<Vec<String>>,
-    }
-
-    impl<'de> Deserializer<'de> for &mut FieldCollector {
-        type Error = CollectError;
-
-        fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-        where
-            V: Visitor<'de>,
-        {
-            visitor.visit_unit()
-        }
-
-        fn deserialize_struct<V>(
-            self,
-            _name: &'static str,
-            fields: &'static [&'static str],
-            _visitor: V,
-        ) -> Result<V::Value, Self::Error>
-        where
-            V: Visitor<'de>,
-        {
-            self.fields = Some(fields.iter().map(|&f| f.to_string()).collect());
-            Err(CollectError("field collection complete".into()))
-        }
-
-        fn deserialize_enum<V>(
-            self,
-            _name: &'static str,
-            _variants: &'static [&'static str],
-            _visitor: V,
-        ) -> Result<V::Value, Self::Error>
-        where
-            V: Visitor<'de>,
-        {
-            Err(CollectError("enums are not supported for automatic schema inference".into()))
-        }
-
-        serde::forward_to_deserialize_any! {
-            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-            bytes byte_buf option unit unit_struct newtype_struct seq tuple tuple_struct
-            map identifier ignored_any
-        }
-    }
-
-    let mut collector = FieldCollector { fields: None };
-    let _ = T::deserialize(&mut collector); // намеренно игнорируем ошибку “complete”
-    collector.fields
+fn type_display_name<T>() -> String {
+    std::any::type_name::<T>()
+        .rsplit("::")
+        .next()
+        .unwrap_or("Model")
+        .to_string()
 }
 
 /// OpenAPI runtime registry.
@@ -431,6 +485,9 @@ impl OpenApiRegistry {
                 description: config.description,
             },
             paths: BTreeMap::new(),
+            components: OpenApiComponents {
+                schemas: BTreeMap::new(),
+            },
         };
         Self {
             inner: Arc::new(Mutex::new(doc)),
@@ -461,13 +518,19 @@ impl OpenApiRegistry {
         if self.is_excluded_path(path) {
             return;
         }
+        
         let mut doc = self.lock();
+
+        let OpenApiDocument { paths, components, .. } = &mut *doc;
+        
         let method = method.as_str().to_ascii_lowercase();
-        let entry = doc.paths.entry(path.to_string()).or_default();
+        let entry = paths.entry(path.to_string()).or_default();
+        
         let operation = entry
             .entry(method.clone())
             .or_insert_with(|| OpenApiOperation::for_method(method, path));
-        config.apply_to(operation);
+
+        config.apply_to_with_doc(operation, &mut components.schemas);
     }
 
     pub(crate) fn document(&self) -> OpenApiDocument {
@@ -483,14 +546,20 @@ impl OpenApiRegistry {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct OpenApiDocument {
     openapi: String,
     info: OpenApiInfo,
+    components: OpenApiComponents,
     paths: BTreeMap<String, BTreeMap<String, OpenApiOperation>>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct OpenApiComponents {
+    schemas: BTreeMap<String, OpenApiSchema>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenApiInfo {
     title: String,
     version: String,
@@ -498,7 +567,7 @@ struct OpenApiInfo {
     description: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenApiOperation {
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
@@ -522,7 +591,7 @@ impl Default for OpenApiOperation {
             "200".to_string(),
             OpenApiResponse {
                 description: "OK".to_string(),
-                content: Some(default_json_content()),
+                content: None,
             },
         );
         Self {
@@ -581,7 +650,7 @@ impl OpenApiOperation {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenApiParameter {
     name: String,
     #[serde(rename = "in")]
@@ -590,14 +659,14 @@ struct OpenApiParameter {
     schema: OpenApiSchema,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenApiResponse {
     description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<BTreeMap<String, OpenApiMediaType>>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenApiRequestBody {
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
@@ -616,143 +685,11 @@ impl OpenApiRequestBody {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenApiMediaType {
     schema: OpenApiSchema,
     #[serde(skip_serializing_if = "Option::is_none")]
     example: Option<Value>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct OpenApiSchema {
-    #[serde(rename = "type")]
-    schema_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    properties: Option<BTreeMap<String, OpenApiSchema>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    required: Option<Vec<String>>,
-    #[serde(
-        rename = "additionalProperties",
-        skip_serializing_if = "Option::is_none"
-    )]
-    additional_properties: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    items: Option<Box<OpenApiSchema>>,
-}
-
-impl OpenApiSchema {
-    pub fn object() -> Self {
-        Self {
-            schema_type: "object".to_string(),
-            properties: None,
-            required: None,
-            additional_properties: Some(true),
-            items: None,
-        }
-    }
-
-    pub fn string() -> Self {
-        Self {
-            schema_type: "string".to_string(),
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-        }
-    }
-
-    pub fn integer() -> Self {
-        Self {
-            schema_type: "integer".to_string(),
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-        }
-    }
-
-    pub fn number() -> Self {
-        Self {
-            schema_type: "number".to_string(),
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-        }
-    }
-
-    pub fn boolean() -> Self {
-        Self {
-            schema_type: "boolean".to_string(),
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-        }
-    }
-
-    pub fn array(items: OpenApiSchema) -> Self {
-        Self {
-            schema_type: "array".to_string(),
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: Some(Box::new(items)),
-        }
-    }
-
-    pub fn from_example(example: &Value) -> Self {
-        match example {
-            Value::Null => OpenApiSchema::object(),
-            Value::Bool(_) => OpenApiSchema::boolean(),
-            Value::Number(number) => {
-                if number.is_i64() || number.is_u64() {
-                    OpenApiSchema::integer()
-                } else {
-                    OpenApiSchema::number()
-                }
-            }
-            Value::String(_) => OpenApiSchema::string(),
-            Value::Array(items) => {
-                let item_schema = items
-                    .first()
-                    .map(OpenApiSchema::from_example)
-                    .unwrap_or_else(OpenApiSchema::object);
-                OpenApiSchema::array(item_schema)
-            }
-            Value::Object(map) => {
-                let mut schema = OpenApiSchema::object();
-                let mut required = Vec::new();
-                for (key, value) in map {
-                    schema = schema.with_property(key.clone(), OpenApiSchema::from_example(value));
-                    required.push(key.clone());
-                }
-                schema.with_required(required)
-            }
-        }
-    }
-
-    pub fn with_property(mut self, name: impl Into<String>, schema: OpenApiSchema) -> Self {
-        self.properties
-            .get_or_insert_with(BTreeMap::new)
-            .insert(name.into(), schema);
-        self
-    }
-
-    pub fn with_required<I, T>(mut self, required: I) -> Self
-    where
-        I: IntoIterator<Item = T>,
-        T: Into<String>,
-    {
-        self.required = Some(required.into_iter().map(Into::into).collect());
-        self
-    }
-}
-
-impl Default for OpenApiSchema {
-    fn default() -> Self {
-        Self::object()
-    }
 }
 
 fn parse_path_parameters(path: &str) -> Vec<OpenApiParameter> {
@@ -779,7 +716,7 @@ fn default_example() -> Value {
 
 fn default_json_content() -> BTreeMap<String, OpenApiMediaType> {
     media_content(
-        "application/json",
+        APPLICATION_JSON.as_ref(),
         OpenApiSchema::object(),
         Some(default_example()),
     )
@@ -814,12 +751,21 @@ pub(crate) fn swagger_ui_html(spec_path: &str) -> String {
   </head>
   <body>
     <div id="swagger-ui"></div>
+
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
     <script>
       window.onload = function() {{
         SwaggerUIBundle({{
-          url: "{spec_path}",
+          urls: [
+            {{ url: "{spec_path}", name: "v1" }},
+          ],
           dom_id: "#swagger-ui",
+          presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIStandalonePreset
+          ],
+          layout: "StandaloneLayout"
         }});
       }};
     </script>
@@ -827,6 +773,7 @@ pub(crate) fn swagger_ui_html(spec_path: &str) -> String {
 </html>"##
     )
 }
+
 
 impl App {
     /// Configures OpenAPI registry with custom settings.
@@ -908,6 +855,42 @@ impl App {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 mod tests {
+    use super::OpenApiRouteConfig;
+    use serde::Deserialize;
 
+    #[derive(Deserialize)]
+    struct Payload {
+        name: String,
+        age: u64,
+    }
+
+    #[test]
+    fn infer_request_schema_from_deserialize_type() {
+        let cfg = OpenApiRouteConfig::default()
+            .with_request_type_from_deserialize::<Payload>("application/json");
+
+        let schema = cfg
+            .request_schema
+            .expect("request schema should be inferred");
+        let props = schema.properties.expect("object properties should exist");
+
+        assert!(props.contains_key("name"));
+        assert!(props.contains_key("age"));
+        assert_eq!(
+            cfg.request_content_type.as_deref(),
+            Some("application/json")
+        );
+    }
+
+    #[test]
+    fn infer_query_parameters_from_deserialize_type() {
+        let cfg = OpenApiRouteConfig::default().with_query_parameters_from_deserialize::<Payload>();
+
+        assert_eq!(cfg.extra_parameters.len(), 2);
+        assert!(cfg.extra_parameters.iter().any(|p| p.name == "name"));
+        assert!(cfg.extra_parameters.iter().any(|p| p.name == "age"));
+        assert!(cfg.extra_parameters.iter().all(|p| p.location == "query"));
+    }
 }

@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-volga = { path = "../../volga", features = ["openapi"] }
+volga = { path = "../../volga", features = ["openapi", "multipart"] }
 serde = { version = "1.0.219", features = ["serde_derive"] }
 tokio = "1.49.0"
 

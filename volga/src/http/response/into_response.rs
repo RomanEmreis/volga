@@ -30,8 +30,9 @@ pub trait IntoResponse {
 
     /// Describes Open API schema
     #[cfg(feature = "openapi")]
+    #[doc(hidden)]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config
+        config.with_empty_response()
     }
 }
 
@@ -81,6 +82,11 @@ where
             Ok(ok) => ok.into_response(),
             Err(err) => err.into_response(),
         }
+    }
+    
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        T::describe_openapi(config)
     }
 }
 
@@ -213,6 +219,11 @@ where
             },
         }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        R::describe_openapi(config)
+    }
 }
 
 #[cfg(feature = "signed-cookie")]
@@ -231,7 +242,12 @@ where
                 Ok(resp)
             },
         }
-    }    
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        R::describe_openapi(config)
+    }
 }
 
 #[cfg(feature = "private-cookie")]
@@ -251,6 +267,11 @@ where
             },
         }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        R::describe_openapi(config)
+    }
 }
 
 #[cfg(feature = "cookie")]
@@ -269,6 +290,11 @@ where
             },
         }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        R::describe_openapi(config)
+    }
 }
 
 impl<S> IntoResponse for SseStream<S>
@@ -278,6 +304,11 @@ where
     #[inline]
     fn into_response(self) -> HttpResult {
         sse!(self.into_bytes())
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_sse_response()
     }
 }
 
@@ -289,6 +320,11 @@ where
     #[inline]
     fn into_response(self) -> HttpResult {
         stream!(self)
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_stream_response()
     }
 }
 
@@ -302,6 +338,11 @@ macro_rules! impl_into_response {
                     self.into();
                     [ContentType::text_utf_8()]
                 )
+            }
+            
+            #[cfg(feature = "openapi")]
+            fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+                config.with_text_response()
             }
         })*
     };

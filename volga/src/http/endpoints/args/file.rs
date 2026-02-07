@@ -6,8 +6,8 @@ use http_body_util::BodyExt;
 use hyper::body::Body;
 use tokio::io::{AsyncWriteExt, BufWriter};
 use std::path::Path;
-use futures_util::TryFutureExt;
-use crate::{error::Error, headers::CONTENT_DISPOSITION};
+use futures_util::{TryFutureExt, TryStreamExt};
+use crate::{error::Error, headers::CONTENT_DISPOSITION, ByteStream};
 
 use crate::http::{
     HttpBody,
@@ -111,6 +111,16 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
         }
         writer.flush().map_err(FileStreamError::flush_error).await
     }
+    
+    /// Consumes file stream into raw bytes stream
+    pub fn into_stream(self) -> impl futures_util::Stream<Item = Result<Bytes, Error>> {
+        self.stream.into_data_stream().into_stream()
+    }
+    
+    /// Consumes file into [`ByteStream`]
+    pub fn into_byte_stream(self) -> ByteStream<impl futures_util::Stream<Item = Result<Bytes, Error>>> {
+        ByteStream::new(self.into_stream())
+    }
 
     #[inline]
     fn parse_file_name(content_disposition: &str) -> Option<&str> {
@@ -142,6 +152,11 @@ impl FromPayload for File {
             .and_then(|header| header.to_str().ok())
             .and_then(Self::parse_file_name);
         ok(FileStream::new(name, body))
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.with_stream_request()
     }
 }
 

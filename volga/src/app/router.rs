@@ -411,7 +411,7 @@ impl<'a> DerefMut for Route<'a> {
 #[cfg(feature = "openapi")]
 impl<'a> Route<'a> {
     /// Configures OpenAPI metadata for this route.
-    pub fn with_openapi<T>(self, config: T) -> Self
+    pub fn open_api<T>(self, config: T) -> Self
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
@@ -428,7 +428,7 @@ impl<'a> Route<'a> {
 #[cfg(feature = "openapi")]
 impl<'a> RouteGroup<'a> {
     /// Configures OpenAPI metadata for this route group.
-    pub fn with_openapi<T>(&mut self, config: T) -> &mut Self
+    pub fn open_api<T>(&mut self, config: T) -> &mut Self
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
@@ -477,7 +477,7 @@ macro_rules! define_route_group_methods {
                     #[cfg(feature = "openapi")]
                     {
                         let openapi_config = self.openapi_config.clone();
-                        route = route.with_openapi(|config| config.merge(&openapi_config));
+                        route = route.open_api(|config| config.merge(&openapi_config));
                     }
 
                     route
@@ -490,7 +490,7 @@ macro_rules! define_route_group_methods {
                     #[cfg(feature = "openapi")]
                     let route = {
                         let openapi_config = self.openapi_config.clone();
-                        route.with_openapi(|config| config.merge(&openapi_config))
+                        route.open_api(|config| config.merge(&openapi_config))
                     };
 
                     route
