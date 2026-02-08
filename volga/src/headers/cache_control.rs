@@ -47,6 +47,10 @@ pub const PUBLIC: &str = "public";
 pub const PRIVATE: &str = "private";
 /// "immutable" directive
 pub const IMMUTABLE: &str = "immutable"; 
+/// "stale-if-error" directive
+pub const STALE_IF_ERROR: &str = "stale-if-error";
+/// "stale-while-revalidate" directive
+pub const STALE_WHILE_REVALIDATE: &str = "stale-while-revalidate";
 
 /// Represents the HTTP [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
 /// header holds directives (instructions) in both requests and responses that control caching 
@@ -83,6 +87,16 @@ pub struct CacheControl {
     /// The `proxy-revalidate` response directive is the equivalent of `must-revalidate`,
     /// but specifically for shared caches only.
     proxy_revalidate: bool,
+
+    /// The stale-while-revalidate response directive indicates that the cache could reuse 
+    /// a stale response while it revalidates it to a cache.
+    stale_while_revalidate: Option<u32>,
+
+    /// The stale-if-error response directive indicates that the cache can reuse a stale response 
+    /// when an upstream server generates an error or when the error is generated locally. 
+    /// 
+    /// Here, an error is considered any response with a status code of 500, 502, 503, or 504.
+    stale_if_error: Option<u32>,
     
     /// The `public` response directive indicates that the response can be stored in a shared cache.
     /// Responses for requests with 
@@ -141,6 +155,12 @@ impl fmt::Display for CacheControl {
         if self.immutable {
             directives.push(IMMUTABLE.to_string());
         }
+        if let Some(stale_while_revalidate) = self.stale_while_revalidate {
+            directives.push(format!("{STALE_WHILE_REVALIDATE}={stale_while_revalidate}"));
+        }
+        if let Some(stale_if_error) = self.stale_if_error {
+            directives.push(format!("{STALE_IF_ERROR}={stale_if_error}"));
+        }
         
         f.write_str(directives.join(", ").as_str())
     }
@@ -160,6 +180,15 @@ impl TryFrom<CacheControl> for HeaderValue {
     fn try_from(value: CacheControl) -> Result<Self, Self::Error> {
         HeaderValue::from_str(value.to_string().as_str())
             .map_err(Into::into)
+    }
+}
+
+impl TryFrom<CacheControl> for Header<CacheControl> {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(value: CacheControl) -> Result<Self, Self::Error> {
+        Ok(Self::new(value.try_into()?))
     }
 }
 
@@ -260,6 +289,26 @@ impl CacheControl {
         self.no_cache = false;
         self.proxy_revalidate = false;
         self.must_revalidate = false;
+        self
+    }
+
+    /// Sets `stale-while-revalidate`: indicates that the cache could reuse a stale response 
+    /// while it revalidates it to a cache.
+    /// Disables `no-store` to allow caching.
+    pub fn with_stale_while_revalidate(mut self, age: u32) -> Self {
+        self.stale_while_revalidate = Some(age);
+        self.no_store = false;
+        self
+    }
+
+    /// Sets `stale-if-error`: indicates that the cache can reuse a stale response 
+    /// when an upstream server generates an error or when the error is generated locally. 
+    /// Disables `no-store` to allow caching.
+    /// 
+    /// Here, an error is considered any response with a status code of 500, 502, 503, or 504.
+    pub fn with_stale_if_error(mut self, age: u32) -> Self {
+        self.stale_if_error = Some(age);
+        self.no_store = false;
         self
     }
 }
@@ -463,7 +512,7 @@ fn make_cache_control_fn(
 #[cfg(test)]
 mod tests {
     use std::time::SystemTime;
-    use crate::headers::{CacheControl, ETag, ResponseCaching};
+    use crate::headers::{Header, CacheControl, ETag, ResponseCaching};
 
     #[test]
     fn it_creates_cache_control_string() {
@@ -572,5 +621,33 @@ mod tests {
         assert!(cc.public);
         assert_eq!(cc.max_age, Some(3600));
         assert!(cc.immutable);
+    }
+    
+    #[test]
+    fn it_tests_stale_while_revalidate() {
+        let cc = CacheControl::default().with_stale_while_revalidate(600);
+        assert_eq!(cc.stale_while_revalidate, Some(600));
+    }
+    
+    #[test]
+    fn it_tests_stale_if_error() {
+        let cc = CacheControl::default().with_stale_if_error(600);
+        assert_eq!(cc.stale_if_error, Some(600));
+    }
+    
+    #[test]
+    fn it_converts_cache_control_to_header() {
+        let cc = CacheControl::default()
+            .with_no_cache()
+            .with_must_revalidate()
+            .with_max_age(0);
+        
+        let header = Header::<CacheControl>::try_from(cc).unwrap();
+        
+        assert_eq!(header.name(), "cache-control");
+        assert_eq!(
+            header.value().to_str().unwrap(),
+            "no-cache, max-age=0, must-revalidate"
+        )
     }
 }

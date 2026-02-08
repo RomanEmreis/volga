@@ -54,6 +54,10 @@ impl App {
         F: FnOnce(&mut RouteGroup<'a>)
     {
         let mut group = RouteGroup::new(self, prefix);
+        
+        #[cfg(feature = "openapi")]
+        group.open_api(|cfg| cfg.with_tag(prefix));
+        
         f(&mut group);
     }
     
@@ -334,9 +338,10 @@ impl App {
 
         #[cfg(feature = "openapi")]
         if let Some(registry) = self.openapi.as_ref() {
-            registry.register_route(&method, pat);
             let auto = Args::describe_openapi(OpenApiRouteConfig::default());
             let auto = R::describe_openapi(auto);
+            
+            registry.register_route(&method, pat, &auto);
             registry.apply_route_config(&method, pat, &auto);
         }
 

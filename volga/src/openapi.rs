@@ -3,7 +3,7 @@
 use std::{collections::BTreeMap, sync::{Arc, Mutex}};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
-use crate::{App, http::Method, headers::ContentType};
+use crate::{App, http::Method, headers::{Header, HttpHeaders, CacheControl, ETag}};
 use schema::Probe;
 use mime::{
     TEXT_PLAIN_UTF_8, 
@@ -19,9 +19,10 @@ pub use schema::OpenApiSchema;
 mod schema;
 
 const DEFAULT_OPENAPI_VERSION: &str = "3.0.0";
+const DEFAULT_SPEC_NAME: &str = "v1";
 const DEFAULT_SPEC_PATH: &str = "/openapi.json";
 const DEFAULT_UI_PATH: &str = "/openapi";
-const DEFAULT_UI_TITLE: &str = "OpenAPI UI";
+//const DEFAULT_UI_TITLE: &str = "OpenAPI UI";
 
 /// OpenAPI runtime configuration.
 #[derive(Clone, Debug)]
@@ -29,7 +30,7 @@ pub struct OpenApiConfig {
     title: String,
     version: String,
     description: Option<String>,
-    spec_path: String,
+    specs: Vec<OpenApiSpec>,
     ui_enabled: bool,
     ui_path: String,
 }
@@ -40,7 +41,7 @@ impl Default for OpenApiConfig {
             title: "Volga API".to_string(),
             version: "0.1.0".to_string(),
             description: None,
-            spec_path: DEFAULT_SPEC_PATH.to_string(),
+            specs: vec![OpenApiSpec::default()],
             ui_enabled: false,
             ui_path: DEFAULT_UI_PATH.to_string(),
         }
@@ -71,11 +72,22 @@ impl OpenApiConfig {
         self
     }
 
-    /// Sets the path where the OpenAPI JSON document is served.
+    /// Sets the OpenAPI spec.
     /// 
     /// Default: `/openapi.json`
-    pub fn with_spec_path(mut self, path: impl Into<String>) -> Self {
-        self.spec_path = path.into();
+    pub fn with_spec(mut self, spec: OpenApiSpec) -> Self {
+        self.specs = vec![spec];
+        self
+    }
+
+    /// Sets the OpenAPI specs.
+    ///
+    /// Default: `/openapi.json`
+    pub fn with_specs<I>(mut self, specs: I) -> Self
+    where 
+        I: IntoIterator<Item = OpenApiSpec>
+    {
+        self.specs = specs.into_iter().collect();
         self
     }
 
@@ -95,8 +107,9 @@ impl OpenApiConfig {
         self
     }
 
-    pub(crate) fn spec_path(&self) -> &str {
-        &self.spec_path
+    #[allow(unused)]
+    pub(crate) fn specs(&self) -> &[OpenApiSpec] {
+        &self.specs
     }
 
     pub(crate) fn ui_enabled(&self) -> bool {
@@ -112,6 +125,7 @@ impl OpenApiConfig {
 #[derive(Clone, Debug, Default)]
 pub struct OpenApiRouteConfig {
     tags: Vec<String>,
+    docs: Option<Vec<String>>,
     summary: Option<String>,
     description: Option<String>,
     operation_id: Option<String>,
@@ -125,6 +139,11 @@ pub struct OpenApiRouteConfig {
 }
 
 impl OpenApiRouteConfig {
+    /// Returns a list of docs that this route is assigned to    
+    pub(crate) fn docs(&self) -> Option<&[String]> {
+        self.docs.as_deref()
+    }
+    
     /// Adds a tag to the operation.
     pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
         self.tags.push(tag.into());
@@ -138,6 +157,24 @@ impl OpenApiRouteConfig {
         T: Into<String>,
     {
         self.tags.extend(tags.into_iter().map(Into::into));
+        self
+    }
+
+    /// Binds the operation with a document
+    pub fn with_doc(mut self, doc: impl Into<String>) -> Self {
+        self.docs.get_or_insert_with(Vec::new).push(doc.into());
+        self
+    }
+
+    /// Binds the operation with documents
+    pub fn with_docs<I, S>(mut self, docs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.docs
+            .get_or_insert_with(Vec::new)
+            .extend(docs.into_iter().map(Into::into));
         self
     }
 
@@ -392,11 +429,15 @@ impl OpenApiRouteConfig {
         self
     }
 
-    fn apply_to_with_doc(
+    fn apply_to_operation(
         &self,
         operation: &mut OpenApiOperation,
         schemas: &mut BTreeMap<String, OpenApiSchema>
     ) {
+        if !self.tags.is_empty() { 
+            operation.tags = Some(self.tags.clone());
+        } 
+        
         if self.request_schema.is_some() || self.request_example.is_some() {
             let mut schema = self.request_schema.clone().unwrap_or_else(OpenApiSchema::object);
             let example = self.request_example.clone();
@@ -466,83 +507,158 @@ fn type_display_name<T>() -> String {
         .to_string()
 }
 
+/// OpenAPI spec
+#[derive(Clone, Debug)]
+pub struct OpenApiSpec {
+    /// Spec name. Used to distinguish between multiple OpenAPI specs.
+    pub name: String,
+    
+    /// Path to OpenAPI spec JSON.
+    pub spec_path: String,
+}
+
+impl Default for OpenApiSpec {
+    fn default() -> Self {
+        Self {
+            name: DEFAULT_SPEC_NAME.to_string(),
+            spec_path: DEFAULT_SPEC_PATH.to_string(),
+        }
+    }
+}
+
+impl OpenApiSpec {
+    /// Creates new OpenAPI spec with given name.
+    pub fn new(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            spec_path: format!("{name}/{DEFAULT_SPEC_PATH}"),
+            name,
+        }
+    }
+    
+    /// Sets OpenAPI spec path.
+    pub fn with_path(mut self, path: impl Into<String>) -> Self {
+        self.spec_path = path.into();
+        self
+    }
+}
+
 /// OpenAPI runtime registry.
 #[derive(Clone, Debug)]
 pub struct OpenApiRegistry {
-    inner: Arc<Mutex<OpenApiDocument>>,
-    spec_path: String,
+    inner: Arc<Mutex<BTreeMap<String, OpenApiDocument>>>,
+    specs: Vec<OpenApiSpec>,
     ui_path: String,
     ui_enabled: bool,
 }
 
 impl OpenApiRegistry {
     pub(crate) fn new(config: OpenApiConfig) -> Self {
-        let doc = OpenApiDocument {
+        let base_doc = |title: String, version: String, description: Option<String>| OpenApiDocument {
             openapi: DEFAULT_OPENAPI_VERSION.to_string(),
-            info: OpenApiInfo {
-                title: config.title,
-                version: config.version,
-                description: config.description,
-            },
+            info: OpenApiInfo { title, version, description },
             paths: BTreeMap::new(),
-            components: OpenApiComponents {
-                schemas: BTreeMap::new(),
-            },
+            components: OpenApiComponents { schemas: BTreeMap::new() },
         };
+
+        let mut docs = BTreeMap::new();
+        for s in &config.specs {
+            docs.insert(
+                s.name.clone(),
+                base_doc(
+                    config.title.clone(), 
+                    config.version.clone(), 
+                    config.description.clone()
+                ),
+            );
+        }
+
         Self {
-            inner: Arc::new(Mutex::new(doc)),
-            spec_path: config.spec_path,
+            inner: Arc::new(Mutex::new(docs)),
+            specs: config.specs,
             ui_path: config.ui_path,
             ui_enabled: config.ui_enabled,
         }
     }
 
-    pub(crate) fn register_route(&self, method: &Method, path: &str) {
-        if self.is_excluded_path(path) {
+    pub(crate) fn register_route(
+        &self, 
+        method: &Method, 
+        path: &str, 
+        cfg: &OpenApiRouteConfig
+    ) {
+        if self.is_excluded_path(path) { 
             return;
         }
-        let mut doc = self.lock();
+
+        let mut docs = self.lock();
         let method = method.as_str().to_ascii_lowercase();
-        let entry = doc.paths.entry(path.to_string()).or_default();
-        entry
-            .entry(method.clone())
-            .or_insert_with(|| OpenApiOperation::for_method(method, path));
+        let targets = self.target_doc_names(cfg);
+
+        for doc_name in targets {
+            if let Some(doc) = docs.get_mut(doc_name) {
+                let entry = doc.paths
+                    .entry(path.to_string())
+                    .or_default();
+                
+                entry
+                    .entry(method.clone())
+                    .or_insert_with(|| OpenApiOperation::for_method(method.clone(), path));
+            }
+        }
     }
 
     pub(crate) fn apply_route_config(
         &self,
         method: &Method,
         path: &str,
-        config: &OpenApiRouteConfig,
+        cfg: &OpenApiRouteConfig,
     ) {
-        if self.is_excluded_path(path) {
-            return;
+        if self.is_excluded_path(path) { return; }
+
+        let mut docs = self.lock();
+        let method_lc = method.as_str().to_ascii_lowercase();
+        let targets = self.target_doc_names(cfg);
+
+        for doc_name in targets {
+            let Some(doc) = docs.get_mut(doc_name) else { continue; };
+
+            let OpenApiDocument { paths, components, .. } = doc;
+
+            let entry = paths.entry(path.to_string()).or_default();
+            let op = entry.entry(method_lc.clone())
+                .or_insert_with(|| OpenApiOperation::for_method(method_lc.clone(), path));
+
+            cfg.apply_to_operation(op, &mut components.schemas);
         }
-        
-        let mut doc = self.lock();
-
-        let OpenApiDocument { paths, components, .. } = &mut *doc;
-        
-        let method = method.as_str().to_ascii_lowercase();
-        let entry = paths.entry(path.to_string()).or_default();
-        
-        let operation = entry
-            .entry(method.clone())
-            .or_insert_with(|| OpenApiOperation::for_method(method, path));
-
-        config.apply_to_with_doc(operation, &mut components.schemas);
     }
 
-    pub(crate) fn document(&self) -> OpenApiDocument {
-        self.lock().clone()
+    pub(crate) fn document_by_name(&self, name: &str) -> Option<OpenApiDocument> {
+        self.lock().get(name).cloned()
+    }
+
+    pub(crate) fn specs(&self) -> &[OpenApiSpec] {
+        &self.specs
     }
 
     fn is_excluded_path(&self, path: &str) -> bool {
-        path == self.spec_path || (self.ui_enabled && path == self.ui_path)
+        if self.ui_enabled && path == self.ui_path { return true; }
+        self.specs.iter().any(|s| s.spec_path == path)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, OpenApiDocument> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, OpenApiDocument>> {
         self.inner.lock().expect("openapi registry lock poisoned")
+    }
+
+    fn target_doc_names<'a>(&'a self, cfg: &'a OpenApiRouteConfig) -> Vec<&'a str> {
+        if let Some(docs) = cfg.docs() {
+            docs.iter().map(|s| s.as_str()).collect()
+        } else {
+            self.specs
+                .first()
+                .map(|s| vec![s.name.as_str()])
+                .unwrap_or_default()
+        }
     }
 }
 
@@ -739,14 +855,39 @@ fn method_supports_body(method: &str) -> bool {
     matches!(method, "post" | "put" | "patch")
 }
 
-pub(crate) fn swagger_ui_html(spec_path: &str) -> String {
+fn swagger_ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
+    let config_js = if specs.len() <= 1 {
+        let url = specs
+            .first()
+            .map(|s| s.spec_path.as_str())
+            .unwrap_or(DEFAULT_SPEC_PATH);
+
+        format!(r#"url: "{url}","#)
+    } else {
+        // urls: [{url, name}, ...] + primaryName
+        let urls = specs
+            .iter()
+            .map(|s| format!(r#"{{ url: "{}", name: "{}" }}"#, s.spec_path, s.name))
+            .collect::<Vec<_>>()
+            .join(",\n          ");
+
+        let primary = &specs[0].name;
+
+        format!(
+            r#"urls: [
+                {urls}
+            ],
+            "urls.primaryName": "{primary}","#,
+        )
+    };
+
     format!(
         r##"<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{DEFAULT_UI_TITLE}</title>
+    <title>{ui_title}</title>
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   </head>
   <body>
@@ -754,12 +895,11 @@ pub(crate) fn swagger_ui_html(spec_path: &str) -> String {
 
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+
     <script>
       window.onload = function() {{
         SwaggerUIBundle({{
-          urls: [
-            {{ url: "{spec_path}", name: "v1" }},
-          ],
+          {config_js}
           dom_id: "#swagger-ui",
           presets: [
             SwaggerUIBundle.presets.apis,
@@ -770,7 +910,7 @@ pub(crate) fn swagger_ui_html(spec_path: &str) -> String {
       }};
     </script>
   </body>
-</html>"##
+</html>"##,
     )
 }
 
@@ -808,50 +948,85 @@ impl App {
 
     /// Registers the OpenAPI JSON endpoint.
     pub fn use_open_api(&mut self) -> &mut Self {
-        if self.openapi.is_none() {
-            let config = self.openapi_config.clone().unwrap_or_default();
-            self.openapi = Some(OpenApiRegistry::new(config.clone()));
-            self.openapi_config = Some(config);
+        let (Some(registry), Some(config)) = (self.openapi.clone(), self.openapi_config.clone()) else {
+            panic!(
+                "OpenAPI is not configured. Use `App::with_open_api` or `App::set_open_api` to configure it."
+            );
+        };
+        
+        let cache_control = create_spec_cache_control();
+        for spec in registry.specs().to_vec() {
+            let registry = registry.clone();
+            let cache_control = cache_control.clone();
+            
+            self.map_get(&spec.spec_path, move || {
+                let spec_name = spec.name.clone();
+                let registry = registry.clone();
+                let cache_control = cache_control.clone();
+                
+                async move {
+                    let Some(doc) = registry.document_by_name(&spec_name) else {
+                        return crate::status!(404);
+                    };
+                    
+                    crate::ok!(doc; [cache_control])
+                }
+            });
         }
 
-        let Some(registry) = self.openapi.clone() else {
-            return self;
-        };
-
-        let spec_path = self
-            .openapi_config
-            .as_ref()
-            .map(|config| config.spec_path().to_string())
-            .unwrap_or_else(|| OpenApiConfig::default().spec_path().to_string());
-
-        self.map_get(&spec_path, move || {
-            let registry = registry.clone();
-            async move { crate::Json(registry.document()) }
-        });
-
-        if self
-            .openapi_config
-            .as_ref()
-            .is_some_and(|config| config.ui_enabled())
-        {
-            let ui_path = self
-                .openapi_config
-                .as_ref()
-                .map(|config| config.ui_path().to_string())
-                .unwrap_or_else(|| OpenApiConfig::default().ui_path().to_string());
-
-            self.map_get(&ui_path, move || {
-                let spec_path = spec_path.clone();
+        if config.ui_enabled() {
+            let html = swagger_ui_html(registry.specs(), config.title.as_str());
+            let etag = create_etag(html.as_bytes());
+            let cache_control = create_ui_cache_control();
+            
+            self.map_get(config.ui_path(), move |headers: HttpHeaders| {
+                let etag = etag.clone();
+                let cache_control = cache_control.clone();
+                let html = html.clone();
+                
                 async move {
-                    crate::HttpResponse::builder()
-                        .header(ContentType::html_utf_8())
-                        .body(swagger_ui_html(&spec_path).into())
+                    if crate::headers::helpers::validate_etag(&etag, &headers) {
+                        return crate::status!(304; [Header::<ETag>::try_from(etag)?]);
+                    }
+                    
+                    crate::html!(html; [
+                        cache_control, 
+                        Header::<ETag>::try_from(etag)?
+                    ])
                 }
             });
         }
 
         self
     }
+}
+
+fn create_spec_cache_control() -> Header<CacheControl> {
+    Header::try_from(
+        CacheControl::default()
+            .with_public()
+            .with_max_age(60)
+            .with_stale_while_revalidate(600))
+        .expect("invalid cache control header")
+}
+
+fn create_ui_cache_control() -> Header<CacheControl> {
+    Header::try_from(
+        CacheControl::default()
+            .with_public()
+            .with_max_age(3600)
+            .with_stale_while_revalidate(86400))
+        .expect("invalid cache control header")
+}
+
+fn create_etag(bytes: &[u8]) -> ETag {
+    use sha1::{Sha1, Digest};
+    
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+
+    let tag = format!("{:x}", hasher.finalize());
+    ETag::weak(tag)
 }
 
 #[cfg(test)]
