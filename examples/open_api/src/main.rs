@@ -26,10 +26,7 @@ async fn main() -> std::io::Result<()> {
             .with_title("Open API Demo")
             .with_description("Demonstration of Open API with Volga")
             .with_version("1.0.0")
-            .with_specs([
-                OpenApiSpec::new("v1"),
-                OpenApiSpec::new("v2")
-            ])
+            .with_specs(["v1", "v2"])
             .with_ui());
 
     app.use_open_api();

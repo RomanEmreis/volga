@@ -83,11 +83,12 @@ impl OpenApiConfig {
     /// Sets the OpenAPI specs.
     ///
     /// Default: `/openapi.json`
-    pub fn with_specs<I>(mut self, specs: I) -> Self
+    pub fn with_specs<I, S>(mut self, specs: I) -> Self
     where 
-        I: IntoIterator<Item = OpenApiSpec>
+        I: IntoIterator<Item = S>,
+        S: Into<OpenApiSpec>
     {
-        self.specs = specs.into_iter().collect();
+        self.specs = specs.into_iter().map(Into::into).collect();
         self
     }
 
@@ -426,6 +427,17 @@ impl OpenApiRouteConfig {
         if !other.extra_parameters.is_empty() {
             self.extra_parameters.extend(other.extra_parameters.clone());
         }
+        match (&mut self.docs, &other.docs) {
+            (None, Some(d)) => self.docs = Some(d.clone()),
+            (Some(dst), Some(src)) => {
+                for s in src {
+                    if !dst.iter().any(|x| x == s) {
+                        dst.push(s.clone());
+                    }
+                }
+            }
+            _ => {}
+        }
         self
     }
 
@@ -526,12 +538,20 @@ impl Default for OpenApiSpec {
     }
 }
 
+impl<T: Into<String>> From<T> for OpenApiSpec {
+    #[inline]
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
 impl OpenApiSpec {
     /// Creates new OpenAPI spec with given name.
+    #[inline]
     pub fn new(name: impl Into<String>) -> Self {
         let name = name.into();
         Self {
-            spec_path: format!("{name}/{DEFAULT_SPEC_PATH}"),
+            spec_path: format!("{name}{DEFAULT_SPEC_PATH}"),
             name,
         }
     }
@@ -614,7 +634,9 @@ impl OpenApiRegistry {
         path: &str,
         cfg: &OpenApiRouteConfig,
     ) {
-        if self.is_excluded_path(path) { return; }
+        if self.is_excluded_path(path) { 
+            return;
+        }
 
         let mut docs = self.lock();
         let method_lc = method.as_str().to_ascii_lowercase();
