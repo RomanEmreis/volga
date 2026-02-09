@@ -446,6 +446,16 @@ impl OpenApiRouteConfig {
         operation: &mut OpenApiOperation,
         schemas: &mut BTreeMap<String, OpenApiSchema>
     ) {
+        if let Some(summary) = &self.summary {
+            operation.summary = Some(summary.clone());
+        }
+        if let Some(description) = &self.description {
+            operation.description = Some(description.clone());
+        }
+        if let Some(operation_id) = &self.operation_id {
+            operation.operation_id = Some(operation_id.clone());
+        }
+
         if !self.tags.is_empty() { 
             operation.tags = Some(self.tags.clone());
         } 
@@ -466,6 +476,19 @@ impl OpenApiRouteConfig {
 
             schema = intern_schema_if_object_named(schema, schemas);
             operation.set_response_body(schema, example, content_type);
+        }
+
+        if !self.extra_parameters.is_empty() {
+            let params = operation.parameters.get_or_insert_with(Vec::new);
+
+            for p in &self.extra_parameters {
+                let exists = params
+                    .iter()
+                    .any(|x| x.name == p.name && x.location == p.location);
+                if !exists {
+                    params.push(p.clone());
+                }
+            }
         }
     }
 }
@@ -625,6 +648,42 @@ impl OpenApiRegistry {
                     .entry(method.clone())
                     .or_insert_with(|| OpenApiOperation::for_method(method.clone(), path));
             }
+        }
+    }
+
+    pub(crate) fn rebind_route(
+        &self,
+        method: &Method,
+        path: &str,
+        cfg: &OpenApiRouteConfig,
+    ) {
+        let method_lc = method.as_str().to_ascii_lowercase();
+        let targets = self.target_doc_names(cfg);
+
+        let mut docs = self.lock();
+
+        let mut op_opt: Option<OpenApiOperation> = None;
+        for doc in docs.values_mut() {
+            if let Some(methods) = doc.paths.get_mut(path)
+                && let Some(op) = methods.remove(&method_lc) {
+                op_opt = Some(op);
+                if methods.is_empty() { doc.paths.remove(path); }
+                break;
+            }
+        }
+
+        let mut op = op_opt
+            .unwrap_or_else(|| OpenApiOperation::for_method(method_lc.clone(), path));
+
+        for name in targets {
+            let Some(doc) = docs.get_mut(name) else { continue; };
+
+            cfg.apply_to_operation(&mut op, &mut doc.components.schemas);
+
+            doc.paths
+                .entry(path.to_string())
+                .or_default()
+                .insert(method_lc.clone(), op.clone());
         }
     }
 

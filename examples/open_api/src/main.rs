@@ -14,7 +14,6 @@ use volga::{
     File, 
     Multipart,
     http::sse::Message,
-    openapi::OpenApiSpec,
     ok, 
     sse_stream
 };

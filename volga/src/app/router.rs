@@ -337,13 +337,17 @@ impl App {
         endpoints.map_route(method.clone(), pat, handler.clone());
 
         #[cfg(feature = "openapi")]
-        if let Some(registry) = self.openapi.as_ref() {
+        let openapi_config = if let Some(registry) = self.openapi.as_ref() {
             let auto = Args::describe_openapi(OpenApiRouteConfig::default());
             let auto = R::describe_openapi(auto);
             
             registry.register_route(&method, pat, &auto);
             registry.apply_route_config(&method, pat, &auto);
-        }
+
+            auto
+        } else {
+            OpenApiRouteConfig::default()
+        };
 
         if self.implicit_head && method == Method::GET {
             let head = Method::HEAD;
@@ -358,6 +362,8 @@ impl App {
             method,
             #[cfg(any(feature = "middleware", feature = "openapi"))]
             pattern,
+            #[cfg(feature = "openapi")]
+            openapi_config
         }
     }
 }
@@ -369,6 +375,8 @@ pub struct Route<'a> {
     pub(crate) method: Method,
     #[cfg(any(feature = "middleware", feature = "openapi"))]
     pub(crate) pattern: Cow<'a, str>,
+    #[cfg(feature = "openapi")]
+    openapi_config: OpenApiRouteConfig,
 }
 
 /// Represents a group of routes
@@ -416,16 +424,20 @@ impl<'a> DerefMut for Route<'a> {
 #[cfg(feature = "openapi")]
 impl<'a> Route<'a> {
     /// Configures OpenAPI metadata for this route.
-    pub fn open_api<T>(self, config: T) -> Self
+    pub fn open_api<T>(mut self, config: T) -> Self
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
-        let Some(registry) = self.app.openapi.as_ref() else {
+        let Some(registry) = self.app.openapi.as_ref() else { 
             return self;
         };
 
-        let config = config(OpenApiRouteConfig::default());
-        registry.apply_route_config(&self.method, self.pattern.as_ref(), &config);
+        let merged = config(self.openapi_config.clone());
+
+        self.openapi_config = merged.clone();
+
+        registry.rebind_route(&self.method, self.pattern.as_ref(), &merged);
+
         self
     }
 }
