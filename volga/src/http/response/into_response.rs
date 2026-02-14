@@ -32,7 +32,7 @@ pub trait IntoResponse {
     #[cfg(feature = "openapi")]
     #[doc(hidden)]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_empty_response()
+        config.produces_no_schema()
     }
 }
 
@@ -102,7 +102,7 @@ impl IntoResponse for &'static str {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_text_response()
+        config.produces_text()
     }
 
 }
@@ -119,7 +119,7 @@ impl IntoResponse for Cow<'static, str> {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_text_response()
+        config.produces_text()
     }
 }
 
@@ -135,7 +135,7 @@ impl IntoResponse for String {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_text_response()
+        config.produces_text()
     }
 }
 
@@ -151,7 +151,7 @@ impl IntoResponse for Box<str> {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_text_response()
+        config.produces_text()
     }
 }
 
@@ -178,7 +178,7 @@ impl<T: Serialize> IntoResponse for Json<T> {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_json_response()
+        config.produces_empty_json()
     }
 }
 
@@ -190,7 +190,7 @@ impl<T: Serialize> IntoResponse for Form<T> {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_form_response()
+        config.produces_empty_form()
     }
 }
 
@@ -308,7 +308,7 @@ where
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_sse_response()
+        config.produces_sse()
     }
 }
 
@@ -324,7 +324,7 @@ where
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_stream_response()
+        config.produces_stream()
     }
 }
 
@@ -342,7 +342,7 @@ macro_rules! impl_into_response {
             
             #[cfg(feature = "openapi")]
             fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-                config.with_text_response()
+                config.produces_text()
             }
         })*
     };

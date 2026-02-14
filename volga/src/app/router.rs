@@ -511,7 +511,6 @@ macro_rules! define_route_group_methods {
                     };
 
                     route
-
                 }
             }
             )*

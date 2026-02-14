@@ -668,6 +668,14 @@ impl App {
     
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
+        #[cfg(all(debug_assertions, feature = "openapi"))]
+        if self.openapi_config.as_ref().is_some_and(|cfg| !cfg.exposed) { 
+            #[cfg(feature = "tracing")]
+            tracing::warn!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
+        } 
+        
         #[cfg(any(feature = "tls", feature = "tracing"))]
         let socket = tcp_listener.local_addr()?;
         

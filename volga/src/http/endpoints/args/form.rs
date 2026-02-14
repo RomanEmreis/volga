@@ -7,7 +7,6 @@ use http_body_util::{combinators::Collect, BodyExt};
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use mime::APPLICATION_WWW_FORM_URLENCODED;
 use std::{
     future::Future,
     fmt::{self, Display, Formatter},
@@ -114,7 +113,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Form<T> {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_request_type_from_deserialize::<T>(APPLICATION_WWW_FORM_URLENCODED.as_ref())
+        config.consumes_form::<T>()
     }
 }
 

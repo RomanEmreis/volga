@@ -4,16 +4,16 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value, json};
 use serde::{
     de::{
-        Visitor, 
-        DeserializeSeed, 
-        SeqAccess, 
-        MapAccess, 
-        IntoDeserializer, 
+        Visitor,
+        DeserializeSeed,
+        SeqAccess,
+        MapAccess,
+        IntoDeserializer,
         Error as DeError
     },
     Deserializer,
-    Deserialize, 
-    Serialize, 
+    Deserialize,
+    Serialize,
 };
 
 /// Represents OpenAPI schema.
@@ -21,7 +21,7 @@ use serde::{
 pub struct OpenApiSchema {
     #[serde(rename = "$ref", skip_serializing_if = "Option::is_none")]
     pub(super) schema_ref: Option<String>,
-    
+
     #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
     pub(super) schema_type: Option<String>,
 
@@ -30,19 +30,19 @@ pub struct OpenApiSchema {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) title: Option<String>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) properties: Option<BTreeMap<String, OpenApiSchema>>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) required: Option<Vec<String>>,
-    
+
     #[serde(
         rename = "additionalProperties",
         skip_serializing_if = "Option::is_none"
     )]
     pub(super) additional_properties: Option<bool>,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) items: Option<Box<OpenApiSchema>>,
 
@@ -140,9 +140,8 @@ impl OpenApiSchema {
             nullable: None,
         }
     }
-    
+
     /// Generates schema for multipart form data
-    #[cfg(feature = "multipart")]
     pub fn multipart() -> Self {
         Self::object()
             .with_property("file", OpenApiSchema::binary())
@@ -284,14 +283,14 @@ impl<'de> Deserializer<'de> for &mut Probe {
     type Error = ProbeError;
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         visitor.visit_unit()
     }
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         self.root = Some((OpenApiSchema::boolean(), Value::Bool(false)));
@@ -299,7 +298,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
@@ -307,7 +306,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
@@ -315,7 +314,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         self.root = Some((OpenApiSchema::number(), json!(0.0)));
@@ -323,7 +322,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         self.root = Some((OpenApiSchema::string(), Value::String(String::new())));
@@ -331,7 +330,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         self.root = Some((OpenApiSchema::string(), Value::String(String::new())));
@@ -339,7 +338,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         struct SomeDeserializer<'a>(&'a mut Probe);
@@ -371,14 +370,14 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         visitor.visit_seq(SeqProbeAccess { probe: self, yielded: false })
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         self.root = Some((OpenApiSchema::object(), Value::Object(Map::new())));
@@ -391,7 +390,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
         fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
-    where 
+    where
         V: Visitor<'de>
     {
         let access = StructProbeAccess {
@@ -412,8 +411,8 @@ impl<'de> Deserializer<'de> for &mut Probe {
         _variants: &'static [&'static str],
         _visitor: V,
     ) -> Result<V::Value, Self::Error>
-    where 
-        V: Visitor<'de> 
+    where
+        V: Visitor<'de>
     {
         Err(ProbeError("enums are not supported for automatic schema inference".into()))
     }
@@ -433,7 +432,7 @@ impl<'de, 'a> SeqAccess<'de> for SeqProbeAccess<'a> {
     type Error = ProbeError;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
-    where 
+    where
         T: DeserializeSeed<'de>
     {
         if self.yielded {
@@ -465,7 +464,7 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
     type Error = ProbeError;
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
-    where 
+    where
         K: DeserializeSeed<'de>
     {
         if self.idx >= self.fields.len() {
@@ -482,12 +481,12 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
-    where 
-        V: DeserializeSeed<'de> 
+    where
+        V: DeserializeSeed<'de>
     {
         let field = self.fields[self.idx];
         self.idx += 1;
-        
+
         let v = seed.deserialize(&mut *self.parent)?;
 
         if let Some((field_schema, field_example)) = self.parent.root.take() {
@@ -509,18 +508,18 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
 struct EmptyMapAccess;
 impl<'de> MapAccess<'de> for EmptyMapAccess {
     type Error = ProbeError;
-    
+
     fn next_key_seed<K>(&mut self, _seed: K) -> Result<Option<K::Value>, Self::Error>
-    where 
+    where
         K: DeserializeSeed<'de>
-    { 
+    {
         Ok(None)
     }
-    
+
     fn next_value_seed<V>(&mut self, _seed: V) -> Result<V::Value, Self::Error>
-    where 
-        V: DeserializeSeed<'de> 
-    { 
+    where
+        V: DeserializeSeed<'de>
+    {
         Err(ProbeError("no values".into()))
     }
 }

@@ -44,17 +44,18 @@ hyper-util = { version = "0.1.20", features = ["server", "server-auto", "server-
 multer = { version = "3.1.0", optional = true }
 sha1 = { version = "0.10.6", optional = true }
 reqwest = { version = "0.13.2", optional = true }
-tempfile = { version = "3.24.0", optional = true }
+tempfile = { version = "3.25.0", optional = true }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["tls12", "aws-lc-rs"], optional = true }
 tokio-tungstenite = { version = "0.28.0", optional = true }
 tracing = { version = "0.1.44", default-features = false, optional = true }
 twox-hash = { version = "2.1.2", optional = true }
-uuid = { version = "1.20.0", features = ["v4"], optional = true }
+uuid = { version = "1.21.0", features = ["v4"], optional = true }
 
 # volga
 volga-dev-cert = { path = "../volga-dev-cert", version = "0.8.4", optional = true }
 volga-di = { path = "../volga-di", version = "0.8.4", optional = true }
 volga-macros = { path = "../volga-macros", version = "0.8.4", optional = true }
+volga-open-api = { path = "../volga-open-api", version = "0.8.4", optional = true }
 volga-rate-limiter = { path = "../volga-rate-limiter", version = "0.8.4", optional = true }
 
 [dev-dependencies]
@@ -66,7 +67,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 uuid = { version = "1.20.0", features = ["v4"] }
 criterion = { version = "0.8.2", features = ["async_tokio"] }
-tempfile = "3.24.0"
+tempfile = "3.25.0"
 
 [features]
 # Default HTTP/1 only server
@@ -103,7 +104,7 @@ di = ["dep:volga-di"]
 macros = ["dep:volga-macros"]
 middleware = []
 multipart = ["dep:multer"]
-openapi = ["dep:sha1", "serde/derive"]
+openapi = ["dep:sha1", "dep:volga-open-api"]
 problem-details = ["serde/derive"]
 rate-limiting = ["dep:twox-hash", "dep:volga-rate-limiter", "middleware"]
 static-files = ["dep:chrono", "dep:handlebars", "dep:sha1"]

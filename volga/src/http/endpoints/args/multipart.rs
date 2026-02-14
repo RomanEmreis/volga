@@ -213,7 +213,7 @@ impl FromPayload for Multipart {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_multipart_request()
+        config.consumes_multipart()
     }
 }
 

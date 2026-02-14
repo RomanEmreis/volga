@@ -1,0 +1,157 @@
+//! Types and utils for OpenAPI operations.
+
+use std::collections::BTreeMap;
+use mime::APPLICATION_JSON;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+use super::{
+    param::{parse_path_parameters, OpenApiParameter},
+    schema::OpenApiSchema,
+};
+
+/// Represents OpenAPI operation.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct OpenApiOperation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) operation_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) tags: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) parameters: Option<Vec<OpenApiParameter>>,
+    #[serde(rename = "requestBody", skip_serializing_if = "Option::is_none")]
+    request_body: Option<OpenApiRequestBody>,
+    responses: BTreeMap<String, OpenApiResponse>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct OpenApiMediaType {
+    schema: OpenApiSchema,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    example: Option<Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct OpenApiResponse {
+    description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<BTreeMap<String, OpenApiMediaType>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct OpenApiRequestBody {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    content: BTreeMap<String, OpenApiMediaType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    required: Option<bool>,
+}
+
+impl Default for OpenApiOperation {
+    fn default() -> Self {
+        let mut responses = BTreeMap::new();
+        responses.insert(
+            "200".to_string(),
+            OpenApiResponse {
+                description: "OK".to_string(),
+                content: None,
+            },
+        );
+        Self {
+            summary: None,
+            description: None,
+            operation_id: None,
+            tags: None,
+            parameters: None,
+            request_body: None,
+            responses,
+        }
+    }
+}
+
+impl OpenApiRequestBody {
+    fn json_payload() -> Self {
+        Self {
+            description: None,
+            content: default_json_content(),
+            required: Some(true),
+        }
+    }
+}
+
+impl OpenApiOperation {
+    pub(super) fn for_method(method: String, path: &str) -> Self {
+        let mut operation = Self::default();
+        if method_supports_body(&method) {
+            operation.request_body = Some(OpenApiRequestBody::json_payload());
+        }
+
+        let parameters = parse_path_parameters(path);
+        if !parameters.is_empty() {
+            operation.parameters = Some(parameters);
+        }
+
+        operation
+    }
+
+    pub(super) fn set_request_body(
+        &mut self,
+        schema: OpenApiSchema,
+        example: Option<Value>,
+        content_type: &str,
+    ) {
+        let request_body = self
+            .request_body
+            .get_or_insert_with(OpenApiRequestBody::json_payload);
+        request_body.content = media_content(content_type, schema, example);
+    }
+
+    pub(super) fn set_response_body(
+        &mut self,
+        schema: OpenApiSchema,
+        example: Option<Value>,
+        content_type: &str,
+    ) {
+        let response = self
+            .responses
+            .entry("200".to_string())
+            .or_insert_with(|| OpenApiResponse {
+                description: "OK".to_string(),
+                content: None,
+            });
+        response.content = Some(media_content(content_type, schema, example));
+    }
+}
+
+fn media_content(
+    content_type: &str,
+    schema: OpenApiSchema,
+    example: Option<Value>,
+) -> BTreeMap<String, OpenApiMediaType> {
+    let mut content = BTreeMap::new();
+    content.insert(
+        content_type.to_string(),
+        OpenApiMediaType { schema, example },
+    );
+    content
+}
+
+fn method_supports_body(method: &str) -> bool {
+    matches!(method, "post" | "put" | "patch")
+}
+
+fn default_json_content() -> BTreeMap<String, OpenApiMediaType> {
+    media_content(
+        APPLICATION_JSON.as_ref(),
+        OpenApiSchema::object(),
+        Some(default_example()),
+    )
+}
+
+fn default_example() -> Value {
+    json!({})
+}

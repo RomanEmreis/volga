@@ -134,7 +134,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Query<T> {
     fn describe_openapi(
         config: crate::openapi::OpenApiRouteConfig,
     ) -> crate::openapi::OpenApiRouteConfig {
-        config.with_query_parameters_from_deserialize::<T>()
+        config.consumes_query::<T>()
     }
 }
 

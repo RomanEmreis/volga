@@ -3,7 +3,6 @@
 use futures_util::ready;
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
-use mime::APPLICATION_JSON;
 use http_body_util::{combinators::Collect, BodyExt};
 use serde::Serialize;
 
@@ -125,7 +124,7 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_request_type_from_deserialize::<T>(APPLICATION_JSON.as_ref())
+        config.consumes_json::<T>()
     }
 }
 

@@ -156,7 +156,7 @@ impl FromPayload for File {
 
     #[cfg(feature = "openapi")]
     fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
-        config.with_stream_request()
+        config.consumes_stream()
     }
 }
 
