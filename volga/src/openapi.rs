@@ -129,3 +129,48 @@ fn create_etag(bytes: &[u8]) -> ETag {
     let tag = format!("{:x}", hasher.finalize());
     ETag::weak(tag)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        OPEN_API_NOT_EXPOSED_WARN, create_etag, create_spec_cache_control, create_ui_cache_control,
+    };
+
+    #[test]
+    fn exposed_warning_message_is_stable() {
+        assert_eq!(
+            OPEN_API_NOT_EXPOSED_WARN,
+            "OpenAPI configured but endpoints not exposed; call app.use_open_api() to serve spec/UI.",
+        );
+    }
+
+    #[test]
+    fn spec_cache_control_has_short_ttl() {
+        let header = create_spec_cache_control();
+        assert_eq!(
+            header.as_str().expect("cache control"),
+            "max-age=60, public, stale-while-revalidate=600"
+        );
+    }
+
+    #[test]
+    fn ui_cache_control_has_longer_ttl() {
+        let header = create_ui_cache_control();
+        assert_eq!(
+            header.as_str().expect("cache control"),
+            "max-age=3600, public, stale-while-revalidate=86400"
+        );
+    }
+
+    #[test]
+    fn etag_is_deterministic_and_weak() {
+        let first = create_etag(b"openapi");
+        let second = create_etag(b"openapi");
+
+        assert_eq!(first, second);
+        assert!(first.is_weak());
+        assert!(first.as_ref().starts_with("W/\""));
+        assert!(first.as_ref().ends_with("\""));
+        assert_eq!(first.tag().len(), 40);
+    }
+}

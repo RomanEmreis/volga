@@ -24,12 +24,20 @@ pub struct OpenApiRegistry {
 impl OpenApiRegistry {
     /// Creates a new [`OpenApiRegistry`]
     pub fn new(config: OpenApiConfig) -> Self {
-        let base_doc = |title: String, version: String, description: Option<String>| OpenApiDocument {
-            openapi: DEFAULT_OPENAPI_VERSION.to_string(),
-            info: OpenApiInfo { title, version, description },
-            paths: BTreeMap::new(),
-            components: OpenApiComponents { schemas: BTreeMap::new() },
-        };
+        let base_doc =
+            |title: String, version: String, description: Option<String>| OpenApiDocument {
+                openapi: DEFAULT_OPENAPI_VERSION.to_string(),
+                info: OpenApiInfo {
+                    title,
+                    version,
+                    description,
+                },
+                paths: BTreeMap::new(),
+                components: OpenApiComponents {
+                    schemas: BTreeMap::new(),
+                },
+            };
+
 
         let mut docs = BTreeMap::new();
         for s in &config.specs {
@@ -96,7 +104,9 @@ impl OpenApiRegistry {
             if let Some(methods) = doc.paths.get_mut(path)
                 && let Some(op) = methods.remove(&method_lc) {
                 op_opt = Some(op);
-                if methods.is_empty() { doc.paths.remove(path); }
+                if methods.is_empty() { 
+                    doc.paths.remove(path);
+                }
                 break;
             }
         }
@@ -105,7 +115,9 @@ impl OpenApiRegistry {
             .unwrap_or_else(|| OpenApiOperation::for_method(method_lc.clone(), path));
 
         for name in targets {
-            let Some(doc) = docs.get_mut(name) else { continue; };
+            let Some(doc) = docs.get_mut(name) else { 
+                continue;
+            };
 
             cfg.apply_to_operation(&mut op, &mut doc.components.schemas);
 
@@ -132,7 +144,9 @@ impl OpenApiRegistry {
         let targets = self.target_doc_names(cfg);
 
         for doc_name in targets {
-            let Some(doc) = docs.get_mut(doc_name) else { continue; };
+            let Some(doc) = docs.get_mut(doc_name) else { 
+                continue;
+            };
 
             let OpenApiDocument { paths, components, .. } = doc;
 
@@ -172,5 +186,54 @@ impl OpenApiRegistry {
                 .map(|s| vec![s.name.as_str()])
                 .unwrap_or_default()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_specs() -> OpenApiConfig {
+        OpenApiConfig::new()
+            .with_specs([OpenApiSpec::new("v1"), OpenApiSpec::new("admin")])
+            .with_ui()
+            .with_ui_path("/openapi")
+    }
+
+    #[test]
+    fn register_route_skips_ui_and_spec_paths() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        registry.register_route(&Method::GET, "/openapi", &OpenApiRouteConfig::default());
+        registry.register_route(
+            &Method::GET,
+            "v1/openapi.json",
+            &OpenApiRouteConfig::default(),
+        );
+        registry.register_route(&Method::GET, "/users", &OpenApiRouteConfig::default());
+
+        let v1_doc = registry.document_by_name("v1").expect("v1 document");
+        assert!(v1_doc.paths.contains_key("/users"));
+        assert!(!v1_doc.paths.contains_key("/openapi"));
+        assert!(!v1_doc.paths.contains_key("v1/openapi.json"));
+    }
+
+    #[test]
+    fn rebind_route_moves_operation_to_target_doc() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        registry.register_route(&Method::POST, "/pets", &OpenApiRouteConfig::default());
+        registry.rebind_route(
+            &Method::POST,
+            "/pets",
+            &OpenApiRouteConfig::default().with_doc("admin"),
+        );
+
+        let v1_doc = registry.document_by_name("v1").expect("v1 document");
+        let admin_doc = registry.document_by_name("admin").expect("admin document");
+
+        assert!(!v1_doc.paths.contains_key("/pets"));
+        assert!(admin_doc.paths.contains_key("/pets"));
+        assert!(admin_doc.paths["/pets"].contains_key("post"));
     }
 }
