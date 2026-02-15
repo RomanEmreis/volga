@@ -192,4 +192,25 @@ mod tests {
         assert_eq!(config.specs()[1].name, "v2");
         assert_eq!(config.specs()[1].spec_path, "v2/openapi.json");
     }
+
+    #[test]
+    fn with_spec_replaces_existing_specs() {
+        let config = OpenApiConfig::new().with_spec(OpenApiSpec::new("admin"));
+
+        assert_eq!(config.specs().len(), 1);
+        assert_eq!(config.specs()[0].name, "admin");
+        assert_eq!(config.specs()[0].spec_path, "admin/openapi.json");
+    }
+
+    #[test]
+    fn with_title_version_and_description_override_defaults() {
+        let config = OpenApiConfig::new()
+            .with_title("Custom API")
+            .with_version("2.5.1")
+            .with_description("custom description");
+
+        assert_eq!(config.title(), "Custom API");
+        assert_eq!(config.version, "2.5.1");
+        assert_eq!(config.description.as_deref(), Some("custom description"));
+    }
 }

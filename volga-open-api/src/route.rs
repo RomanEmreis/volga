@@ -571,4 +571,176 @@ mod tests {
                 .is_some()
         );
     }
+
+    #[test]
+    fn with_tags_extends_existing_tags() {
+        let cfg = OpenApiRouteConfig::default()
+            .with_tag("base")
+            .with_tags(["one", "two"]);
+
+        assert_eq!(cfg.tags, vec!["base", "one", "two"]);
+    }
+
+    #[test]
+    fn with_docs_initializes_and_extends_docs() {
+        let cfg = OpenApiRouteConfig::default()
+            .with_docs(["v1", "admin"])
+            .with_doc("internal");
+
+        assert_eq!(cfg.docs.expect("docs"), vec!["v1", "admin", "internal"]);
+    }
+
+    #[test]
+    fn with_description_sets_operation_description() {
+        let cfg = OpenApiRouteConfig::default().with_description("desc");
+        assert_eq!(cfg.description.as_deref(), Some("desc"));
+    }
+
+    #[test]
+    fn consumes_methods_set_request_content_type() {
+        let query_cfg = OpenApiRouteConfig::default().consumes_query::<Payload>();
+        assert_eq!(query_cfg.extra_parameters.len(), 2);
+
+        let json_cfg = OpenApiRouteConfig::default().consumes_json::<Payload>();
+        assert_eq!(
+            json_cfg.request_content_type.as_deref(),
+            Some("application/json")
+        );
+        assert!(json_cfg.request_schema.is_some());
+
+        let form_cfg = OpenApiRouteConfig::default().consumes_form::<Payload>();
+        assert_eq!(
+            form_cfg.request_content_type.as_deref(),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert!(form_cfg.request_schema.is_some());
+
+        let multipart_cfg = OpenApiRouteConfig::default().consumes_multipart();
+        assert_eq!(
+            multipart_cfg.request_content_type.as_deref(),
+            Some("multipart/form-data")
+        );
+
+        let stream_cfg = OpenApiRouteConfig::default().consumes_stream();
+        assert_eq!(
+            stream_cfg.request_content_type.as_deref(),
+            Some("application/octet-stream")
+        );
+        assert_eq!(
+            stream_cfg.request_schema.expect("schema").format.as_deref(),
+            Some("binary")
+        );
+    }
+
+    #[test]
+    fn produces_helpers_set_expected_response_schema_and_content_type() {
+        let text_cfg = OpenApiRouteConfig::default().produces_text();
+        assert_eq!(
+            text_cfg.response_content_type.as_deref(),
+            Some("text/plain; charset=utf-8")
+        );
+        assert_eq!(
+            text_cfg
+                .response_schema
+                .expect("schema")
+                .schema_type
+                .as_deref(),
+            Some("string")
+        );
+
+        let empty_json_cfg = OpenApiRouteConfig::default().produces_empty_json();
+        assert_eq!(
+            empty_json_cfg.response_content_type.as_deref(),
+            Some("application/json")
+        );
+        assert_eq!(
+            empty_json_cfg
+                .response_schema
+                .expect("schema")
+                .schema_type
+                .as_deref(),
+            Some("object")
+        );
+
+        let form_cfg = OpenApiRouteConfig::default().produces_form::<ResponsePayload>();
+        assert_eq!(
+            form_cfg.response_content_type.as_deref(),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert_eq!(
+            form_cfg
+                .response_schema
+                .expect("schema")
+                .schema_type
+                .as_deref(),
+            Some("string")
+        );
+
+        let empty_form_cfg = OpenApiRouteConfig::default().produces_empty_form();
+        assert_eq!(
+            empty_form_cfg.response_content_type.as_deref(),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert_eq!(
+            empty_form_cfg
+                .response_schema
+                .expect("schema")
+                .schema_type
+                .as_deref(),
+            Some("object")
+        );
+
+        let stream_cfg = OpenApiRouteConfig::default().produces_stream();
+        assert_eq!(
+            stream_cfg.response_content_type.as_deref(),
+            Some("application/octet-stream")
+        );
+        assert_eq!(
+            stream_cfg
+                .response_schema
+                .expect("schema")
+                .format
+                .as_deref(),
+            Some("binary")
+        );
+
+        let sse_cfg = OpenApiRouteConfig::default().produces_sse();
+        assert_eq!(
+            sse_cfg.response_content_type.as_deref(),
+            Some("text/event-stream")
+        );
+        assert_eq!(
+            sse_cfg.response_schema.expect("schema").title.as_deref(),
+            Some("SSE stream")
+        );
+    }
+
+    #[test]
+    fn produces_form_example_encodes_object_into_string_example() {
+        #[derive(Serialize)]
+        struct FormOut {
+            first: String,
+            second: i32,
+        }
+
+        let cfg = OpenApiRouteConfig::default().produces_form_example(FormOut {
+            first: "hello".to_string(),
+            second: 7,
+        });
+
+        assert_eq!(
+            cfg.response_content_type.as_deref(),
+            Some("application/x-www-form-urlencoded")
+        );
+        assert_eq!(
+            cfg.response_schema.expect("schema").schema_type.as_deref(),
+            Some("string")
+        );
+        assert_eq!(
+            cfg.response_example,
+            Some(serde_json::Value::String(
+                "first=hello&second=7".to_string()
+            ))
+        );
+    }
 }

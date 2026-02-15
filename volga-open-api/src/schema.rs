@@ -583,4 +583,28 @@ mod tests {
             Some("#/components/schemas/Payload")
         );
     }
+
+    #[test]
+    fn number_and_boolean_builders_set_expected_types() {
+        assert_eq!(
+            OpenApiSchema::number().schema_type.as_deref(),
+            Some("number")
+        );
+        assert_eq!(
+            OpenApiSchema::boolean().schema_type.as_deref(),
+            Some("boolean")
+        );
+    }
+
+    #[test]
+    fn with_format_sets_schema_format() {
+        let schema = OpenApiSchema::string().with_format("uuid");
+        assert_eq!(schema.format.as_deref(), Some("uuid"));
+    }
+
+    #[test]
+    fn default_schema_is_object() {
+        let schema = OpenApiSchema::default();
+        assert_eq!(schema.schema_type.as_deref(), Some("object"));
+    }
 }
