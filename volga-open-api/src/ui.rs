@@ -61,3 +61,34 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
 </html>"##,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ui_html;
+    use crate::config::OpenApiSpec;
+
+    #[test]
+    fn ui_html_uses_single_url_config_for_one_spec() {
+        let html = ui_html(&[OpenApiSpec::new("v1")], "Docs");
+
+        assert!(html.contains("url: \"v1/openapi.json\""));
+        assert!(!html.contains("urls.primaryName"));
+        assert!(html.contains("<title>Docs</title>"));
+    }
+
+    #[test]
+    fn ui_html_uses_urls_config_for_multiple_specs() {
+        let html = ui_html(&[OpenApiSpec::new("v1"), OpenApiSpec::new("admin")], "Docs");
+
+        assert!(html.contains("urls: ["));
+        assert!(html.contains("{ url: \"v1/openapi.json\", name: \"v1\" }"));
+        assert!(html.contains("{ url: \"admin/openapi.json\", name: \"admin\" }"));
+        assert!(html.contains("\"urls.primaryName\": \"v1\""));
+    }
+
+    #[test]
+    fn ui_html_falls_back_to_default_path_for_empty_specs() {
+        let html = ui_html(&[], "Docs");
+        assert!(html.contains("url: \"/openapi.json\""));
+    }
+}

@@ -545,4 +545,42 @@ mod tests {
             Some("integer")
         );
     }
+
+    #[test]
+    fn schema_from_example_handles_null_and_arrays() {
+        let null_schema = OpenApiSchema::from_example(&Value::Null);
+        assert_eq!(null_schema.schema_type.as_deref(), Some("object"));
+        assert_eq!(null_schema.nullable, Some(true));
+
+        let array_schema = OpenApiSchema::from_example(&serde_json::json!([1, 2, 3]));
+        assert_eq!(array_schema.schema_type.as_deref(), Some("array"));
+        assert_eq!(
+            array_schema
+                .items
+                .expect("array items")
+                .schema_type
+                .as_deref(),
+            Some("integer")
+        );
+    }
+
+    #[test]
+    fn multipart_schema_contains_expected_fields() {
+        let schema = OpenApiSchema::multipart();
+        let props = schema.properties.expect("properties");
+
+        assert!(props.contains_key("file"));
+        assert!(props.contains_key("meta"));
+        assert_eq!(schema.required.expect("required"), vec!["file"]);
+    }
+
+    #[test]
+    fn schema_reference_marks_ref_and_path() {
+        let schema = OpenApiSchema::reference("Payload");
+        assert!(schema.is_ref());
+        assert_eq!(
+            schema.schema_ref.as_deref(),
+            Some("#/components/schemas/Payload")
+        );
+    }
 }

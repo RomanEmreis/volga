@@ -155,3 +155,60 @@ fn default_json_content() -> BTreeMap<String, OpenApiMediaType> {
 fn default_example() -> Value {
     json!({})
 }
+
+#[cfg(test)]
+mod tests {
+    use super::OpenApiOperation;
+    use crate::schema::OpenApiSchema;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn for_method_adds_request_body_only_for_body_methods() {
+        let post = OpenApiOperation::for_method("post".to_string(), "/users/{id}");
+        let get = OpenApiOperation::for_method("get".to_string(), "/users/{id}");
+
+        let post_json = serde_json::to_value(post).expect("serialize");
+        let get_json = serde_json::to_value(get).expect("serialize");
+
+        assert!(post_json.get("requestBody").is_some());
+        assert!(get_json.get("requestBody").is_none());
+
+        let parameters = get_json["parameters"].as_array().expect("parameters array");
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0]["name"], "id");
+        assert_eq!(parameters[0]["in"], "path");
+    }
+
+    #[test]
+    fn set_request_and_response_body_use_provided_content_type() {
+        let mut operation = OpenApiOperation::default();
+        operation.set_request_body(
+            OpenApiSchema::string(),
+            Some(json!("example")),
+            "text/plain",
+        );
+        operation.set_response_body(
+            OpenApiSchema::integer(),
+            Some(json!(42)),
+            "application/custom",
+        );
+
+        let json = serde_json::to_value(operation).expect("serialize");
+
+        assert!(json["requestBody"]["content"].get("text/plain").is_some());
+        assert_eq!(
+            json["requestBody"]["content"]["text/plain"]["example"],
+            Value::String("example".to_string())
+        );
+
+        assert!(
+            json["responses"]["200"]["content"]
+                .get("application/custom")
+                .is_some()
+        );
+        assert_eq!(
+            json["responses"]["200"]["content"]["application/custom"]["example"],
+            json!(42)
+        );
+    }
+}

@@ -452,12 +452,20 @@ fn type_display_name<T>() -> String {
 #[allow(unused)]
 mod tests {
     use super::OpenApiRouteConfig;
-    use serde::Deserialize;
+    use crate::{op::OpenApiOperation, schema::OpenApiSchema};
+    use serde::{Deserialize, Serialize};
+    use serde_json::json;
+    use std::collections::BTreeMap;
 
     #[derive(Deserialize)]
     struct Payload {
         name: String,
         age: u64,
+    }
+
+    #[derive(Serialize, Default)]
+    struct ResponsePayload {
+        message: String,
     }
 
     #[test]
@@ -486,5 +494,81 @@ mod tests {
         assert!(cfg.extra_parameters.iter().any(|p| p.name == "name"));
         assert!(cfg.extra_parameters.iter().any(|p| p.name == "age"));
         assert!(cfg.extra_parameters.iter().all(|p| p.location == "query"));
+    }
+
+    #[test]
+    fn merge_combines_docs_and_preserves_existing_values() {
+        let base = OpenApiRouteConfig::default()
+            .with_tag("base")
+            .with_summary("base summary")
+            .with_doc("v1");
+        let other = OpenApiRouteConfig::default()
+            .with_tag("extra")
+            .with_summary("other summary")
+            .with_doc("v1")
+            .with_doc("admin");
+
+        let merged = base.merge(&other);
+
+        assert_eq!(merged.summary.as_deref(), Some("base summary"));
+        assert_eq!(merged.tags.as_slice(), ["base", "extra"]);
+        assert_eq!(merged.docs.expect("docs"), vec!["v1", "admin"]);
+    }
+
+    #[test]
+    fn apply_to_operation_adds_content_and_interns_named_schema() {
+        let cfg = OpenApiRouteConfig::default()
+            .with_request_schema(
+                OpenApiSchema::object()
+                    .with_title("CreateUser")
+                    .with_property("name", OpenApiSchema::string()),
+            )
+            .with_response_schema(
+                OpenApiSchema::object()
+                    .with_title("User")
+                    .with_property("id", OpenApiSchema::integer()),
+            )
+            .produces_json_example(ResponsePayload {
+                message: "ok".to_string(),
+            })
+            .with_summary("create user")
+            .with_operation_id("createUser");
+
+        let mut op = OpenApiOperation::for_method("post".to_string(), "/users");
+        let mut schemas = BTreeMap::new();
+
+        cfg.apply_to_operation(&mut op, &mut schemas);
+
+        let op_json = serde_json::to_value(op).expect("serialize operation");
+        assert_eq!(op_json["summary"], "create user");
+        assert_eq!(op_json["operation_id"], "createUser");
+        assert!(
+            op_json["requestBody"]["content"]
+                .get("application/json")
+                .is_some()
+        );
+        assert_eq!(
+            op_json["responses"]["200"]["content"]["application/json"]["example"],
+            json!({"message":"ok"})
+        );
+
+        assert!(schemas.contains_key("CreateUser"));
+    }
+
+    #[test]
+    fn produces_no_schema_keeps_json_content_when_example_exists() {
+        let cfg = OpenApiRouteConfig::default()
+            .produces_json::<ResponsePayload>()
+            .produces_no_schema();
+
+        let mut op = OpenApiOperation::for_method("get".to_string(), "/users");
+        cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
+
+        let op_json = serde_json::to_value(op).expect("serialize operation");
+        assert!(
+            op_json["responses"]["200"]["content"]
+                .get("application/json")
+                .is_some()
+        );
     }
 }

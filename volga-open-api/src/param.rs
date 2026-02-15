@@ -30,3 +30,25 @@ pub(super) fn parse_path_parameters(path: &str) -> Vec<OpenApiParameter> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_path_parameters;
+
+    #[test]
+    fn parse_path_parameters_extracts_all_valid_segments() {
+        let params = parse_path_parameters("/teams/{team_id}/users/{user_id}");
+
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[0].name, "team_id");
+        assert_eq!(params[1].name, "user_id");
+        assert!(params.iter().all(|p| p.required));
+        assert!(params.iter().all(|p| p.location == "path"));
+    }
+
+    #[test]
+    fn parse_path_parameters_skips_invalid_placeholders() {
+        let params = parse_path_parameters("/users/{}/raw/{broken/id}");
+        assert!(params.is_empty());
+    }
+}
