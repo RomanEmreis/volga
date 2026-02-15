@@ -84,11 +84,8 @@ impl OpenApiRequestBody {
 }
 
 impl OpenApiOperation {
-    pub(super) fn for_method(method: String, path: &str) -> Self {
+    pub(super) fn for_method(_method: String, path: &str) -> Self {
         let mut operation = Self::default();
-        if method_supports_body(&method) {
-            operation.request_body = Some(OpenApiRequestBody::json_payload());
-        }
 
         let parameters = parse_path_parameters(path);
         if !parameters.is_empty() {
@@ -140,10 +137,6 @@ fn media_content(
     content
 }
 
-fn method_supports_body(method: &str) -> bool {
-    matches!(method, "post" | "put" | "patch")
-}
-
 fn default_json_content() -> BTreeMap<String, OpenApiMediaType> {
     media_content(
         APPLICATION_JSON.as_ref(),
@@ -163,14 +156,14 @@ mod tests {
     use serde_json::{Value, json};
 
     #[test]
-    fn for_method_adds_request_body_only_for_body_methods() {
+    fn for_method_does_not_prepopulate_request_body() {
         let post = OpenApiOperation::for_method("post".to_string(), "/users/{id}");
         let get = OpenApiOperation::for_method("get".to_string(), "/users/{id}");
 
         let post_json = serde_json::to_value(post).expect("serialize");
         let get_json = serde_json::to_value(get).expect("serialize");
 
-        assert!(post_json.get("requestBody").is_some());
+        assert!(post_json.get("requestBody").is_none());
         assert!(get_json.get("requestBody").is_none());
 
         let parameters = get_json["parameters"].as_array().expect("parameters array");
@@ -196,6 +189,7 @@ mod tests {
         let json = serde_json::to_value(operation).expect("serialize");
 
         assert!(json["requestBody"]["content"].get("text/plain").is_some());
+        assert_eq!(json["requestBody"]["required"], Value::Bool(true));
         assert_eq!(
             json["requestBody"]["content"]["text/plain"]["example"],
             Value::String("example".to_string())
