@@ -263,11 +263,15 @@ impl Default for OpenApiSchema {
 pub(super) struct ProbeError(String);
 
 impl std::fmt::Display for ProbeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str(&self.0) }
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { 
+        f.write_str(&self.0)
+    }
 }
 impl std::error::Error for ProbeError {}
 impl DeError for ProbeError {
-    fn custom<M: std::fmt::Display>(msg: M) -> Self { ProbeError(msg.to_string()) }
+    fn custom<M: std::fmt::Display>(msg: M) -> Self { 
+        ProbeError(msg.to_string())
+    }
 }
 
 pub(super) struct Probe {
@@ -275,8 +279,13 @@ pub(super) struct Probe {
 }
 
 impl Probe {
-    pub(super) fn new() -> Self { Self { root: None } }
-    pub(super) fn finish(self) -> Option<(OpenApiSchema, Value)> { self.root }
+    pub(super) fn new() -> Self { 
+        Self { root: None }
+    }
+    
+    pub(super) fn finish(self) -> Option<(OpenApiSchema, Value)> { 
+        self.root
+    }
 }
 
 impl<'de> Deserializer<'de> for &mut Probe {
@@ -373,7 +382,10 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>
     {
-        visitor.visit_seq(SeqProbeAccess { probe: self, yielded: false })
+        visitor.visit_seq(SeqProbeAccess { 
+            probe: self, 
+            yielded: false
+        })
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -414,7 +426,9 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>
     {
-        Err(ProbeError("enums are not supported for automatic schema inference".into()))
+        Err(
+            ProbeError("enums are not supported for automatic schema inference".into())
+        )
     }
 
     serde::forward_to_deserialize_any! {
@@ -437,9 +451,15 @@ impl<'de, 'a> SeqAccess<'de> for SeqProbeAccess<'a> {
     {
         if self.yielded {
             if let Some((item_schema, item_example)) = self.probe.root.take() {
-                self.probe.root = Some((OpenApiSchema::array(item_schema), Value::Array(vec![item_example])));
+                self.probe.root = Some((
+                    OpenApiSchema::array(item_schema),
+                    Value::Array(vec![item_example]),
+                ));
             } else {
-                self.probe.root = Some((OpenApiSchema::array(OpenApiSchema::object()), Value::Array(vec![])));
+                self.probe.root = Some((
+                    OpenApiSchema::array(OpenApiSchema::object()),
+                    Value::Array(vec![]),
+                ));
             }
             return Ok(None);
         }
@@ -490,14 +510,22 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
         let v = seed.deserialize(&mut *self.parent)?;
 
         if let Some((field_schema, field_example)) = self.parent.root.take() {
-            let is_required = field_example != Value::Null;
-            self.obj_schema = self.obj_schema.clone().with_property(field.to_string(), field_schema);
+            let is_required = field_schema.nullable != Some(true) && field_example != Value::Null;
+            self.obj_schema = self
+                .obj_schema
+                .clone()
+                .with_property(field.to_string(), field_schema);
+
             self.example.insert(field.to_string(), field_example);
             if is_required {
                 self.required.push(field.to_string());
             }
         } else {
-            self.obj_schema = self.obj_schema.clone().with_property(field.to_string(), OpenApiSchema::object());
+            self.obj_schema = self
+                .obj_schema
+                .clone()
+                .with_property(field.to_string(), OpenApiSchema::object());
+
             self.example.insert(field.to_string(), Value::Null);
         }
 
@@ -606,5 +634,23 @@ mod tests {
     fn default_schema_is_object() {
         let schema = OpenApiSchema::default();
         assert_eq!(schema.schema_type.as_deref(), Some("object"));
+    }
+
+    #[test]
+    fn probe_does_not_mark_option_fields_as_required() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Input {
+            required_name: String,
+            optional_age: Option<()>,
+        }
+
+        let mut probe = Probe::new();
+        let _ = Input::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let required = schema.required.expect("required list");
+        assert!(required.contains(&"required_name".to_string()));
+        assert!(!required.contains(&"optional_age".to_string()));
     }
 }

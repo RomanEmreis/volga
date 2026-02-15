@@ -71,7 +71,7 @@ mod tests {
     fn ui_html_uses_single_url_config_for_one_spec() {
         let html = ui_html(&[OpenApiSpec::new("v1")], "Docs");
 
-        assert!(html.contains("url: \"v1/openapi.json\""));
+        assert!(html.contains("url: \"/v1/openapi.json\""));
         assert!(!html.contains("urls.primaryName"));
         assert!(html.contains("<title>Docs</title>"));
     }
@@ -81,8 +81,8 @@ mod tests {
         let html = ui_html(&[OpenApiSpec::new("v1"), OpenApiSpec::new("admin")], "Docs");
 
         assert!(html.contains("urls: ["));
-        assert!(html.contains("{ url: \"v1/openapi.json\", name: \"v1\" }"));
-        assert!(html.contains("{ url: \"admin/openapi.json\", name: \"admin\" }"));
+        assert!(html.contains("{ url: \"/v1/openapi.json\", name: \"v1\" }"));
+        assert!(html.contains("{ url: \"/admin/openapi.json\", name: \"admin\" }"));
         assert!(html.contains("\"urls.primaryName\": \"v1\""));
     }
 

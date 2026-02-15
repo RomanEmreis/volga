@@ -59,12 +59,12 @@ impl<T: Into<String>> From<T> for OpenApiSpec {
 }
 
 impl OpenApiSpec {
-    /// Creates new OpenAPI spec with given name.
+    /// Creates a new OpenAPI spec with the given name.
     #[inline]
     pub fn new(name: impl Into<String>) -> Self {
         let name = name.into();
         Self {
-            spec_path: format!("{name}{DEFAULT_SPEC_PATH}"),
+            spec_path: format!("/{name}{DEFAULT_SPEC_PATH}"),
             name,
         }
     }
@@ -177,7 +177,7 @@ mod tests {
     fn spec_new_builds_path_from_spec_name() {
         let spec = OpenApiSpec::new("admin");
         assert_eq!(spec.name, "admin");
-        assert_eq!(spec.spec_path, "admin/openapi.json");
+        assert_eq!(spec.spec_path, "/admin/openapi.json");
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
         assert_eq!(config.specs().len(), 2);
         assert_eq!(config.specs()[0].spec_path, "/docs/v1.json");
         assert_eq!(config.specs()[1].name, "v2");
-        assert_eq!(config.specs()[1].spec_path, "v2/openapi.json");
+        assert_eq!(config.specs()[1].spec_path, "/v2/openapi.json");
     }
 
     #[test]
@@ -199,7 +199,7 @@ mod tests {
 
         assert_eq!(config.specs().len(), 1);
         assert_eq!(config.specs()[0].name, "admin");
-        assert_eq!(config.specs()[0].spec_path, "admin/openapi.json");
+        assert_eq!(config.specs()[0].spec_path, "/admin/openapi.json");
     }
 
     #[test]

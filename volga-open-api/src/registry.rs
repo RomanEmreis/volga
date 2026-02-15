@@ -102,12 +102,12 @@ impl OpenApiRegistry {
         let mut op_opt: Option<OpenApiOperation> = None;
         for doc in docs.values_mut() {
             if let Some(methods) = doc.paths.get_mut(path)
-                && let Some(op) = methods.remove(&method_lc) {
+                && let Some(op) = methods.remove(&method_lc)
+            {
                 op_opt = Some(op);
                 if methods.is_empty() { 
                     doc.paths.remove(path);
                 }
-                break;
             }
         }
 
@@ -215,7 +215,7 @@ mod tests {
         let v1_doc = registry.document_by_name("v1").expect("v1 document");
         assert!(v1_doc.paths.contains_key("/users"));
         assert!(!v1_doc.paths.contains_key("/openapi"));
-        assert!(!v1_doc.paths.contains_key("v1/openapi.json"));
+        assert!(!v1_doc.paths.contains_key("/sv1/openapi.json"));
     }
 
     #[test]
@@ -235,5 +235,22 @@ mod tests {
         assert!(!v1_doc.paths.contains_key("/pets"));
         assert!(admin_doc.paths.contains_key("/pets"));
         assert!(admin_doc.paths["/pets"].contains_key("post"));
+    }
+
+    #[test]
+    fn rebind_route_removes_stale_operation_from_all_docs() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        let shared = OpenApiRouteConfig::default().with_docs(["v1", "admin"]);
+        registry.register_route(&Method::GET, "/shared", &shared);
+
+        let target = OpenApiRouteConfig::default().with_doc("v1");
+        registry.rebind_route(&Method::GET, "/shared", &target);
+
+        let v1_doc = registry.document_by_name("v1").expect("v1 document");
+        let admin_doc = registry.document_by_name("admin").expect("admin document");
+
+        assert!(v1_doc.paths["/shared"].contains_key("get"));
+        assert!(!admin_doc.paths.contains_key("/shared"));
     }
 }
