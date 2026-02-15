@@ -263,11 +263,11 @@ impl OpenApiRouteConfig {
         self
     }
 
-    fn with_query_parameter(mut self, name: String, schema: OpenApiSchema) -> Self {
+    fn with_query_parameter(mut self, name: String, schema: OpenApiSchema, required: bool) -> Self {
         self.extra_parameters.push(OpenApiParameter {
             name,
             location: "query".to_string(),
-            required: false,
+            required,
             schema,
         });
         self
@@ -288,9 +288,13 @@ impl OpenApiRouteConfig {
 
     fn with_query_parameters_from_deserialize<T: DeserializeOwned>(mut self) -> Self {
         if let Some((schema, _)) = schema_and_example_from_deserialize::<T>()
-            && let Some(properties) = schema.properties {
+            && let Some(properties) = schema.properties
+        {
+            let required = schema.required.unwrap_or_default();
+            
             for (name, property_schema) in properties {
-                self = self.with_query_parameter(name, property_schema);
+                let is_required = required.iter().any(|f| f == &name);
+                self = self.with_query_parameter(name, property_schema, is_required);
             }
         }
         self
@@ -466,6 +470,31 @@ mod tests {
     #[derive(Serialize, Default)]
     struct ResponsePayload {
         message: String,
+    }
+
+    #[derive(Deserialize)]
+    struct OptionalQuery {
+        required_name: String,
+        optional_age: Option<()>,
+    }
+
+    #[test]
+    fn consumes_query_marks_non_optional_fields_as_required() {
+        let cfg = OpenApiRouteConfig::default().consumes_query::<OptionalQuery>();
+
+        let required_name = cfg
+            .extra_parameters
+            .iter()
+            .find(|p| p.name == "required_name")
+            .expect("required_name param");
+        let optional_age = cfg
+            .extra_parameters
+            .iter()
+            .find(|p| p.name == "optional_age")
+            .expect("optional_age param");
+
+        assert!(required_name.required);
+        assert!(!optional_age.required);
     }
 
     #[test]

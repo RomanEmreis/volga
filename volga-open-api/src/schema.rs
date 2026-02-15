@@ -356,7 +356,9 @@ impl<'de> Deserializer<'de> for &mut Probe {
             type Error = ProbeError;
 
             fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-            where V: Visitor<'de> {
+            where 
+                V: Visitor<'de>
+            {
                 (&mut *self.0).deserialize_any(visitor)
             }
 

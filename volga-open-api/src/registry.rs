@@ -88,12 +88,11 @@ impl OpenApiRegistry {
     }
 
     /// Rebinds route to another spec.
-    pub fn rebind_route(
-        &self,
-        method: &Method,
-        path: &str,
-        cfg: &OpenApiRouteConfig,
-    ) {
+    pub fn rebind_route(&self, method: &Method, path: &str, cfg: &OpenApiRouteConfig) {
+        if self.is_excluded_path(path) {
+            return;
+        }
+        
         let method_lc = method.as_str().to_ascii_lowercase();
         let targets = self.target_doc_names(cfg);
 
@@ -252,5 +251,19 @@ mod tests {
 
         assert!(v1_doc.paths["/shared"].contains_key("get"));
         assert!(!admin_doc.paths.contains_key("/shared"));
+    }
+
+    #[test]
+    fn rebind_route_skips_excluded_paths() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        registry.rebind_route(
+            &Method::GET,
+            "/v1/openapi.json",
+            &OpenApiRouteConfig::default().with_doc("admin"),
+        );
+
+        let admin_doc = registry.document_by_name("admin").expect("admin document");
+        assert!(!admin_doc.paths.contains_key("/v1/openapi.json"));
     }
 }
