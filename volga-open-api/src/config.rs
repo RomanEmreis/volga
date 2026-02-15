@@ -116,7 +116,12 @@ impl OpenApiConfig {
         I: IntoIterator<Item = S>,
         S: Into<OpenApiSpec>
     {
-        self.specs = specs.into_iter().map(Into::into).collect();
+        let specs: Vec<_> = specs.into_iter().map(Into::into).collect();
+        self.specs = if specs.is_empty() {
+            vec![OpenApiSpec::default()]
+        } else {
+            specs
+        };
         self
     }
 
@@ -212,5 +217,14 @@ mod tests {
         assert_eq!(config.title(), "Custom API");
         assert_eq!(config.version, "2.5.1");
         assert_eq!(config.description.as_deref(), Some("custom description"));
+    }
+
+    #[test]
+    fn with_specs_restores_default_when_given_empty_list() {
+        let config = OpenApiConfig::new().with_specs(Vec::<OpenApiSpec>::new());
+
+        assert_eq!(config.specs().len(), 1);
+        assert_eq!(config.specs()[0].name, "v1");
+        assert_eq!(config.specs()[0].spec_path, DEFAULT_SPEC_PATH);
     }
 }

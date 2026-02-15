@@ -306,6 +306,30 @@ impl<'de> Deserializer<'de> for &mut Probe {
         visitor.visit_bool(false)
     }
 
+    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
+        visitor.visit_i32(0)
+    }
+
+    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
+        visitor.visit_u32(0)
+    }
+
+    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.root = Some((OpenApiSchema::number(), json!(0.0)));
+        visitor.visit_f32(0.0)
+    }
+
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>
@@ -434,7 +458,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     serde::forward_to_deserialize_any! {
-        i8 i16 i32 i128 u8 u16 u32 u128 f32 char bytes byte_buf unit unit_struct
+        i8 i16 i128 u8 u16 u128 char bytes byte_buf unit unit_struct
         newtype_struct tuple tuple_struct identifier ignored_any
     }
 }
@@ -654,5 +678,53 @@ mod tests {
         let required = schema.required.expect("required list");
         assert!(required.contains(&"required_name".to_string()));
         assert!(!required.contains(&"optional_age".to_string()));
+    }
+
+    #[test]
+    fn probe_supports_i32_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: i32,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn probe_supports_u32_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: u32,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn probe_supports_f32_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: f32,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
     }
 }
