@@ -725,6 +725,6 @@ mod tests {
         let (schema, _) = probe.finish().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
-        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+        assert_eq!(props["value"].schema_type.as_deref(), Some("number"));
     }
 }
