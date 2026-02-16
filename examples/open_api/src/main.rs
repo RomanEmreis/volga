@@ -35,7 +35,7 @@ async fn main() -> std::io::Result<()> {
         
         api.map_get("/hello", async || "Hello, World!");
         api.map_get("/{name}", async |name: String| ok!(fmt: "Hello {name}"));
-        api.map_get("/{name}/{age}", async |Path((_name, _age)): Path<(String, u32)>| {});
+        api.map_get("/{name}/{age:integer}", async |Path((_name, _age)): Path<(String, u32)>| {});
         api.map_get("/named/{name}/{age}", async |path: NamedPath<Payload>| ok!(path.into_inner()))
             .open_api(|cfg| cfg.produces_json::<Payload>());
     });

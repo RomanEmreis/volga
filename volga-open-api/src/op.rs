@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::{
-    param::{parse_path_parameters, OpenApiParameter},
+    param::OpenApiParameter,
     schema::OpenApiSchema,
 };
 
@@ -84,17 +84,6 @@ impl OpenApiRequestBody {
 }
 
 impl OpenApiOperation {
-    pub(super) fn for_method(_method: String, path: &str) -> Self {
-        let mut operation = Self::default();
-
-        let parameters = parse_path_parameters(path);
-        if !parameters.is_empty() {
-            operation.parameters = Some(parameters);
-        }
-
-        operation
-    }
-
     pub(super) fn set_request_body(
         &mut self,
         schema: OpenApiSchema,
@@ -154,23 +143,6 @@ mod tests {
     use super::OpenApiOperation;
     use crate::schema::OpenApiSchema;
     use serde_json::{Value, json};
-
-    #[test]
-    fn for_method_does_not_prepopulate_request_body() {
-        let post = OpenApiOperation::for_method("post".to_string(), "/users/{id}");
-        let get = OpenApiOperation::for_method("get".to_string(), "/users/{id}");
-
-        let post_json = serde_json::to_value(post).expect("serialize");
-        let get_json = serde_json::to_value(get).expect("serialize");
-
-        assert!(post_json.get("requestBody").is_none());
-        assert!(get_json.get("requestBody").is_none());
-
-        let parameters = get_json["parameters"].as_array().expect("parameters array");
-        assert_eq!(parameters.len(), 1);
-        assert_eq!(parameters[0]["name"], "id");
-        assert_eq!(parameters[0]["in"], "path");
-    }
 
     #[test]
     fn set_request_and_response_body_use_provided_content_type() {

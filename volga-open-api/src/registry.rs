@@ -7,7 +7,8 @@ use super::{
     doc::{OpenApiDocument, OpenApiComponents, OpenApiInfo},
     config::{OpenApiConfig, OpenApiSpec},
     route::OpenApiRouteConfig,
-    op::OpenApiOperation
+    op::OpenApiOperation,
+    param::normalize_openapi_path
 };
 
 const DEFAULT_OPENAPI_VERSION: &str = "3.0.0";
@@ -70,6 +71,8 @@ impl OpenApiRegistry {
             return;
         }
 
+        let (spec_path, path_params) = normalize_openapi_path(path);
+
         let mut docs = self.lock();
         let method = method.as_str().to_ascii_lowercase();
         let targets = self.target_doc_names(cfg);
@@ -77,12 +80,16 @@ impl OpenApiRegistry {
         for doc_name in targets {
             if let Some(doc) = docs.get_mut(doc_name) {
                 let entry = doc.paths
-                    .entry(path.to_string())
+                    .entry(spec_path.clone())
                     .or_default();
 
-                entry
+                let op = entry
                     .entry(method.clone())
-                    .or_insert_with(|| OpenApiOperation::for_method(method.clone(), path));
+                    .or_insert_with(OpenApiOperation::default);
+
+                if op.parameters.is_none() && !path_params.is_empty() {
+                    op.parameters = Some(path_params.clone());
+                }
             }
         }
     }
@@ -92,6 +99,8 @@ impl OpenApiRegistry {
         if self.is_excluded_path(path) {
             return;
         }
+
+        let (spec_path, path_params) = normalize_openapi_path(path);
         
         let method_lc = method.as_str().to_ascii_lowercase();
         let targets = self.target_doc_names(cfg);
@@ -100,18 +109,21 @@ impl OpenApiRegistry {
 
         let mut op_opt: Option<OpenApiOperation> = None;
         for doc in docs.values_mut() {
-            if let Some(methods) = doc.paths.get_mut(path)
+            if let Some(methods) = doc.paths.get_mut(&spec_path)
                 && let Some(op) = methods.remove(&method_lc)
             {
                 op_opt = Some(op);
                 if methods.is_empty() { 
-                    doc.paths.remove(path);
+                    doc.paths.remove(&spec_path);
                 }
             }
         }
 
-        let mut op = op_opt
-            .unwrap_or_else(|| OpenApiOperation::for_method(method_lc.clone(), path));
+        let mut op = op_opt.unwrap_or_default();
+
+        if op.parameters.is_none() && !path_params.is_empty() {
+            op.parameters = Some(path_params.clone());
+        }
 
         for name in targets {
             let Some(doc) = docs.get_mut(name) else { 
@@ -121,7 +133,7 @@ impl OpenApiRegistry {
             cfg.apply_to_operation(&mut op, &mut doc.components.schemas);
 
             doc.paths
-                .entry(path.to_string())
+                .entry(spec_path.clone())
                 .or_default()
                 .insert(method_lc.clone(), op.clone());
         }
@@ -138,6 +150,8 @@ impl OpenApiRegistry {
             return;
         }
 
+        let (spec_path, path_params) = normalize_openapi_path(path);
+
         let mut docs = self.lock();
         let method_lc = method.as_str().to_ascii_lowercase();
         let targets = self.target_doc_names(cfg);
@@ -149,9 +163,13 @@ impl OpenApiRegistry {
 
             let OpenApiDocument { paths, components, .. } = doc;
 
-            let entry = paths.entry(path.to_string()).or_default();
+            let entry = paths.entry(spec_path.clone()).or_default();
             let op = entry.entry(method_lc.clone())
-                .or_insert_with(|| OpenApiOperation::for_method(method_lc.clone(), path));
+                .or_insert_with(OpenApiOperation::default);
+
+            if op.parameters.is_none() && !path_params.is_empty() {
+                op.parameters = Some(path_params.clone());
+            }
 
             cfg.apply_to_operation(op, &mut components.schemas);
         }

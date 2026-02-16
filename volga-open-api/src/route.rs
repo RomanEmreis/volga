@@ -106,7 +106,12 @@ impl OpenApiRouteConfig {
         self.response_schema = Some(schema);
         self
     }
-    
+
+    /// Generates path parameters schema.
+    pub fn consumes_named_path<T: DeserializeOwned>(self) -> Self {
+        self.with_named_path_parameters_from_deserialize::<T>()
+    }
+
     /// Generates query parameters schema.
     pub fn consumes_query<T: DeserializeOwned>(self) -> Self {
         self.with_query_parameters_from_deserialize::<T>()
@@ -273,6 +278,16 @@ impl OpenApiRouteConfig {
         self
     }
 
+    fn with_path_parameter(mut self, name: String, schema: OpenApiSchema) -> Self {
+        self.extra_parameters.push(OpenApiParameter {
+            name,
+            location: "path".to_string(),
+            required: true,
+            schema,
+        });
+        self
+    }
+
     /// Generates request schema and example from `T`.
     fn with_request_type_from_deserialize<T: DeserializeOwned>(
         mut self,
@@ -295,6 +310,17 @@ impl OpenApiRouteConfig {
             for (name, property_schema) in properties {
                 let is_required = required.iter().any(|f| f == &name);
                 self = self.with_query_parameter(name, property_schema, is_required);
+            }
+        }
+        self
+    }
+
+    fn with_named_path_parameters_from_deserialize<T: DeserializeOwned>(mut self) -> Self {
+        if let Some((schema, _)) = schema_and_example_from_deserialize::<T>()
+            && let Some(properties) = schema.properties
+        {
+            for (name, property_schema) in properties {
+                self = self.with_path_parameter(name, property_schema);
             }
         }
         self
@@ -392,10 +418,12 @@ impl OpenApiRouteConfig {
             let params = operation.parameters.get_or_insert_with(Vec::new);
 
             for p in &self.extra_parameters {
-                let exists = params
-                    .iter()
-                    .any(|x| x.name == p.name && x.location == p.location);
-                if !exists {
+                if let Some(existing) = params
+                    .iter_mut()
+                    .find(|x| x.name == p.name && x.location == p.location)
+                {
+                    *existing = p.clone();
+                } else {
                     params.push(p.clone());
                 }
             }
@@ -563,7 +591,7 @@ mod tests {
             .with_summary("create user")
             .with_operation_id("createUser");
 
-        let mut op = OpenApiOperation::for_method("post".to_string(), "/users");
+        let mut op = OpenApiOperation::default();
         let mut schemas = BTreeMap::new();
 
         cfg.apply_to_operation(&mut op, &mut schemas);
@@ -590,7 +618,7 @@ mod tests {
             .produces_json::<ResponsePayload>()
             .produces_no_schema();
 
-        let mut op = OpenApiOperation::for_method("get".to_string(), "/users");
+        let mut op = OpenApiOperation::default();
         cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
 
         let op_json = serde_json::to_value(op).expect("serialize operation");

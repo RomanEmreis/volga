@@ -21,5 +21,5 @@ pub use {
     route::OpenApiRouteConfig,
     registry::OpenApiRegistry,
     doc::OpenApiDocument,
-    ui::ui_html
+    ui::ui_html,
 };

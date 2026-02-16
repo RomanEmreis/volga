@@ -267,6 +267,13 @@ impl<T: DeserializeOwned + Send> FromPayload for NamedPath<T> {
         let Payload::PathArgs(params) = payload else { unreachable!() };
         ready(Self::from_slice(params))
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
+        config.consumes_named_path::<T>()
+    }
 }
 
 impl FromPayload for String {
