@@ -775,4 +775,100 @@ mod tests {
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("number"));
     }
+
+    #[test]
+    fn probe_supports_i128_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: i128,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn probe_supports_u128_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: u128,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn probe_supports_i16_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: i16,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn probe_supports_u16_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: u16,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn probe_supports_i8_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: i8,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn probe_supports_u8_fields_for_schema_inference() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct NumericInput {
+            value: u8,
+        }
+
+        let mut probe = Probe::new();
+        let _ = NumericInput::deserialize(&mut probe);
+        let (schema, _) = probe.finish().expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
 }

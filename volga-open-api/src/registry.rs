@@ -107,6 +107,22 @@ impl OpenApiRegistry {
 
         let mut docs = self.lock();
 
+        let mut valid_targets: Vec<&str> = targets
+            .into_iter()
+            .filter(|name| docs.contains_key(*name))
+            .collect();
+
+        // If user specified docs but none exist -> do not drop the route from all specs.
+        if valid_targets.is_empty() {
+            #[cfg(debug_assertions)]
+            {
+                eprintln!(
+                    "OpenAPI: rebind_route ignored: no such spec(s) for route {method_lc} {spec_path}"
+                );
+            }
+            return;
+        }
+
         let mut op_opt: Option<OpenApiOperation> = None;
         for doc in docs.values_mut() {
             if let Some(methods) = doc.paths.get_mut(&spec_path)
@@ -125,7 +141,7 @@ impl OpenApiRegistry {
             op.parameters = Some(path_params.clone());
         }
 
-        for name in targets {
+        for name in valid_targets.drain(..) {
             let Some(doc) = docs.get_mut(name) else { 
                 continue;
             };

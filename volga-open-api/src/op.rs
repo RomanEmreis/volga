@@ -111,6 +111,12 @@ impl OpenApiOperation {
             });
         response.content = Some(media_content(content_type, schema, example));
     }
+
+    pub(super) fn clear_response_body(&mut self) {
+        if let Some(resp) = self.responses.get_mut("200") {
+            resp.content = None;
+        }
+    }
 }
 
 fn media_content(

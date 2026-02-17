@@ -29,11 +29,11 @@ pub struct OpenApiRouteConfig {
     description: Option<String>,
     operation_id: Option<String>,
     request_schema: Option<OpenApiSchema>,
-    response_schema: Option<OpenApiSchema>,
+    response_schema: Option<Option<OpenApiSchema>>,
     request_example: Option<Value>,
-    response_example: Option<Value>,
+    response_example: Option<Option<Value>>,
     request_content_type: Option<String>,
-    response_content_type: Option<String>,
+    response_content_type: Option<Option<String>>,
     extra_parameters: Vec<OpenApiParameter>,
 }
 
@@ -103,7 +103,7 @@ impl OpenApiRouteConfig {
 
     /// Sets the response schema for this operation.
     pub fn with_response_schema(mut self, schema: OpenApiSchema) -> Self {
-        self.response_schema = Some(schema);
+        self.response_schema = Some(Some(schema));
         self
     }
 
@@ -181,9 +181,9 @@ impl OpenApiRouteConfig {
     pub fn produces_json_example<T: Serialize>(mut self, example: T) -> Self {
         let example = serde_json::to_value(example).unwrap_or_else(|_| json!({}));
 
-        self.response_schema = Some(OpenApiSchema::from_example(&example));
-        self.response_example = Some(example);
-        self.response_content_type = Some(APPLICATION_JSON.to_string());
+        self.response_schema = Some(Some(OpenApiSchema::from_example(&example)));
+        self.response_example = Some(Some(example));
+        self.response_content_type = Some(Some(APPLICATION_JSON.to_string()));
 
         self
     }
@@ -197,10 +197,10 @@ impl OpenApiRouteConfig {
             _ => String::new(),
         };
 
-        self.response_schema = Some(OpenApiSchema::string());
-        self.response_example = Some(Value::String(encoded));
+        self.response_schema = Some(Some(OpenApiSchema::string()));
+        self.response_example = Some(Some(Value::String(encoded)));
 
-        self.response_content_type = Some(APPLICATION_WWW_FORM_URLENCODED.to_string());
+        self.response_content_type = Some(Some(APPLICATION_WWW_FORM_URLENCODED.to_string()));
 
         self
     }
@@ -224,47 +224,48 @@ impl OpenApiRouteConfig {
     /// Generates default JSON response schema
     fn with_json_response(mut self) -> Self {
         self.response_schema
-            .get_or_insert_with(OpenApiSchema::object);
-        self.response_content_type = Some(APPLICATION_JSON.to_string());
+            .get_or_insert_with(|| Some(OpenApiSchema::object()));
+        self.response_content_type = Some(Some(APPLICATION_JSON.to_string()));
         self
     }
 
     /// Generates default form response schema
     fn with_form_response(mut self) -> Self {
         self.response_schema
-            .get_or_insert_with(OpenApiSchema::object);
-        self.response_content_type = Some(APPLICATION_WWW_FORM_URLENCODED.to_string());
+            .get_or_insert_with(|| Some(OpenApiSchema::object()));
+        self.response_content_type = Some(Some(APPLICATION_WWW_FORM_URLENCODED.to_string()));
         self
     }
 
     /// Generates default text response schema
     fn with_text_response(mut self) -> Self {
         self.response_schema
-            .get_or_insert_with(OpenApiSchema::string);
-        self.response_content_type = Some(TEXT_PLAIN_UTF_8.to_string());
+            .get_or_insert_with(|| Some(OpenApiSchema::string()));
+        self.response_content_type = Some(Some(TEXT_PLAIN_UTF_8.to_string()));
         self
     }
 
     /// Generates empty response schema and content type
     fn with_empty_response(mut self) -> Self {
-        self.response_schema = None;
-        self.response_content_type = None;
+        self.response_schema = Some(None);
+        self.response_content_type = Some(None);
+        self.response_example = Some(None);
         self
     }
 
     /// Generates SSE stream response schema
     fn with_sse_response(mut self) -> Self {
         self.response_schema
-            .get_or_insert_with(|| OpenApiSchema::string().with_title("SSE stream"));
-        self.response_content_type = Some(TEXT_EVENT_STREAM.to_string());
+            .get_or_insert_with(|| Some(OpenApiSchema::string().with_title("SSE stream")));
+        self.response_content_type = Some(Some(TEXT_EVENT_STREAM.to_string()));
         self
     }
 
     /// Generates default stream response schema
     fn with_stream_response(mut self) -> Self {
         self.response_schema
-            .get_or_insert_with(OpenApiSchema::binary);
-        self.response_content_type = Some(APPLICATION_OCTET_STREAM.to_string());
+            .get_or_insert_with(|| Some(OpenApiSchema::binary()));
+        self.response_content_type = Some(Some(APPLICATION_OCTET_STREAM.to_string()));
         self
     }
 
@@ -405,13 +406,36 @@ impl OpenApiRouteConfig {
             operation.set_request_body(schema, example, content_type);
         }
 
-        if self.response_schema.is_some() || self.response_example.is_some() {
-            let mut schema = self.response_schema.clone().unwrap_or_else(OpenApiSchema::object);
-            let example = self.response_example.clone();
-            let content_type = self.response_content_type.as_deref().unwrap_or(APPLICATION_JSON.as_ref());
+        let touched = self.response_schema.is_some()
+            || self.response_example.is_some()
+            || self.response_content_type.is_some();
 
-            schema = intern_schema_if_object_named(schema, schemas);
-            operation.set_response_body(schema, example, content_type);
+        if touched {
+            let schema_clear = matches!(self.response_schema, Some(None));
+            let ct_clear = matches!(self.response_content_type, Some(None));
+            let example_clear = matches!(self.response_example, Some(None));
+        
+            if schema_clear || ct_clear || example_clear {
+                operation.clear_response_body();
+            } else {
+                let mut schema = match &self.response_schema {
+                    Some(Some(s)) => s.clone(),
+                    _ => OpenApiSchema::object(),
+                };
+            
+                let example: Option<Value> = match &self.response_example {
+                    Some(Some(v)) => Some(v.clone()),
+                    _ => None,
+                };
+            
+                let content_type: &str = match &self.response_content_type {
+                    Some(Some(ct)) => ct.as_str(),
+                    _ => APPLICATION_JSON.as_ref(),
+                };
+            
+                schema = intern_schema_if_object_named(schema, schemas);
+                operation.set_response_body(schema, example, content_type);
+            }
         }
 
         if !self.extra_parameters.is_empty() {
@@ -613,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn produces_no_schema_keeps_json_content_when_example_exists() {
+    fn produces_no_schema_clears_content() {
         let cfg = OpenApiRouteConfig::default()
             .produces_json::<ResponsePayload>()
             .produces_no_schema();
@@ -623,9 +647,9 @@ mod tests {
 
         let op_json = serde_json::to_value(op).expect("serialize operation");
         assert!(
-            op_json["responses"]["200"]["content"]
-                .get("application/json")
-                .is_some()
+            op_json["responses"]["200"]
+                .get("content")
+                .is_none()
         );
     }
 
@@ -693,12 +717,16 @@ mod tests {
     fn produces_helpers_set_expected_response_schema_and_content_type() {
         let text_cfg = OpenApiRouteConfig::default().produces_text();
         assert_eq!(
-            text_cfg.response_content_type.as_deref(),
+            text_cfg
+                .response_content_type
+                .as_ref()
+                .and_then(|x| x.as_deref()),
             Some("text/plain; charset=utf-8")
         );
         assert_eq!(
             text_cfg
                 .response_schema
+                .expect("schema")
                 .expect("schema")
                 .schema_type
                 .as_deref(),
@@ -707,12 +735,16 @@ mod tests {
 
         let empty_json_cfg = OpenApiRouteConfig::default().produces_empty_json();
         assert_eq!(
-            empty_json_cfg.response_content_type.as_deref(),
+            empty_json_cfg
+                .response_content_type
+                .as_ref()
+                .and_then(|x| x.as_deref()),
             Some("application/json")
         );
         assert_eq!(
             empty_json_cfg
                 .response_schema
+                .expect("schema")
                 .expect("schema")
                 .schema_type
                 .as_deref(),
@@ -721,12 +753,16 @@ mod tests {
 
         let form_cfg = OpenApiRouteConfig::default().produces_form::<ResponsePayload>();
         assert_eq!(
-            form_cfg.response_content_type.as_deref(),
+            form_cfg                
+                .response_content_type
+                .as_ref()
+                .and_then(|x| x.as_deref()),
             Some("application/x-www-form-urlencoded")
         );
         assert_eq!(
             form_cfg
                 .response_schema
+                .expect("schema")
                 .expect("schema")
                 .schema_type
                 .as_deref(),
@@ -735,12 +771,16 @@ mod tests {
 
         let empty_form_cfg = OpenApiRouteConfig::default().produces_empty_form();
         assert_eq!(
-            empty_form_cfg.response_content_type.as_deref(),
+            empty_form_cfg                
+                .response_content_type
+                .as_ref()
+                .and_then(|x| x.as_deref()),
             Some("application/x-www-form-urlencoded")
         );
         assert_eq!(
             empty_form_cfg
                 .response_schema
+                .expect("schema")
                 .expect("schema")
                 .schema_type
                 .as_deref(),
@@ -749,12 +789,16 @@ mod tests {
 
         let stream_cfg = OpenApiRouteConfig::default().produces_stream();
         assert_eq!(
-            stream_cfg.response_content_type.as_deref(),
+            stream_cfg                
+                .response_content_type
+                .as_ref()
+                .and_then(|x| x.as_deref()),
             Some("application/octet-stream")
         );
         assert_eq!(
             stream_cfg
                 .response_schema
+                .expect("schema")
                 .expect("schema")
                 .format
                 .as_deref(),
@@ -763,11 +807,18 @@ mod tests {
 
         let sse_cfg = OpenApiRouteConfig::default().produces_sse();
         assert_eq!(
-            sse_cfg.response_content_type.as_deref(),
+            sse_cfg                
+                .response_content_type
+                .as_ref()
+                .and_then(|x| x.as_deref()),
             Some("text/event-stream")
         );
         assert_eq!(
-            sse_cfg.response_schema.expect("schema").title.as_deref(),
+            sse_cfg.response_schema
+                .expect("schema")
+                .expect("schema")
+                .title
+                .as_deref(),
             Some("SSE stream")
         );
     }
@@ -786,18 +837,24 @@ mod tests {
         });
 
         assert_eq!(
-            cfg.response_content_type.as_deref(),
+            cfg.response_content_type
+                .as_ref()
+                .and_then(|x| x.as_deref()),
             Some("application/x-www-form-urlencoded")
         );
         assert_eq!(
-            cfg.response_schema.expect("schema").schema_type.as_deref(),
+            cfg.response_schema
+                .expect("schema")
+                .expect("schema")
+                .schema_type
+                .as_deref(),
             Some("string")
         );
         assert_eq!(
             cfg.response_example,
-            Some(serde_json::Value::String(
+            Some(Some(serde_json::Value::String(
                 "first=hello&second=7".to_string()
-            ))
+            )))
         );
     }
 }
