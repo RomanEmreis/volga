@@ -598,7 +598,7 @@ mod tests {
 
         let op_json = serde_json::to_value(op).expect("serialize operation");
         assert_eq!(op_json["summary"], "create user");
-        assert_eq!(op_json["operation_id"], "createUser");
+        assert_eq!(op_json["operationId"], "createUser");
         assert!(
             op_json["requestBody"]["content"]
                 .get("application/json")

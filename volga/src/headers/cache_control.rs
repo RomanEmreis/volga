@@ -231,6 +231,8 @@ impl CacheControl {
         self.no_store = true;
         self.max_age = None;
         self.s_max_age = None;
+        self.stale_if_error = None;
+        self.stale_while_revalidate = None;
         self
     }
 
@@ -581,6 +583,8 @@ mod tests {
         assert!(cc.no_store);
         assert_eq!(cc.max_age, None);
         assert_eq!(cc.s_max_age, None);
+        assert_eq!(cc.stale_if_error, None);
+        assert_eq!(cc.stale_while_revalidate, None);
     }
 
     #[test]

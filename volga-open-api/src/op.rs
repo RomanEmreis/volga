@@ -17,7 +17,7 @@ pub(super) struct OpenApiOperation {
     pub(super) summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "operationId", skip_serializing_if = "Option::is_none")]
     pub(super) operation_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) tags: Option<Vec<String>>,

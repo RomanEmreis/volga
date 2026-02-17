@@ -164,7 +164,8 @@ impl OpenApiRegistry {
             let OpenApiDocument { paths, components, .. } = doc;
 
             let entry = paths.entry(spec_path.clone()).or_default();
-            let op = entry.entry(method_lc.clone())
+            let op = entry
+                .entry(method_lc.clone())
                 .or_insert_with(OpenApiOperation::default);
 
             if op.parameters.is_none() && !path_params.is_empty() {

@@ -306,6 +306,38 @@ impl<'de> Deserializer<'de> for &mut Probe {
         visitor.visit_bool(false)
     }
 
+    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
+        visitor.visit_i8(0)
+    }
+
+    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
+        visitor.visit_u8(0)
+    }
+
+    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
+        visitor.visit_i16(0)
+    }
+
+    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
+        visitor.visit_u16(0)
+    }
+
     fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
@@ -344,6 +376,22 @@ impl<'de> Deserializer<'de> for &mut Probe {
     {
         self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
         visitor.visit_u64(0)
+    }
+
+    fn deserialize_i128<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>
+    {
+        self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
+        visitor.visit_i128(0)
+    }
+
+    fn deserialize_u128<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>
+    {
+        self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
+        visitor.visit_u128(0)
     }
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -458,7 +506,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     }
 
     serde::forward_to_deserialize_any! {
-        i8 i16 i128 u8 u16 u128 char bytes byte_buf unit unit_struct
+        char bytes byte_buf unit unit_struct
         newtype_struct tuple tuple_struct identifier ignored_any
     }
 }
