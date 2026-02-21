@@ -25,7 +25,7 @@ use tokio::{
 #[cfg(feature = "rate-limiting")]
 use {
     crate::rate_limiting::GlobalRateLimiter,
-    std::{net::IpAddr, collections::HashSet}
+    std::{net::IpAddr, collections::HashSet},
 };
 
 #[cfg(any(
@@ -52,7 +52,7 @@ use crate::auth::bearer::BearerAuthConfig;
 use crate::tls::TlsConfig;
 
 #[cfg(feature = "openapi")]
-use crate::openapi::{OpenApiConfig, OpenApiRegistry};
+use crate::openapi::{OpenApiConfig, OpenApiRegistry, OpenApiState};
 
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
@@ -165,6 +165,10 @@ pub struct App {
     #[cfg(feature = "openapi")]
     pub(super) openapi_config: Option<OpenApiConfig>,
 
+    /// State of OpenAPI route registrations
+    #[cfg(feature = "openapi")]
+    pub(super) openapi_state: OpenApiState,
+    
     /// TCP connection parameters
     connection: Connection,
     
@@ -253,6 +257,8 @@ impl App {
             openapi: None,
             #[cfg(feature = "openapi")]
             openapi_config: None,
+            #[cfg(feature = "openapi")]
+            openapi_state: Default::default(),
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]

@@ -202,9 +202,17 @@ impl OpenApiRegistry {
         &self.specs
     }
 
+    #[inline]
     fn is_excluded_path(&self, path: &str) -> bool {
-        if self.ui_enabled && path == self.ui_path { return true; }
-        self.specs.iter().any(|s| s.spec_path == path)
+        let p = normalize_path_for_compare(path);
+
+        if self.ui_enabled && p == normalize_path_for_compare(&self.ui_path) {
+            return true;
+        }
+
+        self.specs
+            .iter()
+            .any(|s| p == normalize_path_for_compare(&s.spec_path))
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, OpenApiDocument>> {
@@ -220,6 +228,30 @@ impl OpenApiRegistry {
                 .map(|s| vec![s.name.as_str()])
                 .unwrap_or_default()
         }
+    }
+}
+
+#[inline]
+fn normalize_path_for_compare(p: &str) -> String {
+    // treat "" as "/"
+    let p = if p.is_empty() { 
+        "/" 
+    } else { 
+        p
+    };
+
+    // ensure leading slash
+    let p = if p.starts_with('/') {
+        p.to_string()
+    } else {
+        format!("/{p}")
+    };
+
+    // drop trailing slash (except root)
+    if p.len() > 1 && p.ends_with('/') {
+        p.trim_end_matches('/').to_string()
+    } else {
+        p
     }
 }
 
@@ -300,5 +332,13 @@ mod tests {
 
         let admin_doc = registry.document_by_name("admin").expect("admin document");
         assert!(!admin_doc.paths.contains_key("/v1/openapi.json"));
+    }
+    
+    #[test]
+    fn it_tests_normalization_for_excluded_paths() {
+        assert_eq!(normalize_path_for_compare("/v1/openapi.json").as_str(), "/v1/openapi.json");
+        assert_eq!(normalize_path_for_compare("openapi"), "/openapi");
+        assert_eq!(normalize_path_for_compare(""), "/");
+        assert_eq!(normalize_path_for_compare("/openapi/"), "/openapi");
     }
 }

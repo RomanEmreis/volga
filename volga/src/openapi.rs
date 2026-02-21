@@ -1,6 +1,7 @@
 //! OpenAPI registry and configuration.
 
-use crate::{App, headers::{Header, HttpHeaders, CacheControl, ETag}};
+use std::collections::{HashSet, HashMap};
+use crate::{App, http::Method, headers::{Header, HttpHeaders, CacheControl, ETag}};
 use volga_open_api::ui_html;
 
 pub use volga_open_api::{
@@ -12,6 +13,19 @@ pub use volga_open_api::{
 };
 
 pub(super) const OPEN_API_NOT_EXPOSED_WARN: &str = "OpenAPI configured but endpoints not exposed; call app.use_open_api() to serve spec/UI.";
+
+#[derive(Debug, Default)]
+pub(super) struct OpenApiState {
+    pub(super) pending: Vec<RouteKey>,
+    pub(super) configs: HashMap<RouteKey, OpenApiRouteConfig>,
+    pub(super) seen: HashSet<RouteKey>,
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub(super) struct RouteKey {
+    pub(super) method: Method,
+    pub(super) pattern: String,
+}
 
 impl App {
     /// Configures OpenAPI registry with custom settings.
@@ -32,6 +46,13 @@ impl App {
         let config = config(self.openapi_config.unwrap_or_default());
         let registry = OpenApiRegistry::new(config.clone());
 
+        for key in self.openapi_state.pending.drain(..) {
+            if let Some(cfg) = self.openapi_state.configs.get(&key) {
+                registry.register_route(&key.method, &key.pattern, cfg);
+                registry.apply_route_config(&key.method, &key.pattern, cfg);
+            }
+        }
+        
         self.openapi_config = Some(config);
         self.openapi = Some(registry);
         self
@@ -99,6 +120,26 @@ impl App {
         }
 
         self
+    }
+
+    #[inline]
+    pub(super) fn on_route_mapped(
+        &mut self, 
+        key: RouteKey, 
+        auto: OpenApiRouteConfig
+    ) {
+        if !self.openapi_state.seen.insert(key.clone()) {
+            return;
+        }
+        
+        if let Some(reg) = self.openapi.as_ref() {
+            reg.register_route(&key.method, &key.pattern, &auto);
+            reg.apply_route_config(&key.method, &key.pattern, &auto);
+        } else {
+            self.openapi_state.pending.push(key.clone());
+        }
+
+        self.openapi_state.configs.insert(key, auto);
     }
 }
 

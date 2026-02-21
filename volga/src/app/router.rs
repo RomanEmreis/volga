@@ -11,7 +11,7 @@ use crate::http::endpoints::{
 };
 
 #[cfg(feature = "openapi")]
-use crate::openapi::OpenApiRouteConfig;
+use crate::openapi::{OpenApiRouteConfig, RouteKey};
 
 #[cfg(feature = "middleware")]
 use {
@@ -336,34 +336,32 @@ impl App {
         let path: &str = pattern.as_ref();
         endpoints.map_route(method.clone(), path, handler.clone());
 
-        #[cfg(feature = "openapi")]
-        let openapi_config = if let Some(registry) = self.openapi.as_ref() {
-            let mut auto = Args::describe_openapi(OpenApiRouteConfig::default());
-            auto = R::describe_openapi(auto);
-
-            registry.register_route(&method, path, &auto);
-            registry.apply_route_config(&method, path, &auto);
-
-            auto
-        } else {
-            OpenApiRouteConfig::default()
-        };
-
         if self.implicit_head && method == Method::GET {
             let head = Method::HEAD;
             if !endpoints.contains(&head, path) {
                 endpoints.map_route(head, path, handler.clone());
             }
         }
+        
+        #[cfg(feature = "openapi")]
+        let openapi_key = {
+            let key = RouteKey { method: method.clone(), pattern: path.to_string() };
+            
+            let mut auto = Args::describe_openapi(OpenApiRouteConfig::default());
+            auto = R::describe_openapi(auto);
+            
+            self.on_route_mapped(key.clone(), auto);
+            key
+        };
 
         Route {
             app: self,
-            #[cfg(any(feature = "middleware", feature = "openapi"))]
+            #[cfg(feature = "middleware")]
             method,
-            #[cfg(any(feature = "middleware", feature = "openapi"))]
+            #[cfg(feature = "middleware")]
             pattern,
             #[cfg(feature = "openapi")]
-            openapi_config
+            openapi_key
         }
     }
 }
@@ -371,18 +369,19 @@ impl App {
 /// Represents a route reference
 pub struct Route<'a> {
     pub(crate) app: &'a mut App,
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
+    #[cfg(feature = "middleware")]
     pub(crate) method: Method,
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
+    #[cfg(feature = "middleware")]
     pub(crate) pattern: Cow<'a, str>,
     #[cfg(feature = "openapi")]
-    openapi_config: OpenApiRouteConfig,
+    openapi_key: RouteKey,
 }
 
 /// Represents a group of routes
 pub struct RouteGroup<'a> {
     pub(crate) app: &'a mut App,
     pub(crate) prefix: &'a str,
+    pub(crate) route_count: usize,
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
     #[cfg(feature = "middleware")]
@@ -424,19 +423,25 @@ impl<'a> DerefMut for Route<'a> {
 #[cfg(feature = "openapi")]
 impl<'a> Route<'a> {
     /// Configures OpenAPI metadata for this route.
-    pub fn open_api<T>(mut self, config: T) -> Self
+    pub fn open_api<T>(self, config: T) -> Self
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
-        let Some(registry) = self.app.openapi.as_ref() else { 
-            return self;
-        };
+        let key = self.openapi_key.clone();
+        let state = &mut self.app.openapi_state;
+        let entry = state
+            .configs
+            .get_mut(&key)
+            .expect("route config missing");
 
-        let merged = config(self.openapi_config.clone());
-
-        self.openapi_config = merged.clone();
-
-        registry.rebind_route(&self.method, self.pattern.as_ref(), &merged);
+        let current = std::mem::take(entry);
+        let updated = config(current);
+        *entry = updated;
+        
+        if let Some(reg) = self.app.openapi.as_ref() {
+            //let cfg = state.configs.get(&key).unwrap();
+            reg.rebind_route(&key.method, &key.pattern, entry);
+        }
 
         self
     }
@@ -449,6 +454,13 @@ impl<'a> RouteGroup<'a> {
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
+        if self.route_count > 0 {
+            #[cfg(feature = "tracing")]
+            tracing::warn!("RouteGroup::open_api must be called before any map_* in the group");
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("RouteGroup::open_api must be called before any map_* in the group");
+        }
+
         self.openapi_config = config(self.openapi_config.clone());
         self
     }
@@ -461,6 +473,7 @@ macro_rules! define_route_group_methods {
                 RouteGroup {
                     app,
                     prefix,
+                    route_count: 0,
                     #[cfg(feature = "middleware")]
                     middleware: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
@@ -478,6 +491,7 @@ macro_rules! define_route_group_methods {
                 R: IntoResponse + 'static,
                 Args: FromRequest + Send + 'static,
             {
+                self.route_count += 1;
                 let pattern = [self.prefix, pattern].concat();
 
                 #[cfg(feature = "middleware")]

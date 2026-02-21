@@ -10,23 +10,23 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
             .map(|s| s.spec_path.as_str())
             .unwrap_or(DEFAULT_SPEC_PATH);
 
-        format!(r#"url: "{url}","#)
+        format!(r#"url: {},"#, js_string(url))
     } else {
         // urls: [{url, name}, ...] + primaryName
-        let urls = specs
-            .iter()
-            .map(|s| format!(r#"{{ url: "{}", name: "{}" }}"#, s.spec_path, s.name))
-            .collect::<Vec<_>>()
-            .join(",\n          ");
+        let urls = specs.iter().map(|s| {
+            format!(
+                r#"{{ url: {}, name: {} }}"#,
+                js_string(&s.spec_path),
+                js_string(&s.name),
+            )
+        }).collect::<Vec<_>>().join(",\n          ");
 
-        let primary = &specs[0].name;
+        let primary = js_string(&specs[0].name);
 
-        format!(
-            r#"urls: [
-                {urls}
-            ],
-            "urls.primaryName": "{primary}","#,
-        )
+        format!(r#"urls: [
+            {urls}
+        ],
+        "urls.primaryName": {primary},"#)
     };
 
     format!(
@@ -60,6 +60,12 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
   </body>
 </html>"##,
     )
+}
+
+#[inline]
+fn js_string(s: &str) -> String {
+    // returns a valid JS string literal: "\"...\"" with escapes
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
 }
 
 #[cfg(test)]
