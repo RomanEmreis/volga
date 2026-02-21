@@ -333,16 +333,16 @@ impl App {
         let endpoints = self.pipeline.endpoints_mut();
 
         // use &str view only for registration
-        let pat: &str = pattern.as_ref();
-        endpoints.map_route(method.clone(), pat, handler.clone());
+        let path: &str = pattern.as_ref();
+        endpoints.map_route(method.clone(), path, handler.clone());
 
         #[cfg(feature = "openapi")]
         let openapi_config = if let Some(registry) = self.openapi.as_ref() {
             let mut auto = Args::describe_openapi(OpenApiRouteConfig::default());
             auto = R::describe_openapi(auto);
 
-            registry.register_route(&method, pat, &auto);
-            registry.apply_route_config(&method, pat, &auto);
+            registry.register_route(&method, path, &auto);
+            registry.apply_route_config(&method, path, &auto);
 
             auto
         } else {
@@ -351,8 +351,8 @@ impl App {
 
         if self.implicit_head && method == Method::GET {
             let head = Method::HEAD;
-            if !endpoints.contains(&head, pat) {
-                endpoints.map_route(head, pat, handler.clone());
+            if !endpoints.contains(&head, path) {
+                endpoints.map_route(head, path, handler.clone());
             }
         }
 
@@ -529,4 +529,3 @@ define_route_group_methods! {
     (map_trace, Method::TRACE)
     (map_connect, Method::CONNECT)
 }
-

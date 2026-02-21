@@ -18,6 +18,12 @@ pub(super) fn normalize_openapi_path(path: &str) -> (String, Vec<OpenApiParamete
     let mut params = Vec::new();
     let mut out = String::with_capacity(path.len());
 
+    let path = if path.is_empty() { 
+        "/" 
+    } else { 
+        path
+    };
+    
     if path.starts_with('/') {
         out.push('/');
     }
@@ -28,12 +34,10 @@ pub(super) fn normalize_openapi_path(path: &str) -> (String, Vec<OpenApiParamete
         }
 
         if let Some((name, schema_opt)) = parse_typed_param_segment(seg) {
-            // в paths ключе только {name}
             out.push('{');
             out.push_str(&name);
             out.push('}');
 
-            // schema: override если задан, иначе string
             let schema = schema_opt.unwrap_or_else(OpenApiSchema::string);
 
             params.push(OpenApiParameter {

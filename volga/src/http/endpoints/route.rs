@@ -60,6 +60,7 @@ pub(crate) mod layer;
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const PATH_SEPARATOR: u8 = b'/';
+const TYPE_SEPARATOR: char = ':';
 const ALLOW_METHOD_SEPARATOR: char = ',';
 const DEFAULT_DEPTH: usize = 4;
 
@@ -384,10 +385,19 @@ impl RouteNode {
     #[inline(always)]
     fn dynamic_name(segment: &str) -> &str {
         // expects "{name}" but safely handles unexpected input
-        segment
-            .strip_prefix('{')
-            .and_then(|s| s.strip_suffix('}'))
-            .unwrap_or(segment)
+        // only touch placeholders: "{id:integer}"
+        if let Some(inner) = segment
+            .strip_prefix(OPEN_BRACKET)
+            .and_then(|s| s.strip_suffix(CLOSE_BRACKET))
+        {
+            // strip ":type" part from inside, keep braces in routing logic if you need,
+            // but for *param name* return only name.
+            let (name, _) = inner.split_once(TYPE_SEPARATOR).unwrap_or((inner, ""));
+            // IMPORTANT: return name only (caller decides how to store)
+            name
+        } else {
+            segment
+        }
     }
 
     #[inline(always)]
@@ -419,8 +429,7 @@ pub(super) fn make_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoin
 #[inline(always)]
 fn split_path(path: &str) -> impl Iterator<Item = &str> {
     memchr_split_nonempty(PATH_SEPARATOR, path.as_bytes())
-        .map(|s| std::str::from_utf8(s)
-            .expect("Invalid UTF-8 sequence in path"))
+        .map(|s| std::str::from_utf8(s).expect("Invalid UTF-8 sequence in path"))
 }
 
 #[inline(always)]
@@ -445,8 +454,15 @@ mod tests {
     use smallvec::SmallVec;
     use crate::ok;
     use crate::http::endpoints::handlers::{Func, RouteHandler};
-    use crate::http::endpoints::route::{make_allowed_str, method_order, split_path, RouteNode, DEFAULT_DEPTH};
     use super::RouteEndpoint;
+    use crate::http::endpoints::route::{
+        make_allowed_str, 
+        method_order, 
+        split_path, 
+        RouteNode, 
+        DEFAULT_DEPTH
+    };
+
     #[cfg(debug_assertions)]
     use super::super::meta::RouteInfo;
     
@@ -607,7 +623,7 @@ mod tests {
         // Add various routes
         route.insert("/api/v1/users", Method::GET, handler.clone().into());
         route.insert("/api/v1/users", Method::POST, handler.clone().into());
-        route.insert("/api/v1/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/api/v1/users/{id:integer}", Method::GET, handler.clone().into());
         route.insert("/api/v1/users/{id}", Method::PUT, handler.clone().into());
         route.insert("/api/v1/users/{id}", Method::DELETE, handler.clone().into());
         route.insert("/api/v1/posts", Method::GET, handler.clone().into());
