@@ -35,7 +35,7 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{ui_title}</title>
+    <title>{}</title>
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   </head>
   <body>
@@ -59,6 +59,7 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
     </script>
   </body>
 </html>"##,
+        html_escape(ui_title),
     )
 }
 
@@ -66,6 +67,22 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
 fn js_string(s: &str) -> String {
     // returns a valid JS string literal: "\"...\"" with escapes
     serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+#[inline]
+fn html_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -96,5 +113,13 @@ mod tests {
     fn ui_html_falls_back_to_default_path_for_empty_specs() {
         let html = ui_html(&[], "Docs");
         assert!(html.contains("url: \"/openapi.json\""));
+    }
+
+    #[test]
+    fn ui_html_escapes_title_html() {
+        let html = ui_html(&[OpenApiSpec::new("v1")], r#"</title><script>alert(1)</script>"#);
+
+        assert!(html.contains("<title>&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title>"));
+        assert!(!html.contains("</title><script>alert(1)</script>"));
     }
 }

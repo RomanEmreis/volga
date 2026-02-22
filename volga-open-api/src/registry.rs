@@ -60,7 +60,7 @@ impl OpenApiRegistry {
         }
     }
 
-    /// Registers a route in OpenAPI registry.
+    /// Registers a route in the OpenAPI registry.
     pub fn register_route(
         &self,
         method: &Method,

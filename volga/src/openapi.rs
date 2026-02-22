@@ -18,8 +18,6 @@ pub(super) const OPEN_API_NOT_EXPOSED_WARN: &str = "OpenAPI configured but endpo
 pub(super) struct OpenApiState {
     pub(super) registry: Option<OpenApiRegistry>,
     pub(super) config: Option<OpenApiConfig>,
-    
-    pub(super) pending: Vec<RouteKey>,
     pub(super) route_configs: HashMap<RouteKey, OpenApiRouteConfig>,
 }
 
@@ -77,25 +75,21 @@ impl OpenApiState {
         if let Some(reg) = self.registry.as_ref() {
             reg.register_route(&key.method, &key.pattern, &auto);
             reg.apply_route_config(&key.method, &key.pattern, &auto);
-        } else {
-            self.pending.push(key.clone());
         }
 
         self.route_configs.insert(key, auto);
     }
 
-    /// Flush pending routes to the registry if there are any
+    /// Rebuilds the current registry from stored route configs.
     #[inline]
-    fn flush_pending_routes(&mut self) {
-        let Some(registry) = &self.registry else { 
+    fn replay_all_routes_to_registry(&mut self) {
+        let Some(registry) = &self.registry else {
             return;
         };
-        
-        for key in self.pending.drain(..) {
-            if let Some(cfg) = self.route_configs.get(&key) {
-                registry.register_route(&key.method, &key.pattern, cfg);
-                registry.apply_route_config(&key.method, &key.pattern, cfg);
-            }
+
+        for (key, cfg) in &self.route_configs {
+            registry.register_route(&key.method, &key.pattern, cfg);
+            registry.apply_route_config(&key.method, &key.pattern, cfg);
         }
     }
 }
@@ -121,7 +115,7 @@ impl App {
         
         self.openapi.config = Some(config);
         self.openapi.registry = Some(registry);
-        self.openapi.flush_pending_routes();
+        self.openapi.replay_all_routes_to_registry();
         self
     }
 
@@ -129,7 +123,7 @@ impl App {
     pub fn set_open_api(mut self, config: OpenApiConfig) -> Self {
         self.openapi.registry = Some(OpenApiRegistry::new(config.clone()));
         self.openapi.config = Some(config);
-        self.openapi.flush_pending_routes();
+        self.openapi.replay_all_routes_to_registry();
         self
     }
 
@@ -302,5 +296,39 @@ mod tests {
         assert!(json["paths"]["/users"]["get"]["responses"]["200"]["content"]
             .get("text/plain; charset=utf-8")
             .is_none());
+    }
+
+    #[test]
+    fn replacing_registry_replays_existing_route_configs() {
+        let config = OpenApiConfig::new().with_specs([OpenApiSpec::new("v1")]);
+        let first_registry = OpenApiRegistry::new(config.clone());
+        let replacement_registry = OpenApiRegistry::new(config.clone());
+
+        let mut state = OpenApiState {
+            registry: Some(first_registry.clone()),
+            config: Some(config),
+            ..Default::default()
+        };
+
+        let key = RouteKey {
+            method: Method::GET,
+            pattern: "/users".into(),
+        };
+
+        state.on_route_mapped(
+            key,
+            super::OpenApiRouteConfig::default().produces_text(),
+        );
+
+        let before = replacement_registry.document_by_name("v1").expect("document");
+        let before_json = serde_json::to_value(before).expect("serialize");
+        assert!(before_json["paths"].get("/users").is_none());
+
+        state.registry = Some(replacement_registry.clone());
+        state.replay_all_routes_to_registry();
+
+        let after = replacement_registry.document_by_name("v1").expect("document");
+        let after_json = serde_json::to_value(after).expect("serialize");
+        assert!(after_json["paths"].get("/users").is_some());
     }
 }
