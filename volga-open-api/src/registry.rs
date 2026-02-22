@@ -1,6 +1,6 @@
 //! Types and utils for the OpenAPI registry.
 
-use std::{collections::BTreeMap, sync::{Arc, Mutex}};
+use std::{collections::{BTreeMap, HashSet}, sync::{Arc, Mutex}};
 use http::Method;
 
 use super::{
@@ -25,6 +25,8 @@ pub struct OpenApiRegistry {
 impl OpenApiRegistry {
     /// Creates a new [`OpenApiRegistry`]
     pub fn new(config: OpenApiConfig) -> Self {
+        validate_specs(&config.specs);
+
         let base_doc =
             |title: String, version: String, description: Option<String>| OpenApiDocument {
                 openapi: DEFAULT_OPENAPI_VERSION.to_string(),
@@ -231,6 +233,25 @@ impl OpenApiRegistry {
     }
 }
 
+fn validate_specs(specs: &[OpenApiSpec]) {
+    let mut names = HashSet::with_capacity(specs.len());
+    let mut paths = HashSet::with_capacity(specs.len());
+
+    for spec in specs {
+        assert!(
+            names.insert(spec.name.clone()),
+            "OpenAPI spec names must be unique; duplicate name: {}",
+            spec.name
+        );
+
+        let normalized_path = normalize_path_for_compare(&spec.spec_path);
+        assert!(
+            paths.insert(normalized_path.clone()),
+            "OpenAPI spec paths must be unique after normalization; duplicate path: {normalized_path}"
+        );
+    }
+}
+
 #[inline]
 fn normalize_path_for_compare(p: &str) -> String {
     // treat "" as "/"
@@ -340,5 +361,27 @@ mod tests {
         assert_eq!(normalize_path_for_compare("openapi"), "/openapi");
         assert_eq!(normalize_path_for_compare(""), "/");
         assert_eq!(normalize_path_for_compare("/openapi/"), "/openapi");
+    }
+
+    #[test]
+    #[should_panic(expected = "OpenAPI spec names must be unique")]
+    fn registry_new_panics_on_duplicate_spec_names() {
+        let config = OpenApiConfig::new().with_specs([
+            OpenApiSpec::new("v1"),
+            OpenApiSpec::new("v1").with_path("/v1-alt/openapi.json"),
+        ]);
+
+        let _ = OpenApiRegistry::new(config);
+    }
+
+    #[test]
+    #[should_panic(expected = "OpenAPI spec paths must be unique after normalization")]
+    fn registry_new_panics_on_duplicate_normalized_spec_paths() {
+        let config = OpenApiConfig::new().with_specs([
+            OpenApiSpec::new("v1").with_path("docs/openapi.json"),
+            OpenApiSpec::new("admin").with_path("/docs/openapi.json/"),
+        ]);
+
+        let _ = OpenApiRegistry::new(config);
     }
 }
