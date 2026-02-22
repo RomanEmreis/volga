@@ -41,7 +41,7 @@ impl FromHeaders for ETag {
 
 #[cfg(feature = "static-files")]
 impl TryFrom<&Metadata> for ETag {
-    type Error = crate::error::Error;
+    type Error = Error;
     
     #[inline]
     fn try_from(metadata: &Metadata) -> Result<Self, Self::Error> {
@@ -98,6 +98,15 @@ impl TryFrom<&ETag> for HeaderValue {
     fn try_from(v: &ETag) -> Result<HeaderValue, Error> {
         HeaderValue::from_str(v.as_ref())
             .map_err(|_| Error::client_error("Invalid ETag"))
+    }
+}
+
+impl TryFrom<ETag> for Header<ETag> {
+    type Error = Error;
+
+    #[inline]
+    fn try_from(v: ETag) -> Result<Self, Self::Error> {
+        Ok(Self::new(v.as_ref().try_into()?))
     }
 }
 
@@ -296,7 +305,7 @@ fn validate_tag(tag: &str) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::headers::ETag;
+    use crate::headers::{ETag, Header};
     use super::parse_etag_ref;
 
     #[test]
@@ -543,5 +552,14 @@ mod tests {
         assert!(w1.weak_eq(&s2));
         assert!(w1.weak_eq(&w2));
         assert!(!w1.weak_eq(&s3));
+    }
+    
+    #[test]
+    fn it_converts_etag_to_header() {
+        let etag = ETag::weak("123");
+        let header = Header::<ETag>::try_from(etag).unwrap();
+        
+        assert_eq!(header.name(), "etag");
+        assert_eq!(header.value(), "W/\"123\"")
     }
 }

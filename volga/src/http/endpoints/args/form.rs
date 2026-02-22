@@ -7,7 +7,6 @@ use http_body_util::{combinators::Collect, BodyExt};
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-
 use std::{
     future::Future,
     fmt::{self, Display, Formatter},
@@ -110,6 +109,11 @@ impl<T: DeserializeOwned + Send> FromPayload for Form<T> {
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Body(body) = payload else { unreachable!() };
         ExtractFormPayloadFut { fut: body.collect(), _marker: PhantomData }
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.consumes_form::<T>()
     }
 }
 

@@ -5,7 +5,7 @@ A lightweight and efficient rate-limiting library for Rust.
 This crate provides in-memory rate limiting algorithms designed
 for high-performance HTTP services and middleware.
 
-[![latest](https://img.shields.io/badge/latest-0.8.3-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.8.4-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://crates.io/crates/volga)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
@@ -87,3 +87,6 @@ high contention.
 
 The rate limiters are intended to be embedded into higher-level
 frameworks or middleware layers.
+
+## License
+Volga is licensed under the MIT License. Contributions welcome!

@@ -17,7 +17,7 @@ use crate::http::endpoints::args::{
     Source
 };
 
-/// Describes a multipart file/form data
+/// Describes multipart file/form data
 ///
 /// # Example
 /// ```no_run
@@ -209,6 +209,11 @@ impl FromPayload for Multipart {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         ready(payload.try_into())
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.consumes_multipart()
     }
 }
 

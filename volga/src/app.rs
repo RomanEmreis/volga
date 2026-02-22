@@ -25,7 +25,7 @@ use tokio::{
 #[cfg(feature = "rate-limiting")]
 use {
     crate::rate_limiting::GlobalRateLimiter,
-    std::{net::IpAddr, collections::HashSet}
+    std::{net::IpAddr, collections::HashSet},
 };
 
 #[cfg(any(
@@ -50,6 +50,9 @@ use crate::auth::bearer::BearerAuthConfig;
 
 #[cfg(feature = "tls")]
 use crate::tls::TlsConfig;
+
+#[cfg(feature = "openapi")]
+use crate::openapi::OpenApiState;
 
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
@@ -154,6 +157,10 @@ pub struct App {
     ))]
     pub(super) decompression_limits: DecompressionLimits,
 
+    /// OpenAPI registry and configuration.
+    #[cfg(feature = "openapi")]
+    pub(super) openapi: OpenApiState,
+    
     /// TCP connection parameters
     connection: Connection,
     
@@ -238,6 +245,8 @@ impl App {
                 feature = "decompression-full"
             ))]
             decompression_limits: Default::default(),
+            #[cfg(feature = "openapi")]
+            openapi: Default::default(),
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
@@ -653,6 +662,14 @@ impl App {
     
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
+        #[cfg(all(debug_assertions, feature = "openapi"))]
+        if self.openapi.is_configure_but_not_exposed() { 
+            #[cfg(feature = "tracing")]
+            tracing::warn!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
+        } 
+        
         #[cfg(any(feature = "tls", feature = "tracing"))]
         let socket = tcp_listener.local_addr()?;
         

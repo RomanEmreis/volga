@@ -27,6 +27,13 @@ use crate::http::sse::Message;
 pub trait IntoResponse {
     /// Converts object into response
     fn into_response(self) -> HttpResult;
+
+    /// Describes Open API schema
+    #[cfg(feature = "openapi")]
+    #[doc(hidden)]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_no_schema()
+    }
 }
 
 impl IntoResponse for HttpResponse {
@@ -76,6 +83,11 @@ where
             Err(err) => err.into_response(),
         }
     }
+    
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        T::describe_openapi(config)
+    }
 }
 
 impl IntoResponse for &'static str {
@@ -87,6 +99,12 @@ impl IntoResponse for &'static str {
             [ContentType::text_utf_8()]
         )
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_text()
+    }
+
 }
 
 impl IntoResponse for Cow<'static, str> {
@@ -97,6 +115,11 @@ impl IntoResponse for Cow<'static, str> {
             HttpBody::text(self);
             [ContentType::text_utf_8()]
         )
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_text()
     }
 }
 
@@ -109,6 +132,11 @@ impl IntoResponse for String {
             [ContentType::text_utf_8()]
         )
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_text()
+    }
 }
 
 impl IntoResponse for Box<str> {
@@ -120,6 +148,11 @@ impl IntoResponse for Box<str> {
             [ContentType::text_utf_8()]
         )
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_text()
+    }
 }
 
 impl<T: IntoResponse> IntoResponse for Option<T> {
@@ -130,6 +163,11 @@ impl<T: IntoResponse> IntoResponse for Option<T> {
             None => status!(404)
         }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        T::describe_openapi(config)
+    }
 }
 
 impl<T: Serialize> IntoResponse for Json<T> {
@@ -137,12 +175,22 @@ impl<T: Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> HttpResult {
         ok!(self.into_inner())
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_empty_json()
+    }
 }
 
 impl<T: Serialize> IntoResponse for Form<T> {
     #[inline]
     fn into_response(self) -> HttpResult {
         form!(self.into_inner())
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_empty_form()
     }
 }
 
@@ -171,6 +219,11 @@ where
             },
         }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        R::describe_openapi(config)
+    }
 }
 
 #[cfg(feature = "signed-cookie")]
@@ -189,7 +242,12 @@ where
                 Ok(resp)
             },
         }
-    }    
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        R::describe_openapi(config)
+    }
 }
 
 #[cfg(feature = "private-cookie")]
@@ -209,6 +267,11 @@ where
             },
         }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        R::describe_openapi(config)
+    }
 }
 
 #[cfg(feature = "cookie")]
@@ -227,6 +290,11 @@ where
             },
         }
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        R::describe_openapi(config)
+    }
 }
 
 impl<S> IntoResponse for SseStream<S>
@@ -236,6 +304,11 @@ where
     #[inline]
     fn into_response(self) -> HttpResult {
         sse!(self.into_bytes())
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_sse()
     }
 }
 
@@ -247,6 +320,11 @@ where
     #[inline]
     fn into_response(self) -> HttpResult {
         stream!(self)
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_stream()
     }
 }
 
@@ -260,6 +338,11 @@ macro_rules! impl_into_response {
                     self.into();
                     [ContentType::text_utf_8()]
                 )
+            }
+            
+            #[cfg(feature = "openapi")]
+            fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+                config.produces_text()
             }
         })*
     };

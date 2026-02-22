@@ -10,6 +10,9 @@ use crate::http::endpoints::{
     handlers::{Func, GenericHandler},
 };
 
+#[cfg(feature = "openapi")]
+use crate::openapi::{OpenApiRouteConfig, RouteKey};
+
 #[cfg(feature = "middleware")]
 use {
     crate::middleware::MiddlewareFn,
@@ -51,6 +54,10 @@ impl App {
         F: FnOnce(&mut RouteGroup<'a>)
     {
         let mut group = RouteGroup::new(self, prefix);
+        
+        #[cfg(feature = "openapi")]
+        group.open_api(|cfg| cfg.with_tag(prefix));
+        
         f(&mut group);
     }
     
@@ -326,15 +333,26 @@ impl App {
         let endpoints = self.pipeline.endpoints_mut();
 
         // use &str view only for registration
-        let pat: &str = pattern.as_ref();
-        endpoints.map_route(method.clone(), pat, handler.clone());
+        let path: &str = pattern.as_ref();
+        endpoints.map_route(method.clone(), path, handler.clone());
 
         if self.implicit_head && method == Method::GET {
             let head = Method::HEAD;
-            if !endpoints.contains(&head, pat) {
-                endpoints.map_route(head, pat, handler.clone());
+            if !endpoints.contains(&head, path) {
+                endpoints.map_route(head, path, handler.clone());
             }
         }
+        
+        #[cfg(feature = "openapi")]
+        let openapi_key = {
+            let key = RouteKey { method: method.clone(), pattern: path.into() };
+            
+            let mut auto = Args::describe_openapi(OpenApiRouteConfig::default());
+            auto = R::describe_openapi(auto);
+            
+            self.openapi.on_route_mapped(key.clone(), auto);
+            key
+        };
 
         Route {
             app: self,
@@ -342,6 +360,8 @@ impl App {
             method,
             #[cfg(feature = "middleware")]
             pattern,
+            #[cfg(feature = "openapi")]
+            openapi_key
         }
     }
 }
@@ -353,16 +373,21 @@ pub struct Route<'a> {
     pub(crate) method: Method,
     #[cfg(feature = "middleware")]
     pub(crate) pattern: Cow<'a, str>,
+    #[cfg(feature = "openapi")]
+    openapi_key: RouteKey,
 }
 
 /// Represents a group of routes
 pub struct RouteGroup<'a> {
     pub(crate) app: &'a mut App,
     pub(crate) prefix: &'a str,
+    pub(crate) route_count: usize,
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
     #[cfg(feature = "middleware")]
-    pub(crate) cors: CorsOverride
+    pub(crate) cors: CorsOverride,
+    #[cfg(feature = "openapi")]
+    pub(crate) openapi_config: OpenApiRouteConfig,
 }
 
 impl std::fmt::Debug for Route<'_> {
@@ -395,6 +420,38 @@ impl<'a> DerefMut for Route<'a> {
     }
 }
 
+#[cfg(feature = "openapi")]
+impl<'a> Route<'a> {
+    /// Configures OpenAPI metadata for this route.
+    pub fn open_api<T>(self, config: T) -> Self
+    where
+        T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
+    {
+        let key = self.openapi_key.clone();
+        self.app.openapi.update_route_config(&key, config);
+        self
+    }
+}
+
+#[cfg(feature = "openapi")]
+impl<'a> RouteGroup<'a> {
+    /// Configures OpenAPI metadata for this route group.
+    pub fn open_api<T>(&mut self, config: T) -> &mut Self
+    where
+        T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
+    {
+        if self.route_count > 0 {
+            #[cfg(feature = "tracing")]
+            tracing::warn!("RouteGroup::open_api must be called before any map_* in the group");
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("RouteGroup::open_api must be called before any map_* in the group");
+        }
+
+        self.openapi_config = config(self.openapi_config.clone());
+        self
+    }
+}
+
 macro_rules! define_route_group_methods {
     ($(($fn_name:ident, $http_method:expr))*) => {
         impl<'a> RouteGroup<'a> {
@@ -402,10 +459,13 @@ macro_rules! define_route_group_methods {
                 RouteGroup {
                     app,
                     prefix,
+                    route_count: 0,
                     #[cfg(feature = "middleware")]
                     middleware: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
                     cors: CorsOverride::Inherit,
+                    #[cfg(feature = "openapi")]
+                    openapi_config: OpenApiRouteConfig::default(),
                 }
             }
 
@@ -417,6 +477,7 @@ macro_rules! define_route_group_methods {
                 R: IntoResponse + 'static,
                 Args: FromRequest + Send + 'static,
             {
+                self.route_count += 1;
                 let pattern = [self.prefix, pattern].concat();
 
                 #[cfg(feature = "middleware")]
@@ -430,12 +491,26 @@ macro_rules! define_route_group_methods {
                         route = route.map_middleware(filter.clone());
                     }
 
+                    #[cfg(feature = "openapi")]
+                    {
+                        let openapi_config = self.openapi_config.clone();
+                        route = route.open_api(|config| config.merge(&openapi_config));
+                    }
+
                     route
                 }
 
                 #[cfg(not(feature = "middleware"))]
                 {
-                    self.app.map_route_owned($http_method, pattern, handler)
+                    let route = self.app.map_route_owned($http_method, pattern, handler);
+
+                    #[cfg(feature = "openapi")]
+                    let route = {
+                        let openapi_config = self.openapi_config.clone();
+                        route.open_api(|config| config.merge(&openapi_config))
+                    };
+
+                    route
                 }
             }
             )*
@@ -454,4 +529,3 @@ define_route_group_methods! {
     (map_trace, Method::TRACE)
     (map_connect, Method::CONNECT)
 }
-

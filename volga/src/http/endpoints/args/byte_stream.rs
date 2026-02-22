@@ -69,6 +69,11 @@ impl FromPayload for ByteStream<BodyDataStream<HttpBody>> {
         let Payload::Body(body) = payload else { unreachable!() };
         ok(Self::new(body.into_data_stream()))
     }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.consumes_stream()
+    }
 }
 
 /// A helper trait for types that are suitable for byte stream

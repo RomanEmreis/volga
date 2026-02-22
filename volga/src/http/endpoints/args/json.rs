@@ -3,7 +3,6 @@
 use futures_util::ready;
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
-
 use http_body_util::{combinators::Collect, BodyExt};
 use serde::Serialize;
 
@@ -121,6 +120,11 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Body(body) = payload else { unreachable!() };
         ExtractJsonPayloadFut { fut: body.collect(), _marker: PhantomData }
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+        config.consumes_json::<T>()
     }
 }
 

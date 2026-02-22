@@ -1,6 +1,6 @@
 [package]
 name = "volga-macros"
-version = "0.8.3"
+version = "0.8.4"
 readme = "README.md"
 description = "Macros for Volga Web Framework"
 edition.workspace = true
@@ -18,7 +18,7 @@ proc-macro = true
 
 [dependencies]
 quote = "1.0.44"
-syn = { version = "2.0.114", features = ["full"] }
+syn = { version = "2.0.117", features = ["full"] }
 proc-macro2 = "1.0.106"
 
 [features]
