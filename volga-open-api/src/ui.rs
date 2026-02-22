@@ -2,6 +2,8 @@
 
 use super::config::{OpenApiSpec, DEFAULT_SPEC_PATH};
 
+const SWAGGER_UI_CDN_BASE: &str = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.31.2";
+
 /// Generates OpenAPI UI HTML.
 pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
     let config_js = if specs.len() <= 1 {
@@ -36,13 +38,13 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{}</title>
-    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <link rel="stylesheet" href="{}/swagger-ui.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
   </head>
   <body>
     <div id="swagger-ui"></div>
 
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
-    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
+    <script src="{}/swagger-ui-bundle.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="{}/swagger-ui-standalone-preset.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
     <script>
       window.onload = function() {{
@@ -60,6 +62,9 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
   </body>
 </html>"##,
         html_escape(ui_title),
+        SWAGGER_UI_CDN_BASE,
+        SWAGGER_UI_CDN_BASE,
+        SWAGGER_UI_CDN_BASE,
     )
 }
 
@@ -87,7 +92,7 @@ fn html_escape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::ui_html;
+    use super::{SWAGGER_UI_CDN_BASE, ui_html};
     use crate::config::OpenApiSpec;
 
     #[test]
@@ -97,6 +102,9 @@ mod tests {
         assert!(html.contains("url: \"/v1/openapi.json\""));
         assert!(!html.contains("urls.primaryName"));
         assert!(html.contains("<title>Docs</title>"));
+        assert!(html.contains(SWAGGER_UI_CDN_BASE));
+        assert!(html.contains("crossorigin=\"anonymous\""));
+        assert!(html.contains("referrerpolicy=\"no-referrer\""));
     }
 
     #[test]
@@ -121,5 +129,15 @@ mod tests {
 
         assert!(html.contains("<title>&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title>"));
         assert!(!html.contains("</title><script>alert(1)</script>"));
+    }
+
+    #[test]
+    fn ui_html_pins_exact_swagger_ui_version() {
+        let html = ui_html(&[OpenApiSpec::new("v1")], "Docs");
+
+        assert!(html.contains("/npm/swagger-ui-dist@5.31.2/swagger-ui.css"));
+        assert!(html.contains("/npm/swagger-ui-dist@5.31.2/swagger-ui-bundle.js"));
+        assert!(html.contains("/npm/swagger-ui-dist@5.31.2/swagger-ui-standalone-preset.js"));
+        assert!(!html.contains("unpkg.com/swagger-ui-dist@5/"));
     }
 }
