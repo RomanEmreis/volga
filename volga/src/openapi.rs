@@ -1,6 +1,6 @@
 //! OpenAPI registry and configuration.
 
-use std::collections::{HashSet, HashMap};
+use std::{collections::HashMap, sync::Arc};
 use crate::{App, http::Method, headers::{Header, HttpHeaders, CacheControl, ETag}};
 use volga_open_api::ui_html;
 
@@ -16,15 +16,83 @@ pub(super) const OPEN_API_NOT_EXPOSED_WARN: &str = "OpenAPI configured but endpo
 
 #[derive(Debug, Default)]
 pub(super) struct OpenApiState {
+    pub(super) registry: Option<OpenApiRegistry>,
+    pub(super) config: Option<OpenApiConfig>,
+    
     pub(super) pending: Vec<RouteKey>,
-    pub(super) configs: HashMap<RouteKey, OpenApiRouteConfig>,
-    pub(super) seen: HashSet<RouteKey>,
+    pub(super) route_configs: HashMap<RouteKey, OpenApiRouteConfig>,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub(super) struct RouteKey {
     pub(super) method: Method,
-    pub(super) pattern: String,
+    pub(super) pattern: Arc<str>,
+}
+
+impl OpenApiState {
+    /// Returns `true` if OpenAPI endpoints were exposed
+    #[inline]
+    pub(super) fn is_exposed(&self) -> bool {
+        self.config
+            .as_ref()
+            .is_some_and(|cfg| cfg.exposed)
+    }
+
+    /// Updates OpenAPI configuration for the route
+    #[inline]
+    pub(super) fn update_route_config<T>(&mut self, key: &RouteKey, config: T)
+    where
+        T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
+    {
+        let entry = self
+            .route_configs
+            .get_mut(key)
+            .expect("route config missing");
+
+        let current = std::mem::take(entry);
+        let updated = config(current);
+        *entry = updated;
+
+        if let Some(registry) = self.registry.as_ref() {
+            registry.rebind_route(&key.method, &key.pattern, entry);
+        }
+    }
+
+    /// Applies new route registration
+    #[inline]
+    pub(super) fn on_route_mapped(
+        &mut self,
+        key: RouteKey,
+        auto: OpenApiRouteConfig
+    ) {
+        if self.route_configs.contains_key(&key) {
+            return;
+        }
+
+        if let Some(reg) = self.registry.as_ref() {
+            reg.register_route(&key.method, &key.pattern, &auto);
+            reg.apply_route_config(&key.method, &key.pattern, &auto);
+        } else {
+            self.pending.push(key.clone());
+        }
+
+        self.route_configs.insert(key, auto);
+    }
+
+    /// Flush pending routes to the registry if there are any
+    #[inline]
+    fn flush_pending_routes(&mut self) {
+        let Some(registry) = &self.registry else { 
+            return;
+        };
+        
+        for key in self.pending.drain(..) {
+            if let Some(cfg) = self.route_configs.get(&key) {
+                registry.register_route(&key.method, &key.pattern, cfg);
+                registry.apply_route_config(&key.method, &key.pattern, cfg);
+            }
+        }
+    }
 }
 
 impl App {
@@ -43,31 +111,26 @@ impl App {
     where
         T: FnOnce(OpenApiConfig) -> OpenApiConfig,
     {
-        let config = config(self.openapi_config.unwrap_or_default());
+        let config = config(self.openapi.config.unwrap_or_default());
         let registry = OpenApiRegistry::new(config.clone());
-
-        for key in self.openapi_state.pending.drain(..) {
-            if let Some(cfg) = self.openapi_state.configs.get(&key) {
-                registry.register_route(&key.method, &key.pattern, cfg);
-                registry.apply_route_config(&key.method, &key.pattern, cfg);
-            }
-        }
         
-        self.openapi_config = Some(config);
-        self.openapi = Some(registry);
+        self.openapi.config = Some(config);
+        self.openapi.registry = Some(registry);
+        self.openapi.flush_pending_routes();
         self
     }
 
     /// Sets OpenAPI registry with the provided configuration.
     pub fn set_open_api(mut self, config: OpenApiConfig) -> Self {
-        self.openapi = Some(OpenApiRegistry::new(config.clone()));
-        self.openapi_config = Some(config);
+        self.openapi.registry = Some(OpenApiRegistry::new(config.clone()));
+        self.openapi.config = Some(config);
+        self.openapi.flush_pending_routes();
         self
     }
 
     /// Registers the OpenAPI JSON endpoint.
     pub fn use_open_api(&mut self) -> &mut Self {
-        let (Some(registry), Some(config)) = (self.openapi.clone(), &mut self.openapi_config) else {
+        let (Some(registry), Some(config)) = (self.openapi.registry.clone(), &mut self.openapi.config) else {
             panic!(
                 "OpenAPI is not configured. Use `App::with_open_api` or `App::set_open_api` to configure it."
             );
@@ -120,26 +183,6 @@ impl App {
         }
 
         self
-    }
-
-    #[inline]
-    pub(super) fn on_route_mapped(
-        &mut self, 
-        key: RouteKey, 
-        auto: OpenApiRouteConfig
-    ) {
-        if !self.openapi_state.seen.insert(key.clone()) {
-            return;
-        }
-        
-        if let Some(reg) = self.openapi.as_ref() {
-            reg.register_route(&key.method, &key.pattern, &auto);
-            reg.apply_route_config(&key.method, &key.pattern, &auto);
-        } else {
-            self.openapi_state.pending.push(key.clone());
-        }
-
-        self.openapi_state.configs.insert(key, auto);
     }
 }
 

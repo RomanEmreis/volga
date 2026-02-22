@@ -52,7 +52,7 @@ use crate::auth::bearer::BearerAuthConfig;
 use crate::tls::TlsConfig;
 
 #[cfg(feature = "openapi")]
-use crate::openapi::{OpenApiConfig, OpenApiRegistry, OpenApiState};
+use crate::openapi::OpenApiState;
 
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
@@ -159,15 +159,7 @@ pub struct App {
 
     /// OpenAPI registry and configuration.
     #[cfg(feature = "openapi")]
-    pub(super) openapi: Option<OpenApiRegistry>,
-
-    /// OpenAPI configuration.
-    #[cfg(feature = "openapi")]
-    pub(super) openapi_config: Option<OpenApiConfig>,
-
-    /// State of OpenAPI route registrations
-    #[cfg(feature = "openapi")]
-    pub(super) openapi_state: OpenApiState,
+    pub(super) openapi: OpenApiState,
     
     /// TCP connection parameters
     connection: Connection,
@@ -254,11 +246,7 @@ impl App {
             ))]
             decompression_limits: Default::default(),
             #[cfg(feature = "openapi")]
-            openapi: None,
-            #[cfg(feature = "openapi")]
-            openapi_config: None,
-            #[cfg(feature = "openapi")]
-            openapi_state: Default::default(),
+            openapi: Default::default(),
             #[cfg(debug_assertions)]
             show_greeter: true,
             #[cfg(not(debug_assertions))]
@@ -675,7 +663,7 @@ impl App {
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
         #[cfg(all(debug_assertions, feature = "openapi"))]
-        if self.openapi_config.as_ref().is_some_and(|cfg| !cfg.exposed) { 
+        if !self.openapi.is_exposed() { 
             #[cfg(feature = "tracing")]
             tracing::warn!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
             #[cfg(not(feature = "tracing"))]

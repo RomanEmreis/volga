@@ -345,12 +345,12 @@ impl App {
         
         #[cfg(feature = "openapi")]
         let openapi_key = {
-            let key = RouteKey { method: method.clone(), pattern: path.to_string() };
+            let key = RouteKey { method: method.clone(), pattern: path.into() };
             
             let mut auto = Args::describe_openapi(OpenApiRouteConfig::default());
             auto = R::describe_openapi(auto);
             
-            self.on_route_mapped(key.clone(), auto);
+            self.openapi.on_route_mapped(key.clone(), auto);
             key
         };
 
@@ -428,21 +428,7 @@ impl<'a> Route<'a> {
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
         let key = self.openapi_key.clone();
-        let state = &mut self.app.openapi_state;
-        let entry = state
-            .configs
-            .get_mut(&key)
-            .expect("route config missing");
-
-        let current = std::mem::take(entry);
-        let updated = config(current);
-        *entry = updated;
-        
-        if let Some(reg) = self.app.openapi.as_ref() {
-            //let cfg = state.configs.get(&key).unwrap();
-            reg.rebind_route(&key.method, &key.pattern, entry);
-        }
-
+        self.app.openapi.update_route_config(&key, config);
         self
     }
 }
