@@ -1,6 +1,6 @@
 //! Types and utils for OpenAPI operations.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use mime::APPLICATION_JSON;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -117,6 +117,30 @@ impl OpenApiOperation {
             resp.content = None;
         }
     }
+
+    pub(super) fn collect_component_refs(&self, out: &mut BTreeSet<String>) {
+        if let Some(params) = &self.parameters {
+            for p in params {
+                p.schema.collect_component_refs(out);
+            }
+        }
+
+        if let Some(body) = &self.request_body {
+            for media in body.content.values() {
+                media.schema.collect_component_refs(out);
+            }
+        }
+
+        for resp in self.responses.values() {
+            let Some(content) = &resp.content else {
+                continue;
+            };
+
+            for media in content.values() {
+                media.schema.collect_component_refs(out);
+            }
+        }
+    }
 }
 
 fn media_content(
@@ -147,8 +171,9 @@ fn default_example() -> Value {
 #[cfg(test)]
 mod tests {
     use super::OpenApiOperation;
-    use crate::schema::OpenApiSchema;
+    use crate::{param::OpenApiParameter, schema::OpenApiSchema};
     use serde_json::{Value, json};
+    use std::collections::BTreeSet;
 
     #[test]
     fn set_request_and_response_body_use_provided_content_type() {
@@ -182,5 +207,37 @@ mod tests {
             json["responses"]["200"]["content"]["application/custom"]["example"],
             json!(42)
         );
+    }
+
+    #[test]
+    fn collect_component_refs_includes_params_request_and_response() {
+        let mut operation = OpenApiOperation {
+            parameters: Some(vec![OpenApiParameter {
+                name: "id".to_string(),
+                location: "path".to_string(),
+                required: true,
+                schema: OpenApiSchema::reference("PathParam"),
+            }]), 
+            ..Default::default()
+        };
+
+        operation.set_request_body(
+            OpenApiSchema::reference("CreateUser"),
+            None,
+            "application/json",
+        );
+        operation.set_response_body(
+            OpenApiSchema::reference("User"),
+            None,
+            "application/json",
+        );
+
+        let mut refs = BTreeSet::new();
+        operation.collect_component_refs(&mut refs);
+
+        assert!(refs.contains("PathParam"));
+        assert!(refs.contains("CreateUser"));
+        assert!(refs.contains("User"));
+        assert_eq!(refs.len(), 3);
     }
 }

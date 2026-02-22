@@ -155,6 +155,10 @@ impl OpenApiRegistry {
                 .or_default()
                 .insert(method_lc.clone(), op.clone());
         }
+
+        for doc in docs.values_mut() {
+            doc.prune_unreferenced_components();
+        }
     }
 
     /// Applies route configuration
@@ -353,6 +357,33 @@ mod tests {
 
         let admin_doc = registry.document_by_name("admin").expect("admin document");
         assert!(!admin_doc.paths.contains_key("/v1/openapi.json"));
+    }
+
+    #[test]
+    fn rebind_route_prunes_unreferenced_component_schemas() {
+        let registry = OpenApiRegistry::new(OpenApiConfig::new().with_specs([OpenApiSpec::new("v1")]));
+
+        let first = OpenApiRouteConfig::default().with_response_schema(
+            crate::schema::OpenApiSchema::object()
+                .with_title("User")
+                .with_property("name", crate::schema::OpenApiSchema::string()),
+        );
+        let second = OpenApiRouteConfig::default().with_response_schema(
+            crate::schema::OpenApiSchema::object()
+                .with_title("User")
+                .with_property("id", crate::schema::OpenApiSchema::integer()),
+        );
+
+        registry.register_route(&Method::GET, "/users", &first);
+        registry.apply_route_config(&Method::GET, "/users", &first);
+
+        registry.rebind_route(&Method::GET, "/users", &second);
+
+        let v1_doc = registry.document_by_name("v1").expect("v1 document");
+
+        assert_eq!(v1_doc.components.schemas.len(), 1);
+        assert!(!v1_doc.components.schemas.contains_key("User"));
+        assert!(v1_doc.components.schemas.contains_key("User_2"));
     }
     
     #[test]

@@ -76,7 +76,7 @@ impl OpenApiState {
             reg.register_route(&key.method, &key.pattern, &auto);
             reg.apply_route_config(&key.method, &key.pattern, &auto);
         }
-
+        
         self.route_configs.insert(key, auto);
     }
 

@@ -1,6 +1,6 @@
 //! Types and utilities for OpenAPI schema.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Map, Value, json};
 use serde::{
     de::{
@@ -250,6 +250,32 @@ impl OpenApiSchema {
     /// Returns `true` if this schema is a reference
     pub fn is_ref(&self) -> bool {
         self.schema_ref.is_some()
+    }
+
+    pub(super) fn collect_component_refs(&self, out: &mut BTreeSet<String>) {
+        if let Some(name) = self.component_ref_name()
+            && out.insert(name.clone())
+        {
+            // refs are terminal here; recursive expansion happens via component lookup.
+        }
+
+        if let Some(properties) = &self.properties {
+            for schema in properties.values() {
+                schema.collect_component_refs(out);
+            }
+        }
+
+        if let Some(items) = &self.items {
+            items.collect_component_refs(out);
+        }
+    }
+
+    pub(super) fn component_ref_name(&self) -> Option<String> {
+        const PREFIX: &str = "#/components/schemas/";
+        self.schema_ref
+            .as_deref()
+            .and_then(|r| r.strip_prefix(PREFIX))
+            .map(str::to_string)
     }
 }
 
@@ -629,6 +655,7 @@ impl<'de> MapAccess<'de> for EmptyMapAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     #[test]
     fn schema_from_example_object_keeps_properties() {
@@ -870,5 +897,19 @@ mod tests {
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn collect_component_refs_walks_nested_refs() {
+        let schema = OpenApiSchema::object()
+            .with_property("user", OpenApiSchema::reference("User"))
+            .with_property("items", OpenApiSchema::array(OpenApiSchema::reference("Item")));
+
+        let mut refs = BTreeSet::new();
+        schema.collect_component_refs(&mut refs);
+
+        assert!(refs.contains("User"));
+        assert!(refs.contains("Item"));
+        assert_eq!(refs.len(), 2);
     }
 }
