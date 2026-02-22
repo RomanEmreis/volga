@@ -32,10 +32,10 @@ pub(super) struct RouteKey {
 impl OpenApiState {
     /// Returns `true` if OpenAPI endpoints were exposed
     #[inline]
-    pub(super) fn is_exposed(&self) -> bool {
+    pub(super) fn is_configure_but_not_exposed(&self) -> bool {
         self.config
             .as_ref()
-            .is_some_and(|cfg| cfg.exposed)
+            .is_some_and(|cfg| !cfg.exposed)
     }
 
     /// Updates OpenAPI configuration for the route
@@ -65,7 +65,12 @@ impl OpenApiState {
         key: RouteKey,
         auto: OpenApiRouteConfig
     ) {
-        if self.route_configs.contains_key(&key) {
+        if let Some(entry) = self.route_configs.get_mut(&key) {
+            *entry = auto;
+
+            if let Some(registry) = self.registry.as_ref() {
+                registry.rebind_route(&key.method, &key.pattern, entry);
+            }
             return;
         }
 
@@ -216,9 +221,13 @@ fn create_etag(bytes: &[u8]) -> ETag {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::Value;
+
     use super::{
-        OPEN_API_NOT_EXPOSED_WARN, create_etag, create_spec_cache_control, create_ui_cache_control,
+        OPEN_API_NOT_EXPOSED_WARN, OpenApiConfig, OpenApiRegistry, OpenApiSpec, OpenApiState,
+        RouteKey, create_etag, create_spec_cache_control, create_ui_cache_control,
     };
+    use crate::http::Method;
 
     #[test]
     fn exposed_warning_message_is_stable() {
@@ -256,5 +265,42 @@ mod tests {
         assert!(first.as_ref().starts_with("W/\""));
         assert!(first.as_ref().ends_with("\""));
         assert_eq!(first.tag().len(), 40);
+    }
+
+    #[test]
+    fn remapping_existing_route_refreshes_auto_openapi_config() {
+        let config = OpenApiConfig::new().with_specs([OpenApiSpec::new("v1")]);
+        let registry = OpenApiRegistry::new(config.clone());
+
+        let mut state = OpenApiState {
+            registry: Some(registry.clone()),
+            config: Some(config),
+            ..Default::default()
+        };
+
+        let key = RouteKey {
+            method: Method::GET,
+            pattern: "/users".into(),
+        };
+
+        state.on_route_mapped(
+            key.clone(),
+            super::OpenApiRouteConfig::default().produces_text(),
+        );
+        state.on_route_mapped(
+            key.clone(),
+            super::OpenApiRouteConfig::default().produces_empty_json(),
+        );
+
+        let doc = registry.document_by_name("v1").expect("document");
+        let json = serde_json::to_value(doc).expect("serialize openapi doc");
+
+        assert_eq!(
+            json["paths"]["/users"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["type"],
+            Value::String("object".to_string())
+        );
+        assert!(json["paths"]["/users"]["get"]["responses"]["200"]["content"]
+            .get("text/plain; charset=utf-8")
+            .is_none());
     }
 }

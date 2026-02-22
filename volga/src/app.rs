@@ -663,7 +663,7 @@ impl App {
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
         #[cfg(all(debug_assertions, feature = "openapi"))]
-        if !self.openapi.is_exposed() { 
+        if self.openapi.is_configure_but_not_exposed() { 
             #[cfg(feature = "tracing")]
             tracing::warn!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
             #[cfg(not(feature = "tracing"))]
