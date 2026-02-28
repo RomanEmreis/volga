@@ -28,12 +28,30 @@ pub trait IntoStatusCode {
 
 impl IntoStatusCode for u16 {
     #[inline]
-    fn into_status_code(self) -> u16 { self }
+    fn into_status_code(self) -> u16 { 
+        self
+    }
+}
+
+impl IntoStatusCode for u32 {
+    #[inline]
+    fn into_status_code(self) -> u16 { 
+        self as u16
+    }
+}
+
+impl IntoStatusCode for i32 {
+    #[inline]
+    fn into_status_code(self) -> u16 { 
+        self as u16
+    }
 }
 
 impl IntoStatusCode for http::StatusCode {
     #[inline]
-    fn into_status_code(self) -> u16 { self.as_u16() }
+    fn into_status_code(self) -> u16 { 
+        self.as_u16()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -264,6 +282,44 @@ impl OpenApiRouteConfig {
             schema: Box::new(OpenApiSchema::string()),
             example: Some(Value::String(encoded)),
             content_type: APPLICATION_WWW_FORM_URLENCODED.to_string(),
+        });
+        self
+    }
+
+    /// Generates an `application/problem+json` response schema for the given status code (RFC 7807).
+    ///
+    /// The example is derived from the status code using its canonical reason phrase.
+    #[cfg(feature = "problem-details")]
+    pub fn produces_problem(mut self, status: impl IntoStatusCode) -> Self {
+        let status = status.into_status_code();
+        let title = http::StatusCode::from_u16(status)
+            .ok()
+            .and_then(|s| s.canonical_reason())
+            .unwrap_or("Error");
+        let example = json!({
+            "type": "https://tools.ietf.org/html/rfc9110",
+            "title": title,
+            "status": status
+        });
+        self.responses.insert(status, ResponseBody::Content {
+            schema: Box::new(OpenApiSchema::from_example(&example)),
+            example: Some(example),
+            content_type: "application/problem+json".to_string(),
+        });
+        self
+    }
+
+    /// Generates an `application/problem+json` response schema and example (RFC 7807).
+    ///
+    /// The schema is inferred from the provided example value.
+    #[cfg(feature = "problem-details")]
+    pub fn produces_problem_example<T: Serialize>(mut self, status: impl IntoStatusCode, example: T) -> Self {
+        let status = status.into_status_code();
+        let example = serde_json::to_value(example).unwrap_or_else(|_| json!({}));
+        self.responses.insert(status, ResponseBody::Content {
+            schema: Box::new(OpenApiSchema::from_example(&example)),
+            example: Some(example),
+            content_type: "application/problem+json".to_string(),
         });
         self
     }
@@ -856,7 +912,79 @@ mod tests {
     #[test]
     fn into_status_code_works_for_u16_and_http_status_code() {
         assert_eq!(200u16.into_status_code(), 200);
+        assert_eq!(201.into_status_code(), 201);
+        assert_eq!(202u32.into_status_code(), 202);
         assert_eq!(http::StatusCode::NOT_FOUND.into_status_code(), 404);
         assert_eq!(http::StatusCode::CREATED.into_status_code(), 201);
+    }
+
+    #[cfg(feature = "problem-details")]
+    mod problem_tests {
+        use super::*;
+
+        #[test]
+        fn produces_problem_generates_problem_json_schema_for_status() {
+            let cfg = OpenApiRouteConfig::default().produces_problem(400u16);
+            let mut op = OpenApiOperation::default();
+            cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
+            let op_json = serde_json::to_value(op).expect("serialize");
+
+            let content = &op_json["responses"]["400"]["content"]["application/problem+json"];
+            assert!(content.is_object(), "application/problem+json content should exist");
+            assert_eq!(content["example"]["title"], "Bad Request");
+            assert_eq!(content["example"]["status"], 400);
+            assert_eq!(content["example"]["type"], "https://tools.ietf.org/html/rfc9110");
+            assert_eq!(op_json["responses"]["400"]["description"], "Bad Request");
+            // Default "200" must be gone
+            assert!(op_json["responses"].get("200").is_none());
+        }
+
+        #[test]
+        fn produces_problem_example_uses_provided_value() {
+            #[derive(Serialize)]
+            struct CustomProblem {
+                r#type: String,
+                title: String,
+                status: u16,
+                detail: String,
+            }
+
+            let cfg = OpenApiRouteConfig::default().produces_problem_example(
+                422u16,
+                CustomProblem {
+                    r#type: "https://tools.ietf.org/html/rfc9110".into(),
+                    title: "Unprocessable Content".into(),
+                    status: 422,
+                    detail: "Validation failed".into(),
+                },
+            );
+
+            let mut op = OpenApiOperation::default();
+            cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
+            let op_json = serde_json::to_value(op).expect("serialize");
+
+            let content = &op_json["responses"]["422"]["content"]["application/problem+json"];
+            assert!(content.is_object(), "application/problem+json content should exist");
+            assert_eq!(content["example"]["detail"], "Validation failed");
+            assert_eq!(content["example"]["status"], 422);
+            assert_eq!(op_json["responses"]["422"]["description"], "Unprocessable Entity");
+        }
+
+        #[test]
+        fn produces_problem_composes_with_other_status_responses() {
+            let cfg = OpenApiRouteConfig::default()
+                .produces_json::<ResponsePayload>(200)
+                .produces_problem(400)
+                .produces_problem(500);
+
+            let mut op = OpenApiOperation::default();
+            cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
+            let op_json = serde_json::to_value(op).expect("serialize");
+
+            assert!(op_json["responses"]["200"]["content"].get("application/json").is_some());
+            assert!(op_json["responses"]["400"]["content"].get("application/problem+json").is_some());
+            assert!(op_json["responses"]["500"]["content"].get("application/problem+json").is_some());
+            assert_eq!(op_json["responses"].as_object().unwrap().len(), 3);
+        }
     }
 }
