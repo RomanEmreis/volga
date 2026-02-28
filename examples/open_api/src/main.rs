@@ -37,7 +37,9 @@ async fn main() -> std::io::Result<()> {
         api.map_get("/{name}", async |name: String| ok!(fmt: "Hello {name}"));
         api.map_get("/{name}/{age:integer}", async |Path((_name, _age)): Path<(String, u32)>| {});
         api.map_get("/named/{name}/{age}", async |path: NamedPath<Payload>| ok!(path.into_inner()))
-            .open_api(|cfg| cfg.produces_json::<Payload>());
+            .open_api(|cfg| cfg
+                .produces_json::<Payload>(200)
+                .produces_no_schema(400));
     });
     
     app.group("/file", |api| {
@@ -60,12 +62,12 @@ async fn main() -> std::io::Result<()> {
     app.map_put("/form", async |payload: Form<Payload>| payload)
         .open_api(|cfg| cfg
             .with_doc("v2")
-            .produces_form::<Payload>());
-    
+            .produces_form::<Payload>(200u16));
+
     app.map_post("/json", async |payload: Json<Payload>| payload)
         .open_api(|cfg| cfg
             .with_doc("v2")
-            .produces_json_example(Payload { name: "John".into(), age: 30 }));
+            .produces_json_example(200u16, Payload { name: "John".into(), age: 30 }));
 
     app.run().await
 }

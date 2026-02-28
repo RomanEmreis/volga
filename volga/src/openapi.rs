@@ -279,11 +279,11 @@ mod tests {
 
         state.on_route_mapped(
             key.clone(),
-            super::OpenApiRouteConfig::default().produces_text(),
+            super::OpenApiRouteConfig::default().produces_text(200u16),
         );
         state.on_route_mapped(
             key.clone(),
-            super::OpenApiRouteConfig::default().produces_empty_json(),
+            super::OpenApiRouteConfig::default().produces_empty_json(200u16),
         );
 
         let doc = registry.document_by_name("v1").expect("document");
@@ -317,7 +317,7 @@ mod tests {
 
         state.on_route_mapped(
             key,
-            super::OpenApiRouteConfig::default().produces_text(),
+            super::OpenApiRouteConfig::default().produces_text(200u16),
         );
 
         let before = replacement_registry.document_by_name("v1").expect("document");

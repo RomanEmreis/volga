@@ -1,6 +1,6 @@
 [package]
 name = "volga-open-api"
-version = "0.8.4"
+version = "0.8.5"
 readme = "README.md"
 description = "Volga Open API Integration"
 edition.workspace = true
@@ -20,6 +20,9 @@ sha1 = "0.10.6"
 serde_json = "1.0.149"
 serde_urlencoded = "0.7.1"
 serde = { version = "1.0.228", features = ["derive"] }
+
+[features]
+problem-details = []
 
 [lints]
 workspace = true
