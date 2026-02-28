@@ -364,11 +364,13 @@ mod tests {
         let registry = OpenApiRegistry::new(OpenApiConfig::new().with_specs([OpenApiSpec::new("v1")]));
 
         let first = OpenApiRouteConfig::default().with_response_schema(
+            200u16,
             crate::schema::OpenApiSchema::object()
                 .with_title("User")
                 .with_property("name", crate::schema::OpenApiSchema::string()),
         );
         let second = OpenApiRouteConfig::default().with_response_schema(
+            200u16,
             crate::schema::OpenApiSchema::object()
                 .with_title("User")
                 .with_property("id", crate::schema::OpenApiSchema::integer()),

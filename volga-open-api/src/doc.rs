@@ -69,6 +69,7 @@ mod tests {
     fn prune_unreferenced_components_keeps_only_reachable_transitive_refs() {
         let mut op = OpenApiOperation::default();
         op.set_response_body(
+            200,
             OpenApiSchema::reference("User"),
             None,
             "application/json",

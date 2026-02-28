@@ -18,7 +18,7 @@ mod ui;
 
 pub use {
     config::{OpenApiConfig, OpenApiSpec},
-    route::OpenApiRouteConfig,
+    route::{OpenApiRouteConfig, IntoStatusCode},
     registry::OpenApiRegistry,
     doc::OpenApiDocument,
     ui::ui_html,

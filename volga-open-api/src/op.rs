@@ -98,24 +98,38 @@ impl OpenApiOperation {
 
     pub(super) fn set_response_body(
         &mut self,
+        status: u16,
         schema: OpenApiSchema,
         example: Option<Value>,
         content_type: &str,
     ) {
+        let description = http::StatusCode::from_u16(status)
+            .ok()
+            .and_then(|s| s.canonical_reason())
+            .unwrap_or("Response")
+            .to_string();
         let response = self
             .responses
-            .entry("200".to_string())
-            .or_insert_with(|| OpenApiResponse {
-                description: "OK".to_string(),
-                content: None,
-            });
+            .entry(status.to_string())
+            .or_insert_with(|| OpenApiResponse { description, content: None });
         response.content = Some(media_content(content_type, schema, example));
     }
 
-    pub(super) fn clear_response_body(&mut self) {
-        if let Some(resp) = self.responses.get_mut("200") {
-            resp.content = None;
-        }
+    pub(super) fn clear_response_body(&mut self, status: u16) {
+        let description = http::StatusCode::from_u16(status)
+            .ok()
+            .and_then(|s| s.canonical_reason())
+            .unwrap_or("Response")
+            .to_string();
+        let response = self
+            .responses
+            .entry(status.to_string())
+            .or_insert_with(|| OpenApiResponse { description, content: None });
+        response.content = None;
+    }
+
+    pub(super) fn clear_all_responses(&mut self) {
+        self.responses.clear();
     }
 
     pub(super) fn collect_component_refs(&self, out: &mut BTreeSet<String>) {
@@ -184,6 +198,7 @@ mod tests {
             "text/plain",
         );
         operation.set_response_body(
+            200,
             OpenApiSchema::integer(),
             Some(json!(42)),
             "application/custom",
@@ -210,6 +225,42 @@ mod tests {
     }
 
     #[test]
+    fn set_response_body_non_200_status() {
+        let mut operation = OpenApiOperation::default();
+        operation.clear_all_responses();
+        operation.set_response_body(
+            201,
+            OpenApiSchema::object(),
+            None,
+            "application/json",
+        );
+
+        let json = serde_json::to_value(operation).expect("serialize");
+        assert!(json["responses"].get("200").is_none());
+        assert!(json["responses"]["201"]["content"].get("application/json").is_some());
+        assert_eq!(json["responses"]["201"]["description"], "Created");
+    }
+
+    #[test]
+    fn clear_response_body_removes_content_for_status() {
+        let mut operation = OpenApiOperation::default();
+        operation.set_response_body(200, OpenApiSchema::string(), None, "text/plain");
+        operation.clear_response_body(200);
+
+        let json = serde_json::to_value(operation).expect("serialize");
+        assert!(json["responses"]["200"].get("content").is_none());
+    }
+
+    #[test]
+    fn clear_all_responses_empties_map() {
+        let mut operation = OpenApiOperation::default();
+        operation.clear_all_responses();
+
+        let json = serde_json::to_value(operation).expect("serialize");
+        assert!(json["responses"].as_object().expect("responses object").is_empty());
+    }
+
+    #[test]
     fn collect_component_refs_includes_params_request_and_response() {
         let mut operation = OpenApiOperation {
             parameters: Some(vec![OpenApiParameter {
@@ -217,7 +268,7 @@ mod tests {
                 location: "path".to_string(),
                 required: true,
                 schema: OpenApiSchema::reference("PathParam"),
-            }]), 
+            }]),
             ..Default::default()
         };
 
@@ -227,6 +278,7 @@ mod tests {
             "application/json",
         );
         operation.set_response_body(
+            200,
             OpenApiSchema::reference("User"),
             None,
             "application/json",
