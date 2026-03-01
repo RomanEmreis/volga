@@ -199,7 +199,7 @@ impl RouteNode {
             if let Some(next) = &current.dynamic_route {
                 params.push(PathArg {
                     name: Arc::clone(&next.path),
-                    value: Arc::from(segment)
+                    value: Box::from(segment)
                 });
                 current = next.node.as_ref();
                 continue;

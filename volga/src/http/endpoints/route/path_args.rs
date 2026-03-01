@@ -31,7 +31,7 @@ pub struct PathArg {
     pub(crate) name: Arc<str>,
 
     /// Argument value
-    pub(crate) value: Arc<str>,
+    pub(crate) value: Box<str>,
 }
 
 impl PathArgs {
