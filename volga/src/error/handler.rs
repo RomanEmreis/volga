@@ -11,7 +11,7 @@ use std::sync::{Arc, Weak};
 ///
 /// Instead of receiving full request [`Parts`] at error time (which would
 /// require cloning them on every request), an `ErrorHandler` pre-extracts
-/// whatever arguments it needs *before* the parts are consumed, and returns
+/// whatever arguments it needs *before* the parts are consumed and returns
 /// them as a type-erased [`ErasedErrorArgs`]. The extracted args are dropped
 /// on the happy path and invoked only if the handler returns an error.
 pub trait ErrorHandler: Send + Sync {
