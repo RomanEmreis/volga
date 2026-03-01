@@ -284,7 +284,7 @@ impl FromPayload for String {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
-        ok(param.value.as_ref().to_owned())
+        ok(param.value.into_string())
     }
 }
 
@@ -303,7 +303,7 @@ impl FromPayload for Cow<'static, str> {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
-        ok(Cow::Owned(param.value.as_ref().to_owned()))
+        ok(Cow::Owned(param.value.into_string()))
     }
 }
 
@@ -322,14 +322,14 @@ impl FromPayload for Box<str> {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
-        ok(param.value.as_ref().into())
+        ok(param.value)
     }
 }
 
 impl FromPathArg for Box<str> {
     #[inline]
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
-        Ok(arg.value.as_ref().into())
+        Ok(arg.value.clone())
     }
 }
 
@@ -341,7 +341,7 @@ impl FromPayload for Box<[u8]> {
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         let Payload::Path(param) = payload else { unreachable!() };
-        ok(param.value.as_bytes().into())
+        ok(param.value.into_boxed_bytes())
     }
 }
 
