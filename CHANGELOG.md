@@ -5,11 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.5
 
 ### Added
 * Per-status-code OpenAPI response config: `produces_*` methods now accept a status code, `IntoStatusCode` trait (supports `u16`, `u32`, `i32`, `http::StatusCode`) (#162)
 * OpenAPI `produces_problem()` and `produces_problem_example()` for `application/problem+json` responses, gated on `problem-details` feature (#162)
+
+### Changed
+* Nested Route Groups support with middleware/CORS/OpenAPI isolation (#164)
+* Updated Global Error Handler: improved performance at the request hot-path (#163)
 
 ## 0.8.4
 
