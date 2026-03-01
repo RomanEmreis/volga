@@ -606,7 +606,7 @@ impl App {
         self
     }
 
-    /// Configures web server with specified TLS configuration
+    /// Configures a web server with a specified TLS configuration
     ///
     /// Default: `None`
     pub fn set_tls(mut self, config: TlsConfig) -> Self {
