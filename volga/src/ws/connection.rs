@@ -15,7 +15,7 @@ use hyper::{
 use crate::{
     HttpResult, ok, status,
     http::endpoints::args::{FromPayload, Payload, Source},
-    error::{Error, handler::{WeakErrorHandler, call_weak_err_handler}}, 
+    error::{Error, handler::{WeakErrorHandler, ErasedErrorArgs, extract_error_args}},
     headers::{
         HeaderValue, 
         CONNECTION, 
@@ -34,9 +34,9 @@ use tokio_tungstenite::{
 
 /// Represents the extractor for establishing WebSockets connections
 pub struct WebSocketConnection {
-    parts: Parts,
     config: WebSocketConfig,
-    error_handler: WeakErrorHandler,
+    /// Pre-extracted error handler args, produced before request parts are consumed.
+    error_args: Option<Box<dyn ErasedErrorArgs + Send>>,
     on_upgrade: OnUpgrade,
     protocol: Option<HeaderValue>,
     sec_websocket_key: Option<HeaderValue>,
@@ -140,24 +140,23 @@ impl WebSocketConnection {
         Fut: Future<Output = ()> + Send + 'static,
     {
         let WebSocketConnection {
-            parts,
             config,
+            error_args,
             protocol,
             on_upgrade,
-            error_handler,
             sec_websocket_key,
             sec_websocket_protocol: _
         } = self;
 
         let response_protocol = protocol.clone();
-        
+
         tokio::spawn(async move {
             let upgraded = match on_upgrade.await {
                 Ok(upgraded) => TokioIo::new(upgraded),
                 Err(err) => {
-                    _ = call_weak_err_handler(
-                        error_handler, parts,
-                        Error::server_error(err)).await;
+                    if let Some(args) = error_args {
+                        _ = args.call(Error::server_error(err)).await;
+                    }
                     return;
                 }
             };
@@ -289,19 +288,19 @@ impl TryFrom<&Parts> for WebSocketConnection {
         
         let error_handler = parts.extensions
             .get::<WeakErrorHandler>()
-            .ok_or(Error::server_error("Server error: error handler is missing"))?
-            .clone();
-        
+            .ok_or(Error::server_error("Server error: error handler is missing"))?;
+
+        let error_args = extract_error_args(error_handler, parts);
+
         let sec_websocket_protocol = parts.headers
             .get(&SEC_WEBSOCKET_PROTOCOL)
             .cloned();
 
         Ok(Self {
-            parts: parts.clone(),
             config: Default::default(),
+            error_args,
             protocol: None,
             on_upgrade,
-            error_handler,
             sec_websocket_key,
             sec_websocket_protocol,
         })
@@ -353,8 +352,7 @@ mod tests {
         let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
             .await
             .unwrap();
-        
-        assert_eq!(conn.parts.uri, parts.uri);
+
         assert_eq!(conn.protocol, None);
         assert_eq!(conn.sec_websocket_key, parts.headers.get("Sec-WebSocket-Key").cloned());
     }
@@ -529,8 +527,6 @@ mod tests {
             .with_write_buffer_size(1024)
             .with_max_frame_size(1024);
         
-        //assert_eq!(conn.uri, parts.uri);
-        assert_eq!(conn.parts.uri, parts.uri);
         assert_eq!(conn.protocol, Some(HeaderValue::from_static("foo-ws")));
         assert_eq!(conn.sec_websocket_key, None);
         assert!(conn.config.accept_unmasked_frames);

@@ -14,8 +14,8 @@ use hyper::{
 };
 
 use crate::{
-    app::AppEnv, 
-    error::{Error, handler::call_weak_err_handler},
+    app::AppEnv,
+    error::{Error, handler::extract_error_args},
     headers::CACHE_CONTROL,
     http::endpoints::FindResult,
     HttpRequest, HttpBody, HttpResult, ClientIp,
@@ -194,7 +194,7 @@ async fn handle_impl(
 
             let error_handler = pipeline.error_handler();
             let (mut parts, body) = request.into_parts();
-                
+
             {
                 let extensions = &mut parts.extensions;
                 extensions.insert(ClientIp(peer_addr));
@@ -204,7 +204,7 @@ async fn handle_impl(
 
                 #[cfg(feature = "ws")]
                 extensions.insert(error_handler.clone());
-                    
+
                 #[cfg(feature = "jwt-auth")]
                 if let Some(bts) = &env.bearer_token_service {
                     extensions.insert(bts.clone());
@@ -225,16 +225,19 @@ async fn handle_impl(
                     if let Some(rate_limiter) = &env.rate_limiter {
                         extensions.insert(rate_limiter.clone());
                     }
-                    
+
                     if let Some(trusted_proxies) = &env.trusted_proxies {
                         extensions.insert(TrustedProxies(trusted_proxies.clone()));
                     }
                 }
             }
 
-            let request = HttpRequest::new(Request::from_parts(parts.clone(), body))
+            // Pre-extract error handler args from parts before consuming them.
+            let error_args = extract_error_args(&error_handler, &parts);
+
+            let request = HttpRequest::new(Request::from_parts(parts, body))
                 .into_limited(env.body_limit);
-                
+
             #[cfg(feature = "middleware")]
             let response = if pipeline.has_middleware_pipeline() {
                 let ctx = HttpContext::new(request, Some(route_pipeline), cors);
@@ -244,10 +247,13 @@ async fn handle_impl(
             };
             #[cfg(not(feature = "middleware"))]
             let response = route_pipeline.call(request).await;
-                
+
             match response {
                 Ok(response) => Ok(response),
-                Err(err) => call_weak_err_handler(error_handler, parts, err).await,
+                Err(err) => match error_args {
+                    Some(args) => args.call(err).await,
+                    None => Err(Error::server_error("Server Error: error handler could not be upgraded")),
+                },
             }
         }
     }
@@ -323,7 +329,6 @@ fn apply_hsts_headers(
     host: Option<HeaderValue>,
 ) {
     if is_excluded(host, &hsts.exclude_hosts) {
-        println!("22");
         return;
     }
 
