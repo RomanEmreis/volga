@@ -10,9 +10,18 @@ use volga::{App, HttpResult, ok};
 async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
-    app.group("/user", |group| {
-        group.map_get("/{id}", get_user);
-        group.map_post("/create/{name}", create_user); 
+    app.group("/v1", |v1| {
+        v1.group("/user", |api| {
+            api.map_get("/{id}", get_user);
+            api.map_post("/create/{name}", create_user);
+        });
+    });
+
+    app.group("/v2", |v2| {
+        v2.group("/user", |api| {
+            api.map_get("/{id}", get_user);
+            api.map_post("/create/{name}", create_user);
+        });
     });
 
     app.run().await

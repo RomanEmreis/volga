@@ -49,9 +49,9 @@ impl App {
     ///# fn get_user() -> User { unimplemented!() }
     ///# fn create_user(user: Json<User>) -> i32 { unimplemented!() }
     /// ```
-    pub fn group<'a, F>(&'a mut self, prefix: &'a str, f: F)
-    where 
-        F: FnOnce(&mut RouteGroup<'a>)
+    pub fn group<F>(&mut self, prefix: &str, f: F)
+    where
+        F: FnOnce(&mut RouteGroup<'_>)
     {
         let mut group = RouteGroup::new(self, prefix);
         
@@ -62,7 +62,7 @@ impl App {
     }
     
     /// Adds a request handler that matches HTTP GET requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, ok};
@@ -70,7 +70,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_get("/hello", || async {
     ///    ok!("Hello World!")
     /// });
@@ -380,7 +380,7 @@ pub struct Route<'a> {
 /// Represents a group of routes
 pub struct RouteGroup<'a> {
     pub(crate) app: &'a mut App,
-    pub(crate) prefix: &'a str,
+    pub(crate) prefix: String,
     pub(crate) route_count: usize,
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
@@ -452,13 +452,66 @@ impl<'a> RouteGroup<'a> {
     }
 }
 
+impl<'a> RouteGroup<'a> {
+    /// Maps a sub-group of request handlers combined by `sub_prefix`.
+    ///
+    /// Inherits the parent group's middleware, CORS policy, and OpenAPI
+    /// configuration. Any middleware or settings added to the sub-group
+    /// apply only to routes within it (and any further nested groups),
+    /// running after the parent's middleware.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use volga::{App, ok};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.group("/api", |api| {
+    ///     api.map_get("/info", || async { ok!() });
+    ///
+    ///     api.group("/users", |users| {
+    ///         users.map_get("/{id}", |id: i32| async move { ok!(id) });
+    ///     });
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn group<F>(&mut self, sub_prefix: &str, f: F)
+    where
+        F: FnOnce(&mut RouteGroup<'_>)
+    {
+        let full_prefix = [self.prefix.as_str(), sub_prefix].concat();
+        let mut child = RouteGroup {
+            app: self.app,
+            prefix: full_prefix,
+            route_count: 0,
+            #[cfg(feature = "middleware")]
+            middleware: self.middleware.clone(),
+            #[cfg(feature = "middleware")]
+            cors: self.cors.clone(),
+            #[cfg(feature = "openapi")]
+            openapi_config: self.openapi_config.clone(),
+        };
+
+        #[cfg(feature = "openapi")]
+        {
+            let tag = child.prefix.clone();
+            child.open_api(|cfg| cfg.with_tag(tag));
+        }
+
+        f(&mut child);
+    }
+}
+
 macro_rules! define_route_group_methods {
     ($(($fn_name:ident, $http_method:expr))*) => {
         impl<'a> RouteGroup<'a> {
-            fn new(app: &'a mut App, prefix: &'a str) -> Self {
+            fn new(app: &'a mut App, prefix: &str) -> Self {
                 RouteGroup {
                     app,
-                    prefix,
+                    prefix: prefix.to_string(),
                     route_count: 0,
                     #[cfg(feature = "middleware")]
                     middleware: Vec::with_capacity(4),
@@ -478,7 +531,7 @@ macro_rules! define_route_group_methods {
                 Args: FromRequest + Send + 'static,
             {
                 self.route_count += 1;
-                let pattern = [self.prefix, pattern].concat();
+                let pattern = [self.prefix.as_str(), pattern].concat();
 
                 #[cfg(feature = "middleware")]
                 {

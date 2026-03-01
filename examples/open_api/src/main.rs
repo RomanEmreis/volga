@@ -36,13 +36,16 @@ async fn main() -> std::io::Result<()> {
         api.map_get("/hello", async || "Hello, World!");
         api.map_get("/{name}", async |name: String| ok!(fmt: "Hello {name}"));
         api.map_get("/{name}/{age:integer}", async |Path((_name, _age)): Path<(String, u32)>| {});
-        api.map_get("/named/{name}/{age}", async |path: NamedPath<Payload>| ok!(path.into_inner()))
-            .open_api(|cfg| cfg
-                .produces_json::<Payload>(200)
-                .produces_no_schema(400));
+        
+        api.group("/named", |api| {
+            api.map_get("/{name}/{age}", async |path: NamedPath<Payload>| ok!(path.into_inner()))
+                .open_api(|cfg| cfg
+                    .produces_json::<Payload>(200)
+                    .produces_no_schema(400)); 
+        });
     });
     
-    app.group("/file", |api| {
+    app.group("/files", |api| {
         api.open_api(|cfg| cfg.with_docs(["v1", "v2"]));
         
         api.map_post("/file", async |file: File| file.into_byte_stream());

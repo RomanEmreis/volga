@@ -464,3 +464,129 @@ async fn it_adds_shortcut_with_middleware_for_group() {
     
     server.shutdown().await;
 }
+#[tokio::test]
+async fn it_routes_nested_group() {
+    let server = TestServer::spawn(|app| {
+        app.group("/api", |api| {
+            api.map_get("/info", async || "api");
+
+            api.group("/users", |users| {
+                users.map_get("/{id}", |id: i32| async move { id.to_string() });
+            });
+        });
+    }).await;
+
+    let info = server.client()
+        .get(server.url("/api/info"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(info.status().is_success());
+    assert_eq!(info.text().await.unwrap(), "api");
+
+    let user = server.client()
+        .get(server.url("/api/users/42"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(user.status().is_success());
+    assert_eq!(user.text().await.unwrap(), "42");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_inherits_parent_middleware_in_nested_group() {
+    let server = TestServer::spawn(|app| {
+        app.group("/api", |api| {
+            api.map_ok(|mut resp: HttpResponse| async move {
+                resp.try_insert_header::<XTest>("from-parent").unwrap();
+                resp
+            });
+
+            api.group("/users", |users| {
+                users.map_get("/list", async || "users");
+            });
+        });
+    }).await;
+
+    let response = server.client()
+        .get(server.url("/api/users/list"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.headers().get("X-Test").unwrap(), "from-parent");
+    assert_eq!(response.text().await.unwrap(), "users");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_applies_child_middleware_only_to_nested_group() {
+    let server = TestServer::spawn(|app| {
+        app.group("/api", |api| {
+            api.map_get("/info", async || "api");
+
+            api.group("/users", |users| {
+                users.map_ok(|mut resp: HttpResponse| async move {
+                    resp.try_insert_header::<XTest>("from-child").unwrap();
+                    resp
+                });
+                users.map_get("/list", async || "users");
+            });
+        });
+    }).await;
+
+    let nested = server.client()
+        .get(server.url("/api/users/list"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(nested.status().is_success());
+    assert_eq!(nested.headers().get("X-Test").unwrap(), "from-child");
+
+    let parent = server.client()
+        .get(server.url("/api/info"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(parent.status().is_success());
+    assert!(parent.headers().get("X-Test").is_none());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_applies_middleware_top_to_bottom_in_nested_group() {
+    let server = TestServer::spawn(|app| {
+        app.group("/api", |api| {
+            api.tap_req(|mut req: HttpRequestMut| async move {
+                req.try_insert_header::<XTest>("parent").unwrap();
+                req
+            });
+
+            api.group("/inner", |inner| {
+                inner.map_get("/test", |headers: HttpHeaders| async move {
+                    headers.try_get::<XTest>().map(|v| v.to_string())
+                });
+            });
+        });
+    }).await;
+
+    let response = server.client()
+        .get(server.url("/api/inner/test"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "x-test: parent");
+
+    server.shutdown().await;
+}
