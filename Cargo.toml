@@ -4,6 +4,7 @@ default-members = ["volga", "volga-*"]
 resolver = "2"
 
 [workspace.package]
+version = "0.8.6"
 license = "MIT"
 edition = "2024"
 rust-version = "1.90.0"
@@ -17,6 +18,13 @@ categories = [
     "network-programming",
     "asynchronous",
 ]
+
+[workspace.dependencies]
+volga-dev-cert    = { path = "volga-dev-cert",    version = "0.8.6" }
+volga-di          = { path = "volga-di",          version = "0.8.6" }
+volga-macros      = { path = "volga-macros",      version = "0.8.6" }
+volga-open-api    = { path = "volga-open-api",    version = "0.8.6" }
+volga-rate-limiter = { path = "volga-rate-limiter", version = "0.8.6" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
