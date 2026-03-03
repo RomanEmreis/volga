@@ -1,6 +1,6 @@
 [package]
 name = "volga-open-api"
-version = "0.8.5"
+version.workspace = true
 readme = "README.md"
 description = "Volga Open API Integration"
 edition.workspace = true

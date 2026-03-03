@@ -6,15 +6,6 @@ OpenAPI 3.0 integration for the **Volga** web framework.
 
 It is fully optional and designed to stay out of your way.
 
-[![latest](https://img.shields.io/badge/latest-0.8.5-blue)](https://crates.io/crates/volga)
-[![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://crates.io/crates/volga)
-[![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
-[![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
-[![Release](https://github.com/RomanEmreis/volga/actions/workflows/release.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/release.yml)
-
-> 💡 **Status**: Volga is currently in preview.  
-> The public API may change while core abstractions are being finalized.
-
 ## Features
 
 * OpenAPI 3.0 spec generation

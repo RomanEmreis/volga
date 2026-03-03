@@ -1,6 +1,6 @@
 [package]
 name = "volga"
-version = "0.8.5"
+version.workspace = true
 readme = "../README.md"
 description = "Easy & Fast Web Framework for Rust"
 edition.workspace = true
@@ -50,11 +50,11 @@ twox-hash = { version = "2.1.2", optional = true }
 uuid = { version = "1.21.0", features = ["v4"], optional = true }
 
 # volga
-volga-dev-cert = { path = "../volga-dev-cert", version = "0.8.5", optional = true }
-volga-di = { path = "../volga-di", version = "0.8.5", optional = true }
-volga-macros = { path = "../volga-macros", version = "0.8.5", optional = true }
-volga-open-api = { path = "../volga-open-api", version = "0.8.5", optional = true }
-volga-rate-limiter = { path = "../volga-rate-limiter", version = "0.8.5", optional = true }
+volga-dev-cert     = { workspace = true, optional = true }
+volga-di           = { workspace = true, optional = true }
+volga-macros       = { workspace = true, optional = true }
+volga-open-api     = { workspace = true, optional = true }
+volga-rate-limiter = { workspace = true, optional = true }
 
 [dev-dependencies]
 base64 = { version = "0.22.1" }
