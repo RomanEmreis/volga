@@ -100,9 +100,9 @@ impl Middlewares {
         let last = iter.next()?;
         let mut next: NextFn = {
             let handler = last.clone();
-            // Call the last middleware, ignoring its `next` argument with an empty placeholder
-            Arc::new(move |ctx| 
-                handler(ctx, Arc::new(|_| Box::pin(async { not_found!() }))))
+            // Allocate the placeholder once at compose time, not per-request
+            let dummy: NextFn = Arc::new(|_| Box::pin(async { not_found!() }));
+            Arc::new(move |ctx| handler(ctx, dummy.clone()))
         };
 
         for mw in iter {
@@ -129,6 +129,31 @@ impl App {
     /// 
     /// app.wrap(|ctx, next| async move {
     ///     next(ctx).await
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    ///
+    /// # Timeouts
+    ///
+    /// The pipeline does not enforce per-request timeouts. If your middleware
+    /// performs a long-running or potentially unbounded operation, check the
+    /// [`CancellationToken`](crate::CancellationToken) injected into each
+    /// request's extensions to avoid holding connections open indefinitely:
+    ///
+    /// ```no_run
+    /// use volga::{App, CancellationToken, error::Error};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.wrap(|ctx, next| async move {
+    ///     let token = ctx.extract::<CancellationToken>()?;
+    ///     tokio::select! {
+    ///         res = next(ctx) => res,
+    ///         _ = token.cancelled() => Err(Error::server_error("request cancelled")),
+    ///     }
     /// });
     ///# app.run().await
     ///# }
@@ -213,6 +238,14 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
+    ///
+    /// # Security
+    ///
+    /// `tap_req` grants full mutable ownership of the incoming request, including
+    /// all headers. Security-critical values such as `Authorization` can be
+    /// stripped or overwritten before downstream middleware and handlers observe
+    /// them. Only register trusted closures and be mindful that registration order
+    /// determines which code sees the original request.
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
     where
@@ -259,6 +292,14 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
+    ///
+    /// # Security
+    ///
+    /// `tap_req` grants full mutable ownership of the incoming request, including
+    /// all headers. Security-critical values such as `Authorization` can be
+    /// stripped or overwritten before downstream middleware and handlers observe
+    /// them. Only register trusted closures and be mindful that registration order
+    /// determines which code sees the original request.
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
     where
@@ -469,6 +510,14 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
+    ///
+    /// # Security
+    ///
+    /// `tap_req` grants full mutable ownership of the incoming request, including
+    /// all headers. Security-critical values such as `Authorization` can be
+    /// stripped or overwritten before downstream middleware and handlers observe
+    /// them. Only register trusted closures and be mindful that registration order
+    /// determines which code sees the original request.
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(self, map: F) -> Self
     where
@@ -513,6 +562,14 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
+    ///
+    /// # Security
+    ///
+    /// `tap_req` grants full mutable ownership of the incoming request, including
+    /// all headers. Security-critical values such as `Authorization` can be
+    /// stripped or overwritten before downstream middleware and handlers observe
+    /// them. Only register trusted closures and be mindful that registration order
+    /// determines which code sees the original request.
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(self, map: F) -> Self
     where
@@ -729,6 +786,14 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
+    ///
+    /// # Security
+    ///
+    /// `tap_req` grants full mutable ownership of the incoming request, including
+    /// all headers. Security-critical values such as `Authorization` can be
+    /// stripped or overwritten before downstream middleware and handlers observe
+    /// them. Only register trusted closures and be mindful that registration order
+    /// determines which code sees the original request.
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
     where
@@ -736,8 +801,8 @@ impl<'a> RouteGroup<'a> {
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
     {
-        let map_err_fn = make_tap_req_fn(map);
-        self.middleware.push(map_err_fn);
+        let tap_req_fn = make_tap_req_fn(map);
+        self.middleware.push(tap_req_fn);
         self
     }
 
@@ -776,14 +841,22 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
+    ///
+    /// # Security
+    ///
+    /// `tap_req` grants full mutable ownership of the incoming request, including
+    /// all headers. Security-critical values such as `Authorization` can be
+    /// stripped or overwritten before downstream middleware and handlers observe
+    /// them. Only register trusted closures and be mindful that registration order
+    /// determines which code sees the original request.
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
     where
         F: TapReqHandler<Output = R>,
         R: IntoTapResult,
     {
-        let map_err_fn = make_tap_req_fn(map);
-        self.middleware.push(map_err_fn);
+        let tap_req_fn = make_tap_req_fn(map);
+        self.middleware.push(tap_req_fn);
         self
     }
 

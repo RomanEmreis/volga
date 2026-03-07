@@ -130,9 +130,7 @@ impl Pipeline {
 
     #[cfg(feature = "middleware")]
     pub(crate) async fn execute(&self, ctx: HttpContext) -> HttpResult {
-        let next = &self.start;
-        if let Some(next) = next {
-            let next: NextFn = next.clone();
+        if let Some(next) = &self.start {
             next(ctx).await
         } else {
             ctx.execute().await
