@@ -1,0 +1,42 @@
+[package]
+name = "volga-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+hyper = { version = "1.8.1", default-features = false }
+volga = { path = "../volga", features = ["full", "__fuzzing"] }
+
+[[bin]]
+name = "fuzz_router_match"
+path = "fuzz_targets/fuzz_router_match.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_query_decode"
+path = "fuzz_targets/fuzz_query_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_extractor_typed"
+path = "fuzz_targets/fuzz_extractor_typed.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_openapi_gen"
+path = "fuzz_targets/fuzz_openapi_gen.rs"
+test = false
+doc = false
+bench = false

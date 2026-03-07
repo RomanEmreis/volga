@@ -57,6 +57,9 @@ pub mod rate_limiting;
 pub mod openapi;
 #[cfg(any(test, feature = "test"))]
 pub mod test;
+#[cfg(feature = "__fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing;
 
 pub use crate::app::App;
 pub use crate::http::{

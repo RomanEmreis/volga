@@ -24,7 +24,7 @@ memchr = "2.8.0"
 mime = "0.3.17"
 mime_guess = "2.0.5"
 pin-project-lite = "0.2.17"
-tokio = { version = "1.49.0", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.50.0", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7.18"
 serde = "1.0.228"
 serde_json = "1.0.149"
@@ -47,7 +47,7 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["tls1
 tokio-tungstenite = { version = "0.28.0", optional = true }
 tracing = { version = "0.1.44", default-features = false, optional = true }
 twox-hash = { version = "2.1.2", optional = true }
-uuid = { version = "1.21.0", features = ["v4"], optional = true }
+uuid = { version = "1.22.0", features = ["v4"], optional = true }
 
 # volga
 volga-dev-cert     = { workspace = true, optional = true }
@@ -63,7 +63,7 @@ hyper = { version = "1.8.1", features = ["client"] }
 reqwest = { version = "0.13.2", features = ["rustls-no-provider"] }
 serde = { version = "1.0.228", features = ["derive"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
-uuid = { version = "1.21.0", features = ["v4"] }
+uuid = { version = "1.22.0", features = ["v4"] }
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 tempfile = "3.26.0"
 
@@ -124,6 +124,8 @@ decompression-full = ["decompression-brotli", "decompression-gzip", "decompressi
 decompression-brotli = ["middleware", "dep:async-compression", "async-compression?/brotli"]
 decompression-gzip = ["middleware", "dep:async-compression", "async-compression?/zlib", "async-compression?/gzip"]
 decompression-zstd = ["middleware", "dep:async-compression", "async-compression?/zstd"]
+
+__fuzzing = []
 
 test = [
     "dep:uuid",
