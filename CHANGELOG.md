@@ -5,11 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.6
+
+### Added
+* fuzz tests for router and OpenAPI (#166)
 
 ## Changed
-* Refactored directory listing HTML generation.
-* Removed dependencies on `handlebars` and `chrono`
+* Added security notes for tap_req middleware (#167)
+* Added safety notes for wrap middleware (#167)
+* Improved performance of the entire middleware pipeline, reducing heap allocations (#167)
+* Unused Next/NextFn are now zero-alloc (#167)
+* Refactored directory listing HTML generation. (#165)
+* Removed dependencies on `handlebars` and `chrono` (#165)
 
 ## 0.8.5
 
