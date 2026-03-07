@@ -1,5 +1,6 @@
 ﻿//! Extractors for middleware functions
 
+use futures_util::future::BoxFuture;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -8,9 +9,23 @@ use crate::error::Error;
 use crate::{HttpRequestMut, HttpResponse, HttpResult};
 use super::{HttpContext, NextFn};
 
+/// Internal state machine for [`Next`]
+///
+/// `Pending` is intentionally large: `HttpContext` lives here until the first
+/// poll, avoiding the heap allocation that would be required to box it.
+/// Both variants reside inside the already heap-allocated [`Next`] future,
+/// so this does not create stack pressure.
+#[allow(clippy::large_enum_variant)]
+enum NextState {
+    /// Not yet polled; the inner future is created on demand
+    Pending(HttpContext, NextFn),
+    /// Polled at least once; holds the running future
+    Running(BoxFuture<'static, HttpResult>),
+}
+
 /// Represents the [`Future`] that wraps the next middleware in the chain,
 /// that will be called by `await` with the current [`HttpContext`]
-/// 
+///
 /// # Example
 /// ```no_run
 /// # use volga::middleware::Next;
@@ -21,7 +36,7 @@ use super::{HttpContext, NextFn};
 /// });
 /// ```
 pub struct Next {
-    inner: Option<Pin<Box<dyn Future<Output = HttpResult> + Send>>>
+    state: Option<NextState>
 }
 
 impl std::fmt::Debug for Next {
@@ -37,24 +52,35 @@ impl Future for Next {
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        let fut = this
-            .inner
-            .as_mut()
-            .ok_or_else(|| Error::server_error("Next polled after completion"))?;
-
-        let poll = fut.as_mut().poll(cx);
-        if matches!(poll, Poll::Ready(_)) {
-            this.inner = None;
+        match this.state.take() {
+            None => Poll::Ready(Err(Error::server_error("Next polled after completion"))),
+            Some(NextState::Pending(ctx, next)) => {
+                let mut fut = next(ctx);
+                let poll = fut.as_mut().poll(cx);
+                if poll.is_pending() {
+                    this.state = Some(NextState::Running(fut));
+                }
+                poll
+            }
+            Some(NextState::Running(mut fut)) => {
+                let poll = fut.as_mut().poll(cx);
+                if poll.is_pending() {
+                    this.state = Some(NextState::Running(fut));
+                }
+                poll
+            }
         }
-        poll
     }
 }
 
 impl Next {
-    /// Creates a new [`Next`]
+    /// Creates a new [`Next`].
+    ///
+    /// The inner future is created lazily: `next(ctx)` is not called until
+    /// this future is first polled. This avoids a heap allocation when the
+    /// middleware exits early without awaiting `next`.
     pub fn new(ctx: HttpContext, next: NextFn) -> Self {
-        Self { inner: Some(Box::pin(next(ctx))) }
-        //Self { ctx: Some(ctx), next }
+        Self { state: Some(NextState::Pending(ctx, next)) }
     }
 }
 
@@ -166,12 +192,12 @@ mod tests {
     use futures_util::task::noop_waker_ref;
     use crate::{HttpBody, HttpResponse, status};
     use crate::error::Error;
-    use super::{MapOkHandler, MiddlewareHandler, Next};
+    use super::{MapOkHandler, MiddlewareHandler, Next, NextState};
 
     #[test]
     fn next_returns_error_when_polled_after_completion() {
         let mut next = Next {
-            inner: Some(Box::pin(async { status!(204) })),
+            state: Some(NextState::Running(Box::pin(async { status!(204) }))),
         };
 
         let waker = noop_waker_ref();
@@ -194,7 +220,7 @@ mod tests {
     #[tokio::test]
     async fn middleware_handler_invokes_function_with_next() {
         let next = Next {
-            inner: Some(Box::pin(async { status!(204) })),
+            state: Some(NextState::Running(Box::pin(async { status!(204) }))),
         };
 
         let handler = |value: u8, next: Next| async move {
