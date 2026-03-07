@@ -1,6 +1,7 @@
 [workspace]
 members = ["volga", "volga-*", "examples/*"]
 default-members = ["volga", "volga-*"]
+exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
