@@ -8,7 +8,8 @@ use hyper::{Method, Uri};
 use crate::http::endpoints::Endpoints;
 use crate::http::endpoints::args::{FromPayload, Payload};
 use crate::http::endpoints::handlers::Func;
-use crate::{App, HttpBody, Json, Query, ok};
+use crate::{App, Form, HttpBody, Json, Query, ok};
+use crate::headers::{ContentType, Header, HttpHeaders};
 
 fn build_router() -> Endpoints {
     let mut endpoints = Endpoints::new();
@@ -55,15 +56,18 @@ pub fn fuzz_query_decode(query: &str) {
 }
 
 pub fn fuzz_extractor_typed(headers: &[(String, String)], body: &[u8]) {
-    let _parsed_headers = headers
-        .iter()
-        .take(16)
-        .filter_map(|(k, v)| {
-            let name = k.parse::<hyper::header::HeaderName>().ok()?;
-            let value = v.parse::<hyper::header::HeaderValue>().ok()?;
-            Some((name, value))
-        })
-        .collect::<Vec<_>>();
+    // Build a HeaderMap from the fuzzed headers, skipping any with invalid names or values.
+    let mut header_map = hyper::HeaderMap::new();
+    for (k, v) in headers.iter().take(16) {
+        if let (Ok(name), Ok(value)) = (
+            k.parse::<hyper::header::HeaderName>(),
+            v.parse::<hyper::header::HeaderValue>(),
+        ) {
+            header_map.insert(name, value);
+        }
+    }
+    let (mut parts, _) = hyper::Request::new(()).into_parts();
+    parts.headers = header_map;
 
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     let rt = RT.get_or_init(|| {
@@ -74,11 +78,17 @@ pub fn fuzz_extractor_typed(headers: &[(String, String)], body: &[u8]) {
     });
 
     rt.block_on(async {
-        let payload = Payload::Body(HttpBody::full(body.to_vec()));
-        let extracted = Json::<serde_json::Value>::from_payload(payload).await;
-        if let Ok(data) = extracted {
-            let _ = data.0.to_string();
-        }
+        // Header extractors (Source::Parts).
+        let _ = HttpHeaders::from_payload(Payload::Parts(&parts)).await;
+        let _ = Header::<ContentType>::from_payload(Payload::Parts(&parts)).await;
+
+        // Body extractors (Source::Body).
+        let _ = Json::<serde_json::Value>::from_payload(
+            Payload::Body(HttpBody::full(body.to_vec()))
+        ).await;
+        let _ = Form::<HashMap<String, String>>::from_payload(
+            Payload::Body(HttpBody::full(body.to_vec()))
+        ).await;
     });
 }
 
