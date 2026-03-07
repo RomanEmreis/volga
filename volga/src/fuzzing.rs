@@ -1,5 +1,3 @@
-#![cfg(feature = "__fuzzing")]
-
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
