@@ -78,6 +78,14 @@ impl HttpHeaders {
     pub fn get_all_raw(&self, name: impl AsHeaderName) -> impl Iterator<Item = &HeaderValue> {
         self.inner.get_all(name).iter()
     }
+
+    /// Returns a cloned snapshot of all headers.
+    /// 
+    /// > *Note:* this is an immutable copy - modifications will not affect the request.
+    #[inline]
+    pub fn to_map(&self) -> HeaderMap {
+        self.inner.clone()
+    }
 }
 
 impl From<HeaderMap<HeaderValue>> for HttpHeaders {
@@ -419,6 +427,22 @@ mod tests {
         let headers = HttpHeaders::from_request(&req).unwrap();
 
         assert_eq!(headers.get_raw("content-type").unwrap(), "text/plain");
+    }
+
+    #[test]
+    fn it_creates_header_map_snapshot() {
+        let req = Request::get("/")
+            .header("Content-Type", HeaderValue::from_static("text/plain"))
+            .body(HttpBody::empty())
+            .unwrap();
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        let headers = HttpHeaders::from_request(&req).unwrap();
+        let headers = headers.to_map();
+
+        assert_eq!(headers.get("content-type").unwrap(), "text/plain");
     }
 
     #[test]
