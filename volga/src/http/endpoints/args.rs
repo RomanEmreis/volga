@@ -1,39 +1,34 @@
-﻿//! Extractors for HTTP request parts and body
+//! Extractors for HTTP request parts and body
 
+use hyper::{Request, body::Incoming, http::request::Parts};
 use std::future::Future;
-use hyper::{
-    body::Incoming,
-    http::request::Parts,
-    Request
-};
 
 use crate::{
+    HttpBody, HttpRequest,
     error::Error,
     http::endpoints::route::{PathArg, PathArgs},
-    HttpBody,
-    HttpRequest
 };
 
 #[cfg(feature = "di")]
-use crate::di::{FromContainer, Container};
+use crate::di::{Container, FromContainer};
 
-pub mod path;
-pub mod query;
-pub mod json;
-pub mod file;
-pub mod cancellation_token;
-pub mod request;
-pub mod form;
-pub mod sse;
-pub mod option;
-pub mod result;
-pub mod vec;
-pub mod client_ip;
 pub mod byte_stream;
-#[cfg(feature = "multipart")]
-pub mod multipart;
+pub mod cancellation_token;
+pub mod client_ip;
+pub mod file;
+pub mod form;
 #[cfg(feature = "static-files")]
 pub mod host_env;
+pub mod json;
+#[cfg(feature = "multipart")]
+pub mod multipart;
+pub mod option;
+pub mod path;
+pub mod query;
+pub mod request;
+pub mod result;
+pub mod sse;
+pub mod vec;
 
 /// Holds the payload for extractors
 pub(crate) enum Payload<'a> {
@@ -43,7 +38,7 @@ pub(crate) enum Payload<'a> {
     Parts(&'a Parts),
     Path(PathArg),
     Body(HttpBody),
-    PathArgs(&'a PathArgs)
+    PathArgs(&'a PathArgs),
 }
 
 /// Describes a data source for extractors to read from
@@ -55,7 +50,7 @@ pub(crate) enum Source {
     Parts,
     Path,
     Body,
-    PathArgs
+    PathArgs,
 }
 
 /// Specifies extractors to read data from HTTP request
@@ -66,7 +61,9 @@ pub trait FromRequest: Sized {
     /// Describes Open API schema
     #[cfg(feature = "openapi")]
     #[doc(hidden)]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config
     }
 }
@@ -101,20 +98,22 @@ pub(crate) trait FromPathArg: Sized {
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error>;
 }
 
-/// Specifies extractor to read data from an HTTP request 
+/// Specifies extractor to read data from an HTTP request
 /// depending on payload's [`Source`]
 pub(crate) trait FromPayload: Send + Sized {
     type Future: Future<Output = Result<Self, Error>> + Send;
 
     /// Represents a [`Source`] where the payload should be extracted from
     const SOURCE: Source = Source::None;
-    
+
     /// Extracts data from give [`Payload`]
     fn from_payload(payload: Payload<'_>) -> Self::Future;
 
     /// Describes Open API schema
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config
     }
 }
@@ -156,7 +155,7 @@ macro_rules! define_generic_from_request {
                 let tuple = (
                     $(
                     $T::from_parts(&parts)?,
-                    )*    
+                    )*
                 );
                 Ok(tuple)
             }
@@ -167,7 +166,7 @@ macro_rules! define_generic_from_request {
                 let tuple = (
                     $(
                     $T::from_request(req)?,
-                    )*    
+                    )*
                 );
                 Ok(tuple)
             }
@@ -178,7 +177,7 @@ macro_rules! define_generic_from_request {
                 let tuple = (
                     $(
                     $T::from_parts(parts)?,
-                    )*    
+                    )*
                 );
                 Ok(tuple)
             }
@@ -190,7 +189,7 @@ macro_rules! define_generic_from_request {
                 let tuple = (
                     $(
                     $T::from_container(container)?,
-                    )*    
+                    )*
                 );
                 Ok(tuple)
             }
@@ -206,7 +205,7 @@ macro_rules! define_generic_from_request {
                 }
 
                 let (mut parts, body) = req.into_parts();
-                
+
                 let params = parts.extensions
                     .remove::<PathArgs>()
                     .unwrap_or_default();
@@ -240,7 +239,7 @@ macro_rules! define_generic_from_request {
                 );
                 Ok(tuple)
             }
-            
+
             #[cfg(feature = "openapi")]
             fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
                 let mut config = config;
@@ -257,7 +256,7 @@ macro_rules! define_generic_from_request {
 #[inline(never)]
 fn invalid_extractor_combination() -> Error {
     Error::client_error(
-        "Invalid extractor combination: Cannot mix Path and PathArgs in the same handler"
+        "Invalid extractor combination: Cannot mix Path and PathArgs in the same handler",
     )
 }
 
@@ -287,7 +286,7 @@ macro_rules! payload_for_path {
             Source::PathArgs => Payload::None,
             Source::None => Payload::None,
         }
-    }}
+    }};
 }
 
 macro_rules! payload_for_path_args {
@@ -313,7 +312,7 @@ macro_rules! payload_for_path_args {
             Source::Path => Payload::None,
             Source::None => Payload::None,
         }
-    }}
+    }};
 }
 
 define_generic_from_request! { T1 }
@@ -329,12 +328,12 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
 
 #[cfg(test)]
 mod tests {
-    use futures_util::future::{ok, Ready};
-    use crate::error::Error;
     use super::{FromPayload, Payload, Source};
-    
+    use crate::error::Error;
+    use futures_util::future::{Ready, ok};
+
     struct TestNone;
-    
+
     impl FromPayload for TestNone {
         type Future = Ready<Result<TestNone, Error>>;
 
@@ -342,7 +341,7 @@ mod tests {
             ok(TestNone)
         }
     }
-    
+
     #[tokio::test]
     async fn it_reads_none_from_payload() {
         let extraction = TestNone::from_payload(Payload::None).await;

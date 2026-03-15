@@ -2,15 +2,15 @@
 
 use volga::{App, claims};
 
-use std::hint::black_box;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use futures_util::future::join_all;
 use reqwest::Client;
+use std::hint::black_box;
 use tokio::{runtime::Runtime, time::Instant};
 
-use std::time::Duration;
 use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use volga::auth::roles;
 
 const TEST_TOKEN: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJlbWFpbC5jb20iLCJjb21wYW55IjoiQXdlc29tZSBDby4iLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3NTMwMDEzODl9.5g6aE4KpRobZqsS8WFJndbHYakG6GydPtIpKt3L1X5o";
@@ -25,10 +25,13 @@ async fn routing(iters: u64, url: &str, token: &str) -> Duration {
 
     let start = Instant::now();
 
-    let requests = (0..iters).map(|_| client.get(&url)
-        .header(volga::headers::AUTHORIZATION, format!("Bearer {token}"))
-        .send());
-    
+    let requests = (0..iters).map(|_| {
+        client
+            .get(&url)
+            .header(volga::headers::AUTHORIZATION, format!("Bearer {token}"))
+            .send()
+    });
+
     let responses = join_all(requests).await;
 
     let elapsed = start.elapsed();
@@ -49,25 +52,26 @@ fn benchmark(c: &mut Criterion) {
                 .without_body_limit()
                 .without_implicit_head()
                 .without_greeter()
-                .with_bearer_auth(|auth| auth
-                    .validate_exp(false)
-                    .set_encoding_key(EncodingKey::from_secret(b"test secret"))
-                    .set_decoding_key(DecodingKey::from_secret(b"test secret")));
+                .with_bearer_auth(|auth| {
+                    auth.validate_exp(false)
+                        .set_encoding_key(EncodingKey::from_secret(b"test secret"))
+                        .set_decoding_key(DecodingKey::from_secret(b"test secret"))
+                });
 
             app.map_get("/protected", || async { "Hello, World!" })
                 .authorize::<Claims>(roles(["admin", "user"]));
-            
+
             _ = app.run().await;
         });
     });
 
-    c.bench_function("unauthorized", |b| b.iter_custom(
-        |iters| rt.block_on(routing(iters, black_box("/protected"), "invalid"))
-    ));
+    c.bench_function("unauthorized", |b| {
+        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/protected"), "invalid")))
+    });
 
-    c.bench_function("protected", |b| b.iter_custom(
-        |iters| rt.block_on(routing(iters, black_box("/protected"), TEST_TOKEN))
-    ));
+    c.bench_function("protected", |b| {
+        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/protected"), TEST_TOKEN)))
+    });
 }
 
 criterion_group!(benches, benchmark);

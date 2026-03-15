@@ -1,7 +1,7 @@
-﻿//! Macros for file responses
+//! Macros for file responses
 
 /// Produces `OK 200` response with file body
-/// 
+///
 /// # Examples
 /// ## Default usage
 ///```no_run
@@ -24,7 +24,7 @@
 /// # async fn dox() -> std::io::Result<()> {
 /// let file_name = "example.txt";
 /// let file_data = File::open(file_name).await?;
-/// 
+///
 /// file!(file_name, file_data; [
 ///    ("x-api-key", "some api key")
 /// ]);
@@ -36,11 +36,11 @@ macro_rules! file {
     ($file_name:expr, $body:expr) => {
         $crate::file!($file_name, $body; [])
     };
-    
+
     ($file_name:expr, $body:expr; [ $( $header:expr),* $(,)? ]) => {{
         let mime = $crate::fs::get_mime_or_octet_stream($file_name);
         $crate::response!(
-            $crate::http::StatusCode::OK, 
+            $crate::http::StatusCode::OK,
             $crate::HttpBody::file($body);
             [
                 ($crate::headers::CONTENT_TYPE, mime.as_ref()),
@@ -53,8 +53,8 @@ macro_rules! file {
 
 #[cfg(test)]
 mod tests {
-    use tokio::fs::File;
     use crate::test::{TempFile, utils::read_file_bytes};
+    use tokio::fs::File;
 
     #[tokio::test]
     async fn it_creates_file_with_ok_response() {
@@ -69,7 +69,10 @@ mod tests {
         let mut response = response.unwrap();
         let body = read_file_bytes(&mut response).await;
 
-        assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
+        assert_eq!(
+            String::from_utf8_lossy(body.as_slice()),
+            "Hello, this is some file content!"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -88,7 +91,10 @@ mod tests {
         let mut response = response.unwrap();
         let body = read_file_bytes(&mut response).await;
 
-        assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
+        assert_eq!(
+            String::from_utf8_lossy(body.as_slice()),
+            "Hello, this is some file content!"
+        );
         assert_eq!(response.headers()["x-api-key"], "some api key");
         assert_eq!(response.status(), 200);
     }

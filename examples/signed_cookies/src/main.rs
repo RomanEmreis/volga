@@ -8,12 +8,15 @@ use uuid::Uuid;
 use volga::{
     App, HttpResult,
     error::Error,
+    headers::{Authorization, Header},
     http::{SignedCookies, SignedKey},
-    headers::{Header, Authorization},
-    status, ok, see_other
+    ok, see_other, status,
 };
 
-async fn login(cookies: SignedCookies, auth: Header<Authorization>) -> Result<(HttpResult, SignedCookies), Error> {
+async fn login(
+    cookies: SignedCookies,
+    auth: Header<Authorization>,
+) -> Result<(HttpResult, SignedCookies), Error> {
     let session_id = authorize(auth)?;
     Ok((see_other!("/me"), cookies.add(("session-id", session_id))))
 }

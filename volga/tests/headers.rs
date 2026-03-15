@@ -1,19 +1,24 @@
-﻿#![allow(missing_docs)]
+#![allow(missing_docs)]
 #![cfg(feature = "test")]
 
+use volga::headers::{ContentType, Header, HttpHeaders};
 use volga::ok;
-use volga::headers::{Header, HttpHeaders, ContentType};
 use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_reads_headers() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", |headers: HttpHeaders| async move {
-            ok!("{}", headers.get_raw("x-api-key").unwrap().to_str().unwrap())
+            ok!(
+                "{}",
+                headers.get_raw("x-api-key").unwrap().to_str().unwrap()
+            )
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .header("x-api-key", "some-api-key")
         .send()
@@ -22,7 +27,7 @@ async fn it_reads_headers() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "some-api-key");
-    
+
     server.shutdown().await;
 }
 
@@ -32,9 +37,11 @@ async fn it_reads_specific_header() {
         app.map_get("/test", |content_type: Header<ContentType>| async move {
             ok!("{content_type}")
         });
-    }).await;
-    
-    let response = server.client()
+    })
+    .await;
+
+    let response = server
+        .client()
         .get(server.url("/test"))
         .header("Content-Type", "text/plain")
         .send()
@@ -43,7 +50,7 @@ async fn it_reads_specific_header() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "content-type: text/plain");
-    
+
     server.shutdown().await;
 }
 
@@ -55,17 +62,19 @@ async fn it_writes_headers() {
                 ("x-api-key", "some-api-key")
             ])
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
-        .unwrap();  
+        .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("x-api-key").unwrap(), "some-api-key");
     assert_eq!(response.text().await.unwrap(), "ok!");
-    
+
     server.shutdown().await;
 }

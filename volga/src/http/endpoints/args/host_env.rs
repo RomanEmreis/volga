@@ -1,24 +1,22 @@
-﻿//! Extractors for the whole Hosting Environment request
+//! Extractors for the whole Hosting Environment request
 
-use crate::{app::HostEnv, error::Error, HttpRequest};
-use futures_util::future::{ready, Ready};
-use hyper::http::{request::Parts, Extensions};
 use crate::http::endpoints::args::{
-    FromRequestParts,
-    FromRequestRef,
-    FromPayload,
-    Payload,
-    Source
+    FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
 };
+use crate::{HttpRequest, app::HostEnv, error::Error};
+use futures_util::future::{Ready, ready};
+use hyper::http::{Extensions, request::Parts};
 
 impl TryFrom<&Extensions> for HostEnv {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
         match extensions.get::<HostEnv>() {
             Some(env) => Ok(env.clone()),
-            None => Err(Error::server_error("Server Error: hosting environment is not specified"))
+            None => Err(Error::server_error(
+                "Server Error: hosting environment is not specified",
+            )),
         }
     }
 }
@@ -41,10 +39,12 @@ impl FromPayload for HostEnv {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(HostEnv::from_parts(parts))
     }
 }
@@ -52,8 +52,8 @@ impl FromPayload for HostEnv {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyper::Request;
     use crate::HttpBody;
+    use hyper::Request;
 
     #[test]
     fn it_returns_host_env_when_present_in_extensions() {

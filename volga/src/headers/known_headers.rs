@@ -1,18 +1,13 @@
 //! Common presets for the most used HTTP headers
 
 use super::{
-    Header, 
-    ContentType, 
-    CacheControl, 
-    cache_control::{NO_CACHE, NO_STORE, PUBLIC, PRIVATE}
+    CacheControl, ContentType, Header,
+    cache_control::{NO_CACHE, NO_STORE, PRIVATE, PUBLIC},
 };
 
 use mime::{
-    TEXT_PLAIN, TEXT_PLAIN_UTF_8, 
-    TEXT_HTML, TEXT_HTML_UTF_8,
-    TEXT_EVENT_STREAM,
-    APPLICATION_JSON, APPLICATION_WWW_FORM_URLENCODED, 
-    APPLICATION_OCTET_STREAM
+    APPLICATION_JSON, APPLICATION_OCTET_STREAM, APPLICATION_WWW_FORM_URLENCODED, TEXT_EVENT_STREAM,
+    TEXT_HTML, TEXT_HTML_UTF_8, TEXT_PLAIN, TEXT_PLAIN_UTF_8,
 };
 
 impl ContentType {
@@ -105,11 +100,11 @@ impl CacheControl {
 
 #[cfg(test)]
 mod tests {
-    use crate::headers::{CacheControl, ContentType, Header, FromHeaders};
+    use crate::headers::{CacheControl, ContentType, FromHeaders, Header};
 
     fn assert_header_value<T>(h: Header<T>, expected: &str)
     where
-        T: FromHeaders
+        T: FromHeaders,
     {
         // HeaderValue should always be valid ASCII for these static constants
         let v = h.as_str().expect("header value must be valid ASCII");

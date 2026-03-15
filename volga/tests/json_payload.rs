@@ -1,14 +1,14 @@
-﻿#![allow(missing_docs)]
+#![allow(missing_docs)]
 #![cfg(feature = "test")]
 
 use serde::{Deserialize, Serialize};
-use volga::{ok, Json};
 use volga::test::TestServer;
+use volga::{Json, ok};
 
 #[derive(Deserialize, Serialize)]
 struct User {
     name: String,
-    age: u32
+    age: u32,
 }
 
 #[tokio::test]
@@ -17,11 +17,16 @@ async fn it_reads_json_payload() {
         app.map_post("/test", |user: Json<User>| async move {
             ok!("My name is: {}, I'm {} years old", user.name, user.age)
         });
-    }).await;
+    })
+    .await;
 
-    let user = User { name: String::from("John"), age: 35 };
-    
-    let response = server.client()
+    let user = User {
+        name: String::from("John"),
+        age: 35,
+    };
+
+    let response = server
+        .client()
         .post(server.url("/test"))
         .json(&user)
         .send()
@@ -29,8 +34,11 @@ async fn it_reads_json_payload() {
         .unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "My name is: John, I'm 35 years old");
-    
+    assert_eq!(
+        response.text().await.unwrap(),
+        "My name is: John, I'm 35 years old"
+    );
+
     server.shutdown().await;
 }
 
@@ -38,13 +46,18 @@ async fn it_reads_json_payload() {
 async fn it_writes_json_response() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", || async move {
-            let user = User { name: String::from("John"), age: 35 };
-            
+            let user = User {
+                name: String::from("John"),
+                age: 35,
+            };
+
             ok!(&user)
         });
-    }).await;
-    
-    let response = server.client()
+    })
+    .await;
+
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -55,20 +68,25 @@ async fn it_writes_json_response() {
 
     assert_eq!(response.name, "John");
     assert_eq!(response.age, 35);
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_writes_json_using_macro_response() {
-    let server = TestServer::spawn(|app| { 
+    let server = TestServer::spawn(|app| {
         app.map_get("/test", || async move {
-            let user = User { name: String::from("John"), age: 35 };
+            let user = User {
+                name: String::from("John"),
+                age: 35,
+            };
             ok!(user)
         });
-    }).await;
-    
-    let response = server.client()
+    })
+    .await;
+
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -79,19 +97,22 @@ async fn it_writes_json_using_macro_response() {
 
     assert_eq!(response.name, "John");
     assert_eq!(response.age, 35);
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_writes_untyped_json_response() {
     let server = TestServer::spawn(|app| {
-        app.map_get("/test", || async move {
-            ok!({ "name": "John", "age": 35 })
-        });
-    }).await;
-    
-    let response = server.client()
+        app.map_get(
+            "/test",
+            || async move { ok!({ "name": "John", "age": 35 }) },
+        );
+    })
+    .await;
+
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -102,6 +123,6 @@ async fn it_writes_untyped_json_response() {
 
     assert_eq!(response.name, "John");
     assert_eq!(response.age, 35);
-    
+
     server.shutdown().await;
 }

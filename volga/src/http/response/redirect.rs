@@ -1,4 +1,4 @@
-﻿//! Macros for redirect responses
+//! Macros for redirect responses
 
 /// Produces HTTP 301 MOVED PERMANENTLY response
 ///

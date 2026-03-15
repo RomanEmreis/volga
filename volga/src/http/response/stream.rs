@@ -1,7 +1,7 @@
-﻿//! Macros for stream responses
+//! Macros for stream responses
 
 /// Produces `OK 200` response with stream body
-/// 
+///
 /// # Examples
 /// ## Default usage
 ///```no_run
@@ -11,7 +11,7 @@
 /// let body_stream = request
 ///    .into_body()
 ///    .into_data_stream();
-/// 
+///
 /// stream!(body_stream);
 /// # Ok(())
 /// # }
@@ -24,7 +24,7 @@
 /// let body_stream = request
 ///    .into_body()
 ///    .into_data_stream();
-/// 
+///
 /// stream!(body_stream; [
 ///    ("Content-Type", "message/http")
 /// ]);
@@ -38,7 +38,7 @@ macro_rules! stream {
     };
     ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
-            $crate::http::StatusCode::OK, 
+            $crate::http::StatusCode::OK,
             $crate::HttpBody::stream($body);
             [ $( $header ),* ]
         )
@@ -47,10 +47,10 @@ macro_rules! stream {
 
 #[cfg(test)]
 mod tests {
-    use tokio::fs::File;
     use crate::HttpBody;
     use crate::test::TempFile;
     use crate::test::utils::read_file_bytes;
+    use tokio::fs::File;
 
     #[tokio::test]
     async fn it_creates_stream_response() {
@@ -65,7 +65,10 @@ mod tests {
         let mut response = response.unwrap();
         let body = read_file_bytes(&mut response).await;
 
-        assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
+        assert_eq!(
+            String::from_utf8_lossy(body.as_slice()),
+            "Hello, this is some file content!"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -84,7 +87,10 @@ mod tests {
         let mut response = response.unwrap();
         let body = read_file_bytes(&mut response).await;
 
-        assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
+        assert_eq!(
+            String::from_utf8_lossy(body.as_slice()),
+            "Hello, this is some file content!"
+        );
         assert_eq!(response.headers()["x-api-key"], "some api key");
         assert_eq!(response.status(), 200);
     }

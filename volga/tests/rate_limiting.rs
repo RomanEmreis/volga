@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use volga::rate_limiting::{by, FixedWindow, SlidingWindow, TokenBucket, Gcra};
+use volga::rate_limiting::{FixedWindow, Gcra, SlidingWindow, TokenBucket, by};
 use volga::test::TestServer;
 
 const RATE_LIMIT_MESSAGE: &str = "Rate limit exceeded. Try again later.";
@@ -12,10 +12,7 @@ const RATE_LIMIT_MESSAGE: &str = "Rate limit exceeded. Try again later.";
 async fn it_rate_limits_by_header_with_named_policy() {
     let server = TestServer::builder()
         .configure(|app| {
-            app.with_fixed_window(
-                FixedWindow::new(2, Duration::from_secs(60))
-                    .with_name("burst"),
-            )
+            app.with_fixed_window(FixedWindow::new(2, Duration::from_secs(60)).with_name("burst"))
         })
         .setup(|app| {
             app.use_fixed_window(by::header("x-api-key").using("burst"));
@@ -67,8 +64,7 @@ async fn it_rate_limits_sliding_window_by_header_with_named_policy() {
     let server = TestServer::builder()
         .configure(|app| {
             app.with_sliding_window(
-                SlidingWindow::new(2, Duration::from_secs(60))
-                    .with_name("burst"),
+                SlidingWindow::new(2, Duration::from_secs(60)).with_name("burst"),
             )
         })
         .setup(|app| {
@@ -278,11 +274,7 @@ async fn it_rate_limits_by_header_with_named_policy_token_bucket() {
 #[tokio::test]
 async fn it_rate_limits_by_header_token_bucket_for_route() {
     let server = TestServer::builder()
-        .configure(|app| {
-            app.with_token_bucket(
-                TokenBucket::new(2, 0.0)
-            )
-        })
+        .configure(|app| app.with_token_bucket(TokenBucket::new(2, 0.0)))
         .setup(|app| {
             app.map_get("/limited", || async { "ok" })
                 .token_bucket(by::header("x-api-key"));
@@ -332,11 +324,7 @@ async fn it_rate_limits_by_header_token_bucket_for_route() {
 #[tokio::test]
 async fn it_rate_limits_by_header_token_bucket_for_route_group() {
     let server = TestServer::builder()
-        .configure(|app| {
-            app.with_token_bucket(
-                TokenBucket::new(2, 0.0),
-            )
-        })
+        .configure(|app| app.with_token_bucket(TokenBucket::new(2, 0.0)))
         .setup(|app| {
             app.group("/tests", |g| {
                 g.token_bucket(by::header("x-api-key"));
@@ -442,11 +430,7 @@ async fn it_rate_limits_by_header_with_named_policy_gcra() {
 #[tokio::test]
 async fn it_rate_limits_by_header_gcra_for_route() {
     let server = TestServer::builder()
-        .configure(|app| {
-            app.with_gcra(
-                Gcra::new(1.0, 2),
-            )
-        })
+        .configure(|app| app.with_gcra(Gcra::new(1.0, 2)))
         .setup(|app| {
             app.map_get("/limited", || async { "ok" })
                 .gcra(by::header("x-api-key"));
@@ -495,11 +479,7 @@ async fn it_rate_limits_by_header_gcra_for_route() {
 #[tokio::test]
 async fn it_rate_limits_by_header_gcra_for_route_group() {
     let server = TestServer::builder()
-        .configure(|app| {
-            app.with_gcra(
-                Gcra::new(1.0, 2),
-            )
-        })
+        .configure(|app| app.with_gcra(Gcra::new(1.0, 2)))
         .setup(|app| {
             app.group("/tests", |g| {
                 g.gcra(by::header("x-api-key"));

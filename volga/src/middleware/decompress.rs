@@ -1,4 +1,4 @@
-﻿//! Decompression middleware
+//! Decompression middleware
 //!
 //! Middleware that decompresses the HTTP request body
 
@@ -6,44 +6,31 @@
 use async_compression::tokio::bufread::BrotliDecoder;
 
 #[cfg(feature = "decompression-gzip")]
-use async_compression::tokio::bufread::{ZlibDecoder, GzipDecoder};
+use async_compression::tokio::bufread::{GzipDecoder, ZlibDecoder};
 
 #[cfg(feature = "decompression-zstd")]
 use async_compression::tokio::bufread::ZstdDecoder;
 
+use crate::{
+    App, HttpBody, HttpRequest, HttpRequestMut, HttpResult,
+    error::Error,
+    headers::{
+        ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, ContentEncoding, Encoding, Header, VARY,
+    },
+    http::{StatusCode, request::request_body_limit::RequestBodyLimit},
+    middleware::{HttpContext, NextFn},
+    routing::{Route, RouteGroup},
+    status,
+};
 use futures_util::{TryStream, TryStreamExt, future::ready};
 use http_body_util::StreamBody;
 use hyper::body::Frame;
-use tokio_util::io::{
-    ReaderStream,
-    StreamReader
-};
 use std::fmt::Display;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
 };
-use crate::{
-    App, 
-    routing::{Route, RouteGroup}, 
-    error::Error, 
-    headers::{
-        ContentEncoding,
-        Header,
-        Encoding,
-        ACCEPT_ENCODING,
-        CONTENT_ENCODING,
-        CONTENT_LENGTH,
-        VARY
-    }, 
-    http::{StatusCode, request::request_body_limit::RequestBodyLimit}, 
-    middleware::{HttpContext, NextFn}, 
-    HttpRequestMut,
-    HttpRequest,
-    HttpResult,
-    HttpBody, 
-    status, 
-};
+use tokio_util::io::{ReaderStream, StreamReader};
 
 pub(crate) use limits::ResolvedDecompressionLimits;
 pub use limits::{DecompressionLimits, ExpansionRatio};
@@ -70,7 +57,7 @@ struct DecompressionState {
 }
 
 impl DecompressionState {
-    #[inline(always)]  
+    #[inline(always)]
     fn add_compressed(&self, n: usize) -> usize {
         self.compressed_bytes.fetch_add(n, Ordering::Relaxed) + n
     }
@@ -93,12 +80,12 @@ macro_rules! impl_decompressor {
             let stream_reader = StreamReader::new(body_stream);
             let mut decoder = $decoder::new(stream_reader);
             decoder.multiple_members($mm);
-            let decompressed_body = limited_decompressed_stream(ReaderStream::new(decoder), limits, state);
-    
-            HttpBody::boxed(StreamBody::new(decompressed_body
-                .map_err(Error::from)
-                .map_ok(Frame::data))
-            )
+            let decompressed_body =
+                limited_decompressed_stream(ReaderStream::new(decoder), limits, state);
+
+            HttpBody::boxed(StreamBody::new(
+                decompressed_body.map_err(Error::from).map_ok(Frame::data),
+            ))
         }
     };
 }
@@ -147,7 +134,8 @@ impl<'a> Route<'a> {
 
 async fn make_decompression_fn(mut ctx: HttpContext, next: NextFn) -> HttpResult {
     if let Ok(content_encoding) = ctx.extract::<Header<ContentEncoding>>() {
-        let limits = ctx.request()
+        let limits = ctx
+            .request()
             .extensions()
             .get::<ResolvedDecompressionLimits>()
             .copied()
@@ -172,31 +160,31 @@ async fn make_decompression_fn(mut ctx: HttpContext, next: NextFn) -> HttpResult
 }
 
 fn decompress(
-    encoding: Encoding, 
+    encoding: Encoding,
     request: HttpRequestMut,
-    limits: ResolvedDecompressionLimits
+    limits: ResolvedDecompressionLimits,
 ) -> HttpRequestMut {
     let (mut parts, body) = request.into_parts();
 
     parts.headers.remove(CONTENT_LENGTH);
     parts.headers.remove(CONTENT_ENCODING);
 
-    let body_limit = parts.extensions.get::<RequestBodyLimit>()
+    let body_limit = parts
+        .extensions
+        .get::<RequestBodyLimit>()
         .cloned()
         .unwrap_or_default();
-    
+
     let body = decompress_body(encoding, body, limits);
-    
-    HttpRequestMut::new(
-        HttpRequest::from_parts(parts, body).into_limited(body_limit)
-    )
+
+    HttpRequestMut::new(HttpRequest::from_parts(parts, body).into_limited(body_limit))
 }
 
 #[inline]
 fn decompress_body(
     encoding: Encoding,
     body: HttpBody,
-    limits: ResolvedDecompressionLimits
+    limits: ResolvedDecompressionLimits,
 ) -> HttpBody {
     match encoding {
         #[cfg(feature = "decompression-brotli")]
@@ -207,7 +195,7 @@ fn decompress_body(
         Encoding::Deflate => deflate(body, limits),
         #[cfg(feature = "decompression-zstd")]
         Encoding::Zstd => zstd(body, limits),
-        _ => body
+        _ => body,
     }
 }
 
@@ -215,43 +203,44 @@ fn decompress_body(
 fn limited_compressed_stream(
     body: HttpBody,
     limits: ResolvedDecompressionLimits,
-    state: Arc<DecompressionState>
+    state: Arc<DecompressionState>,
 ) -> impl TryStream<Ok = bytes::Bytes, Error = Error, Item = Result<bytes::Bytes, Error>> {
-    body.into_data_stream()
-        .and_then(move |chunk| {
-            let total = state.add_compressed(chunk.len());
-            ready(check_max(
-                total, 
-                limits.max_compressed_bytes, 
-                DecompressionError::CompressedBodyTooLarge)
-                .map(|_| chunk))
-        })
+    body.into_data_stream().and_then(move |chunk| {
+        let total = state.add_compressed(chunk.len());
+        ready(
+            check_max(
+                total,
+                limits.max_compressed_bytes,
+                DecompressionError::CompressedBodyTooLarge,
+            )
+            .map(|_| chunk),
+        )
+    })
 }
 
 #[inline]
 fn limited_decompressed_stream<R>(
     stream: R,
     limits: ResolvedDecompressionLimits,
-    state: Arc<DecompressionState>
+    state: Arc<DecompressionState>,
 ) -> impl TryStream<Ok = bytes::Bytes, Error = Error>
 where
     R: TryStream<Ok = bytes::Bytes, Error = std::io::Error>,
 {
-    stream
-        .map_err(Into::into)
-        .and_then(move |chunk| {
-            let decompressed = state.add_decompressed(chunk.len());
-            let compressed = state.compressed();
+    stream.map_err(Into::into).and_then(move |chunk| {
+        let decompressed = state.add_decompressed(chunk.len());
+        let compressed = state.compressed();
 
-            let res = check_max(
-                decompressed,
-                limits.max_decompressed_bytes,
-                DecompressionError::DecompressedBodyTooLarge)
-                .and_then(|_| check_ratio(decompressed, compressed, limits.max_expansion_ratio))
-                .map(|_| chunk);
+        let res = check_max(
+            decompressed,
+            limits.max_decompressed_bytes,
+            DecompressionError::DecompressedBodyTooLarge,
+        )
+        .and_then(|_| check_ratio(decompressed, compressed, limits.max_expansion_ratio))
+        .map(|_| chunk);
 
-            ready(res)
-        })
+        ready(res)
+    })
 }
 
 #[inline]
@@ -301,51 +290,57 @@ impl From<DecompressionError> for Error {
         Error::from_parts(
             StatusCode::PAYLOAD_TOO_LARGE,
             None,
-            format!("Decompression error: {err}")
+            format!("Decompression error: {err}"),
         )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use http_body_util::BodyExt;
-    use bytes::Bytes;
-    use tokio::io::AsyncWriteExt;
-    use crate::{HttpBody, Limit};
     use super::*;
+    use crate::{HttpBody, Limit};
+    use bytes::Bytes;
+    use http_body_util::BodyExt;
+    use tokio::io::AsyncWriteExt;
 
     #[tokio::test]
     #[cfg(feature = "decompression-brotli")]
     async fn it_decompress_brotli() {
         use async_compression::tokio::write::BrotliEncoder;
-        
+
         let data = b"{\"age\":33,\"name\":\"John\"}";
         let mut encoder = BrotliEncoder::new(Vec::new());
         encoder.write_all(data).await.unwrap();
         encoder.shutdown().await.unwrap();
         let compressed = encoder.into_inner();
-        
+
         let body = HttpBody::full(compressed);
         let body = brotli(body, DecompressionLimits::default().resolved());
-        
-        assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));
+
+        assert_eq!(
+            body.collect().await.unwrap().to_bytes(),
+            Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}")
+        );
     }
 
     #[tokio::test]
     #[cfg(feature = "decompression-gzip")]
     async fn it_decompress_gzip() {
         use async_compression::tokio::write::GzipEncoder;
-        
+
         let data = b"{\"age\":33,\"name\":\"John\"}";
         let mut encoder = GzipEncoder::new(Vec::new());
         encoder.write_all(data).await.unwrap();
         encoder.shutdown().await.unwrap();
         let compressed = encoder.into_inner();
-            
+
         let body = HttpBody::full(compressed);
         let body = gzip(body, DecompressionLimits::default().resolved());
 
-        assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));
+        assert_eq!(
+            body.collect().await.unwrap().to_bytes(),
+            Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}")
+        );
     }
 
     #[tokio::test]
@@ -362,7 +357,10 @@ mod tests {
         let body = HttpBody::full(compressed);
         let body = deflate(body, DecompressionLimits::default().resolved());
 
-        assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));
+        assert_eq!(
+            body.collect().await.unwrap().to_bytes(),
+            Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}")
+        );
     }
 
     #[tokio::test]
@@ -379,7 +377,10 @@ mod tests {
         let body = HttpBody::full(compressed);
         let body = zstd(body, DecompressionLimits::default().resolved());
 
-        assert_eq!(body.collect().await.unwrap().to_bytes(), Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}"));
+        assert_eq!(
+            body.collect().await.unwrap().to_bytes(),
+            Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}")
+        );
     }
 
     #[tokio::test]
@@ -394,9 +395,12 @@ mod tests {
         let compressed = encoder.into_inner();
 
         let body = HttpBody::full(compressed);
-        let body = brotli(body, DecompressionLimits::default()
-            .with_max_compressed(Limit::Limited(1))
-            .resolved());
+        let body = brotli(
+            body,
+            DecompressionLimits::default()
+                .with_max_compressed(Limit::Limited(1))
+                .resolved(),
+        );
 
         assert!(body.collect().await.is_err());
     }
@@ -413,9 +417,12 @@ mod tests {
         let compressed = encoder.into_inner();
 
         let body = HttpBody::full(compressed);
-        let body = brotli(body, DecompressionLimits::default()
-            .with_max_decompressed(Limit::Limited(1))
-            .resolved());
+        let body = brotli(
+            body,
+            DecompressionLimits::default()
+                .with_max_decompressed(Limit::Limited(1))
+                .resolved(),
+        );
 
         assert!(body.collect().await.is_err());
     }
@@ -432,19 +439,31 @@ mod tests {
         let compressed = encoder.into_inner();
 
         let body = HttpBody::full(compressed);
-        let body = brotli(body, DecompressionLimits::default()
-            .with_max_expansion_ratio(ExpansionRatio::new(1, 0))
-            .resolved());
+        let body = brotli(
+            body,
+            DecompressionLimits::default()
+                .with_max_expansion_ratio(ExpansionRatio::new(1, 0))
+                .resolved(),
+        );
 
         assert!(body.collect().await.is_err());
     }
-    
+
     #[test]
     fn it_sets_decompression_limit_by_default() {
         let app = App::new();
-        
-        assert_eq!(app.decompression_limits.max_compressed_bytes, Limit::Limited(5 * 1024 * 1024));
-        assert_eq!(app.decompression_limits.max_decompressed_bytes, Limit::Limited(16 * 1024 * 1024));
-        assert_eq!(app.decompression_limits.max_expansion_ratio, Some(ExpansionRatio::new(100, 1024 * 1024)));
+
+        assert_eq!(
+            app.decompression_limits.max_compressed_bytes,
+            Limit::Limited(5 * 1024 * 1024)
+        );
+        assert_eq!(
+            app.decompression_limits.max_decompressed_bytes,
+            Limit::Limited(16 * 1024 * 1024)
+        );
+        assert_eq!(
+            app.decompression_limits.max_expansion_ratio,
+            Some(ExpansionRatio::new(100, 1024 * 1024))
+        );
     }
 }

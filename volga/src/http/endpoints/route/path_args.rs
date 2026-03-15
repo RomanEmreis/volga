@@ -1,8 +1,8 @@
 //! URL path arguments utilities
 
-use smallvec::SmallVec;
 use super::DEFAULT_DEPTH;
 use crate::error::Error;
+use smallvec::SmallVec;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -10,7 +10,7 @@ const QUERY_SEPARATOR: char = '&';
 const QUERY_KEY_VALUE_SEPARATOR: char = '=';
 
 /// Route path arguments
-/// 
+///
 /// > **Note:** This type is part of Volga's public API but is primarily intended
 /// > for framework-level extractors and middleware. It should not be
 /// > constructed manually.
@@ -72,9 +72,7 @@ impl PathArgs {
             return Err(Error::client_error("Path parsing error: missing arguments"));
         }
 
-        let value = self
-            .encoded
-            .get_or_init(|| encode(&self.args));
+        let value = self.encoded.get_or_init(|| encode(&self.args));
 
         Ok(value.as_str())
     }
@@ -153,10 +151,11 @@ impl IntoIterator for PathArgs {
 }
 
 #[inline]
-fn encode(args: &SmallVec<[PathArg; DEFAULT_DEPTH]>) -> String  {
-    let capacity = args.iter().fold(0, |acc, arg| {
-        acc + arg.name.len() + arg.value.len() + 1
-    }) + args.len().saturating_sub(1);
+fn encode(args: &SmallVec<[PathArg; DEFAULT_DEPTH]>) -> String {
+    let capacity = args
+        .iter()
+        .fold(0, |acc, arg| acc + arg.name.len() + arg.value.len() + 1)
+        + args.len().saturating_sub(1);
 
     let mut result = String::with_capacity(capacity);
     let mut iter = args.iter();
@@ -181,14 +180,23 @@ mod tests {
     use super::*;
 
     fn arg(name: &str, value: &str) -> PathArg {
-        PathArg { name: name.into(), value: value.into() }
+        PathArg {
+            name: name.into(),
+            value: value.into(),
+        }
     }
 
     #[test]
     fn it_makes_query_str() {
         let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
+            PathArg {
+                name: "id".into(),
+                value: "123".into()
+            },
+            PathArg {
+                name: "name".into(),
+                value: "John".into()
+            }
         ]
         .into();
 
@@ -222,7 +230,7 @@ mod tests {
 
     #[test]
     fn push_invalidates_cached_query_str() {
-            let mut args: PathArgs = smallvec::smallvec![arg("id", "123")].into();
+        let mut args: PathArgs = smallvec::smallvec![arg("id", "123")].into();
 
         // no cache yet
         let (parts, cached) = args.clone().into_parts();
@@ -371,7 +379,10 @@ mod tests {
 
         assert_eq!(
             collected,
-            vec![("a".to_string(), "1".to_string()), ("b".to_string(), "2".to_string())]
+            vec![
+                ("a".to_string(), "1".to_string()),
+                ("b".to_string(), "2".to_string())
+            ]
         );
     }
 
@@ -388,7 +399,8 @@ mod tests {
 
     #[test]
     fn iter_yields_all_items() {
-        let args: PathArgs = smallvec::smallvec![arg("a", "1"), arg("b", "2"), arg("c", "3")].into();
+        let args: PathArgs =
+            smallvec::smallvec![arg("a", "1"), arg("b", "2"), arg("c", "3")].into();
         let names: Vec<&str> = args.iter().map(|a| a.name.as_ref()).collect();
         assert_eq!(names, vec!["a", "b", "c"]);
     }

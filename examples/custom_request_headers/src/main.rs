@@ -5,9 +5,9 @@
 //! ```
 
 use volga::{
-    headers::{Header, headers, http_header},
     App,
-    ok
+    headers::{Header, headers, http_header},
+    ok,
 };
 
 const CORRELATION_ID_HEADER: &str = "x-correlation-id";
@@ -39,12 +39,17 @@ async fn main() -> std::io::Result<()> {
     });
 
     // Reading custom header and insert it to response headers
-    app.map_get("/hello", |correlation_id: Header<CorrelationId>, api_key: Header<ApiKey>, header: Header<SomeHeader>| async move {
-        ok!(format!("{}: {}", header.name(), header.as_str()?); [
-            correlation_id,
-            api_key
-        ])
-    });
+    app.map_get(
+        "/hello",
+        |correlation_id: Header<CorrelationId>,
+         api_key: Header<ApiKey>,
+         header: Header<SomeHeader>| async move {
+            ok!(format!("{}: {}", header.name(), header.as_str()?); [
+                correlation_id,
+                api_key
+            ])
+        },
+    );
 
     app.run().await
 }

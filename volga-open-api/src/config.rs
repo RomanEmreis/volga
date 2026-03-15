@@ -9,7 +9,7 @@ const DEFAULT_UI_PATH: &str = "/openapi";
 pub struct OpenApiConfig {
     /// Returns `true` if the OpenAPI have been exposed.
     pub exposed: bool,
-    
+
     pub(super) title: String,
     pub(super) version: String,
     pub(super) description: Option<String>,
@@ -114,7 +114,7 @@ impl OpenApiConfig {
     pub fn with_specs<I, S>(mut self, specs: I) -> Self
     where
         I: IntoIterator<Item = S>,
-        S: Into<OpenApiSpec>
+        S: Into<OpenApiSpec>,
     {
         let specs: Vec<_> = specs.into_iter().map(Into::into).collect();
         self.specs = if specs.is_empty() {
@@ -140,7 +140,7 @@ impl OpenApiConfig {
         self.ui_path = path.into();
         self
     }
-    
+
     /// Returns the title.
     pub fn title(&self) -> &str {
         &self.title

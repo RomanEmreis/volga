@@ -1,21 +1,22 @@
-﻿//! Utilities for signed cookies
+//! Utilities for signed cookies
 
-use std::{io::Read, fs::File, path::Path};
-use cookie::{CookieJar, SignedJar, Key};
-use futures_util::future::{ready, Ready};
-use crate::{error::Error, di::Container, headers::{HeaderMap}, http::{
-    Parts, Extensions, Request,
-    body::Incoming,
-    cookie::get_cookies,
-    endpoints::args::{
-        FromPayload,
-        FromRequestParts,
-        FromRawRequest,
-        FromRequestRef,
-        Payload,
-        Source
-    }
-}, HttpRequest};
+use crate::{
+    HttpRequest,
+    di::Container,
+    error::Error,
+    headers::HeaderMap,
+    http::{
+        Extensions, Parts, Request,
+        body::Incoming,
+        cookie::get_cookies,
+        endpoints::args::{
+            FromPayload, FromRawRequest, FromRequestParts, FromRequestRef, Payload, Source,
+        },
+    },
+};
+use cookie::{CookieJar, Key, SignedJar};
+use futures_util::future::{Ready, ready};
+use std::{fs::File, io::Read, path::Path};
 
 /// Represents a cryptographic pass key for [`SignedCookies`]
 #[derive(Clone)]
@@ -25,33 +26,29 @@ pub struct SignedKey(Key);
 pub struct SignedCookies(SignedKey, CookieJar);
 
 impl Default for SignedKey {
-    #[inline] 
+    #[inline]
     fn default() -> Self {
-        Self::from(&[])   
+        Self::from(&[])
     }
 }
 
 impl std::fmt::Debug for SignedCookies {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("SignedCookies")
-            .field(&"[redacted]")
-            .finish()
+        f.debug_tuple("SignedCookies").field(&"[redacted]").finish()
     }
 }
 
 impl std::fmt::Debug for SignedKey {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("SignedKey")
-            .field(&"[redacted]")
-            .finish()
+        f.debug_tuple("SignedKey").field(&"[redacted]").finish()
     }
 }
 
 impl SignedKey {
     /// Creates a new [`SignedKey`] from a 512-bit cryptographically random string.
-    /// 
+    ///
     /// See also [`Key::from`]
     #[inline]
     pub fn from(bytes: &[u8]) -> Self {
@@ -61,22 +58,20 @@ impl SignedKey {
     /// Creates a new [`SignedKey`] from a file with 512-bit cryptographically random string.
     ///
     /// > **Note:** It reads the first 64 bytes of the file.
-    /// 
+    ///
     /// See also [`Key::from`]
     #[inline]
     pub fn from_file(path: impl AsRef<Path>) -> Self {
-        let mut file = File::open(path)
-            .expect("File must exists");
+        let mut file = File::open(path).expect("File must exists");
         let mut buffer = [0u8; 64];
-        file.read_exact(&mut buffer)
-            .expect("File must be readable");
-        
+        file.read_exact(&mut buffer).expect("File must be readable");
+
         Self(Key::from(&buffer))
     }
-    
-    /// Generates signing/encryption keys from a secure, random source. 
+
+    /// Generates signing/encryption keys from a secure, random source.
     /// Keys are generated nondeterministically.
-    /// 
+    ///
     /// See also [`Key::generate`]
     #[inline]
     pub fn generate() -> Self {
@@ -88,9 +83,9 @@ impl SignedCookies {
     /// Creates a new [`SignedCookies`].
     #[inline]
     pub fn new(key: SignedKey) -> Self {
-        Self(key, CookieJar::default())        
+        Self(key, CookieJar::default())
     }
-    
+
     /// Creates a new [`SignedCookies`] from [`HeaderMap`].
     #[inline]
     pub fn from_headers(key: SignedKey, headers: &HeaderMap) -> Self {
@@ -109,43 +104,43 @@ impl SignedCookies {
     pub fn into_parts(self) -> (SignedKey, CookieJar) {
         (self.0, self.1)
     }
-    
+
     /// Returns a reference to the cookie inside the signed jar by `name`
-    /// and verifies the authenticity and integrity of the cookie's value, 
-    /// returning a [`Cookie`] with the authenticated value. 
+    /// and verifies the authenticity and integrity of the cookie's value,
+    /// returning a [`Cookie`] with the authenticated value.
     /// If the cookie cannot be found, or the cookie fails to verify, `None` is returned.
     pub fn get(&self, name: &str) -> Option<cookie::Cookie<'static>> {
         self.signed().get(name)
     }
-    
+
     /// Adds a cookie. The cookie's value is signed assuring integrity and authenticity.
     #[allow(clippy::should_implement_trait)]
     pub fn add<C: Into<cookie::Cookie<'static>>>(mut self, cookie: C) -> Self {
         self.signed_mut().add(cookie);
         self
     }
-    
+
     /// Removes a cookie from the signed jar.
-    /// 
-    /// For correct removal, the passed in cookie must contain the same path 
+    ///
+    /// For correct removal, the passed in cookie must contain the same path
     /// and domain as the cookie that was initially set.
     pub fn remove<C: Into<cookie::Cookie<'static>>>(mut self, cookie: C) -> Self {
         self.signed_mut().remove(cookie);
         self
     }
-    
-    /// Verifies the authenticity and integrity of the cookie, 
-    /// returning the plaintext version if verification succeeds or None otherwise. 
+
+    /// Verifies the authenticity and integrity of the cookie,
+    /// returning the plaintext version if verification succeeds or None otherwise.
     /// Verification always succeeds if a cookie was generated by a [`SignedCookies`] with the same `key` as `self`.
     pub fn verify(&self, cookie: cookie::Cookie<'static>) -> Option<cookie::Cookie<'static>> {
         self.signed().verify(cookie)
     }
-    
+
     /// Returns an iterator over all the cookies present in this jar.
     pub fn iter(&self) -> impl Iterator<Item = &cookie::Cookie<'static>> + '_ {
         self.1.iter()
     }
-    
+
     #[inline]
     fn signed(&self) -> SignedJar<&'_ CookieJar> {
         self.1.signed(&self.0.0)
@@ -206,20 +201,22 @@ impl FromPayload for SignedCookies {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(Self::from_parts(parts))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::di::ContainerBuilder;
     use super::*;
+    use crate::di::ContainerBuilder;
     use crate::headers::{COOKIE, SET_COOKIE};
-    use crate::http::{Request, HttpRequest, HttpBody, cookie::set_cookies};
+    use crate::http::{HttpBody, HttpRequest, Request, cookie::set_cookies};
 
     #[test]
     fn it_creates_cookies_from_empty_headers() {
@@ -234,13 +231,13 @@ mod tests {
             b"f3d9e2a44c6b172a1ea9b9d05e5fe1bcaa8679d032ccae271c503af9618bb2ef7c4e51452dbfcd96f6e9c9d09166a3de77e");
         let cookies = SignedCookies::new(key.clone());
         let cookies = cookies.add(("session", "abc123"));
-        
+
         let mut headers = HeaderMap::new();
         set_cookies_for_request(cookies.1, &mut headers);
 
         let cookies = SignedCookies::from_headers(key, &headers);
         let cookie = cookies.get("session").expect("Cookie should exist");
-        
+
         assert_eq!(cookie.value(), "abc123");
     }
 
@@ -257,7 +254,7 @@ mod tests {
         set_cookies_for_request(cookies.1, &mut headers);
 
         let cookies = SignedCookies::from_headers(key, &headers);
-        
+
         assert_eq!(cookies.get("session").unwrap().value(), "abc123");
         assert_eq!(cookies.get("user").unwrap().value(), "john");
         assert_eq!(cookies.get("theme").unwrap().value(), "dark");
@@ -285,8 +282,10 @@ mod tests {
 
         let mut headers = HeaderMap::new();
         set_cookies(cookies.1, &mut headers);
-        
-        let cookie_header = headers.get(SET_COOKIE).expect("Cookie header should be set");
+
+        let cookie_header = headers
+            .get(SET_COOKIE)
+            .expect("Cookie header should be set");
         assert!(cookie_header.to_str().unwrap().contains("session"));
     }
 
@@ -298,16 +297,16 @@ mod tests {
 
         let mut headers = HeaderMap::new();
         set_cookies_for_request(cookies.1, &mut headers);
-        
+
         let mut container = ContainerBuilder::new();
         container.register_singleton(key);
         let container = container.build();
-        
+
         let mut request = Request::builder()
             .extension(container.create_scope())
             .body(())
             .unwrap();
-        
+
         request.headers_mut().extend(headers);
 
         let (parts, _) = request.into_parts();
@@ -420,9 +419,7 @@ mod tests {
 
         request.headers_mut().extend(headers);
 
-        let cookies = SignedCookies::try_from(
-            (request.extensions(), request.headers())
-        ).unwrap();
+        let cookies = SignedCookies::try_from((request.extensions(), request.headers())).unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }
@@ -431,7 +428,7 @@ mod tests {
     fn if_return_parts_source() {
         assert_eq!(SignedCookies::SOURCE, Source::Parts);
     }
-    
+
     #[tokio::test]
     async fn it_reads_signed_key_from_bytes() {
         let temp_file = crate::test::TempFile::new(

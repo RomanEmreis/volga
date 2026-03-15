@@ -5,11 +5,9 @@
 //! ```
 
 use volga::{
-    App,
-    HttpResult,
-    Json,
+    App, HttpResult, Json,
     di::Dc,
-    ws::{WebSocketConnection, WebSocket, WsEvent}
+    ws::{WebSocket, WebSocketConnection, WsEvent},
 };
 
 use std::sync::{Arc, RwLock};
@@ -19,7 +17,7 @@ type Counter = Arc<RwLock<i32>>;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 struct Msg {
-    text: String
+    text: String,
 }
 
 #[tokio::main]
@@ -47,7 +45,7 @@ async fn main() -> std::io::Result<()> {
         tokio::task::spawn(async move {
             while let Some(Ok(msg)) = receiver.recv::<String>().await {
                 let value = inc(&counter).await;
-                match msg { 
+                match msg {
                     WsEvent::Data(msg) => tracing::info!("received: {msg}; msg #{value}"),
                     WsEvent::Close(frame) => tracing::info!("close: {frame:?}"),
                 }
@@ -71,12 +69,12 @@ async fn main() -> std::io::Result<()> {
 
 async fn handle_ws(conn: WebSocketConnection, counter: Dc<Counter>) -> HttpResult {
     // Here can be configured a connection and extracted something from DI or HTTP metadata
-    conn.with_protocols(["foo-ws"])
-        .on(|ws| handle(ws, counter))
+    conn.with_protocols(["foo-ws"]).on(|ws| handle(ws, counter))
 }
 
 async fn handle(mut ws: WebSocket, counter: Dc<Counter>) {
-    ws.on_msg(move |msg: String| handle_message(msg, counter.clone())).await;
+    ws.on_msg(move |msg: String| handle_message(msg, counter.clone()))
+        .await;
 }
 
 async fn handle_message(msg: String, counter: Dc<Counter>) -> String {
@@ -85,7 +83,9 @@ async fn handle_message(msg: String, counter: Dc<Counter>) -> String {
 }
 
 async fn inc(counter: &Counter) -> i32 {
-    let Ok(mut value) = counter.write() else { unreachable!() };
+    let Ok(mut value) = counter.write() else {
+        unreachable!()
+    };
     *value += 1;
     *value
 }

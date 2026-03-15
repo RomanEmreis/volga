@@ -1,27 +1,23 @@
-﻿//! [`From ] trait implementations from various types into HTTP response
+//! [`From ] trait implementations from various types into HTTP response
 
-use super::{HttpResponse, HttpResult, HttpBody};
-use crate::{Json, Form, ByteStream, ok, status, form, response, sse, stream};
-use crate::http::endpoints::args::byte_stream::IntoByteResult;
+use super::{HttpBody, HttpResponse, HttpResult};
 use crate::error::Error;
-use crate::http::{sse::SseStream, StatusCode};
-use crate::headers::{HeaderMap, ContentType};
-use serde::Serialize;
+use crate::headers::{ContentType, HeaderMap};
+use crate::http::endpoints::args::byte_stream::IntoByteResult;
+use crate::http::{StatusCode, sse::SseStream};
+use crate::{ByteStream, Form, Json, form, ok, response, sse, status, stream};
 use futures_util::Stream;
+use serde::Serialize;
 
-#[cfg(feature = "cookie")]
-use crate::http::{Cookies, cookie::set_cookies};
-#[cfg(feature = "signed-cookie")]
-use crate::http::SignedCookies;
 #[cfg(feature = "private-cookie")]
 use crate::http::PrivateCookies;
+#[cfg(feature = "signed-cookie")]
+use crate::http::SignedCookies;
+#[cfg(feature = "cookie")]
+use crate::http::{Cookies, cookie::set_cookies};
 
-use std::{
-    io::Error as IoError,
-    convert::Infallible,
-    borrow::Cow
-};
 use crate::http::sse::Message;
+use std::{borrow::Cow, convert::Infallible, io::Error as IoError};
 
 /// Trait for types that can be returned from request handlers
 pub trait IntoResponse {
@@ -31,7 +27,9 @@ pub trait IntoResponse {
     /// Describes Open API schema
     #[cfg(feature = "openapi")]
     #[doc(hidden)]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_no_schema(200u16)
     }
 }
@@ -74,18 +72,20 @@ impl IntoResponse for Infallible {
 impl<T, E> IntoResponse for Result<T, E>
 where
     T: IntoResponse,
-    E: IntoResponse
+    E: IntoResponse,
 {
     #[inline]
     fn into_response(self) -> HttpResult {
-        match self { 
+        match self {
             Ok(ok) => ok.into_response(),
             Err(err) => err.into_response(),
         }
     }
-    
+
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         T::describe_openapi(config)
     }
 }
@@ -101,10 +101,11 @@ impl IntoResponse for &'static str {
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_text(200u16)
     }
-
 }
 
 impl IntoResponse for Cow<'static, str> {
@@ -118,7 +119,9 @@ impl IntoResponse for Cow<'static, str> {
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_text(200u16)
     }
 }
@@ -134,7 +137,9 @@ impl IntoResponse for String {
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_text(200u16)
     }
 }
@@ -150,7 +155,9 @@ impl IntoResponse for Box<str> {
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_text(200u16)
     }
 }
@@ -158,14 +165,16 @@ impl IntoResponse for Box<str> {
 impl<T: IntoResponse> IntoResponse for Option<T> {
     #[inline]
     fn into_response(self) -> HttpResult {
-        match self { 
+        match self {
             Some(ok) => ok.into_response(),
-            None => status!(404)
+            None => status!(404),
         }
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         T::describe_openapi(config)
     }
 }
@@ -177,7 +186,9 @@ impl<T: Serialize> IntoResponse for Json<T> {
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_empty_json(200u16)
     }
 }
@@ -189,7 +200,9 @@ impl<T: Serialize> IntoResponse for Form<T> {
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_empty_form(200u16)
     }
 }
@@ -197,39 +210,38 @@ impl<T: Serialize> IntoResponse for Form<T> {
 impl IntoResponse for StatusCode {
     #[inline]
     fn into_response(self) -> HttpResult {
-        response!(
-            self,
-            HttpBody::empty()
-        )
+        response!(self, HttpBody::empty())
     }
 }
 
 impl<R> IntoResponse for (R, HeaderMap)
-where 
-    R: IntoResponse
+where
+    R: IntoResponse,
 {
     #[inline]
     fn into_response(self) -> HttpResult {
         let (resp, headers) = self;
         match resp.into_response() {
             Err(err) => Err(err),
-            Ok(mut resp) => { 
+            Ok(mut resp) => {
                 resp.headers_mut().extend(headers);
                 Ok(resp)
-            },
+            }
         }
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         R::describe_openapi(config)
     }
 }
 
 #[cfg(feature = "signed-cookie")]
 impl<R> IntoResponse for (R, SignedCookies)
-where 
-    R: IntoResponse
+where
+    R: IntoResponse,
 {
     #[inline]
     fn into_response(self) -> HttpResult {
@@ -240,12 +252,14 @@ where
                 let (_, jar) = cookies.into_parts();
                 set_cookies(jar, resp.headers_mut());
                 Ok(resp)
-            },
+            }
         }
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         R::describe_openapi(config)
     }
 }
@@ -253,7 +267,7 @@ where
 #[cfg(feature = "private-cookie")]
 impl<R> IntoResponse for (R, PrivateCookies)
 where
-    R: IntoResponse
+    R: IntoResponse,
 {
     #[inline]
     fn into_response(self) -> HttpResult {
@@ -264,12 +278,14 @@ where
                 let (_, jar) = cookies.into_parts();
                 set_cookies(jar, resp.headers_mut());
                 Ok(resp)
-            },
+            }
         }
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         R::describe_openapi(config)
     }
 }
@@ -277,7 +293,7 @@ where
 #[cfg(feature = "cookie")]
 impl<R> IntoResponse for (R, Cookies)
 where
-    R: IntoResponse
+    R: IntoResponse,
 {
     #[inline]
     fn into_response(self) -> HttpResult {
@@ -287,19 +303,21 @@ where
             Ok(mut resp) => {
                 set_cookies(cookies.into_inner(), resp.headers_mut());
                 Ok(resp)
-            },
+            }
         }
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         R::describe_openapi(config)
     }
 }
 
 impl<S> IntoResponse for SseStream<S>
 where
-    S: Stream<Item = Result<Message, Error>> + Send + 'static
+    S: Stream<Item = Result<Message, Error>> + Send + 'static,
 {
     #[inline]
     fn into_response(self) -> HttpResult {
@@ -307,7 +325,9 @@ where
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_sse(200u16)
     }
 }
@@ -315,7 +335,7 @@ where
 impl<S, I> IntoResponse for ByteStream<S>
 where
     S: Stream<Item = I> + Send + 'static,
-    I: IntoByteResult
+    I: IntoByteResult,
 {
     #[inline]
     fn into_response(self) -> HttpResult {
@@ -323,7 +343,9 @@ where
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.produces_stream(200u16)
     }
 }
@@ -339,7 +361,7 @@ macro_rules! impl_into_response {
                     [ContentType::text_utf_8()]
                 )
             }
-            
+
             #[cfg(feature = "openapi")]
             fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
                 config.produces_text(200u16)
@@ -362,29 +384,27 @@ impl_into_response! {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Error as IoError, ErrorKind};
-    use http_body_util::BodyExt;
-    use hyper::StatusCode;
-    use serde::Serialize;
+    use super::IntoResponse;
     use crate::ByteStream;
     use crate::error::Error;
     use crate::headers::HeaderMap;
-    use super::IntoResponse;
-    use crate::http::sse::Message;
     #[cfg(feature = "cookie")]
     use crate::http::Cookies;
+    use crate::http::sse::Message;
+    use http_body_util::BodyExt;
+    use hyper::StatusCode;
+    use serde::Serialize;
+    use std::io::{Error as IoError, ErrorKind};
 
     #[derive(Serialize)]
     struct TestPayload {
-        name: String
+        name: String,
     }
 
     #[tokio::test]
     async fn it_converts_bytes_stream_into_response() {
-        let stream = ByteStream::new(
-            futures_util::stream::iter(["hi!".to_string()])
-        );
-        
+        let stream = ByteStream::new(futures_util::stream::iter(["hi!".to_string()]));
+
         let response = stream.into_response();
 
         assert!(response.is_ok());
@@ -394,7 +414,7 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(body), "hi!");
         assert_eq!(response.status(), 200);
     }
-    
+
     #[tokio::test]
     async fn it_converts_sse_stream_into_response() {
         let stream = Message::new().data("hi!").once();
@@ -405,7 +425,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "data: hi!\n\n");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/event-stream");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/event-stream"
+        );
         assert_eq!(response.headers().get("Cache-Control").unwrap(), "no-cache");
         #[cfg(all(not(feature = "http2"), feature = "http1"))]
         assert_eq!(response.headers().get("Connection").unwrap(), "keep-alive");
@@ -416,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn it_converts_into_response() {
         let response = ().into_response();
-        
+
         assert!(response.is_ok());
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
@@ -435,7 +458,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "test");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -448,7 +474,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "test");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -458,7 +487,7 @@ mod tests {
 
         assert!(response.is_err());
     }
-    
+
     #[tokio::test]
     async fn it_converts_ok_result_into_response() {
         let response = Result::<&str, Error>::Ok("test").into_response();
@@ -468,13 +497,18 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "test");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
     async fn it_converts_err_result_into_response() {
-        let response = Result::<&str, IoError>::Err(IoError::new(ErrorKind::InvalidInput, "some error")).into_response();
+        let response =
+            Result::<&str, IoError>::Err(IoError::new(ErrorKind::InvalidInput, "some error"))
+                .into_response();
 
         assert!(response.is_err());
     }
@@ -488,13 +522,18 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "test");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
     async fn it_converts_json_into_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = crate::Json(payload).into_response();
 
         assert!(response.is_ok());
@@ -502,13 +541,18 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/json"
+        );
         assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
     async fn it_converts_form_into_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = crate::Form(payload).into_response();
 
         assert!(response.is_ok());
@@ -516,7 +560,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "name=test");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/x-www-form-urlencoded");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/x-www-form-urlencoded"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -529,7 +576,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "test");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -555,7 +605,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "test");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -575,7 +628,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "-7878");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -588,7 +644,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "1.25");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -601,7 +660,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "7878");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -614,7 +676,10 @@ mod tests {
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "true");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -635,11 +700,8 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-api-key", "some api key".parse().unwrap());
         headers.insert("x-api-secret", "some api secret".parse().unwrap());
-        
-        let response = (
-            StatusCode::NO_CONTENT,
-            headers
-        ).into_response();
+
+        let response = (StatusCode::NO_CONTENT, headers).into_response();
 
         assert!(response.is_ok());
         let mut response = response.unwrap();
@@ -648,32 +710,33 @@ mod tests {
         assert_eq!(body.len(), 0);
         assert_eq!(response.status(), 204);
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
-        assert_eq!(response.headers().get("x-api-secret").unwrap(), "some api secret");
+        assert_eq!(
+            response.headers().get("x-api-secret").unwrap(),
+            "some api secret"
+        );
     }
-    
+
     #[tokio::test]
     #[cfg(feature = "cookie")]
     async fn it_converts_tuple_of_redirect_status_and_cookies_into_redirect_response() {
         let mut cookies = Cookies::new();
-        cookies = cookies
-            .add(("key-1", "value-1"))
-            .add(("key-2", "value-2"));
-        
-        let response = (
-            crate::found!("https://www.rust-lang.org/"), 
-            cookies
-        ).into_response();
+        cookies = cookies.add(("key-1", "value-1")).add(("key-2", "value-2"));
+
+        let response = (crate::found!("https://www.rust-lang.org/"), cookies).into_response();
 
         assert!(response.is_ok());
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("location").unwrap(), "https://www.rust-lang.org/");
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "https://www.rust-lang.org/"
+        );
         assert_eq!(response.status(), 302);
 
-        let cookies = get_cookies(response.headers()); 
-        
+        let cookies = get_cookies(response.headers());
+
         assert!(cookies.contains(&"key-1=value-1"));
         assert!(cookies.contains(&"key-2=value-2"));
     }
@@ -681,25 +744,23 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "signed-cookie")]
     async fn it_converts_tuple_of_redirect_status_and_signed_cookies_into_redirect_response() {
-        use crate::http::{SignedKey, SignedCookies};
-        
+        use crate::http::{SignedCookies, SignedKey};
+
         let key = SignedKey::generate();
         let mut cookies = SignedCookies::new(key);
-        cookies = cookies
-            .add(("key-1", "value-1"))
-            .add(("key-2", "value-2"));
+        cookies = cookies.add(("key-1", "value-1")).add(("key-2", "value-2"));
 
-        let response = (
-            crate::see_other!("https://www.rust-lang.org/"),
-            cookies
-        ).into_response();
+        let response = (crate::see_other!("https://www.rust-lang.org/"), cookies).into_response();
 
         assert!(response.is_ok());
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("location").unwrap(), "https://www.rust-lang.org/");
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "https://www.rust-lang.org/"
+        );
         assert_eq!(response.status(), 303);
 
         let cookies = get_cookies(response.headers());
@@ -711,25 +772,23 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "private-cookie")]
     async fn it_converts_tuple_of_redirect_status_and_private_cookies_into_redirect_response() {
-        use crate::http::{PrivateKey, PrivateCookies};
+        use crate::http::{PrivateCookies, PrivateKey};
 
         let key = PrivateKey::generate();
         let mut cookies = PrivateCookies::new(key);
-        cookies = cookies
-            .add(("key-1", "value-1"))
-            .add(("key-2", "value-2"));
+        cookies = cookies.add(("key-1", "value-1")).add(("key-2", "value-2"));
 
-        let response = (
-            crate::see_other!("https://www.rust-lang.org/"),
-            cookies
-        ).into_response();
+        let response = (crate::see_other!("https://www.rust-lang.org/"), cookies).into_response();
 
         assert!(response.is_ok());
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("location").unwrap(), "https://www.rust-lang.org/");
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            "https://www.rust-lang.org/"
+        );
         assert_eq!(response.status(), 303);
 
         let cookies = get_cookies(response.headers());

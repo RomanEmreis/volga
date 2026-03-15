@@ -1,19 +1,19 @@
-﻿//! Extractors for Form Data
+//! Extractors for Form Data
 
-use crate::{error::Error, HttpBody};
 use crate::http::endpoints::args::{FromPayload, Payload, Source};
+use crate::{HttpBody, error::Error};
 use futures_util::ready;
-use http_body_util::{combinators::Collect, BodyExt};
+use http_body_util::{BodyExt, combinators::Collect};
 use pin_project_lite::pin_project;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::{
-    future::Future,
     fmt::{self, Display, Formatter},
+    future::Future,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     pin::Pin,
-    task::{Context, Poll}
+    task::{Context, Poll},
 };
 
 /// Wraps typed data extracted from [`Uri`]
@@ -88,8 +88,7 @@ impl<T: DeserializeOwned + Send> Future for ExtractFormPayloadFut<T> {
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let result = ready!(this.fut.poll(cx))
-            .map_err(FormError::collect_error)?;
+        let result = ready!(this.fut.poll(cx)).map_err(FormError::collect_error)?;
         let body = result.to_bytes();
         let form = serde_urlencoded::from_bytes(&body)
             .map(Form::<T>)
@@ -104,15 +103,22 @@ impl<T: DeserializeOwned + Send> FromPayload for Form<T> {
     type Future = ExtractFormPayloadFut<T>;
 
     const SOURCE: Source = Source::Body;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Body(body) = payload else { unreachable!() };
-        ExtractFormPayloadFut { fut: body.collect(), _marker: PhantomData }
+        let Payload::Body(body) = payload else {
+            unreachable!()
+        };
+        ExtractFormPayloadFut {
+            fut: body.collect(),
+            _marker: PhantomData,
+        }
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.consumes_form::<T>()
     }
 }
@@ -133,30 +139,35 @@ impl FormError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use serde::{Deserialize, Serialize};
     use super::Form;
-    use crate::http::endpoints::args::{FromPayload, Payload};
     use crate::HttpBody;
+    use crate::http::endpoints::args::{FromPayload, Payload};
+    use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
 
     #[derive(Serialize, Deserialize)]
     struct User {
         name: String,
-        age: i32
+        age: i32,
     }
 
     #[derive(Serialize, Deserialize)]
     struct OptionalUser {
         name: Option<String>,
-        age: Option<i32>
+        age: Option<i32>,
     }
 
     #[tokio::test]
     async fn it_reads_from_payload() {
-        let user = User { age: 33, name: "John".into() };
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let body = HttpBody::boxed(HttpBody::form(user).unwrap());
 
-        let user = Form::<User>::from_payload(Payload::Body(body)).await.unwrap();
+        let user = Form::<User>::from_payload(Payload::Body(body))
+            .await
+            .unwrap();
 
         assert_eq!(user.age, 33);
         assert_eq!(user.name, "John");
@@ -164,10 +175,15 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_optional_from_payload() {
-        let user = OptionalUser { name: Some("John".into()), age: None };
+        let user = OptionalUser {
+            name: Some("John".into()),
+            age: None,
+        };
         let body = HttpBody::boxed(HttpBody::form(user).unwrap());
 
-        let user = Form::<OptionalUser>::from_payload(Payload::Body(body)).await.unwrap();
+        let user = Form::<OptionalUser>::from_payload(Payload::Body(body))
+            .await
+            .unwrap();
 
         assert!(user.age.is_none());
         assert_eq!(user.0.name.unwrap(), "John");
@@ -175,13 +191,12 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_hash_map_from_payload() {
-        let user_map = HashMap::from([
-            ("age", "33"),
-            ("name", "John")
-        ]);
+        let user_map = HashMap::from([("age", "33"), ("name", "John")]);
         let body = HttpBody::boxed(HttpBody::form(user_map).unwrap());
 
-        let user = Form::<HashMap<String, String>>::from_payload(Payload::Body(body)).await.unwrap();
+        let user = Form::<HashMap<String, String>>::from_payload(Payload::Body(body))
+            .await
+            .unwrap();
 
         assert_eq!(user.get("age").unwrap(), "33");
         assert_eq!(user.get("name").unwrap(), "John");
@@ -189,12 +204,12 @@ mod tests {
 
     #[tokio::test]
     async fn it_reads_hash_map_optional_from_payload() {
-        let user_map = HashMap::from([
-            ("name", "John")
-        ]);
+        let user_map = HashMap::from([("name", "John")]);
         let body = HttpBody::boxed(HttpBody::form(user_map).unwrap());
 
-        let user = Form::<HashMap<String, String>>::from_payload(Payload::Body(body)).await.unwrap();
+        let user = Form::<HashMap<String, String>>::from_payload(Payload::Body(body))
+            .await
+            .unwrap();
 
         assert!(user.get("age").is_none());
         assert_eq!(user.get("name").unwrap(), "John");
@@ -202,7 +217,10 @@ mod tests {
 
     #[test]
     fn it_converts_to_form() {
-        let user = User { age: 33, name: "John".into() };
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let form: Form<User> = user.into();
 
         assert_eq!(form.age, 33);
@@ -211,11 +229,17 @@ mod tests {
 
     #[test]
     fn it_derefs_mut() {
-        let user = User { age: 33, name: "John".into() };
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let mut form: Form<User> = user.into();
 
-        *form = User { age: 30, name: "Jack".into() };
-        
+        *form = User {
+            age: 30,
+            name: "Jack".into(),
+        };
+
         assert_eq!(form.age, 30);
         assert_eq!(form.name, "Jack");
     }

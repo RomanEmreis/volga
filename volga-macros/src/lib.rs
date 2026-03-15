@@ -1,20 +1,20 @@
 //! Proc-Macros implementations for different features of Volga
-//! 
+//!
 
 use proc_macro::TokenStream;
 use syn::parse_macro_input;
 
-mod http;
 #[cfg(feature = "jwt-auth-derive")]
 mod auth;
+mod http;
 
 /// Implements the `AuthClaims` trait for the custom claims structure
-/// 
+///
 /// # Example
 /// ```ignore
 /// use volga::auth::Claims;
 /// use serde::{Serialize, Deserialize}
-/// 
+///
 /// #[derive(Claims, Serialize, Deserialize)]
 /// struct Claims {
 ///     sub: String,
@@ -42,14 +42,14 @@ pub fn derive_claims(input: TokenStream) -> TokenStream {
 /// Provide either a string literal for the inline header name:
 /// ```ignore
 /// use volga::headers::http_header;
-/// 
+///
 /// #[http_header("x-api-key")]
 /// pub struct ApiKey;
 /// ```
 /// Or use a constant:
 /// ```ignore
 /// use volga::headers::http_header;
-/// 
+///
 /// const X_HEADER: &str = "x-auth-token";
 ///
 /// #[http_header(X_HEADER)]

@@ -1,9 +1,9 @@
 //! Tools, structs, and traits for rate-limiting partition keys
 
+use crate::HttpRequest;
+use crate::error::Error;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use crate::error::Error;
-use crate::HttpRequest;
 
 /// Defines how a rate-limiting partition key is extracted from an HTTP request.
 ///
@@ -113,9 +113,9 @@ impl Debug for RateLimitBinding {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use hyper::Request;
     use crate::HttpBody;
+    use hyper::Request;
+    use std::sync::Arc;
 
     // Mock implementation of RateLimitKey for testing
     struct MockKey {
@@ -220,10 +220,7 @@ mod tests {
         let cloned = binding.clone();
 
         assert!(cloned.policy.is_some());
-        assert_eq!(
-            cloned.policy.as_ref().unwrap().as_ref(),
-            "original_policy"
-        );
+        assert_eq!(cloned.policy.as_ref().unwrap().as_ref(), "original_policy");
     }
 
     #[test]
@@ -385,13 +382,7 @@ mod tests {
         let bound1 = binding.clone().bind();
         let bound2 = binding.clone().bind();
 
-        assert_eq!(
-            bound1.policy.as_ref().unwrap().as_ref(),
-            "multi_bind"
-        );
-        assert_eq!(
-            bound2.policy.as_ref().unwrap().as_ref(),
-            "multi_bind"
-        );
+        assert_eq!(bound1.policy.as_ref().unwrap().as_ref(), "multi_bind");
+        assert_eq!(bound2.policy.as_ref().unwrap().as_ref(), "multi_bind");
     }
 }

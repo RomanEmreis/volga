@@ -1,28 +1,25 @@
-﻿//! Route mapping helpers
+//! Route mapping helpers
 
-use std::ops::{Deref, DerefMut};
-use std::borrow::Cow;
-use hyper::Method;
 use crate::App;
 use crate::http::IntoResponse;
 use crate::http::endpoints::{
     args::FromRequest,
     handlers::{Func, GenericHandler},
 };
+use hyper::Method;
+use std::borrow::Cow;
+use std::ops::{Deref, DerefMut};
 
 #[cfg(feature = "openapi")]
 use crate::openapi::{OpenApiRouteConfig, RouteKey};
 
 #[cfg(feature = "middleware")]
-use {
-    crate::middleware::MiddlewareFn,
-    crate::http::cors::CorsOverride
-};
+use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
-/// Routes mapping 
+/// Routes mapping
 impl App {
     /// Maps a group of request handlers combined by `prefix`
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, Json, ok};
@@ -31,7 +28,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.group("/user", |api| {
     ///     api.map_get("/{id}", |id: i32| async move {
     ///         // get the user from somewhere
@@ -51,16 +48,16 @@ impl App {
     /// ```
     pub fn group<F>(&mut self, prefix: &str, f: F)
     where
-        F: FnOnce(&mut RouteGroup<'_>)
+        F: FnOnce(&mut RouteGroup<'_>),
     {
         let mut group = RouteGroup::new(self, prefix);
-        
+
         #[cfg(feature = "openapi")]
         group.open_api(|cfg| cfg.with_tag(prefix));
-        
+
         f(&mut group);
     }
-    
+
     /// Adds a request handler that matches HTTP GET requests for the specified pattern.
     ///
     /// # Examples
@@ -81,13 +78,13 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + 'static
+        Args: FromRequest + Send + 'static,
     {
         self.map_route(Method::GET, pattern, handler)
     }
 
     /// Adds a request handler that matches HTTP POST requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, File, ok};
@@ -95,7 +92,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_post("/upload", |file: File| async move {
     ///     file.save_as("example.txt").await?;
     ///     ok!()
@@ -113,7 +110,7 @@ impl App {
     }
 
     /// Adds a request handler that matches HTTP PUT requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, ok};
@@ -121,7 +118,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_put("/hello", || async {
     ///    ok!("Hello World!")
     /// });
@@ -138,7 +135,7 @@ impl App {
     }
 
     /// Adds a request handler that matches HTTP PATCH requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, ok};
@@ -146,7 +143,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_patch("/hello", || async {
     ///    ok!("Hello World!")
     /// });
@@ -163,7 +160,7 @@ impl App {
     }
 
     /// Adds a request handler that matches HTTP DELETE requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, ok};
@@ -171,7 +168,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_delete("/delete/{id}", |id: i32| async move {
     ///    ok!("Item with ID: {} has been removed!", id)
     /// });
@@ -188,7 +185,7 @@ impl App {
     }
 
     /// Adds a request handler that matches HTTP HEAD requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, ok};
@@ -196,7 +193,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_head("/resource/{id}", |id: i32| async move {
     ///    ok!([("Custom-Header", "value")])
     /// });
@@ -213,7 +210,7 @@ impl App {
     }
 
     /// Adds a request handler that matches HTTP OPTIONS requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, ok};
@@ -221,7 +218,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_options("/resource/{id}", |id: i32| async move {
     ///    ok!([("Allow", "GET, HEAD, POST, OPTIONS")])
     /// });
@@ -238,7 +235,7 @@ impl App {
     }
 
     /// Adds a request handler that matches HTTP TRACE requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, ok};
@@ -246,7 +243,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_trace("/", |id: i32| async move {
     ///    ok!([("content-type", "message/http")])
     /// });
@@ -263,7 +260,7 @@ impl App {
     }
 
     /// Adds a request handler that matches HTTP CONNECT requests for the specified pattern.
-    /// 
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, status};
@@ -271,7 +268,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_connect("/", || async {
     ///    status!(101)
     /// });
@@ -301,7 +298,7 @@ impl App {
     {
         self.map_route_impl(method, Cow::Borrowed(pattern), handler)
     }
-    
+
     #[inline]
     fn map_route_owned<F, R, Args>(
         &mut self,
@@ -342,14 +339,17 @@ impl App {
                 endpoints.map_route(head, path, handler.clone());
             }
         }
-        
+
         #[cfg(feature = "openapi")]
         let openapi_key = {
-            let key = RouteKey { method: method.clone(), pattern: path.into() };
-            
+            let key = RouteKey {
+                method: method.clone(),
+                pattern: path.into(),
+            };
+
             let mut auto = Args::describe_openapi(OpenApiRouteConfig::default());
             auto = R::describe_openapi(auto);
-            
+
             self.openapi.on_route_mapped(key.clone(), auto);
             key
         };
@@ -361,7 +361,7 @@ impl App {
             #[cfg(feature = "middleware")]
             pattern,
             #[cfg(feature = "openapi")]
-            openapi_key
+            openapi_key,
         }
     }
 }
@@ -406,7 +406,7 @@ impl std::fmt::Debug for RouteGroup<'_> {
 
 impl<'a> Deref for Route<'a> {
     type Target = App;
-    
+
     #[inline]
     fn deref(&self) -> &Self::Target {
         self.app
@@ -480,7 +480,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     pub fn group<F>(&mut self, sub_prefix: &str, f: F)
     where
-        F: FnOnce(&mut RouteGroup<'_>)
+        F: FnOnce(&mut RouteGroup<'_>),
     {
         let full_prefix = [self.prefix.as_str(), sub_prefix].concat();
         let mut child = RouteGroup {

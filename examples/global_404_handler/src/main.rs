@@ -6,7 +6,12 @@
 
 use std::sync::{Arc, RwLock};
 use tracing_subscriber::prelude::*;
-use volga::{App, http::{Method, Uri}, di::Dc, html};
+use volga::{
+    App,
+    di::Dc,
+    html,
+    http::{Method, Uri},
+};
 
 #[derive(Default, Clone, Debug)]
 struct Counter(Arc<RwLock<usize>>);
@@ -25,13 +30,20 @@ async fn main() -> std::io::Result<()> {
     // Enabling global 404 handler
     app.map_fallback(|uri: Uri, method: Method, cnt: Dc<Counter>| async move {
         *cnt.0.write().unwrap() += 1;
-        tracing::debug!("route not found {} {}; attempt: #{}", method, uri, cnt.0.read().unwrap());
-        html!(r#"
+        tracing::debug!(
+            "route not found {} {}; attempt: #{}",
+            method,
+            uri,
+            cnt.0.read().unwrap()
+        );
+        html!(
+            r#"
             <!doctype html>
             <html>
                 <head>Not Found!</head>
             </html>
-            "#)
+            "#
+        )
     });
 
     app.run().await

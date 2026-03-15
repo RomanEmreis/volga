@@ -1,9 +1,12 @@
 //! Tools and data structures for a fixed-window rate limiter.
 
-use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering::Relaxed}};
-use std::time::Duration;
+use super::{RateLimiter, SystemTimeSource, TimeSource};
 use dashmap::DashMap;
-use super::{SystemTimeSource, TimeSource, RateLimiter};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU32, AtomicU64, Ordering::Relaxed},
+};
+use std::time::Duration;
 
 /// Internal per-key state for the fixed window algorithm.
 ///
@@ -101,7 +104,7 @@ impl<T: TimeSource> RateLimiter for FixedWindowRateLimiter<T> {
                 self.storage.remove(&key);
             }
         }
-        
+
         let entry = self.storage.entry(key).or_insert_with(|| Entry {
             window_start: AtomicU64::new(window),
             count: AtomicU32::new(0),
@@ -162,7 +165,6 @@ impl<T: TimeSource> FixedWindowRateLimiter<T> {
         self.eviction_grace_secs = eviction.as_secs();
     }
 
-
     /// Maximum number of allowed requests per window.
     #[inline(always)]
     pub fn max_requests(&self) -> u32 {
@@ -192,15 +194,13 @@ impl<T: TimeSource> FixedWindowRateLimiter<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_utils::MockTimeSource;
+    use super::*;
 
     #[test]
     fn fixed_window_allows_within_limit() {
-        let limiter = FixedWindowRateLimiter::new(
-            3,
-            Duration::from_secs(10));
-        
+        let limiter = FixedWindowRateLimiter::new(3, Duration::from_secs(10));
+
         let key = 42;
 
         assert!(limiter.check(key));
@@ -212,11 +212,9 @@ mod tests {
     #[test]
     fn fixed_window_resets_after_window() {
         let time = MockTimeSource::new(1000);
-        let limiter = FixedWindowRateLimiter::with_time_source(
-            2, 
-            Duration::from_secs(1),
-            time.clone());
-        
+        let limiter =
+            FixedWindowRateLimiter::with_time_source(2, Duration::from_secs(1), time.clone());
+
         let key = 1;
 
         assert!(limiter.check(key));
@@ -230,9 +228,7 @@ mod tests {
 
     #[test]
     fn fixed_window_isolated_per_key() {
-        let limiter = FixedWindowRateLimiter::new(
-            1,
-            Duration::from_secs(10));
+        let limiter = FixedWindowRateLimiter::new(1, Duration::from_secs(10));
 
         assert!(limiter.check(1));
         assert!(!limiter.check(1));
@@ -245,10 +241,8 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
-        let limiter = Arc::new(FixedWindowRateLimiter::new(
-            1000, 
-            Duration::from_secs(10)));
-        
+        let limiter = Arc::new(FixedWindowRateLimiter::new(1000, Duration::from_secs(10)));
+
         let key = 123;
 
         let mut handles = vec![];

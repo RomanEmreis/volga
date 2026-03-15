@@ -1,6 +1,6 @@
 use crate::error::Error;
-use tokio::fs::read_dir;
 use std::path::Path;
+use tokio::fs::read_dir;
 
 #[cfg(debug_assertions)]
 use std::time::UNIX_EPOCH;
@@ -17,7 +17,7 @@ struct FileEntry {
 pub(super) async fn generate_html(
     directory: &Path,
     display_directory: &str,
-    is_root: bool
+    is_root: bool,
 ) -> Result<String, Error> {
     let mut entries = Vec::new();
 
@@ -38,7 +38,8 @@ pub(super) async fn generate_html(
                 Err(_) => continue,
             };
 
-            let name = entry.file_name()
+            let name = entry
+                .file_name()
                 .into_string()
                 .unwrap_or_else(|_| "[Invalid UTF-8]".to_string());
 
@@ -61,12 +62,20 @@ pub(super) async fn generate_html(
             let modified = "-".to_string();
 
             #[cfg(debug_assertions)]
-            let modified = metadata.modified().ok()
+            let modified = metadata
+                .modified()
+                .ok()
                 .and_then(fmt_system_time)
                 .unwrap_or_else(|| "Unknown".to_string());
 
             let link = display_name.clone();
-            entries.push(FileEntry { name: display_name, size, modified, link, is_dir });
+            entries.push(FileEntry {
+                name: display_name,
+                size,
+                modified,
+                link,
+                is_dir,
+            });
         }
     }
 
@@ -84,7 +93,9 @@ fn render_html(directory: &str, entries: &[FileEntry]) -> String {
     html.push_str("</title></head>\n    <body>\n        <h2>Index Of ");
     push_escaped(&mut html, directory);
     html.push_str("</h2>\n        <table border='1'>\n");
-    html.push_str("            <tr><th>Name</th><th>Size (bytes)</th><th>Last Modified</th></tr>\n");
+    html.push_str(
+        "            <tr><th>Name</th><th>Size (bytes)</th><th>Last Modified</th></tr>\n",
+    );
 
     for entry in entries {
         html.push_str("            <tr><td><a href='");
@@ -125,39 +136,35 @@ fn fmt_system_time(time: std::time::SystemTime) -> Option<String> {
     let secs = time.duration_since(UNIX_EPOCH).ok()?.as_secs();
 
     let days = secs / 86400;
-    let rem  = secs % 86400;
-    let hh   = rem / 3600;
-    let mm   = (rem % 3600) / 60;
-    let ss   = rem % 60;
+    let rem = secs % 86400;
+    let hh = rem / 3600;
+    let mm = (rem % 3600) / 60;
+    let ss = rem % 60;
 
     // Civil date from days since Unix epoch (Hinnant's algorithm).
-    let z   = days as i64 + 719_468;
+    let z = days as i64 + 719_468;
     let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
     let doe = (z - era * 146_097) as u64;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let y   = yoe as i64 + era * 400;
+    let y = yoe as i64 + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp  = (5 * doy + 2) / 153;
-    let d   = doy - (153 * mp + 2) / 5 + 1;
-    let mo  = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y   = if mo <= 2 { y + 1 } else { y };
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
 
     Some(format!("{y:04}-{mo:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z"))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use crate::fs::static_files::file_listing::generate_html;
+    use std::path::Path;
 
     #[tokio::test]
     async fn it_creates_file_listing_html() {
         let dir = Path::new("tests/resources");
-        let html = generate_html(
-            dir,
-            "/tests/resources",
-            true
-        ).await;
+        let html = generate_html(dir, "/tests/resources", true).await;
 
         assert!(html.is_ok());
     }

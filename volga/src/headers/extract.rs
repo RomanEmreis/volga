@@ -1,4 +1,4 @@
-﻿//! Extractors for default HTTP headers
+//! Extractors for default HTTP headers
 
 use super::FromHeaders;
 use super::{X_ACCEL_BUFFERING, X_FORWARDED_FOR};
@@ -7,8 +7,8 @@ use hyper::header::{
     ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
     ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE,
     ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, AGE, ALLOW, ALT_SVC,
-    AUTHORIZATION, CONNECTION, CONTENT_DISPOSITION, CONTENT_ENCODING,
-    CONTENT_LANGUAGE, CONTENT_LENGTH, CONTENT_LOCATION, CONTENT_RANGE, CONTENT_SECURITY_POLICY,
+    AUTHORIZATION, CONNECTION, CONTENT_DISPOSITION, CONTENT_ENCODING, CONTENT_LANGUAGE,
+    CONTENT_LENGTH, CONTENT_LOCATION, CONTENT_RANGE, CONTENT_SECURITY_POLICY,
     CONTENT_SECURITY_POLICY_REPORT_ONLY, CONTENT_TYPE, COOKIE, DATE, DNT, EXPECT, EXPIRES,
     FORWARDED, FROM, HOST, IF_MATCH, IF_MODIFIED_SINCE, IF_NONE_MATCH, IF_RANGE,
     IF_UNMODIFIED_SINCE, LAST_MODIFIED, LINK, LOCATION, MAX_FORWARDS, ORIGIN, PRAGMA,
@@ -17,7 +17,7 @@ use hyper::header::{
     SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION, SERVER, SET_COOKIE,
     STRICT_TRANSPORT_SECURITY, TE, TRAILER, TRANSFER_ENCODING, UPGRADE, UPGRADE_INSECURE_REQUESTS,
     USER_AGENT, VARY, VIA, WARNING, WWW_AUTHENTICATE, X_CONTENT_TYPE_OPTIONS,
-    X_DNS_PREFETCH_CONTROL, X_FRAME_OPTIONS, X_XSS_PROTECTION
+    X_DNS_PREFETCH_CONTROL, X_FRAME_OPTIONS, X_XSS_PROTECTION,
 };
 
 macro_rules! define_header {
@@ -34,7 +34,7 @@ macro_rules! define_header {
                 pub const fn from_static(value: &'static str) -> $crate::headers::Header<$struct_name> {
                     $crate::headers::Header::<$struct_name>::from_static(value)
                 }
-                
+
                 /// Construct a typed header from bytes (validated).
                 #[inline]
                 pub fn from_bytes(bytes: &[u8]) -> Result<$crate::headers::Header<$struct_name>, $crate::error::Error> {
@@ -56,7 +56,7 @@ macro_rules! define_header {
 
             impl FromHeaders for $struct_name {
                 const NAME: $crate::headers::HeaderName = $header_name;
-                
+
                 #[inline]
                 fn from_headers(headers: &$crate::headers::HeaderMap) -> Option<&$crate::headers::HeaderValue> {
                     headers.get(Self::NAME)
@@ -88,7 +88,7 @@ define_header! {
 #[cfg(test)]
 mod tests {
     use super::{ContentType, Host};
-    use crate::headers::{FromHeaders, HeaderMap, HeaderValue, HOST, CONTENT_TYPE};
+    use crate::headers::{CONTENT_TYPE, FromHeaders, HOST, HeaderMap, HeaderValue};
 
     #[test]
     fn it_extracts_headers_from_map() {

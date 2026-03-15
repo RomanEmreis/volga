@@ -1,9 +1,13 @@
 //! Error Handler
 
+use super::Error;
+use crate::{
+    HttpResult,
+    http::{FromRequestParts, IntoResponse, MapErrHandler},
+    status,
+};
 use futures_util::future::BoxFuture;
 use hyper::http::request::Parts;
-use crate::{http::{IntoResponse, MapErrHandler, FromRequestParts}, HttpResult, status};
-use super::Error;
 
 use std::sync::{Arc, Weak};
 
@@ -38,7 +42,7 @@ pub struct ErrorFunc<F, R, Args>
 where
     F: MapErrHandler<Args, Output = R>,
     R: IntoResponse,
-    Args: FromRequestParts + Send
+    Args: FromRequestParts + Send,
 {
     func: F,
     _marker: std::marker::PhantomData<fn(Args) -> R>,
@@ -48,7 +52,7 @@ impl<F, R, Args> ErrorFunc<F, R, Args>
 where
     F: MapErrHandler<Args, Output = R>,
     R: IntoResponse,
-    Args: FromRequestParts + Send
+    Args: FromRequestParts + Send,
 {
     pub(crate) fn new(func: F) -> Self {
         Self {
@@ -135,18 +139,10 @@ where
 }
 
 /// Holds a reference to global error handler
-pub(crate) type PipelineErrorHandler = Arc<
-    dyn ErrorHandler
-    + Send
-    + Sync
->;
+pub(crate) type PipelineErrorHandler = Arc<dyn ErrorHandler + Send + Sync>;
 
 /// Weak version of [`crate::error::PipelineErrorHandler`]
-pub(crate) type WeakErrorHandler = Weak<
-    dyn ErrorHandler
-    + Send
-    + Sync
->;
+pub(crate) type WeakErrorHandler = Weak<dyn ErrorHandler + Send + Sync>;
 
 /// Default error handler that creates a [`HttpResult`] from error
 #[inline]
@@ -168,18 +164,14 @@ pub(crate) fn extract_error_args(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use http_body_util::BodyExt;
-    use hyper::Request;
-    use crate::{error::ErrorHandler, status};
     use super::{
-        Error,
-        ErrorFunc,
-        PipelineErrorHandler,
-        WeakErrorHandler,
-        default_error_handler,
+        Error, ErrorFunc, PipelineErrorHandler, WeakErrorHandler, default_error_handler,
         extract_error_args,
     };
+    use crate::{error::ErrorHandler, status};
+    use http_body_util::BodyExt;
+    use hyper::Request;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn default_error_handler_returns_server_error_status_code() {

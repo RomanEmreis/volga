@@ -1,11 +1,10 @@
 //! Mutable version of [`HttpRequest`] for middleware
 
 use crate::{
-    headers::{FromHeaders, HeaderMap, Header, HeaderName, HeaderValue}, 
-    http::{Parts, Extensions, Method, Uri, Version, FromRequestRef}, 
-    error::Error, 
-    HttpRequest, 
-    HttpBody
+    HttpBody, HttpRequest,
+    error::Error,
+    headers::{FromHeaders, Header, HeaderMap, HeaderName, HeaderValue},
+    http::{Extensions, FromRequestRef, Method, Parts, Uri, Version},
 };
 
 /// A mutable HTTP request used during the middleware pipeline.
@@ -50,7 +49,7 @@ impl HttpRequestMut {
     pub(crate) fn new(inner: HttpRequest) -> Self {
         Self { inner }
     }
-    
+
     /// Returns a reference to the associated URI.
     ///
     /// # Example
@@ -131,7 +130,7 @@ impl HttpRequestMut {
     pub(crate) fn extensions_mut(&mut self) -> &mut Extensions {
         self.inner.extensions_mut()
     }
-    
+
     /// Returns a typed HTTP header value
     #[inline]
     pub fn get_header<T: FromHeaders>(&self) -> Option<Header<T>> {
@@ -143,17 +142,16 @@ impl HttpRequestMut {
     pub fn get_all_headers<T: FromHeaders>(&self) -> impl Iterator<Item = Header<T>> {
         self.inner.get_all_headers()
     }
-    
+
     /// Inserts the header into the request, replacing any existing values
     /// with the same header name.
     ///
     /// This method always overwrites previous values.
     #[inline]
     pub fn insert_header<T: FromHeaders>(&mut self, header: Header<T>) -> Header<T> {
-        self.inner.headers_mut().insert(
-            header.name(),
-            header.value().clone()
-        );
+        self.inner
+            .headers_mut()
+            .insert(header.name(), header.value().clone());
         header
     }
 
@@ -164,7 +162,7 @@ impl HttpRequestMut {
     #[inline]
     pub fn try_insert_header<T>(
         &mut self,
-        header: impl TryInto<Header<T>, Error = Error>
+        header: impl TryInto<Header<T>, Error = Error>,
     ) -> Result<Header<T>, Error>
     where
         T: FromHeaders,
@@ -184,10 +182,8 @@ impl HttpRequestMut {
     /// with the same header name.
     #[inline]
     pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(Error::from)?;
-        let value = HeaderValue::from_str(value)
-            .map_err(Error::from)?;
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
+        let value = HeaderValue::from_str(value).map_err(Error::from)?;
 
         self.insert_raw_header(name, value);
         Ok(())
@@ -202,10 +198,9 @@ impl HttpRequestMut {
     where
         T: FromHeaders,
     {
-        self.inner.headers_mut().append(
-            header.name(),
-            header.value().clone()
-        );
+        self.inner
+            .headers_mut()
+            .append(header.name(), header.value().clone());
         Ok(header)
     }
 
@@ -215,7 +210,7 @@ impl HttpRequestMut {
     #[inline]
     pub fn try_append_header<T>(
         &mut self,
-        header: impl TryInto<Header<T>, Error = Error>
+        header: impl TryInto<Header<T>, Error = Error>,
     ) -> Result<Header<T>, Error>
     where
         T: FromHeaders,
@@ -233,10 +228,8 @@ impl HttpRequestMut {
     /// Attempts to append a new raww value for the given header name.
     #[inline]
     pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(Error::from)?;
-        let value = HeaderValue::from_str(value)
-            .map_err(Error::from)?;
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
+        let value = HeaderValue::from_str(value).map_err(Error::from)?;
 
         self.append_raw_header(name, value);
         Ok(())
@@ -250,10 +243,7 @@ impl HttpRequestMut {
     where
         T: FromHeaders,
     {
-        self.inner
-            .headers_mut()
-            .remove(&T::NAME)
-            .is_some()
+        self.inner.headers_mut().remove(&T::NAME).is_some()
     }
 
     /// Attempts to remove all values for the given header name.
@@ -261,13 +251,9 @@ impl HttpRequestMut {
     /// Returns `true` if at least one value was removed.
     #[inline]
     pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(Error::from)?;
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
 
-        Ok(self.inner
-            .headers_mut()
-            .remove(name)
-            .is_some())
+        Ok(self.inner.headers_mut().remove(name).is_some())
     }
 
     /// Returns this [`HttpRequest`] body limit.
@@ -320,7 +306,7 @@ impl HttpRequestMut {
     }
 
     /// Returns iterator of URL query params
-    /// 
+    ///
     /// > Note: Only `key=value` pairs are yielded. Arguments without `=` are ignored.
     ///
     /// # Example
@@ -348,7 +334,7 @@ impl HttpRequestMut {
     pub fn as_read_only(&self) -> &HttpRequest {
         &self.inner
     }
-    
+
     /// Transitions the request into the immutable handler phase.
     ///
     /// This method consumes `HttpRequestMut` and returns an
@@ -397,7 +383,7 @@ impl HttpRequestMut {
 /// use volga::{App, HttpRequestMut};
 ///
 /// let mut app = App::new();
-/// 
+///
 /// app.tap_req(|req: HttpRequestMut| async move {
 ///     println!("{:?}", req.headers().get("x-header"));
 ///     req
@@ -409,16 +395,16 @@ impl HttpRequestMut {
 /// ```no_run
 /// use volga::{App, HttpRequestMut, error::Error};
 /// # use volga::HttpBody;
-/// 
+///
 /// let mut app = App::new();
-/// 
+///
 /// app.tap_req(|req: HttpRequestMut| async move {
 ///     let (parts, body) = req.into_parts();
 ///     let body = exotic_decompression(body)?;
 ///
 ///     Ok(HttpRequestMut::from_parts(parts, body))
 /// });
-/// 
+///
 /// # fn exotic_decompression(body: HttpBody) -> Result<HttpBody, Error> {
 /// #     Ok(body)
 /// # }
@@ -428,7 +414,7 @@ impl HttpRequestMut {
 ///
 /// This trait is **not intended to be implemented by users**.
 /// Only framework-provided implementations are supported.
-pub trait IntoTapResult : sealed::Sealed {
+pub trait IntoTapResult: sealed::Sealed {
     /// Converts the value into a `Result<HttpRequestMut, Error>`.
     fn into_result(self) -> Result<HttpRequestMut, Error>;
 }
@@ -451,7 +437,7 @@ mod sealed {
     use crate::{HttpRequestMut, error::Error};
 
     pub trait Sealed {}
-    
+
     impl Sealed for HttpRequestMut {}
     impl Sealed for Result<HttpRequestMut, Error> {}
 }
@@ -461,9 +447,9 @@ mod sealed {
 #[allow(unused)]
 mod tests {
     use super::*;
+    use crate::HttpBody;
     use crate::headers::headers;
     use crate::http::Request;
-    use crate::HttpBody;
     use crate::http::endpoints::route::{PathArg, PathArgs};
 
     headers! {
@@ -488,9 +474,16 @@ mod tests {
     #[test]
     fn it_returns_url_path() {
         let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
-        ].into();
+            PathArg {
+                name: "id".into(),
+                value: "123".into()
+            },
+            PathArg {
+                name: "name".into(),
+                value: "John".into()
+            }
+        ]
+        .into();
 
         let req = Request::get("/")
             .extension(args)
@@ -538,7 +531,7 @@ mod tests {
 
         assert!(args.next().is_none());
     }
-    
+
     #[test]
     fn it_inserts_header() {
         let mut req = create_req();
@@ -548,7 +541,7 @@ mod tests {
 
         assert_eq!(req.headers().get("x-foo").unwrap(), "some key");
     }
-    
+
     #[test]
     fn it_tries_insert_header() {
         let mut req = create_req();
@@ -589,7 +582,13 @@ mod tests {
         let api_key_header: Header<Foo> = Header::from_static("2");
         let _ = req.append_header(api_key_header);
 
-        assert_eq!(req.headers().get_all("x-foo").into_iter().collect::<Vec<_>>(), ["1", "2"]);
+        assert_eq!(
+            req.headers()
+                .get_all("x-foo")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]
@@ -599,7 +598,12 @@ mod tests {
         req.try_append_header::<Foo>("1").unwrap();
         req.try_append_header::<Foo>("2").unwrap();
 
-        assert_eq!(req.get_all_headers::<Foo>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]);
+        assert_eq!(
+            req.get_all_headers::<Foo>()
+                .map(|h| h.into_inner())
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]
@@ -616,7 +620,12 @@ mod tests {
             HeaderValue::from_static("2"),
         );
 
-        assert_eq!(req.get_all_headers::<Foo>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]);
+        assert_eq!(
+            req.get_all_headers::<Foo>()
+                .map(|h| h.into_inner())
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]
@@ -626,7 +635,12 @@ mod tests {
         req.try_append_raw_header("x-foo", "1").unwrap();
         req.try_append_raw_header("x-foo", "2").unwrap();
 
-        assert_eq!(req.get_all_headers::<Foo>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]);
+        assert_eq!(
+            req.get_all_headers::<Foo>()
+                .map(|h| h.into_inner())
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]

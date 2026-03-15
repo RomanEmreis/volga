@@ -1,4 +1,4 @@
-﻿#![allow(missing_docs)]
+#![allow(missing_docs)]
 #![cfg(all(feature = "test", feature = "static-files"))]
 
 use volga::app::HostEnv;
@@ -7,24 +7,18 @@ use volga::test::TestServer;
 #[tokio::test]
 async fn it_responds_with_index_file() {
     let server = TestServer::builder()
-        .configure(|app| {
-            app.set_host_env(HostEnv::new("tests/static"))
-        })
+        .configure(|app| app.set_host_env(HostEnv::new("tests/static")))
         .setup(|app| {
             app.use_static_files();
         })
         .build()
         .await;
-    
-    let response = server.client()
-        .get(server.url("/"))
-        .send()
-        .await
-        .unwrap();
+
+    let response = server.client().get(server.url("/")).send().await.unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("Content-Type").unwrap(), "text/html");
-    
+
     server.shutdown().await;
 }
 
@@ -32,9 +26,10 @@ async fn it_responds_with_index_file() {
 async fn it_responds_with_fallback_file() {
     let server = TestServer::builder()
         .configure(|app| {
-            app.with_host_env(|env| env
-                .with_content_root("tests/static")
-                .with_fallback_file("index.html"))
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
         })
         .setup(|app| {
             app.group("/static", |g| {
@@ -44,15 +39,16 @@ async fn it_responds_with_fallback_file() {
         .build()
         .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test/thing"))
         .send()
         .await
         .unwrap();
-    
+
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("Content-Type").unwrap(), "text/html");
-    
+
     server.shutdown().await;
 }
 
@@ -60,9 +56,7 @@ async fn it_responds_with_fallback_file() {
 async fn it_responds_with_files_listing() {
     let server = TestServer::builder()
         .configure(|app| {
-            app.with_host_env(|env| env
-                .with_content_root("tests/static")
-                .with_files_listing())
+            app.with_host_env(|env| env.with_content_root("tests/static").with_files_listing())
         })
         .setup(|app| {
             app.use_static_files();
@@ -70,14 +64,13 @@ async fn it_responds_with_files_listing() {
         .build()
         .await;
 
-    let response = server.client()
-        .get(server.url("/"))
-        .send()
-        .await
-        .unwrap();
+    let response = server.client().get(server.url("/")).send().await.unwrap();
 
     assert!(response.status().is_success());
-    assert_eq!(response.headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
-    
+    assert_eq!(
+        response.headers().get("Content-Type").unwrap(),
+        "text/html; charset=utf-8"
+    );
+
     server.shutdown().await;
 }

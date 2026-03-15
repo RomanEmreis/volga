@@ -18,9 +18,7 @@ async fn main() -> std::io::Result<()> {
 
     app.use_decompression();
 
-    app.map_post("/decompress", |users: Vec<User>| async move {
-        ok!(users)
-    });
+    app.map_post("/decompress", |users: Vec<User>| async move { ok!(users) });
 
     app.run().await
 }

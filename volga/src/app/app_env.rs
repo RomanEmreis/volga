@@ -1,14 +1,10 @@
 //! Types and utils for control the Application Environment and runtime.
 
 use super::App;
-use std::io::Error;
 use super::pipeline::Pipeline;
+use crate::{Limit, headers::HeaderValue, http::request::request_body_limit::RequestBodyLimit};
 use hyper_util::server::graceful::GracefulShutdown;
-use crate::{
-    http::request::request_body_limit::RequestBodyLimit,
-    headers::HeaderValue,
-    Limit
-};
+use std::io::Error;
 
 #[cfg(any(feature = "tls", feature = "rate-limiting"))]
 use std::sync::Arc;
@@ -17,10 +13,7 @@ use std::sync::Arc;
 use crate::di::Container;
 
 #[cfg(feature = "tls")]
-use {
-    crate::tls::HstsHeader,
-    tokio_rustls::TlsAcceptor
-};
+use {crate::tls::HstsHeader, tokio_rustls::TlsAcceptor};
 
 #[cfg(feature = "tracing")]
 use crate::tracing::TracingConfig;
@@ -34,7 +27,7 @@ use crate::auth::bearer::BearerTokenService;
 #[cfg(feature = "rate-limiting")]
 use {
     crate::rate_limiting::GlobalRateLimiter,
-    std::{net::IpAddr, collections::HashSet}
+    std::{collections::HashSet, net::IpAddr},
 };
 
 #[cfg(feature = "static-files")]
@@ -74,14 +67,14 @@ pub(crate) struct AppEnv {
 
     /// Default `Cache-Control` header value
     pub(super) cache_control: Option<HeaderValue>,
-    
+
     /// Request body limit
     pub(super) body_limit: RequestBodyLimit,
 
     /// HTTP/2 resource and backpressure limits.
     #[cfg(feature = "http2")]
     pub(crate) http2_limits: Http2Limits,
-    
+
     /// Incoming TLS connection acceptor
     #[cfg(feature = "tls")]
     pub(crate) acceptor: Option<TlsAcceptor>,
@@ -133,25 +126,21 @@ impl TryFrom<App> for AppEnv {
 
     fn try_from(app: App) -> Result<Self, Self::Error> {
         #[cfg(feature = "tls")]
-        let hsts = app.tls_config
+        let hsts = app
+            .tls_config
             .as_ref()
             .map(|tls| HstsHeader::new(tls.hsts_config.clone()));
 
         #[cfg(feature = "tls")]
         let acceptor = {
-            let tls_config = app.tls_config
-                .map(|config| config.build())
-                .transpose()?;
-            tls_config
-                .map(|config| TlsAcceptor::from(Arc::new(config)))
+            let tls_config = app.tls_config.map(|config| config.build()).transpose()?;
+            tls_config.map(|config| TlsAcceptor::from(Arc::new(config)))
         };
 
         #[cfg(feature = "jwt-auth")]
         let bearer_token_service = app.auth_config.map(Into::into);
 
-        let default_cache_control = app.cache_control
-            .map(|c| c.try_into())
-            .transpose()?;
+        let default_cache_control = app.cache_control.map(|c| c.try_into()).transpose()?;
 
         let app_instance = Self {
             body_limit: app.body_limit,
@@ -186,7 +175,7 @@ impl TryFrom<App> for AppEnv {
             #[cfg(feature = "tls")]
             acceptor,
             #[cfg(feature = "tls")]
-            hsts
+            hsts,
         };
         Ok(app_instance)
     }
@@ -219,9 +208,11 @@ mod tests {
 
         let app_instance: AppEnv = app.try_into().unwrap();
 
-        let RequestBodyLimit::Enabled(limit) = app_instance.body_limit else { unreachable!() };
+        let RequestBodyLimit::Enabled(limit) = app_instance.body_limit else {
+            unreachable!()
+        };
         assert_eq!(limit, 5242880);
-        
+
         assert_eq!(app_instance.max_header_count, Limit::Default);
         assert_eq!(app_instance.max_header_size, Limit::Default);
     }

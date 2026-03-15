@@ -1,22 +1,16 @@
 //! Extractor for Result<T, E>
 
-use pin_project_lite::pin_project;
-use std::{
-    task::{Context, Poll},
-    future::Future,
-    pin::Pin
-};
 use crate::{
     HttpRequest,
     error::Error,
     http::Parts,
-    http::endpoints::args::{
-        FromRequestParts,
-        FromRequestRef,
-        FromPayload,
-        Payload,
-        Source
-    }
+    http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+};
+use pin_project_lite::pin_project;
+use std::{
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
 };
 
 pin_project! {
@@ -49,7 +43,7 @@ impl<T: FromRequestRef> FromRequestRef for Result<T, Error> {
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         match T::from_request(req) {
             Ok(value) => Ok(Ok(value)),
-            Err(err) => Ok(Err(err))
+            Err(err) => Ok(Err(err)),
         }
     }
 }
@@ -59,7 +53,7 @@ impl<T: FromRequestParts> FromRequestParts for Result<T, Error> {
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         match T::from_parts(parts) {
             Ok(value) => Ok(Ok(value)),
-            Err(err) => Ok(Err(err))
+            Err(err) => Ok(Err(err)),
         }
     }
 }
@@ -68,7 +62,7 @@ impl<T: FromPayload> FromPayload for Result<T, Error> {
     type Future = ResultFromPayloadFuture<T::Future>;
 
     const SOURCE: Source = T::SOURCE;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         ResultFromPayloadFuture {
@@ -79,10 +73,10 @@ impl<T: FromPayload> FromPayload for Result<T, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HttpBody, error::Error};
-    use futures_util::future::{ok, err, Ready};
-    use hyper::Request;
     use crate::http::endpoints::route::{PathArg, PathArgs};
+    use crate::{HttpBody, error::Error};
+    use futures_util::future::{Ready, err, ok};
+    use hyper::Request;
 
     // Test extractors for testing
     struct SuccessExtractor;
@@ -143,7 +137,7 @@ mod tests {
         fn from_payload(payload: Payload<'_>) -> Self::Future {
             match payload {
                 Payload::Body(_) => ok(BodyExtractor("body content".to_string())),
-                _ => err(Error::client_error("Expected body payload"))
+                _ => err(Error::client_error("Expected body payload")),
             }
         }
     }
@@ -154,7 +148,7 @@ mod tests {
         type Future = Ready<Result<Self, Error>>;
 
         const SOURCE: Source = Source::Path;
-        
+
         fn from_payload(payload: Payload<'_>) -> Self::Future {
             let Payload::Path(param) = payload else {
                 return err(Error::client_error("Expected path payload"));
@@ -162,7 +156,7 @@ mod tests {
 
             match param.value.parse::<u32>() {
                 Ok(id) => ok(PathExtractor(id)),
-                Err(_) => err(Error::client_error("Invalid path parameter"))
+                Err(_) => err(Error::client_error("Invalid path parameter")),
             }
         }
     }
@@ -274,7 +268,10 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_result_with_path_extractor() {
-        let param = PathArg { name: "id".into(), value: "123".into() };
+        let param = PathArg {
+            name: "id".into(),
+            value: "123".into(),
+        };
 
         let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(param)).await;
 
@@ -286,7 +283,10 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_result_with_path_extractor_returns_invalid_value() {
-        let param = PathArg { name: "id".into(), value: "invalid".into() };
+        let param = PathArg {
+            name: "id".into(),
+            value: "invalid".into(),
+        };
 
         let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(param)).await;
 
@@ -310,7 +310,10 @@ mod tests {
     #[tokio::test]
     async fn it_extracts_result_with_primitive_types() {
         // Test with i32
-        let param = PathArg { name: "id".into(), value: "42".into() };
+        let param = PathArg {
+            name: "id".into(),
+            value: "42".into(),
+        };
         let result = Result::<i32, Error>::from_payload(Payload::Path(param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -318,14 +321,20 @@ mod tests {
         assert_eq!(inner_result.unwrap(), 42);
 
         // Test with invalid i32
-        let param = PathArg { name: "id".into(), value: "invalid".into() };
+        let param = PathArg {
+            name: "id".into(),
+            value: "invalid".into(),
+        };
         let result = Result::<i32, Error>::from_payload(Payload::Path(param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_err());
 
         // Test with String
-        let param = PathArg { name: "name".into(), value: "test".into() };
+        let param = PathArg {
+            name: "name".into(),
+            value: "test".into(),
+        };
         let result = Result::<String, Error>::from_payload(Payload::Path(param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -339,7 +348,9 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<Result<SuccessExtractor, Error>, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result =
+            Result::<Result<SuccessExtractor, Error>, Error>::from_payload(Payload::Parts(&parts))
+                .await;
 
         assert!(result.is_ok());
         let outer = result.unwrap();
@@ -348,7 +359,9 @@ mod tests {
         assert!(inner.is_ok());
 
         // Test Result<Result<T, Error>, Error> - inner failure
-        let result = Result::<Result<FailureExtractor, Error>, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result =
+            Result::<Result<FailureExtractor, Error>, Error>::from_payload(Payload::Parts(&parts))
+                .await;
 
         assert!(result.is_ok());
         let outer = result.unwrap();
@@ -359,11 +372,13 @@ mod tests {
 
     #[test]
     fn it_extracts_result_future_poll_ready_ok() {
-        use std::task::{Context, Poll};
         use std::pin::Pin;
+        use std::task::{Context, Poll};
 
         let inner_future = ok(SuccessExtractor);
-        let mut result_future = ResultFromPayloadFuture { inner: inner_future };
+        let mut result_future = ResultFromPayloadFuture {
+            inner: inner_future,
+        };
 
         let waker = futures_util::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
@@ -371,18 +386,20 @@ mod tests {
         let result = Pin::new(&mut result_future).poll(&mut cx);
 
         match result {
-            Poll::Ready(Ok(Ok(_))) => {},
-            _ => panic!("Expected Poll::Ready(Ok(Ok(_)))")
+            Poll::Ready(Ok(Ok(_))) => {}
+            _ => panic!("Expected Poll::Ready(Ok(Ok(_)))"),
         }
     }
 
     #[test]
     fn it_extracts_result_future_poll_ready_err() {
-        use std::task::{Context, Poll};
         use std::pin::Pin;
+        use std::task::{Context, Poll};
 
         let inner_future = err::<SuccessExtractor, Error>(Error::client_error("test"));
-        let mut result_future = ResultFromPayloadFuture { inner: inner_future };
+        let mut result_future = ResultFromPayloadFuture {
+            inner: inner_future,
+        };
 
         let waker = futures_util::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
@@ -390,19 +407,21 @@ mod tests {
         let result = Pin::new(&mut result_future).poll(&mut cx);
 
         match result {
-            Poll::Ready(Ok(Err(_))) => {},
-            _ => panic!("Expected Poll::Ready(Ok(Err(_)))")
+            Poll::Ready(Ok(Err(_))) => {}
+            _ => panic!("Expected Poll::Ready(Ok(Err(_)))"),
         }
     }
 
     #[test]
     fn it_extracts_result_future_poll_pending() {
-        use std::task::{Context, Poll};
-        use std::pin::Pin;
         use futures_util::future::pending;
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
 
         let inner_future = pending::<Result<SuccessExtractor, Error>>();
-        let mut result_future = ResultFromPayloadFuture { inner: inner_future };
+        let mut result_future = ResultFromPayloadFuture {
+            inner: inner_future,
+        };
 
         let waker = futures_util::task::noop_waker();
         let mut cx = Context::from_waker(&waker);
@@ -410,8 +429,8 @@ mod tests {
         let result = Pin::new(&mut result_future).poll(&mut cx);
 
         match result {
-            Poll::Pending => {},
-            _ => panic!("Expected Poll::Pending")
+            Poll::Pending => {}
+            _ => panic!("Expected Poll::Pending"),
         }
     }
 
@@ -426,18 +445,23 @@ mod tests {
             id: u32,
         }
 
-        let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() }
-        ].into();
+        let args: PathArgs = smallvec::smallvec![PathArg {
+            name: "id".into(),
+            value: "123".into()
+        }]
+        .into();
 
         // Valid path should return Ok(Ok(value))
-        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(&args)).await;
+        let result =
+            Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(&args)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
         assert_eq!(inner_result.unwrap().id, 123);
 
-        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(&PathArgs::new())).await;
+        let result =
+            Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(&PathArgs::new()))
+                .await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_err());
@@ -449,12 +473,20 @@ mod tests {
         use crate::Path;
 
         let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
-        ].into();
+            PathArg {
+                name: "id".into(),
+                value: "123".into()
+            },
+            PathArg {
+                name: "name".into(),
+                value: "John".into()
+            }
+        ]
+        .into();
 
         // Valid path should return Some
-        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(&args)).await;
+        let result =
+            Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(&args)).await;
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.is_ok());
@@ -464,7 +496,9 @@ mod tests {
         assert_eq!(result.0.0, 123);
         assert_eq!(result.0.1, "John");
 
-        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(&PathArgs::new())).await;
+        let result =
+            Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(&PathArgs::new()))
+                .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_err());
     }
@@ -506,7 +540,7 @@ mod tests {
             type Future = Ready<Result<Self, Error>>;
 
             const SOURCE: Source = Source::Parts;
-            
+
             fn from_payload(_: Payload<'_>) -> Self::Future {
                 ok(ValueExtractor(42))
             }

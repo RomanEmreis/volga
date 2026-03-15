@@ -1,28 +1,24 @@
-﻿//! Set of utils to work with Cookies
+//! Set of utils to work with Cookies
 
-use cookie::CookieJar;
-use futures_util::future::{ready, Ready};
+use crate::http::Parts;
 use crate::{
-    error::Error, 
-    headers::{COOKIE, SET_COOKIE, HeaderMap}, 
+    error::Error,
+    headers::{COOKIE, HeaderMap, SET_COOKIE},
     http::{
         HttpRequest, Request,
         body::Incoming,
         endpoints::args::{
-        FromRequestRef,
-        FromRequestParts,
-        FromRawRequest,
-        FromPayload,
-        Payload,
-        Source
-    }},
+            FromPayload, FromRawRequest, FromRequestParts, FromRequestRef, Payload, Source,
+        },
+    },
 };
-use crate::http::Parts;
+use cookie::CookieJar;
+use futures_util::future::{Ready, ready};
 
-#[cfg(feature = "signed-cookie")]
-pub mod signed;
 #[cfg(feature = "private-cookie")]
 pub mod private;
+#[cfg(feature = "signed-cookie")]
+pub mod signed;
 
 /// Represents HTTP cookies
 #[derive(Debug, Default, Clone)]
@@ -35,7 +31,7 @@ impl From<&HeaderMap> for Cookies {
         for cookie in get_cookies(headers) {
             jar.add_original(cookie);
         }
-        
+
         Self(jar)
     }
 }
@@ -55,7 +51,7 @@ impl Cookies {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Unwraps the inner jar
     #[inline]
     pub fn into_inner(self) -> CookieJar {
@@ -136,10 +132,12 @@ impl FromPayload for Cookies {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(Self::from_parts(parts))
     }
 }
@@ -147,9 +145,9 @@ impl FromPayload for Cookies {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::HttpBody;
     use crate::headers::HeaderValue;
     use hyper::Request;
-    use crate::HttpBody;
 
     #[test]
     fn it_creates_cookies_from_empty_headers() {
@@ -161,10 +159,7 @@ mod tests {
     #[test]
     fn it_creates_cookies() {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            COOKIE,
-            HeaderValue::from_static("session=abc123"),
-        );
+        headers.insert(COOKIE, HeaderValue::from_static("session=abc123"));
 
         let cookies = Cookies::from(&headers);
         let cookie = cookies.get("session").expect("Cookie should exist");
@@ -206,7 +201,9 @@ mod tests {
         let mut headers = HeaderMap::new();
         set_cookies(cookies.0, &mut headers);
 
-        let cookie_header = headers.get(SET_COOKIE).expect("Cookie header should be set");
+        let cookie_header = headers
+            .get(SET_COOKIE)
+            .expect("Cookie header should be set");
         assert!(cookie_header.to_str().unwrap().contains("session=xyz789"));
     }
 
@@ -224,7 +221,7 @@ mod tests {
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }
-    
+
     #[test]
     fn it_extracts_from_parts() {
         let request = Request::builder()
@@ -233,7 +230,7 @@ mod tests {
             .unwrap();
 
         let (parts, _) = request.into_parts();
-        
+
         let cookies = Cookies::from_parts(&parts).unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");

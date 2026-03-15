@@ -1,12 +1,12 @@
 //! HTTP/2 resource and backpressure limits.
 //!
 //! This module provides configuration for HTTP/2 resource usage
-//! and backpressure management. 
+//! and backpressure management.
 //!
 //! [`Http2Limits`] allows you to safely control concurrency and memory
 //! usage per connection.
 //!
-//! Defaults are chosen to be safe for most workloads. 
+//! Defaults are chosen to be safe for most workloads.
 //! Disabling limits ([`Limit::Unlimited`]) should only be done in
 //! trusted environments.
 //!
@@ -21,8 +21,8 @@
 //!         .with_max_frame_size(Limit::Unlimited));
 //! ```
 
-use crate::App;
 use super::Limit;
+use crate::App;
 
 /// HTTP/2 resource and backpressure limits.
 ///
@@ -43,7 +43,7 @@ pub struct Http2Limits {
     pub(crate) max_pending_reset_streams: Limit<usize>,
 
     /// Maximum number of local reset streams allowed before a `GOAWAY` will be sent.
-    pub(crate) max_local_error_reset_streams: Limit<usize>
+    pub(crate) max_local_error_reset_streams: Limit<usize>,
 }
 
 impl Default for Http2Limits {
@@ -53,7 +53,7 @@ impl Default for Http2Limits {
             max_concurrent_streams: Limit::Default,
             max_frame_size: Limit::Default,
             max_pending_reset_streams: Limit::Default,
-            max_local_error_reset_streams: Limit::Default
+            max_local_error_reset_streams: Limit::Default,
         }
     }
 }
@@ -61,7 +61,7 @@ impl Default for Http2Limits {
 impl Http2Limits {
     /// Creates a new [`Http2Limits`] with default values
     #[inline]
-    pub fn new() -> Self { 
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -176,7 +176,7 @@ impl App {
     ///
     /// ```rust
     /// use volga::{App, Limit};
-    /// 
+    ///
     /// let app = App::new()
     ///     .with_http2_limits(|limits| limits
     ///         .with_max_concurrent_streams(Limit::Limited(200))
@@ -185,7 +185,7 @@ impl App {
     /// ```
     pub fn with_http2_limits<F>(mut self, config: F) -> Self
     where
-        F: FnOnce(Http2Limits) -> Http2Limits
+        F: FnOnce(Http2Limits) -> Http2Limits,
     {
         self.http2_limits = config(self.http2_limits);
         self
@@ -198,20 +198,27 @@ mod tests {
 
     #[test]
     fn it_sets_http2_limits() {
-        let app = App::new()
-            .with_http2_limits(|limits| limits
+        let app = App::new().with_http2_limits(|limits| {
+            limits
                 .with_max_concurrent_streams(Limit::Limited(100))
                 .with_max_frame_size(Limit::Default)
                 .with_max_pending_reset_streams(Limit::Limited(1024))
-                .with_max_local_error_reset_streams(Limit::Unlimited));
+                .with_max_local_error_reset_streams(Limit::Unlimited)
+        });
 
         assert_eq!(app.http2_limits.max_concurrent_streams, Limit::Limited(100));
-        assert_eq!(app.http2_limits.max_pending_reset_streams, Limit::Limited(1024));
+        assert_eq!(
+            app.http2_limits.max_pending_reset_streams,
+            Limit::Limited(1024)
+        );
         assert_eq!(app.http2_limits.max_frame_size, Limit::Default);
-        assert_eq!(app.http2_limits.max_local_error_reset_streams, Limit::Unlimited);
+        assert_eq!(
+            app.http2_limits.max_local_error_reset_streams,
+            Limit::Unlimited
+        );
     }
 
-        #[test]
+    #[test]
     fn it_creates_and_configures_http2_limits() {
         let limits = Http2Limits::new()
             .with_max_concurrent_streams(Limit::Limited(100))

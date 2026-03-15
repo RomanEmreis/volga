@@ -1,16 +1,10 @@
 //! Represents tools for "local" middleware
 
 use crate::http::endpoints::handlers::RouteHandler;
-use crate::{status, HttpResult};
+use crate::{HttpResult, status};
 
 #[cfg(feature = "middleware")]
-use crate::middleware::{
-    from_handler,
-    HttpContext,
-    Middlewares,
-    MiddlewareFn,
-    NextFn,
-};
+use crate::middleware::{HttpContext, MiddlewareFn, Middlewares, NextFn, from_handler};
 
 #[cfg(not(feature = "middleware"))]
 use crate::http::request::HttpRequest;
@@ -55,7 +49,7 @@ impl From<Layer> for MiddlewareFn {
     fn from(layer: Layer) -> Self {
         match layer {
             Layer::Middleware(mw) => mw,
-            Layer::Handler(handler) => from_handler(handler)
+            Layer::Handler(handler) => from_handler(handler),
         }
     }
 }
@@ -68,7 +62,7 @@ pub(crate) enum RoutePipeline {
     #[cfg(feature = "middleware")]
     Middleware(Option<NextFn>),
     #[cfg(not(feature = "middleware"))]
-    Handler(Option<RouteHandler>)
+    Handler(Option<RouteHandler>),
 }
 
 impl From<Layer> for RoutePipeline {
@@ -110,8 +104,8 @@ impl RoutePipeline {
             Self::Middleware(Some(next)) => {
                 let next = next.clone();
                 next(ctx).await
-            },
-            _ => status!(405)
+            }
+            _ => status!(405),
         }
     }
 
@@ -120,7 +114,7 @@ impl RoutePipeline {
     pub(crate) async fn call(self, req: HttpRequest) -> HttpResult {
         match self {
             Self::Handler(Some(handler)) => handler.call(req).await,
-            _ => status!(405)
+            _ => status!(405),
         }
     }
 
@@ -130,12 +124,12 @@ impl RoutePipeline {
         let next = match self {
             Self::Middleware(_) => return,
             Self::Builder(mx) => {
-                // Unlike global, in route middlewares the route handler 
-                // initially locates at the beginning of the pipeline, 
+                // Unlike global, in route middlewares the route handler
+                // initially locates at the beginning of the pipeline,
                 // so we need to take it to the end
                 mx.pipeline.rotate_left(1);
                 mx.compose()
-            },
+            }
         };
         *self = Self::Middleware(next)
     }
@@ -143,11 +137,11 @@ impl RoutePipeline {
 
 #[cfg(all(test, not(feature = "middleware")))]
 mod tests {
-    use std::sync::Arc;
-    use futures_util::future::BoxFuture;
-    use crate::{HttpRequest, HttpResult, status};
-    use crate::http::endpoints::handlers::{Handler, RouteHandler};
     use super::{Layer, RoutePipeline};
+    use crate::http::endpoints::handlers::{Handler, RouteHandler};
+    use crate::{HttpRequest, HttpResult, status};
+    use futures_util::future::BoxFuture;
+    use std::sync::Arc;
 
     struct NoopHandler;
 

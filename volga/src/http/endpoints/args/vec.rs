@@ -1,18 +1,18 @@
 //! Extractor for [Vec<T>] that is basically [`Json<Vec<T>>`] and deserialized from JSON array
 
-use serde::de::DeserializeOwned;
 use pin_project_lite::pin_project;
+use serde::de::DeserializeOwned;
 use std::{
-    task::{Context, Poll},
-    marker::PhantomData,
     future::Future,
-    pin::Pin
+    marker::PhantomData,
+    pin::Pin,
+    task::{Context, Poll},
 };
 
 use crate::{
-    http::endpoints::args::{FromPayload, Payload, Source},
     Json,
-    error::Error
+    error::Error,
+    http::endpoints::args::{FromPayload, Payload, Source},
 };
 
 pin_project! {
@@ -43,33 +43,33 @@ where
 
 impl<T> FromPayload for Vec<T>
 where
-    T: DeserializeOwned + Send
+    T: DeserializeOwned + Send,
 {
     type Future = ExtractVecFromPayloadFut<T, <Json<Vec<T>> as FromPayload>::Future>;
 
     const SOURCE: Source = Source::Body;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         ExtractVecFromPayloadFut {
             inner: Json::<Vec<T>>::from_payload(payload),
-            _marker: PhantomData
+            _marker: PhantomData,
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use serde::{Deserialize, Serialize};
-    use crate::HttpBody;
     use super::*;
+    use crate::HttpBody;
+    use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, Ord, PartialOrd, PartialEq, Eq)]
     struct User {
         age: i32,
         name: String,
     }
-    
+
     #[tokio::test]
     async fn it_extracts_vec_of_integers() {
         let body = HttpBody::boxed(HttpBody::json([1, 2, 3]).unwrap());
@@ -99,16 +99,34 @@ mod test {
 
     #[tokio::test]
     async fn it_extracts_vec_of_struct_array() {
-        let body = HttpBody::boxed(HttpBody::json([
-            User { age: 33, name: "John".into() },
-            User { age: 30, name: "Jack".into() }
-        ]).unwrap());
+        let body = HttpBody::boxed(
+            HttpBody::json([
+                User {
+                    age: 33,
+                    name: "John".into(),
+                },
+                User {
+                    age: 30,
+                    name: "Jack".into(),
+                },
+            ])
+            .unwrap(),
+        );
         let payload = Payload::Body(body);
         let fut = <Vec<User> as FromPayload>::from_payload(payload);
         let result = fut.await;
-        assert_eq!(result.unwrap(), vec![
-            User { age: 33, name: "John".into() },
-            User { age: 30, name: "Jack".into() }
-        ]);
+        assert_eq!(
+            result.unwrap(),
+            vec![
+                User {
+                    age: 33,
+                    name: "John".into()
+                },
+                User {
+                    age: 30,
+                    name: "Jack".into()
+                }
+            ]
+        );
     }
 }

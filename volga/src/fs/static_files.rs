@@ -1,28 +1,18 @@
-﻿//! Tools and utilities for handling static files
+//! Tools and utilities for handling static files
 
-use tokio::fs::{File, canonicalize, metadata};
+use crate::{
+    App, HttpResult, NamedPath as RoutePath, app::HostEnv, error::Error, html, html_file,
+    http::StatusCode, routing::RouteGroup, status,
+};
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf}
+    path::{Path, PathBuf},
 };
-use crate::{
-    App,
-    NamedPath as RoutePath,
-    HttpResult,
-    app::HostEnv,
-    http::StatusCode,
-    routing::RouteGroup,
-    error::Error,
-    html_file,
-    html,
-    status
-};
+use tokio::fs::{File, canonicalize, metadata};
 
 use crate::headers::{
-    ResponseCaching,
-    HttpHeaders,
+    CACHE_CONTROL, ETAG, HttpHeaders, LAST_MODIFIED, ResponseCaching,
     helpers::{validate_etag, validate_last_modified},
-    CACHE_CONTROL, LAST_MODIFIED, ETAG
 };
 
 mod file_listing;
@@ -38,7 +28,7 @@ async fn index(env: HostEnv) -> HttpResult {
         let index_path = env.index_path().to_path_buf();
         let metadata = metadata(&index_path).await?;
         let caching = ResponseCaching::try_from(&metadata)?;
-        
+
         respond_with_file_impl(index_path, caching).await
     }
 }
@@ -51,7 +41,7 @@ async fn fallback(env: HostEnv) -> HttpResult {
             let path = path.to_path_buf();
             let metadata = metadata(&path).await?;
             let caching = ResponseCaching::try_from(&metadata)?;
-            
+
             respond_with_file_impl(path, caching).await
         }
     }
@@ -61,20 +51,16 @@ async fn fallback(env: HostEnv) -> HttpResult {
 async fn respond_with_file(
     path: RoutePath<HashMap<String, String>>,
     headers: HttpHeaders,
-    env: HostEnv
+    env: HostEnv,
 ) -> HttpResult {
-    let path = path.values()
-        .fold(PathBuf::new(), |mut acc, v| {
-            acc.push(v);
-            acc
-        });
+    let path = path.values().fold(PathBuf::new(), |mut acc, v| {
+        acc.push(v);
+        acc
+    });
     let path = env.content_root().join(&path);
-    let response = respond_with_file_or_dir_impl(
-        path,
-        headers,
-        env.content_root(),
-        env.show_files_listing()
-    ).await;
+    let response =
+        respond_with_file_or_dir_impl(path, headers, env.content_root(), env.show_files_listing())
+            .await;
     match response {
         Ok(response) => Ok(response),
         Err(err) if err.status == StatusCode::NOT_FOUND => fallback(env).await,
@@ -87,7 +73,7 @@ async fn respond_with_file_or_dir_impl(
     path: PathBuf,
     headers: HttpHeaders,
     content_root: &Path,
-    show_files_listing: bool
+    show_files_listing: bool,
 ) -> HttpResult {
     let (path, content_root) = sanitize_path(path, content_root).await?;
     let metadata = metadata(&path).await?;
@@ -96,8 +82,9 @@ async fn respond_with_file_or_dir_impl(
         (true, true) => respond_with_folder_impl(path, &content_root, false).await,
         (false, _) => {
             let caching = ResponseCaching::try_from(&metadata)?;
-            if validate_etag(&caching.etag, &headers) ||
-                validate_last_modified(caching.last_modified, &headers) {
+            if validate_etag(&caching.etag, &headers)
+                || validate_last_modified(caching.last_modified, &headers)
+            {
                 status!(304; [
                     (ETAG, caching.etag()),
                     (LAST_MODIFIED, caching.last_modified())
@@ -105,16 +92,12 @@ async fn respond_with_file_or_dir_impl(
             } else {
                 respond_with_file_impl(path, caching).await
             }
-        },
+        }
     }
 }
 
 #[inline]
-async fn respond_with_folder_impl(
-    path: PathBuf, 
-    content_root: &Path, 
-    is_root: bool
-) -> HttpResult {
+async fn respond_with_folder_impl(path: PathBuf, content_root: &Path, is_root: bool) -> HttpResult {
     let display_path = if is_root {
         "/".to_string()
     } else {
@@ -123,12 +106,8 @@ async fn respond_with_folder_impl(
             .display()
             .to_string()
     };
-    
-    let html = file_listing::generate_html(
-        &path, 
-        &display_path, 
-        is_root
-    ).await?;
+
+    let html = file_listing::generate_html(&path, &display_path, is_root).await?;
 
     html!(html)
 }
@@ -141,7 +120,7 @@ async fn respond_with_file_impl(path: PathBuf, caching: ResponseCaching) -> Http
             (ETAG, caching.etag()),
             (LAST_MODIFIED, caching.last_modified()),
             (CACHE_CONTROL, caching.cache_control()),
-        ])
+        ]),
     }
 }
 
@@ -150,13 +129,11 @@ async fn sanitize_path(path: PathBuf, content_root: &Path) -> Result<(PathBuf, P
     let content_root = canonicalize(content_root).await?;
     let path = canonicalize(&path).await?;
     if !path.starts_with(&content_root) {
-        return Err(
-            Error::from_parts(
-                StatusCode::FORBIDDEN, 
-                None, 
-                "Access is denied."
-            )
-        );
+        return Err(Error::from_parts(
+            StatusCode::FORBIDDEN,
+            None,
+            "Access is denied.",
+        ));
     }
     Ok((path, content_root))
 }
@@ -184,7 +161,7 @@ impl RouteGroup<'_> {
     /// Configures a static asset
     ///
     /// All the `GET`/`HEAD` requests to root `/` will be redirected to `/index.html`
-    /// as well as all the `GET`/`HEAD` requests to `/{file_name}` 
+    /// as well as all the `GET`/`HEAD` requests to `/{file_name}`
     /// will respond with the appropriate page
     ///    
     /// # Example
@@ -216,7 +193,7 @@ impl RouteGroup<'_> {
 
     /// Configures a static files server
     ///
-    /// This method combines logic [`App::map_static_assets`] and [`App::map_fallback_to_file`]. 
+    /// This method combines logic [`App::map_static_assets`] and [`App::map_fallback_to_file`].
     /// The last one is called if the `fallback_path` is explicitly provided in [`HostEnv`].
     ///    
     /// # Example
@@ -246,7 +223,7 @@ impl RouteGroup<'_> {
 impl App {
     /// Configures a static files server
     ///
-    /// This method combines logic [`App::map_static_assets`] and [`App::map_fallback_to_file`]. 
+    /// This method combines logic [`App::map_static_assets`] and [`App::map_fallback_to_file`].
     /// The last one is called if the `fallback_path` is explicitly provided in [`HostEnv`].
     ///    
     /// # Example
@@ -267,14 +244,14 @@ impl App {
         if self.host_env.fallback_path().is_some() {
             self.map_fallback_to_file();
         }
-        
+
         self.map_static_assets()
     }
 
     /// Configures a static asset
     ///
     /// All the `GET`/`HEAD` requests to root `/` will be redirected to `/index.html`
-    /// as well as all the `GET`/`HEAD` requests to `/{file_name}` 
+    /// as well as all the `GET`/`HEAD` requests to `/{file_name}`
     /// will respond with the appropriate page
     ///    
     /// # Example
@@ -296,7 +273,7 @@ impl App {
         let mut segment = String::new();
         for i in 0..folder_depth {
             segment.push_str(&format!("/{{path_{i}}}"));
-            self.map_get(&segment, respond_with_file);  
+            self.map_get(&segment, respond_with_file);
         }
         self.map_get("/", index).app
     }
@@ -327,46 +304,67 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        fallback, index, max_folder_depth, respond_with_file_impl, respond_with_file_or_dir_impl,
+        respond_with_folder_impl,
+    };
+    use crate::app::HostEnv;
+    use crate::headers::{
+        HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
+    };
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
     use tokio::fs::metadata;
-    use crate::app::HostEnv;
-    use crate::headers::{HeaderMap, HeaderValue, HttpHeaders, ResponseCaching, IF_MODIFIED_SINCE, IF_NONE_MATCH};
-    use super::{
-        index, fallback, respond_with_folder_impl, respond_with_file_impl,
-        respond_with_file_or_dir_impl, max_folder_depth
-    };
-    
+
     #[tokio::test]
     async fn it_returns_index() {
         let env = HostEnv::new("tests/static");
-        
+
         let index_response = index(env).await;
-        
+
         assert!(index_response.is_ok());
-        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
+        assert_eq!(
+            index_response
+                .unwrap()
+                .headers()
+                .get("Content-Type")
+                .unwrap(),
+            "text/html"
+        );
     }
 
     #[tokio::test]
     async fn it_returns_root_folder_files_listing() {
-        let env = HostEnv::new("tests/static")
-            .with_files_listing();
+        let env = HostEnv::new("tests/static").with_files_listing();
 
         let index_response = index(env).await;
 
         assert!(index_response.is_ok());
-        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
+        assert_eq!(
+            index_response
+                .unwrap()
+                .headers()
+                .get("Content-Type")
+                .unwrap(),
+            "text/html; charset=utf-8"
+        );
     }
 
     #[tokio::test]
     async fn it_returns_fallback() {
-        let env = HostEnv::new("tests/static")
-            .with_fallback_file("index.html");
+        let env = HostEnv::new("tests/static").with_fallback_file("index.html");
 
         let index_response = fallback(env).await;
 
         assert!(index_response.is_ok());
-        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
+        assert_eq!(
+            index_response
+                .unwrap()
+                .headers()
+                .get("Content-Type")
+                .unwrap(),
+            "text/html"
+        );
     }
 
     #[tokio::test]
@@ -387,7 +385,14 @@ mod tests {
         let index_response = respond_with_file_impl(path, resp_caching).await;
 
         assert!(index_response.is_ok());
-        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
+        assert_eq!(
+            index_response
+                .unwrap()
+                .headers()
+                .get("Content-Type")
+                .unwrap(),
+            "text/html"
+        );
     }
 
     #[tokio::test]
@@ -396,9 +401,16 @@ mod tests {
         let index_response = respond_with_folder_impl(path.clone(), &path, true).await;
 
         assert!(index_response.is_ok());
-        assert_eq!(index_response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
+        assert_eq!(
+            index_response
+                .unwrap()
+                .headers()
+                .get("Content-Type")
+                .unwrap(),
+            "text/html; charset=utf-8"
+        );
     }
-    
+
     #[tokio::test]
     async fn it_responds_with_directory_listing() {
         let path = PathBuf::from("tests/static");
@@ -406,7 +418,10 @@ mod tests {
         let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, true).await;
 
         assert!(response.is_ok());
-        assert_eq!(response.unwrap().headers().get("Content-Type").unwrap(), "text/html; charset=utf-8");
+        assert_eq!(
+            response.unwrap().headers().get("Content-Type").unwrap(),
+            "text/html; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -427,7 +442,10 @@ mod tests {
         let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
 
         assert!(response.is_ok());
-        assert_eq!(response.unwrap().headers().get("Content-Type").unwrap(), "text/html");
+        assert_eq!(
+            response.unwrap().headers().get("Content-Type").unwrap(),
+            "text/html"
+        );
     }
 
     #[tokio::test]
@@ -436,7 +454,10 @@ mod tests {
         let now = SystemTime::now() - Duration::from_secs(10);
 
         let mut headers = HeaderMap::new();
-        headers.insert(IF_MODIFIED_SINCE, HeaderValue::from_str(&httpdate::fmt_http_date(now)).unwrap());
+        headers.insert(
+            IF_MODIFIED_SINCE,
+            HeaderValue::from_str(&httpdate::fmt_http_date(now)).unwrap(),
+        );
 
         let headers = HttpHeaders::from(headers);
         let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
@@ -459,11 +480,11 @@ mod tests {
         assert!(response.is_ok());
         assert_eq!(response.unwrap().status(), 304);
     }
-    
+
     #[test]
     fn it_calculates_max_folder_depth() {
         let depth = max_folder_depth("tests");
-        
+
         assert_eq!(depth, 2);
     }
 }

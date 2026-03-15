@@ -1,12 +1,12 @@
 //! [`From ] trait implementations from various types into HTTP Body
 
-use crate::{Json, Form, HttpBody};
 use crate::error::Error;
-use tokio::fs::File;
-use std::convert::Infallible;
-use std::{borrow::Cow, str::FromStr};
+use crate::{Form, HttpBody, Json};
 use bytes::Bytes;
 use serde::Serialize;
+use std::convert::Infallible;
+use std::{borrow::Cow, str::FromStr};
+use tokio::fs::File;
 
 impl FromStr for HttpBody {
     type Err = Infallible;
@@ -107,9 +107,9 @@ macro_rules! impl_into_body {
 }
 
 impl_into_body! {
-    bool, 
-    char, 
-    f32, 
+    bool,
+    char,
+    f32,
     f64
 }
 
@@ -130,10 +130,7 @@ mod tests {
     use std::borrow::Cow;
 
     async fn collect_bytes(body: HttpBody) -> Bytes {
-        let collected = body
-            .collect()
-            .await
-            .expect("body collection must succeed");
+        let collected = body.collect().await.expect("body collection must succeed");
 
         collected.to_bytes()
     }
@@ -192,13 +189,13 @@ mod tests {
 
     #[tokio::test]
     async fn from_file_streams_file_contents() {
-        let tmp = crate::test::TempFile::new("file-body").await;    
+        let tmp = crate::test::TempFile::new("file-body").await;
 
         let f = tokio::fs::File::open(&tmp.path)
             .await
-            .expect("open temp file");  
+            .expect("open temp file");
 
-        let body: HttpBody = f.into();  
+        let body: HttpBody = f.into();
 
         let bytes = collect_bytes(body).await;
         assert_eq!(&bytes[..], b"file-body");
@@ -269,7 +266,10 @@ mod tests {
         let v: i128 = -123456789012345678901234567890_i128;
         let body: HttpBody = v.into();
         let bytes = collect_bytes(body).await;
-        assert_eq!(std::str::from_utf8(&bytes).unwrap(), "-123456789012345678901234567890");
+        assert_eq!(
+            std::str::from_utf8(&bytes).unwrap(),
+            "-123456789012345678901234567890"
+        );
     }
 
     // --------------------------
@@ -284,7 +284,10 @@ mod tests {
 
     #[tokio::test]
     async fn try_from_json_serializes_to_json_bytes() {
-        let payload = TestJson { name: "volga", value: 42 };
+        let payload = TestJson {
+            name: "volga",
+            value: 42,
+        };
         let body = HttpBody::try_from(Json(payload)).expect("json serialization must succeed");
 
         let bytes = collect_bytes(body).await;
@@ -318,9 +321,12 @@ mod tests {
     async fn it_works_with_str() {
         let string = String::from("Hello, World!");
         let body = HttpBody::from_str(string.as_str()).unwrap();
-        
+
         let collected = body.collect().await;
-        
-        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+
+        assert_eq!(
+            String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(),
+            "Hello, World!"
+        );
     }
 }

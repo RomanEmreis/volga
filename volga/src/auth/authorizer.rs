@@ -1,8 +1,8 @@
 //! Generic authorization tools
 
+use super::AuthClaims;
 use std::collections::HashSet;
 use std::sync::Arc;
-use super::AuthClaims;
 
 pub(super) const DEFAULT_ERROR_MSG: &str = "Bearer error=\"insufficient_scope\" error_description=\"User does not have required role or permission\"";
 
@@ -23,10 +23,7 @@ where
     S: Into<String>,
     I: IntoIterator<Item = S>,
 {
-    Authorizer::Role(roles
-        .into_iter()
-        .map(Into::into)
-        .collect())
+    Authorizer::Role(roles.into_iter().map(Into::into).collect())
 }
 
 /// Creates an [`Authorizer::Permission`] authorizer for a single permission.
@@ -44,10 +41,7 @@ where
     S: Into<String>,
     I: IntoIterator<Item = S>,
 {
-    Authorizer::Permission(permissions
-        .into_iter()
-        .map(Into::into)
-        .collect())
+    Authorizer::Permission(permissions.into_iter().map(Into::into).collect())
 }
 
 /// Creates an [`Authorizer::Predicate`] authorizer from a closure or function.
@@ -75,23 +69,23 @@ pub type ClaimsValidator<C> = dyn Fn(&C) -> bool + Send + Sync + 'static;
 /// ```no_run
 /// use volga::auth::{Authorizer, AuthClaims, role, roles};
 /// use serde::Deserialize;
-/// 
+///
 /// #[derive(Clone, Deserialize)]
 /// struct MyClaims {
 ///     role: String
 /// }
-/// 
+///
 /// impl AuthClaims for MyClaims {
 ///     fn role(&self) -> Option<&str> {
 ///         Some(self.role.as_str())
 ///     }
 /// }
-/// 
+///
 /// let admin_only = role("admin");
 /// let any_editor = roles(["editor", "contributor"]);
-/// 
+///
 /// let access: Authorizer<MyClaims> = admin_only.or(any_editor);
-/// 
+///
 /// assert!(access.validate(&MyClaims { role: "admin".to_string() }));
 /// assert!(access.validate(&MyClaims { role: "editor".to_string() }));
 /// assert!(access.validate(&MyClaims { role: "contributor".to_string() }));
@@ -140,25 +134,19 @@ impl<C: AuthClaims> Authorizer<C> {
     pub fn validate(&self, claims: &C) -> bool {
         match self {
             Authorizer::Predicate(pred) => pred(claims),
-            Authorizer::And(auths) => auths
-                .iter()
-                .all(|a| a.validate(claims)),
-            Authorizer::Or(auths) => auths
-                .iter()
-                .any(|a| a.validate(claims)),
-            Authorizer::Role(roles) => {
-                match (claims.role(), claims.roles()) {
-                    (Some(r), None) => roles.contains(r),
-                    (_, Some(rs)) => rs.iter().any(|r| roles.contains(r)),
-                    (None, None) => false,
-                }
+            Authorizer::And(auths) => auths.iter().all(|a| a.validate(claims)),
+            Authorizer::Or(auths) => auths.iter().any(|a| a.validate(claims)),
+            Authorizer::Role(roles) => match (claims.role(), claims.roles()) {
+                (Some(r), None) => roles.contains(r),
+                (_, Some(rs)) => rs.iter().any(|r| roles.contains(r)),
+                (None, None) => false,
             },
             Authorizer::Permission(perms) => claims
                 .permissions()
-                .is_some_and(|p| p.iter().any(|perm| perms.contains(perm)))
+                .is_some_and(|p| p.iter().any(|perm| perms.contains(perm))),
         }
     }
-    
+
     /// Combines the current authorizer with another one via logical **AND** (And).
     ///
     /// If both operands are already `And`, then their contents are combined into one list.
@@ -207,7 +195,7 @@ impl<C: AuthClaims> Authorizer<C> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Authorizer, AuthClaims, role, roles};
+    use super::{AuthClaims, Authorizer, role, roles};
 
     #[derive(Clone, serde::Deserialize)]
     struct Claims {
@@ -219,7 +207,7 @@ mod tests {
             Some(&self.role)
         }
     }
-    
+
     #[test]
     fn it_tests_the_and_flattening() {
         let a = role::<Claims>("admin");
@@ -232,9 +220,15 @@ mod tests {
         match abc {
             Authorizer::And(inner) => {
                 assert_eq!(inner.len(), 3);
-                assert!(matches!(inner[0], Authorizer::Role(ref s) if s.contains(&"admin".to_owned())));
-                assert!(matches!(inner[1], Authorizer::Role(ref s) if s.contains(&"editor".to_owned())));
-                assert!(matches!(inner[2], Authorizer::Role(ref s) if s.contains(&"moderator".to_owned())));
+                assert!(
+                    matches!(inner[0], Authorizer::Role(ref s) if s.contains(&"admin".to_owned()))
+                );
+                assert!(
+                    matches!(inner[1], Authorizer::Role(ref s) if s.contains(&"editor".to_owned()))
+                );
+                assert!(
+                    matches!(inner[2], Authorizer::Role(ref s) if s.contains(&"moderator".to_owned()))
+                );
             }
             _ => panic!("Expected And variant"),
         }
@@ -252,9 +246,15 @@ mod tests {
         match abc {
             Authorizer::Or(inner) => {
                 assert_eq!(inner.len(), 3);
-                assert!(matches!(inner[0], Authorizer::Role(ref s) if s.contains(&"admin".to_owned())));
-                assert!(matches!(inner[1], Authorizer::Role(ref s) if s.contains(&"editor".to_owned())));
-                assert!(matches!(inner[2], Authorizer::Role(ref s) if s.contains(&"viewer".to_owned())));
+                assert!(
+                    matches!(inner[0], Authorizer::Role(ref s) if s.contains(&"admin".to_owned()))
+                );
+                assert!(
+                    matches!(inner[1], Authorizer::Role(ref s) if s.contains(&"editor".to_owned()))
+                );
+                assert!(
+                    matches!(inner[2], Authorizer::Role(ref s) if s.contains(&"viewer".to_owned()))
+                );
             }
             _ => panic!("Expected Or variant"),
         }
@@ -278,7 +278,9 @@ mod tests {
                     }
                     _ => panic!("Expected Or inside And[0]"),
                 }
-                assert!(matches!(inner[1], Authorizer::Role(ref s) if s.contains(&"moderator".to_owned())));
+                assert!(
+                    matches!(inner[1], Authorizer::Role(ref s) if s.contains(&"moderator".to_owned()))
+                );
             }
             _ => panic!("Expected And variant"),
         }

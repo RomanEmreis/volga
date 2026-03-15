@@ -1,7 +1,7 @@
 //! Tools and structs for a token bucket rate limiting configuration
 
-use std::time::Duration;
 use super::TokenBucketRateLimiter;
+use std::time::Duration;
 
 /// Configuration for a **Token Bucket** rate limiting policy.
 ///
@@ -16,8 +16,8 @@ pub struct TokenBucket {
     pub(super) name: Option<String>,
 
     /// Maximum number of tokens in the bucket.
-    capacity: u64, 
-    
+    capacity: u64,
+
     /// Tokens added per second.
     refill_rate: f64,
 
@@ -46,7 +46,7 @@ impl TokenBucket {
             name: None,
             eviction: None,
             capacity,
-            refill_rate
+            refill_rate,
         }
     }
 
@@ -67,10 +67,7 @@ impl TokenBucket {
     /// Builds a `TokenBucketRateLimiter` instance based on this policy.
     #[inline]
     pub(super) fn build(&self) -> TokenBucketRateLimiter {
-        let mut limiter = TokenBucketRateLimiter::new(
-            self.capacity,
-            self.refill_rate
-        );
+        let mut limiter = TokenBucketRateLimiter::new(self.capacity, self.refill_rate);
 
         if let Some(eviction) = self.eviction {
             limiter.set_eviction(eviction);
@@ -97,16 +94,14 @@ mod tests {
 
     #[test]
     fn it_sets_eviction_period() {
-        let policy = TokenBucket::new(100, 1.0)
-            .with_eviction(Duration::from_secs(300));
+        let policy = TokenBucket::new(100, 1.0).with_eviction(Duration::from_secs(300));
 
         assert_eq!(policy.eviction, Some(Duration::from_secs(300)));
     }
 
     #[test]
     fn it_sets_policy_name_from_string() {
-        let policy = TokenBucket::new(100, 1.0)
-            .with_name("api_limiter");
+        let policy = TokenBucket::new(100, 1.0).with_name("api_limiter");
 
         assert_eq!(policy.name, Some("api_limiter".to_string()));
     }
@@ -114,8 +109,7 @@ mod tests {
     #[test]
     fn it_sets_policy_name_from_string_slice() {
         let name = String::from("test_policy");
-        let policy = TokenBucket::new(100, 1.0)
-            .with_name(name.clone());
+        let policy = TokenBucket::new(100, 1.0).with_name(name.clone());
 
         assert_eq!(policy.name, Some(name));
     }
@@ -144,8 +138,7 @@ mod tests {
 
     #[test]
     fn it_builds_rate_limiter_with_eviction() {
-        let policy = TokenBucket::new(100, 1.0)
-            .with_eviction(Duration::from_secs(300));
+        let policy = TokenBucket::new(100, 1.0).with_eviction(Duration::from_secs(300));
         let limiter = policy.build();
 
         assert_eq!(limiter.capacity(), 100);
@@ -176,10 +169,8 @@ mod tests {
 
     #[test]
     fn it_creates_multiple_independent_policies() {
-        let policy1 = TokenBucket::new(100, 1.0)
-            .with_name("policy1");
-        let policy2 = TokenBucket::new(200, 2.0)
-            .with_name("policy2");
+        let policy1 = TokenBucket::new(100, 1.0).with_name("policy1");
+        let policy2 = TokenBucket::new(200, 2.0).with_name("policy2");
 
         assert_eq!(policy1.capacity, 100);
         assert_eq!(policy2.capacity, 200);

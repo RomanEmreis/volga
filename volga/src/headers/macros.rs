@@ -1,4 +1,4 @@
-﻿//! Helper macros for HTTP headers
+//! Helper macros for HTTP headers
 
 /// Declares a custom HTTP headers structure
 ///
@@ -47,7 +47,7 @@ macro_rules! headers {
 
             impl $crate::headers::FromHeaders for $struct_name {
                 const NAME: $crate::headers::HeaderName = $crate::headers::HeaderName::from_static($header_name);
-                
+
                 #[inline]
                 fn from_headers(headers: &$crate::headers::HeaderMap) -> Option<&$crate::headers::HeaderValue> {
                     headers.get(Self::NAME)
@@ -63,19 +63,19 @@ pub use headers;
 #[allow(unreachable_pub)]
 #[allow(unused)]
 mod test {
-    use hyper::header::HeaderValue;
+    use crate::headers::{FromHeaders, Header};
     use hyper::HeaderMap;
-    use crate::headers::{Header, FromHeaders};
-    
+    use hyper::header::HeaderValue;
+
     headers! {
         (ApiKey, "x-api-key")
     }
-    
+
     #[test]
     fn it_creates_custom_headers() {
         let api_key = HeaderValue::from_str("some-api-key").unwrap();
         let api_key_header = Header::<ApiKey>::from_ref(&api_key);
-        
+
         assert_eq!(api_key_header.value(), "some-api-key");
         assert_eq!(ApiKey::NAME, "x-api-key");
     }
@@ -83,10 +83,10 @@ mod test {
     #[test]
     fn it_gets_custom_headers_from_map() {
         let api_key = HeaderValue::from_str("some-api-key").unwrap();
-        
+
         let mut map = HeaderMap::new();
         map.insert("x-api-key", api_key);
-        
+
         let api_key_header = Header::<ApiKey>::from_headers_map(&map).unwrap();
 
         assert_eq!(api_key_header.as_ref(), "some-api-key");

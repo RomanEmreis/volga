@@ -1,7 +1,7 @@
 //! Tools and structs for a GCRA (Generic Cell Rate Algorithm) rate limiting configuration
 
-use std::time::Duration;
 use super::GcraRateLimiter;
+use std::time::Duration;
 
 /// Configuration for a [**GCRA (Generic Cell Rate Algorithm)**](https://en.wikipedia.org/wiki/Generic_cell_rate_algorithm) rate limiting policy.
 ///
@@ -45,7 +45,7 @@ impl Gcra {
             name: None,
             eviction: None,
             rate_per_second,
-            burst
+            burst,
         }
     }
 
@@ -66,10 +66,7 @@ impl Gcra {
     /// Builds a `GcraRateLimiter` instance based on this policy.
     #[inline]
     pub(super) fn build(&self) -> GcraRateLimiter {
-        let mut limiter = GcraRateLimiter::new(
-            self.rate_per_second,
-            self.burst
-        );
+        let mut limiter = GcraRateLimiter::new(self.rate_per_second, self.burst);
 
         if let Some(eviction) = self.eviction {
             limiter.set_eviction(eviction);
@@ -96,16 +93,14 @@ mod tests {
 
     #[test]
     fn it_sets_eviction_period() {
-        let policy = Gcra::new(1.0, 1)
-            .with_eviction(Duration::from_secs(300));
+        let policy = Gcra::new(1.0, 1).with_eviction(Duration::from_secs(300));
 
         assert_eq!(policy.eviction, Some(Duration::from_secs(300)));
     }
 
     #[test]
     fn it_sets_policy_name_from_string() {
-        let policy = Gcra::new(1.0, 1)
-            .with_name("api_limiter");
+        let policy = Gcra::new(1.0, 1).with_name("api_limiter");
 
         assert_eq!(policy.name, Some("api_limiter".to_string()));
     }
@@ -113,8 +108,7 @@ mod tests {
     #[test]
     fn it_sets_policy_name_from_string_slice() {
         let name = String::from("test_policy");
-        let policy = Gcra::new(1.0, 1)
-            .with_name(name.clone());
+        let policy = Gcra::new(1.0, 1).with_name(name.clone());
 
         assert_eq!(policy.name, Some(name));
     }
@@ -143,8 +137,7 @@ mod tests {
 
     #[test]
     fn it_builds_rate_limiter_with_eviction() {
-        let policy = Gcra::new(1.0, 1)
-            .with_eviction(Duration::from_secs(300));
+        let policy = Gcra::new(1.0, 1).with_eviction(Duration::from_secs(300));
         let limiter = policy.build();
 
         assert_eq!(limiter.rate_per_second(), 1.0);
@@ -168,10 +161,8 @@ mod tests {
 
     #[test]
     fn it_creates_multiple_independent_policies() {
-        let policy1 = Gcra::new(1.0, 1)
-            .with_name("policy1");
-        let policy2 = Gcra::new(1.0, 3)
-            .with_name("policy2");
+        let policy1 = Gcra::new(1.0, 1).with_name("policy1");
+        let policy2 = Gcra::new(1.0, 3).with_name("policy2");
 
         assert_eq!(policy1.burst, 1);
         assert_eq!(policy2.burst, 3);

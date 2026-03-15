@@ -1,23 +1,18 @@
-﻿//! HTTP request utilities
+//! HTTP request utilities
 
-use query_args::{QueryArgsIter, QueryArgsCache};
-use hyper::body::Incoming;
-use std::sync::OnceLock;
 use crate::{
+    HttpBody,
     error::Error,
     headers::{FromHeaders, Header},
-    HttpBody,
 };
+use hyper::body::Incoming;
+use query_args::{QueryArgsCache, QueryArgsIter};
+use std::sync::OnceLock;
 
 use crate::http::{
-    endpoints::{args::FromRequestRef, route::PathArgs}, 
+    Extensions, Method, Parts, Request, Uri, Version,
+    endpoints::{args::FromRequestRef, route::PathArgs},
     request::request_body_limit::RequestBodyLimit,
-    Request,
-    Parts,
-    Extensions,
-    Method,
-    Uri,
-    Version
 };
 
 use crate::headers::HeaderMap;
@@ -25,10 +20,10 @@ use crate::headers::HeaderMap;
 #[cfg(feature = "middleware")]
 pub use request_mut::{HttpRequestMut, IntoTapResult};
 
-#[cfg(feature = "middleware")]
-mod request_mut;
 mod query_args;
 pub mod request_body_limit;
+#[cfg(feature = "middleware")]
+mod request_mut;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
@@ -47,20 +42,20 @@ impl std::fmt::Debug for HttpRequest {
 impl HttpRequest {
     /// Creates a new [`HttpRequest`]
     pub(crate) fn new(request: Request<Incoming>) -> Self {
-        Self { 
+        Self {
             inner: request.map(HttpBody::incoming),
-            query_args_cache: OnceLock::new()
+            query_args_cache: OnceLock::new(),
         }
     }
 
     /// Returns a reference to the associated URI.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, HttpRequest};
-    /// 
+    ///
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_get("/", |req: HttpRequest| async move {
     ///     assert_eq!(req.uri(), "/");
     /// });
@@ -69,7 +64,7 @@ impl HttpRequest {
     pub fn uri(&self) -> &Uri {
         self.inner.uri()
     }
-    
+
     /// Returns a reference to the associated HTTP header map.
     ///
     /// # Example
@@ -93,9 +88,9 @@ impl HttpRequest {
     pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
         self.inner.headers_mut()
     }
-    
+
     /// Returns a reference to the associated HTTP method.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, HttpRequest, http::Method};
@@ -116,7 +111,7 @@ impl HttpRequest {
     pub fn version(&self) -> Version {
         self.inner.version()
     }
-    
+
     /// Returns a reference to the associated extensions.
     #[inline]
     pub(crate) fn extensions(&self) -> &Extensions {
@@ -132,7 +127,8 @@ impl HttpRequest {
 
     /// Returns this [`HttpRequest`] body limit.
     pub fn body_limit(&self) -> Option<usize> {
-        self.inner.extensions()
+        self.inner
+            .extensions()
             .get::<RequestBodyLimit>()
             .and_then(|l| match l {
                 RequestBodyLimit::Enabled(size) => Some(*size),
@@ -157,7 +153,7 @@ impl HttpRequest {
     pub fn into_body(self) -> HttpBody {
         self.inner.into_body()
     }
-    
+
     /// Consumes the request and returns request head and body
     pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
         self.inner.into_parts()
@@ -166,12 +162,12 @@ impl HttpRequest {
     /// Creates a new `HttpRequest` with the given head and body
     pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
         let request = Request::from_parts(parts, body);
-        Self { 
-            inner: request, 
-            query_args_cache: OnceLock::new()
+        Self {
+            inner: request,
+            query_args_cache: OnceLock::new(),
         }
     }
-    
+
     /// Extracts a payload from request parts
     ///
     /// # Example
@@ -188,7 +184,7 @@ impl HttpRequest {
     /// # fn docs(req: HttpRequest) -> std::io::Result<()> {
     /// // https://www.example.com?key=1&value=test
     /// let params: Query<Params> = req.extract()?;
-    /// 
+    ///
     /// assert_eq!(params.key, 1u32);
     /// assert_eq!(params.value, "test");
     /// # Ok(())
@@ -209,24 +205,26 @@ impl HttpRequest {
     /// // https://www.example.com/{key}/{value}
     /// // https://www.example.com/1/test
     /// let mut args = req.path_args();
-    /// 
+    ///
     /// assert_eq!(args.next().unwrap(), ("key", "1"));
     /// assert_eq!(args.next().unwrap(), ("value", "test"));
     /// # Ok(())
     /// # }
     /// ```
     pub fn path_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.inner.extensions()
+        self.inner
+            .extensions()
             .get::<PathArgs>()
-            .map(|args| args
-                .iter()
-                .map(|arg| (arg.name.as_ref(), arg.value.as_ref())))
+            .map(|args| {
+                args.iter()
+                    .map(|arg| (arg.name.as_ref(), arg.value.as_ref()))
+            })
             .into_iter()
             .flatten()
     }
 
     /// Returns iterator of URL query params
-    /// 
+    ///
     /// > Note: Only `key=value` pairs are yielded. Arguments without `=` are ignored.
     ///
     /// # Example
@@ -236,7 +234,7 @@ impl HttpRequest {
     /// # fn docs(req: HttpRequest) -> std::io::Result<()> {
     /// // https://www.example.com?key=1&value=test
     /// let mut args = req.query_args();
-    /// 
+    ///
     /// assert_eq!(args.next().unwrap(), ("key", "1"));
     /// assert_eq!(args.next().unwrap(), ("value", "test"));
     /// # Ok(())
@@ -253,18 +251,13 @@ impl HttpRequest {
     /// Returns a typed HTTP header value
     #[inline]
     pub fn get_header<T: FromHeaders>(&self) -> Option<Header<T>> {
-        self.headers()
-            .get(T::NAME)
-            .map(Header::from_ref)
+        self.headers().get(T::NAME).map(Header::from_ref)
     }
 
     /// Returns a view of all values associated with this HTTP header.
     #[inline]
     pub fn get_all_headers<T: FromHeaders>(&self) -> impl Iterator<Item = Header<T>> {
-        self.headers()
-            .get_all(T::NAME)
-            .iter()
-            .map(Header::from_ref)
+        self.headers().get_all(T::NAME).iter().map(Header::from_ref)
     }
 }
 
@@ -272,29 +265,31 @@ impl HttpRequest {
 #[allow(unreachable_pub)]
 #[allow(unused)]
 mod tests {
-    use http_body_util::BodyExt;
+    use super::*;
     use crate::headers::{Header, Vary, headers};
     use crate::http::endpoints::route::PathArg;
-    use super::*;
+    use http_body_util::BodyExt;
 
     headers! {
         (Foo, "x-foo")
     }
-    
+
     #[test]
     fn it_inserts_header() {
         let req = Request::get("http://localhost")
             .body(HttpBody::empty())
             .unwrap();
-        
+
         let (parts, body) = req.into_parts();
         let mut http_req = HttpRequest::from_parts(parts, body);
-        
-        http_req.headers_mut().insert("vary", "foo".parse().unwrap());
-        
+
+        http_req
+            .headers_mut()
+            .insert("vary", "foo".parse().unwrap());
+
         assert_eq!(http_req.headers().get("vary").unwrap(), "foo");
     }
-    
+
     #[test]
     fn it_extracts_from_request_ref() {
         let req = Request::get("http://localhost/")
@@ -304,12 +299,12 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        
+
         let header = http_req.extract::<Header<Vary>>().unwrap();
-        
+
         assert_eq!(header.value(), "foo");
     }
-    
+
     #[tokio::test]
     async fn it_unwraps_body() {
         let req = Request::get("http://localhost/")
@@ -318,13 +313,8 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        
-        let body = http_req
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+
+        let body = http_req.into_body().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(&body), "foo");
     }
@@ -338,12 +328,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
 
-        let body = http_req
-            .into_body()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
+        let body = http_req.into_body().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(&body), "foo");
     }
@@ -376,9 +361,16 @@ mod tests {
     #[test]
     fn it_returns_url_path() {
         let args: PathArgs = smallvec::smallvec![
-            PathArg { name: "id".into(), value: "123".into() },
-            PathArg { name: "name".into(), value: "John".into() }
-        ].into();
+            PathArg {
+                name: "id".into(),
+                value: "123".into()
+            },
+            PathArg {
+                name: "name".into(),
+                value: "John".into()
+            }
+        ]
+        .into();
 
         let req = Request::get("/")
             .extension(args)
@@ -412,9 +404,7 @@ mod tests {
 
     #[test]
     fn it_returns_empty_iter_if_no_path_params() {
-        let req = Request::get("/")
-            .body(HttpBody::empty())
-            .unwrap();
+        let req = Request::get("/").body(HttpBody::empty()).unwrap();
 
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
@@ -426,9 +416,7 @@ mod tests {
 
     #[test]
     fn it_returns_empty_iter_if_no_query_params() {
-        let req = Request::get("/")
-            .body(HttpBody::empty())
-            .unwrap();
+        let req = Request::get("/").body(HttpBody::empty()).unwrap();
 
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
@@ -462,7 +450,12 @@ mod tests {
         req.headers_mut().append("x-foo", "1".parse().unwrap());
         req.headers_mut().append("x-foo", "2".parse().unwrap());
 
-        assert_eq!(req.get_all_headers::<Foo>().map(|h| h.value().clone()).collect::<Vec<_>>(), ["1", "2"]);
+        assert_eq!(
+            req.get_all_headers::<Foo>()
+                .map(|h| h.value().clone())
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]

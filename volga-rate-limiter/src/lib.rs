@@ -43,7 +43,7 @@
 //!   - Uses the Generic Cell Rate Algorithm (GCRA)
 //!   - Smooths traffic with explicit burst tolerance
 //!   - Accurate average rate enforcement
-//! 
+//!
 //! ## Time Source Abstraction
 //!
 //! All rate limiters are built on top of a pluggable [`TimeSource`] abstraction.
@@ -81,11 +81,6 @@
 mod rate_limiter;
 
 pub use rate_limiter::{
-    FixedWindowRateLimiter,
-    SlidingWindowRateLimiter,
-    TokenBucketRateLimiter,
-    GcraRateLimiter,
-    SystemTimeSource,
-    TimeSource,
-    RateLimiter
+    FixedWindowRateLimiter, GcraRateLimiter, RateLimiter, SlidingWindowRateLimiter,
+    SystemTimeSource, TimeSource, TokenBucketRateLimiter,
 };

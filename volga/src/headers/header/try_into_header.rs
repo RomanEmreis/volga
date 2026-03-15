@@ -3,7 +3,7 @@
 use super::{FromHeaders, Header, HeaderName, HeaderValue};
 use crate::error::Error;
 
-/// A trait that describes how to convert a type 
+/// A trait that describes how to convert a type
 /// into a raw HTTP [`HeaderName`] and [`HeaderValue`] pair.
 pub trait TryIntoHeaderPair {
     /// Converts into a raw HTTP [`HeaderName`] and [`HeaderValue`] pair.
@@ -35,8 +35,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::headers::ContentType;
     use super::*;
+    use crate::headers::ContentType;
 
     #[test]
     fn it_converts_from_header() {

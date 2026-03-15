@@ -4,9 +4,9 @@
 //! cargo run -p global_error_handler
 //! ```
 
-use volga::{App, status};
 use std::io::Error;
 use tracing_subscriber::prelude::*;
+use volga::{App, status};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -14,8 +14,7 @@ async fn main() -> std::io::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let mut app = App::new()
-        .with_tracing(|tracing| tracing.with_header());
+    let mut app = App::new().with_tracing(|tracing| tracing.with_header());
 
     app.map_get("/error", || async {
         tracing::trace!("producing error");
@@ -26,7 +25,7 @@ async fn main() -> std::io::Result<()> {
     app.map_err(|error: volga::error::Error| async move {
         tracing::error!("{:?}", error);
         status!(error.status.as_u16(), "{error}")
-    });   
+    });
 
     app.run().await
 }

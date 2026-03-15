@@ -1,4 +1,4 @@
-﻿//! Macros for responses with various HTTP statuses.
+//! Macros for responses with various HTTP statuses.
 
 /// Produces a response with the specified HTTP status code.
 ///
@@ -252,7 +252,7 @@ macro_rules! status {
     // status!(401, "Unauthorized!"; [headers])
     ($status:expr, $fmt:literal ; [ $( $header:expr ),* $(,)? ]) => {{
         const __S: &str = $fmt;
-        
+
         if $crate::utils::str::memchr_contains(b'{', __S.as_bytes()) {
             $crate::response!(
                 $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
@@ -334,7 +334,7 @@ mod tests {
 
     #[derive(Serialize)]
     struct TestPayload {
-        name: String
+        name: String,
     }
 
     #[tokio::test]
@@ -366,7 +366,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_200_with_json_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = status!(200, payload);
 
         assert!(response.is_ok());
@@ -430,7 +432,7 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(body), "John is not authorized!");
         assert_eq!(response.status(), 401);
     }
-    
+
     #[tokio::test]
     async fn it_creates_401_response_with_formatted_text_body() {
         let name = "John";
@@ -447,7 +449,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_401_response_with_json_body() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = status!(401, payload);
 
         assert!(response.is_ok());
@@ -500,7 +504,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_403_response_with_json_body() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = status!(403, payload);
 
         assert!(response.is_ok());
@@ -545,7 +551,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_empty_status_response_with_body_and_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = status!(406, payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
@@ -562,7 +570,7 @@ mod tests {
         assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
     }
 
-        #[tokio::test]
+    #[tokio::test]
     async fn it_sets_content_type_for_text_sugar() {
         let response = status!(401, "Unauthorized!");
 
@@ -577,7 +585,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_sets_content_type_for_json_typed() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = status!(401, payload);
 
         assert!(response.is_ok());
@@ -715,7 +725,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_explicit_json_mode_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = status!(401, json: payload);
 
         assert!(response.is_ok());

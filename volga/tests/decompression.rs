@@ -1,20 +1,15 @@
-﻿#![allow(missing_docs)]
+#![allow(missing_docs)]
 #![cfg(all(feature = "test", feature = "decompression-full"))]
 
 use http_body_util::BodyExt;
-use volga::{Json, ok, HttpRequest, Limit};
 use serde_json::{Value, json};
+use volga::{HttpRequest, Json, Limit, ok};
 
-use async_compression::tokio::write::{
-    BrotliEncoder, 
-    GzipEncoder, 
-    ZlibEncoder, 
-    ZstdEncoder
-};
+use async_compression::tokio::write::{BrotliEncoder, GzipEncoder, ZlibEncoder, ZstdEncoder};
 use tokio::io::AsyncWriteExt;
 use volga::error::Error;
-use volga::test::TestServer;
 use volga::middleware::decompress::ExpansionRatio;
+use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_decompress_brotli() {
@@ -23,7 +18,8 @@ async fn it_decompress_brotli() {
         app.map_post("/decompress", |Json(value): Json<Value>| async move {
             ok!(value)
         });
-    }).await;
+    })
+    .await;
 
     let data = b"{\"age\":33,\"name\":\"John\"}";
     let mut encoder = BrotliEncoder::new(Vec::new());
@@ -31,8 +27,9 @@ async fn it_decompress_brotli() {
     encoder.write_all(data).await.unwrap();
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
-    
-    let response = server.client()
+
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "br")
         .body(body)
@@ -40,8 +37,11 @@ async fn it_decompress_brotli() {
         .await
         .unwrap();
 
-    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
-    
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "name": "John", "age": 33 })
+    );
+
     server.shutdown().await;
 }
 
@@ -52,7 +52,8 @@ async fn it_decompress_brotli_for_route() {
             ok!(value)
         })
         .with_decompression();
-    }).await;
+    })
+    .await;
 
     let data = b"{\"age\":33,\"name\":\"John\"}";
     let mut encoder = BrotliEncoder::new(Vec::new());
@@ -61,7 +62,8 @@ async fn it_decompress_brotli_for_route() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "br")
         .body(body)
@@ -69,8 +71,11 @@ async fn it_decompress_brotli_for_route() {
         .await
         .unwrap();
 
-    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
-    
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "name": "John", "age": 33 })
+    );
+
     server.shutdown().await;
 }
 
@@ -83,7 +88,8 @@ async fn it_decompress_brotli_for_group() {
                 ok!(value)
             });
         });
-    }).await;
+    })
+    .await;
 
     let data = b"{\"age\":33,\"name\":\"John\"}";
     let mut encoder = BrotliEncoder::new(Vec::new());
@@ -92,7 +98,8 @@ async fn it_decompress_brotli_for_group() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/tests/decompress"))
         .header("content-encoding", "br")
         .body(body)
@@ -100,8 +107,11 @@ async fn it_decompress_brotli_for_group() {
         .await
         .unwrap();
 
-    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
-    
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "name": "John", "age": 33 })
+    );
+
     server.shutdown().await;
 }
 
@@ -112,7 +122,8 @@ async fn it_decompress_gzip() {
         app.map_post("/decompress", |Json(value): Json<Value>| async move {
             ok!(value)
         });
-    }).await;
+    })
+    .await;
 
     let data = b"{\"age\":33,\"name\":\"John\"}";
     let mut encoder = GzipEncoder::new(Vec::new());
@@ -121,7 +132,8 @@ async fn it_decompress_gzip() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "gzip")
         .body(body)
@@ -129,8 +141,11 @@ async fn it_decompress_gzip() {
         .await
         .unwrap();
 
-    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
-    
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "name": "John", "age": 33 })
+    );
+
     server.shutdown().await;
 }
 
@@ -140,8 +155,9 @@ async fn it_decompress_deflate() {
         app.use_decompression();
         app.map_post("/decompress", |Json(value): Json<Value>| async move {
             ok!(value)
-        });   
-    }).await;
+        });
+    })
+    .await;
 
     let data = b"{\"age\":33,\"name\":\"John\"}";
     let mut encoder = ZlibEncoder::new(Vec::new());
@@ -150,7 +166,8 @@ async fn it_decompress_deflate() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "deflate")
         .body(body)
@@ -158,8 +175,11 @@ async fn it_decompress_deflate() {
         .await
         .unwrap();
 
-    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
-    
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "name": "John", "age": 33 })
+    );
+
     server.shutdown().await;
 }
 
@@ -169,8 +189,9 @@ async fn it_decompress_zstd() {
         app.use_decompression();
         app.map_post("/decompress", |Json(value): Json<Value>| async move {
             ok!(value)
-        });   
-    }).await;
+        });
+    })
+    .await;
 
     let data = b"{\"age\":33,\"name\":\"John\"}";
     let mut encoder = ZstdEncoder::new(Vec::new());
@@ -179,16 +200,20 @@ async fn it_decompress_zstd() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "zstd")
         .body(body)
         .send()
         .await
         .unwrap();
-    
-    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
-    
+
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "name": "John", "age": 33 })
+    );
+
     server.shutdown().await;
 }
 
@@ -198,32 +223,35 @@ async fn it_ignores_decompress() {
         app.use_decompression();
         app.map_post("/decompress", |Json(value): Json<Value>| async move {
             ok!(value)
-        });   
-    }).await;
+        });
+    })
+    .await;
 
     let body = "{\"age\":33,\"name\":\"John\"}";
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .body(body)
         .send()
         .await
         .unwrap();
 
-    assert_eq!(response.json::<Value>().await.unwrap(), json!({ "name": "John", "age": 33 }));
-    
+    assert_eq!(
+        response.json::<Value>().await.unwrap(),
+        json!({ "name": "John", "age": 33 })
+    );
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_tests_max_compressed_limit() {
     let server = TestServer::builder()
-        .configure(|app| app
-            .without_body_limit()
-            .with_decompression_limits(|limits| {
-                limits.with_max_compressed(Limit::Limited(1))
-            })
-        )
+        .configure(|app| {
+            app.without_body_limit()
+                .with_decompression_limits(|limits| limits.with_max_compressed(Limit::Limited(1)))
+        })
         .setup(|app| {
             app.use_decompression();
             app.map_post("/decompress", async |req: HttpRequest| {
@@ -242,7 +270,8 @@ async fn it_tests_max_compressed_limit() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "zstd")
         .body(body)
@@ -262,12 +291,10 @@ async fn it_tests_max_compressed_limit() {
 #[tokio::test]
 async fn it_tests_max_decompressed_limit() {
     let server = TestServer::builder()
-        .configure(|app| app
-            .without_body_limit()
-            .with_decompression_limits(|limits| {
-                limits.with_max_decompressed(Limit::Limited(1))
-            })
-        )
+        .configure(|app| {
+            app.without_body_limit()
+                .with_decompression_limits(|limits| limits.with_max_decompressed(Limit::Limited(1)))
+        })
         .setup(|app| {
             app.use_decompression();
             app.map_post("/decompress", async |req: HttpRequest| {
@@ -286,7 +313,8 @@ async fn it_tests_max_decompressed_limit() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "zstd")
         .body(body)
@@ -306,12 +334,12 @@ async fn it_tests_max_decompressed_limit() {
 #[tokio::test]
 async fn it_tests_expansion_ratio_exceeded() {
     let server = TestServer::builder()
-        .configure(|app| app
-            .without_body_limit()
-            .with_decompression_limits(|limits| {
-                limits.with_max_expansion_ratio(ExpansionRatio::new(1, 0))
-            })
-        )
+        .configure(|app| {
+            app.without_body_limit()
+                .with_decompression_limits(|limits| {
+                    limits.with_max_expansion_ratio(ExpansionRatio::new(1, 0))
+                })
+        })
         .setup(|app| {
             app.use_decompression();
             app.map_post("/decompress", async |req: HttpRequest| {
@@ -330,7 +358,8 @@ async fn it_tests_expansion_ratio_exceeded() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "zstd")
         .body(body)
@@ -350,12 +379,12 @@ async fn it_tests_expansion_ratio_exceeded() {
 #[tokio::test]
 async fn it_does_not_exceed_expansion_ratio_when_within_slack() {
     let server = TestServer::builder()
-        .configure(|app| app
-            .without_body_limit()
-            .with_decompression_limits(|limits| {
-                limits.with_max_expansion_ratio(ExpansionRatio::new(1, 1024 * 1024))
-            })
-        )
+        .configure(|app| {
+            app.without_body_limit()
+                .with_decompression_limits(|limits| {
+                    limits.with_max_expansion_ratio(ExpansionRatio::new(1, 1024 * 1024))
+                })
+        })
         .setup(|app| {
             app.use_decompression();
             app.map_post("/decompress", async |req: HttpRequest| {
@@ -377,7 +406,8 @@ async fn it_does_not_exceed_expansion_ratio_when_within_slack() {
     encoder.shutdown().await.unwrap();
     let body = encoder.into_inner();
 
-    let response = server.client()
+    let response = server
+        .client()
         .post(server.url("/decompress"))
         .header("content-encoding", "zstd")
         .body(body)
@@ -385,7 +415,11 @@ async fn it_does_not_exceed_expansion_ratio_when_within_slack() {
         .await
         .unwrap();
 
-    assert!(response.status().is_success(), "status = {}", response.status());
+    assert!(
+        response.status().is_success(),
+        "status = {}",
+        response.status()
+    );
 
     server.shutdown().await;
 }

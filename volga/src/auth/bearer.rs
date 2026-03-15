@@ -1,19 +1,21 @@
 //! Tools and utils for Bearer Token Authorization
 
-use std::{fmt::{Display, Formatter}, sync::Arc};
-use futures_util::future::{ready, Ready};
-use hyper::http::request::Parts;
-use serde::{de::DeserializeOwned, Serialize};
 use crate::{
-    http::{Extensions, endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source}}, 
-    headers::{HeaderMap, HeaderValue, Header, Authorization, AUTHORIZATION},
-    error::Error, 
     HttpRequest,
+    error::Error,
+    headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
+    http::{
+        Extensions,
+        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+    },
 };
-use jsonwebtoken::{
-    EncodingKey, DecodingKey,
-    Validation, Algorithm, 
-    Header as JwtHeader
+use futures_util::future::{Ready, ready};
+use hyper::http::request::Parts;
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header as JwtHeader, Validation};
+use serde::{Serialize, de::DeserializeOwned};
+use std::{
+    fmt::{Display, Formatter},
+    sync::Arc,
 };
 
 const SCHEME: &str = "Bearer ";
@@ -38,17 +40,17 @@ impl std::fmt::Debug for BearerAuthConfig {
 }
 
 impl BearerAuthConfig {
-    /// Specifies a security key to validate a JWT. 
-    /// 
+    /// Specifies a security key to validate a JWT.
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, auth::DecodingKey};
     ///
     /// let secret = std::env::var("JWT_SECRET")
     ///     .expect("JWT_SECRET must be set");
-    /// 
+    ///
     /// let key = DecodingKey::from_secret(secret.as_bytes());
-    /// 
+    ///
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth
     ///         .set_decoding_key(key));
@@ -58,7 +60,7 @@ impl BearerAuthConfig {
         self
     }
 
-    /// Specifies a security key to generate a JWT. 
+    /// Specifies a security key to generate a JWT.
     ///
     /// # Example
     /// ```no_run
@@ -66,9 +68,9 @@ impl BearerAuthConfig {
     ///
     /// let secret = std::env::var("JWT_SECRET")
     ///     .expect("JWT_SECRET must be set");
-    /// 
+    ///
     /// let key = EncodingKey::from_secret(secret.as_bytes());
-    /// 
+    ///
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth
     ///         .set_encoding_key(key));
@@ -77,32 +79,32 @@ impl BearerAuthConfig {
         self.encoding = Some(key);
         self
     }
-    
+
     /// Specifies the algorithm supported for signing/verifying JWTs
-    /// 
+    ///
     /// Default: [`Algorithm::HS256`]
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, auth::Algorithm};
-    /// 
+    ///
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth
     ///         .with_alg(Algorithm::RS256));
     /// ```
     pub fn with_alg(mut self, alg: Algorithm) -> Self {
-        if !self.validation.algorithms.contains(&alg) { 
-            self.validation.algorithms.push(alg);  
+        if !self.validation.algorithms.contains(&alg) {
+            self.validation.algorithms.push(alg);
         }
         self
     }
-    
+
     /// Sets one or more acceptable audience members
     ///
     /// # Example
     /// ```no_run
     /// use volga::App;
-    /// 
+    ///
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth
     ///         .with_aud(["some audience"]));
@@ -110,7 +112,7 @@ impl BearerAuthConfig {
     pub fn with_aud<I, T>(mut self, aud: I) -> Self
     where
         T: ToString,
-        I: AsRef<[T]>
+        I: AsRef<[T]>,
     {
         self.validation.set_audience(aud.as_ref());
         self
@@ -129,7 +131,7 @@ impl BearerAuthConfig {
     pub fn with_iss<I, T>(mut self, iss: I) -> Self
     where
         T: ToString,
-        I: AsRef<[T]>
+        I: AsRef<[T]>,
     {
         self.validation.set_issuer(iss.as_ref());
         self
@@ -235,7 +237,7 @@ impl BearerTokenService {
     pub fn validation(&self) -> &Validation {
         &self.validation
     }
-    
+
     /// Returns a secret key for decoding JWT
     pub fn decoding_key(&self) -> Option<Arc<DecodingKey>> {
         self.decoding.clone()
@@ -246,7 +248,7 @@ impl BearerTokenService {
         self.encoding.clone()
     }
 
-    /// Encode the header and claims given and sign the payload using the algorithm from the header and the key. 
+    /// Encode the header and claims given and sign the payload using the algorithm from the header and the key.
     /// If the algorithm given is RSA or EC, the key needs to be in the PEM format.
     pub fn encode<C: Serialize>(&self, claims: &C) -> Result<Bearer, Error> {
         let Some(encoding_key) = &self.encoding else {
@@ -261,8 +263,8 @@ impl BearerTokenService {
     ///
     /// If the token or its signature is invalid or the claims fail validation, it will return an error.
     pub fn decode<C: DeserializeOwned + Clone>(&self, bearer: Bearer) -> Result<C, Error> {
-        let Some(decoding_key) = &self.decoding else { 
-            return Err(Error::server_error("Missing security key")); 
+        let Some(decoding_key) = &self.decoding else {
+            return Err(Error::server_error("Missing security key"));
         };
         jsonwebtoken::decode(&*bearer.0, decoding_key, &self.validation)
             .map_err(Error::from)
@@ -276,21 +278,18 @@ pub struct Bearer(Box<str>);
 impl std::fmt::Debug for Bearer {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Bearer")
-            .field(&"[redacted]")
-            .finish()
+        f.debug_tuple("Bearer").field(&"[redacted]").finish()
     }
 }
 
 impl TryFrom<&HeaderValue> for Bearer {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(header: &HeaderValue) -> Result<Self, Self::Error> {
-        let token = header
-            .to_str()
-            .map_err(Error::from)?;
-        let token = token.strip_prefix(SCHEME)
+        let token = header.to_str().map_err(Error::from)?;
+        let token = token
+            .strip_prefix(SCHEME)
             .map(str::trim)
             .ok_or_else(|| Error::client_error("Header: Missing Credentials"))?;
         Ok(Self(token.into()))
@@ -299,7 +298,7 @@ impl TryFrom<&HeaderValue> for Bearer {
 
 impl TryFrom<Header<Authorization>> for Bearer {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(header: Header<Authorization>) -> Result<Self, Self::Error> {
         let header = header.into_inner();
@@ -321,7 +320,7 @@ impl TryFrom<&HeaderMap> for Bearer {
 
 impl TryFrom<&Parts> for Bearer {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
         Self::try_from(&parts.headers)
@@ -353,10 +352,12 @@ impl FromPayload for Bearer {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(Self::from_parts(parts))
     }
 }
@@ -366,9 +367,9 @@ impl TryFrom<&Extensions> for BearerTokenService {
 
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
-        let bts = extensions
-            .get::<BearerTokenService>()
-            .ok_or_else(|| Error::server_error("Bearer Token authorization is not properly configured"))?;
+        let bts = extensions.get::<BearerTokenService>().ok_or_else(|| {
+            Error::server_error("Bearer Token authorization is not properly configured")
+        })?;
         Ok(bts.clone())
     }
 }
@@ -391,10 +392,12 @@ impl FromPayload for BearerTokenService {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(Self::from_parts(parts))
     }
 }
@@ -402,13 +405,13 @@ impl FromPayload for BearerTokenService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use serde::{Serialize, Deserialize};
-    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
-    use hyper::Request;
     use crate::headers::{HeaderMap, HeaderValue};
     use crate::http::Extensions;
+    use hyper::Request;
+    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
+    use serde::{Deserialize, Serialize};
+    use std::collections::HashSet;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[derive(Clone, Debug, Serialize, Deserialize)]
     struct TestClaims {
@@ -432,8 +435,7 @@ mod tests {
     #[tokio::test]
     async fn it_tests_bearer_auth_config_set_decoding_key() {
         let decoding_key = DecodingKey::from_secret(SECRET);
-        let config = BearerAuthConfig::default()
-            .set_decoding_key(decoding_key);
+        let config = BearerAuthConfig::default().set_decoding_key(decoding_key);
 
         assert!(config.decoding.is_some());
         assert!(config.decoding_key().is_some());
@@ -442,8 +444,7 @@ mod tests {
     #[tokio::test]
     async fn it_tests_bearer_auth_config_set_encoding_key() {
         let encoding_key = EncodingKey::from_secret(SECRET);
-        let config = BearerAuthConfig::default()
-            .set_encoding_key(encoding_key);
+        let config = BearerAuthConfig::default().set_encoding_key(encoding_key);
 
         assert!(config.encoding.is_some());
     }
@@ -462,8 +463,7 @@ mod tests {
     #[tokio::test]
     async fn it_tests_bearer_auth_config_with_aud() {
         let audience = vec!["test-audience", "another-audience"];
-        let config = BearerAuthConfig::default()
-            .with_aud(&audience);
+        let config = BearerAuthConfig::default().with_aud(&audience);
 
         assert!(config.validation.aud.is_some());
         let expected_aud: HashSet<String> = audience.iter().map(|s| s.to_string()).collect();
@@ -473,8 +473,7 @@ mod tests {
     #[tokio::test]
     async fn it_tests_bearer_auth_config_with_iss() {
         let issuers = vec!["test-issuer", "another-issuer"];
-        let config = BearerAuthConfig::default()
-            .with_iss(&issuers);
+        let config = BearerAuthConfig::default().with_iss(&issuers);
 
         assert!(config.validation.iss.is_some());
         let expected_iss: HashSet<String> = issuers.iter().map(|s| s.to_string()).collect();
@@ -483,24 +482,21 @@ mod tests {
 
     #[tokio::test]
     async fn it_tests_bearer_auth_config_validate_aud() {
-        let config = BearerAuthConfig::default()
-            .validate_aud(false);
+        let config = BearerAuthConfig::default().validate_aud(false);
 
         assert!(!config.validation.validate_aud);
     }
 
     #[tokio::test]
     async fn it_tests_bearer_auth_config_validate_exp() {
-        let config = BearerAuthConfig::default()
-            .validate_exp(false);
+        let config = BearerAuthConfig::default().validate_exp(false);
 
         assert!(!config.validation.validate_exp);
     }
 
     #[tokio::test]
     async fn it_tests_bearer_auth_config_validate_nbf() {
-        let config = BearerAuthConfig::default()
-            .validate_nbf(true);
+        let config = BearerAuthConfig::default().validate_nbf(true);
 
         assert!(config.validation.validate_nbf);
     }
@@ -525,14 +521,14 @@ mod tests {
     #[tokio::test]
     async fn it_tests_bearer_token_service_encode_success() {
         let encoding_key = EncodingKey::from_secret(SECRET);
-        let config = BearerAuthConfig::default()
-            .set_encoding_key(encoding_key);
+        let config = BearerAuthConfig::default().set_encoding_key(encoding_key);
         let service: BearerTokenService = config.into();
 
         let exp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() + 3600;
+            .as_secs()
+            + 3600;
 
         let claims = TestClaims {
             sub: "test".to_string(),
@@ -562,7 +558,12 @@ mod tests {
 
         let result = service.encode(&claims);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing security key"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing security key")
+        );
     }
 
     #[tokio::test]
@@ -573,14 +574,15 @@ mod tests {
         let config = BearerAuthConfig::default()
             .set_encoding_key(encoding_key)
             .set_decoding_key(decoding_key)
-            .with_aud(["test-audience"]) 
+            .with_aud(["test-audience"])
             .with_iss(["test-issuer"]);
         let service: BearerTokenService = config.into();
 
         let exp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() + 3600;
+            .as_secs()
+            + 3600;
 
         let original_claims = TestClaims {
             sub: "test".to_string(),
@@ -607,7 +609,12 @@ mod tests {
         let result: Result<TestClaims, Error> = service.decode(bearer);
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing security key"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing security key")
+        );
     }
 
     #[tokio::test]
@@ -625,7 +632,12 @@ mod tests {
 
         let result = Bearer::try_from(&header_value);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing Credentials"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing Credentials")
+        );
     }
 
     #[tokio::test]
@@ -639,7 +651,10 @@ mod tests {
     async fn it_tests_bearer_from_header_map_success() {
         let mut headers = HeaderMap::new();
         let token_value = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test";
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {token_value}")).unwrap());
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token_value}")).unwrap(),
+        );
 
         let bearer = Bearer::try_from(&headers).unwrap();
         assert_eq!(bearer.to_string(), token_value);
@@ -651,7 +666,12 @@ mod tests {
 
         let result = Bearer::try_from(&headers);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing Authorization header"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Missing Authorization header")
+        );
     }
 
     #[tokio::test]
@@ -683,7 +703,13 @@ mod tests {
 
         let result = BearerTokenService::try_from(&extensions);
         assert!(result.is_err());
-        assert!(result.err().unwrap().to_string().contains("Bearer Token authorization is not properly configured"));
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("Bearer Token authorization is not properly configured")
+        );
     }
 
     #[tokio::test]
@@ -732,7 +758,8 @@ mod tests {
         let exp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs() + 3600;
+            .as_secs()
+            + 3600;
 
         let claims = TestClaims {
             sub: "test".to_string(),
@@ -769,7 +796,10 @@ mod tests {
             .with_iss(vec!["test-issuer"])
             .validate_aud(true);
 
-        assert_eq!(format!("{config:?}"), r#"BearerAuthConfig { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]" }"#);
+        assert_eq!(
+            format!("{config:?}"),
+            r#"BearerAuthConfig { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]" }"#
+        );
     }
 
     #[test]
@@ -786,6 +816,9 @@ mod tests {
 
         let service: BearerTokenService = config.into();
 
-        assert_eq!(format!("{service:?}"), r#"BearerTokenService { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]" }"#);
+        assert_eq!(
+            format!("{service:?}"),
+            r#"BearerTokenService { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]" }"#
+        );
     }
 }

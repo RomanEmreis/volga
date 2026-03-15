@@ -1,20 +1,11 @@
 //! Types and utilities for OpenAPI schema.
 
-use std::collections::{BTreeMap, BTreeSet};
-use serde_json::{Map, Value, json};
 use serde::{
-    de::{
-        Visitor,
-        DeserializeSeed,
-        SeqAccess,
-        MapAccess,
-        IntoDeserializer,
-        Error as DeError
-    },
-    Deserializer,
-    Deserialize,
-    Serialize,
+    Deserialize, Deserializer, Serialize,
+    de::{DeserializeSeed, Error as DeError, IntoDeserializer, MapAccess, SeqAccess, Visitor},
 };
+use serde_json::{Map, Value, json};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Represents OpenAPI schema.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -175,7 +166,7 @@ impl OpenApiSchema {
             additional_properties: None,
             items: None,
             nullable: None,
-            format: None
+            format: None,
         }
     }
 
@@ -289,13 +280,13 @@ impl Default for OpenApiSchema {
 pub(super) struct ProbeError(String);
 
 impl std::fmt::Display for ProbeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { 
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
 impl std::error::Error for ProbeError {}
 impl DeError for ProbeError {
-    fn custom<M: std::fmt::Display>(msg: M) -> Self { 
+    fn custom<M: std::fmt::Display>(msg: M) -> Self {
         ProbeError(msg.to_string())
     }
 }
@@ -305,11 +296,11 @@ pub(super) struct Probe {
 }
 
 impl Probe {
-    pub(super) fn new() -> Self { 
+    pub(super) fn new() -> Self {
         Self { root: None }
     }
-    
-    pub(super) fn finish(self) -> Option<(OpenApiSchema, Value)> { 
+
+    pub(super) fn finish(self) -> Option<(OpenApiSchema, Value)> {
         self.root
     }
 }
@@ -319,14 +310,14 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         visitor.visit_unit()
     }
 
     fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::boolean(), Value::Bool(false)));
         visitor.visit_bool(false)
@@ -390,7 +381,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
         visitor.visit_i64(0)
@@ -398,7 +389,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
         visitor.visit_u64(0)
@@ -406,7 +397,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_i128<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
         visitor.visit_i128(0)
@@ -414,7 +405,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_u128<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::integer(), Value::Number(0.into())));
         visitor.visit_u128(0)
@@ -422,7 +413,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::number(), json!(0.0)));
         visitor.visit_f64(0.0)
@@ -430,7 +421,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::string(), Value::String(String::new())));
         visitor.visit_borrowed_str("")
@@ -438,7 +429,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::string(), Value::String(String::new())));
         visitor.visit_string(String::new())
@@ -446,7 +437,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         struct SomeDeserializer<'a>(&'a mut Probe);
 
@@ -454,8 +445,8 @@ impl<'de> Deserializer<'de> for &mut Probe {
             type Error = ProbeError;
 
             fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-            where 
-                V: Visitor<'de>
+            where
+                V: Visitor<'de>,
             {
                 (&mut *self.0).deserialize_any(visitor)
             }
@@ -480,17 +471,17 @@ impl<'de> Deserializer<'de> for &mut Probe {
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
-        visitor.visit_seq(SeqProbeAccess { 
-            probe: self, 
-            yielded: false
+        visitor.visit_seq(SeqProbeAccess {
+            probe: self,
+            yielded: false,
         })
     }
 
     fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         self.root = Some((OpenApiSchema::object(), Value::Object(Map::new())));
         visitor.visit_map(EmptyMapAccess)
@@ -503,7 +494,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
         let access = StructProbeAccess {
             fields,
@@ -524,11 +515,11 @@ impl<'de> Deserializer<'de> for &mut Probe {
         _visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
-        V: Visitor<'de>
+        V: Visitor<'de>,
     {
-        Err(
-            ProbeError("enums are not supported for automatic schema inference".into())
-        )
+        Err(ProbeError(
+            "enums are not supported for automatic schema inference".into(),
+        ))
     }
 
     serde::forward_to_deserialize_any! {
@@ -547,7 +538,7 @@ impl<'de, 'a> SeqAccess<'de> for SeqProbeAccess<'a> {
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>, Self::Error>
     where
-        T: DeserializeSeed<'de>
+        T: DeserializeSeed<'de>,
     {
         if self.yielded {
             if let Some((item_schema, item_example)) = self.probe.root.take() {
@@ -585,7 +576,7 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
 
     fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
     where
-        K: DeserializeSeed<'de>
+        K: DeserializeSeed<'de>,
     {
         if self.idx >= self.fields.len() {
             let schema = self.obj_schema.clone().with_required(self.required.clone());
@@ -602,7 +593,7 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
     where
-        V: DeserializeSeed<'de>
+        V: DeserializeSeed<'de>,
     {
         let field = self.fields[self.idx];
         self.idx += 1;
@@ -639,14 +630,14 @@ impl<'de> MapAccess<'de> for EmptyMapAccess {
 
     fn next_key_seed<K>(&mut self, _seed: K) -> Result<Option<K::Value>, Self::Error>
     where
-        K: DeserializeSeed<'de>
+        K: DeserializeSeed<'de>,
     {
         Ok(None)
     }
 
     fn next_value_seed<V>(&mut self, _seed: V) -> Result<V::Value, Self::Error>
     where
-        V: DeserializeSeed<'de>
+        V: DeserializeSeed<'de>,
     {
         Err(ProbeError("no values".into()))
     }
@@ -903,7 +894,10 @@ mod tests {
     fn collect_component_refs_walks_nested_refs() {
         let schema = OpenApiSchema::object()
             .with_property("user", OpenApiSchema::reference("User"))
-            .with_property("items", OpenApiSchema::array(OpenApiSchema::reference("Item")));
+            .with_property(
+                "items",
+                OpenApiSchema::array(OpenApiSchema::reference("Item")),
+            );
 
         let mut refs = BTreeSet::new();
         schema.collect_component_refs(&mut refs);

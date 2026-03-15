@@ -1,30 +1,26 @@
 //! WebSocket streaming and messaging utils
 
-use crate::{error::Error, headers::HeaderValue};
 use super::Message;
+use crate::{error::Error, headers::HeaderValue};
 
-use futures_util::{sink::{Sink, SinkExt}, stream::{
-    Stream,
-    StreamExt,
-    SplitSink,
-    SplitStream
-}};
+use futures_util::{
+    sink::{Sink, SinkExt},
+    stream::{SplitSink, SplitStream, Stream, StreamExt},
+};
 
-use hyper_util::rt::TokioIo;
 use hyper::upgrade::Upgraded;
+use hyper_util::rt::TokioIo;
 
 use std::{
-    future::Future, 
-    pin::Pin, 
-    task::{ready, Context, Poll}
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll, ready},
 };
 
-use tokio_tungstenite::{tungstenite, WebSocketStream};
 use tokio_tungstenite::tungstenite::{
-    Message as WsMessage,
-    Error as WsError,
-    protocol::CloseFrame
+    Error as WsError, Message as WsMessage, protocol::CloseFrame,
 };
+use tokio_tungstenite::{WebSocketStream, tungstenite};
 
 /// A WebSocket connection.
 ///
@@ -128,9 +124,7 @@ impl WsSink {
     #[inline]
     pub async fn send<T: TryInto<Message, Error = Error>>(&mut self, msg: T) -> Result<(), Error> {
         let msg = msg.try_into()?.into();
-        self.0.send(msg)
-            .await
-            .map_err(Error::from)
+        self.0.send(msg).await.map_err(Error::from)
     }
 
     /// Gracefully closes the sink.
@@ -198,9 +192,9 @@ impl WsStream {
         T: TryFrom<Message, Error = Error>,
     {
         loop {
-            let msg = match self.recv_raw().await? { 
+            let msg = match self.recv_raw().await? {
                 Ok(msg) => msg,
-                Err(err) => return Some(Err(err))
+                Err(err) => return Some(Err(err)),
             };
 
             match msg.0 {
@@ -208,14 +202,14 @@ impl WsStream {
                 WsMessage::Close(frame) => return Some(Ok(WsEvent::Close(frame))),
                 WsMessage::Text(_) | WsMessage::Binary(_) => {
                     return Some(T::try_from(msg).map(WsEvent::Data));
-                },
+                }
                 WsMessage::Frame(_) => {
                     debug_assert!(
                         false,
                         "tungstenite returned a raw Frame while reading messages"
                     );
                     continue;
-                },
+                }
             }
         }
     }
@@ -232,7 +226,7 @@ impl WebSocket {
     #[inline]
     pub(super) fn new(
         inner: WebSocketStream<TokioIo<Upgraded>>,
-        protocol: Option<HeaderValue>
+        protocol: Option<HeaderValue>,
     ) -> Self {
         Self { inner, protocol }
     }
@@ -255,7 +249,7 @@ impl WebSocket {
         loop {
             let msg = match self.recv_raw().await? {
                 Ok(msg) => msg,
-                Err(err) => return Some(Err(err))
+                Err(err) => return Some(Err(err)),
             };
 
             match msg.0 {
@@ -267,7 +261,7 @@ impl WebSocket {
                         "tungstenite returned a raw Frame while reading messages"
                     );
                     continue;
-                },
+                }
                 WsMessage::Close(_) => {
                     if let Err(_close_err) = self.finish_close().await {
                         #[cfg(feature = "tracing")]
@@ -288,19 +282,16 @@ impl WebSocket {
     #[inline]
     pub async fn send<T: TryInto<Message, Error = Error>>(&mut self, msg: T) -> Result<(), Error> {
         let msg = msg.try_into()?;
-        self.inner
-            .send(msg.into_inner())
-            .await
-            .map_err(Error::from)
+        self.inner.send(msg.into_inner()).await.map_err(Error::from)
     }
 
     /// Returns the selected WebSocket sub-protocol, if there is any.
     pub fn protocol(&self) -> Option<&HeaderValue> {
         self.protocol.as_ref()
     }
-    
+
     /// Splits this `Stream + Sink` object into separate `Sink` and `Stream` objects.
-    /// This can be useful when you want to split ownership between tasks, 
+    /// This can be useful when you want to split ownership between tasks,
     /// or allow direct interaction between the two objects (e.g. via `Sink::send_all`).
     #[inline]
     pub fn split(self) -> (WsSink, WsStream) {
@@ -315,11 +306,11 @@ impl WebSocket {
         F: Fn(M) -> Fut + Send + 'static,
         M: TryFrom<Message, Error = Error>,
         R: TryInto<Message, Error = Error>,
-        Fut: Future<Output = R> + Send
+        Fut: Future<Output = R> + Send,
     {
         while let Some(msg) = self.recv::<M>().await {
-            let msg = match msg { 
-                Ok(msg) => msg, 
+            let msg = match msg {
+                Ok(msg) => msg,
                 Err(_e) => {
                     #[cfg(feature = "tracing")]
                     tracing::error!("Error receiving message: {_e}");
@@ -328,7 +319,7 @@ impl WebSocket {
             };
 
             let response = handler(msg).await;
-            
+
             if let Err(_e) = self.send(response).await {
                 #[cfg(feature = "tracing")]
                 tracing::error!("Error sending message: {_e}");
@@ -337,7 +328,7 @@ impl WebSocket {
                     #[cfg(feature = "tracing")]
                     tracing::warn!("WebSocket close failed: {_close_err}");
                 }
-                
+
                 return;
             }
         }
@@ -386,9 +377,7 @@ where
     stream
         .next()
         .await
-        .map(|r| 
-            r.map(Message).map_err(Error::from)
-        )
+        .map(|r| r.map(Message).map_err(Error::from))
 }
 
 #[inline]
@@ -396,10 +385,7 @@ fn is_expected_close_error(e: &WsError) -> bool {
     match e {
         WsError::ConnectionClosed => true,
         WsError::AlreadyClosed => true,
-        WsError::Protocol(p) => matches!(
-            p, 
-            tungstenite::error::ProtocolError::SendAfterClosing
-        ),
+        WsError::Protocol(p) => matches!(p, tungstenite::error::ProtocolError::SendAfterClosing),
         WsError::Io(io) => matches!(
             io.kind(),
             std::io::ErrorKind::BrokenPipe
@@ -409,7 +395,6 @@ fn is_expected_close_error(e: &WsError) -> bool {
         _ => false,
     }
 }
-
 
 impl Stream for WebSocket {
     type Item = Result<Message, Error>;
@@ -421,7 +406,9 @@ impl Stream for WebSocket {
                 None => return Poll::Ready(None),
                 Some(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
                 Some(Ok(msg)) => {
-                    let WsMessage::Frame(_) = msg else { return Poll::Ready(Some(Ok(Message(msg)))) };
+                    let WsMessage::Frame(_) = msg else {
+                        return Poll::Ready(Some(Ok(Message(msg))));
+                    };
                 }
             }
         }
@@ -443,7 +430,7 @@ impl Sink<Message> for WebSocket {
     fn start_send(mut self: Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
         match Pin::new(&mut self.inner).start_send(item.0) {
             Ok(_) => Ok(()),
-            Err(err) => Err(Error::server_error(err))
+            Err(err) => Err(Error::server_error(err)),
         }
     }
 
@@ -459,7 +446,7 @@ impl Sink<Message> for WebSocket {
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         match ready!(Pin::new(&mut self.inner).poll_close(cx)) {
             Ok(_) => Poll::Ready(Ok(())),
-            Err(err) => Poll::Ready(Err(Error::server_error(err)))
+            Err(err) => Poll::Ready(Err(Error::server_error(err))),
         }
     }
 }

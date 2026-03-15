@@ -1,4 +1,4 @@
-﻿//! # Route Tree Implementation
+//! # Route Tree Implementation
 //!
 //! This module implements a hierarchical route tree optimized for fast lookups
 //! and minimal runtime overhead. Instead of using a `HashMap` for storing child
@@ -43,19 +43,19 @@
 //! O(1) lookup complexity, which in practice provides better real-world
 //! performance under concurrent, read-only workloads.
 
+use crate::utils::str::memchr_split_nonempty;
 use hyper::Method;
 use smallvec::SmallVec;
-use crate::utils::str::memchr_split_nonempty;
 use std::sync::Arc;
 
 #[cfg(feature = "middleware")]
 use crate::http::cors::CorsOverride;
 
-pub(crate) use path_args::{PathArgs, PathArg};
-pub(crate) use layer::{RoutePipeline, Layer};
+pub(crate) use layer::{Layer, RoutePipeline};
+pub(crate) use path_args::{PathArg, PathArgs};
 
-pub(crate) mod path_args;
 pub(crate) mod layer;
+pub(crate) mod path_args;
 
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
@@ -65,20 +65,20 @@ const ALLOW_METHOD_SEPARATOR: char = ',';
 const DEFAULT_DEPTH: usize = 4;
 
 /// Represents a full route's "local" middleware pipeline
-/// with handler 
+/// with handler
 #[derive(Clone)]
 pub(super) struct RouteEndpoint {
     pub(super) method: Method,
     pub(super) pipeline: RoutePipeline,
     #[cfg(feature = "middleware")]
-    pub(super) cors: CorsOverride
+    pub(super) cors: CorsOverride,
 }
 
 /// Represents route path node
 #[derive(Clone)]
 pub(super) struct RouteEntry {
     path: Arc<str>,
-    node: Box<RouteNode>
+    node: Box<RouteNode>,
 }
 
 /// A node in the route tree
@@ -86,10 +86,10 @@ pub(super) struct RouteEntry {
 pub(super) struct RouteNode {
     /// A list of associated endpoints for each HTTP method
     pub(super) handlers: Option<SmallVec<[RouteEndpoint; DEFAULT_DEPTH]>>,
-    
+
     /// List of static routes
     static_routes: SmallVec<[RouteEntry; DEFAULT_DEPTH]>,
-    
+
     /// Dynamic route
     dynamic_route: Option<RouteEntry>,
 
@@ -100,25 +100,23 @@ pub(super) struct RouteNode {
 /// Parameters of a route
 pub(super) struct RouteParams<'route> {
     pub(super) route: &'route RouteNode,
-    pub(super) params: PathArgs
+    pub(super) params: PathArgs,
 }
 
 impl RouteEntry {
     /// Creates a new [`RouteEntry`]
     #[inline]
     fn new(path: &str) -> Self {
-        Self { 
+        Self {
             node: Box::new(RouteNode::new()),
-            path: Arc::from(path)
+            path: Arc::from(path),
         }
     }
 
     /// Compares two route entries
     #[inline(always)]
     fn cmp(&self, path: &str) -> std::cmp::Ordering {
-        self.path
-            .as_ref()
-            .cmp(path)
+        self.path.as_ref().cmp(path)
     }
 }
 
@@ -130,16 +128,16 @@ impl RouteEndpoint {
             method,
             pipeline: RoutePipeline::new(),
             #[cfg(feature = "middleware")]
-            cors: CorsOverride::Inherit
+            cors: CorsOverride::Inherit,
         }
     }
-    
+
     /// Inserts a layer into the pipeline
     #[inline]
     fn insert(&mut self, handler: Layer) {
         self.pipeline.insert(handler);
     }
-    
+
     /// Compares two route endpoints
     #[inline(always)]
     pub(super) fn cmp(&self, method: &Method) -> std::cmp::Ordering {
@@ -162,12 +160,7 @@ impl RouteNode {
     }
 
     /// Inserts a handler to the route tree
-    pub(super) fn insert(
-        &mut self,
-        path: &str,
-        method: Method,
-        handler: Layer,
-    ) {
+    pub(super) fn insert(&mut self, path: &str, method: Method, handler: Layer) {
         let mut current = self;
         let path_segments = split_path(path);
 
@@ -199,7 +192,7 @@ impl RouteNode {
             if let Some(next) = &current.dynamic_route {
                 params.push(PathArg {
                     name: Arc::clone(&next.path),
-                    value: Box::from(segment)
+                    value: Box::from(segment),
                 });
                 current = next.node.as_ref();
                 continue;
@@ -207,15 +200,11 @@ impl RouteNode {
 
             return None;
         }
-        
-        (!current
-            .handlers
-            .as_ref()
-            .is_none_or(|h| h.is_empty()))
-            .then_some(RouteParams {
-                route: current,
-                params,
-            })
+
+        (!current.handlers.as_ref().is_none_or(|h| h.is_empty())).then_some(RouteParams {
+            route: current,
+            params,
+        })
     }
 
     /// Finds handlers by path and returns a mutable reference to it
@@ -239,11 +228,7 @@ impl RouteNode {
             return None;
         }
 
-        (!current
-            .handlers
-            .as_ref()
-            .is_none_or(|h| h.is_empty()))
-            .then_some(current)
+        (!current.handlers.as_ref().is_none_or(|h| h.is_empty())).then_some(current)
     }
 
     /// Returns a reference to the handler for the given method
@@ -259,30 +244,28 @@ impl RouteNode {
     #[inline]
     #[cfg(feature = "middleware")]
     pub(super) fn handler_mut(&mut self, method: &Method) -> Option<&mut RouteEndpoint> {
-        let i = self.handlers.as_ref()?
+        let i = self
+            .handlers
+            .as_ref()?
             .binary_search_by(|h| h.cmp(method))
             .ok()?;
 
         Some(&mut self.handlers.as_mut()?[i])
     }
-    
+
     #[cfg(feature = "middleware")]
     pub(super) fn compose(&mut self) {
         // Compose all static routes
-        self.static_routes
-            .iter_mut()
-            .for_each(|r| r.node.compose());
+        self.static_routes.iter_mut().for_each(|r| r.node.compose());
 
         // Compose a dynamic route if present
         if let Some(route) = self.dynamic_route.as_mut() {
             route.node.compose();
         }
-        
+
         // Compose oute endpoint pipeline if present
         if let Some(handlers) = self.handlers.as_mut() {
-            handlers
-                .iter_mut()
-                .for_each(|r| r.pipeline.compose());
+            handlers.iter_mut().for_each(|r| r.pipeline.compose());
         }
     }
 
@@ -305,11 +288,7 @@ impl RouteNode {
     }
 
     #[cfg(debug_assertions)]
-    fn traverse_routes(
-        &self, 
-        routes: &mut Vec<super::meta::RouteInfo>, 
-        current_path: String
-    ) {
+    fn traverse_routes(&self, routes: &mut Vec<super::meta::RouteInfo>, current_path: String) {
         // Traverse static routes
         for route in self.static_routes.iter() {
             let new_path = if current_path.is_empty() {
@@ -319,7 +298,7 @@ impl RouteNode {
             };
             route.node.traverse_routes(routes, new_path);
         }
-        
+
         // Traverse dynamic route (if any)
         if let Some(route) = &self.dynamic_route {
             let new_path = if current_path.is_empty() {
@@ -331,7 +310,7 @@ impl RouteNode {
         }
 
         // Record handlers for this node
-        let Some(ref handlers) = self.handlers else { 
+        let Some(ref handlers) = self.handlers else {
             return;
         };
 
@@ -341,7 +320,10 @@ impl RouteNode {
             } else {
                 current_path.clone()
             };
-            routes.push(super::meta::RouteInfo::new(handler.method.clone(), &route_path));
+            routes.push(super::meta::RouteInfo::new(
+                handler.method.clone(),
+                &route_path,
+            ));
         }
     }
 
@@ -358,8 +340,7 @@ impl RouteNode {
 
     #[inline(always)]
     fn insert_dynamic_node(&mut self, segment: &str) -> &mut Self {
-        self
-            .dynamic_route
+        self.dynamic_route
             .get_or_insert_with(|| RouteEntry::new(segment))
             .node
             .as_mut()
@@ -367,9 +348,7 @@ impl RouteNode {
 
     #[inline(always)]
     fn insert_handler(&mut self, method: Method, handler: Layer) {
-        let handlers = self
-            .handlers
-            .get_or_insert_with(SmallVec::new);
+        let handlers = self.handlers.get_or_insert_with(SmallVec::new);
 
         let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
             Ok(i) => &mut handlers[i],
@@ -402,17 +381,18 @@ impl RouteNode {
 
     #[inline(always)]
     fn is_dynamic_segment(segment: &str) -> bool {
-        segment.starts_with(OPEN_BRACKET) &&
-        segment.ends_with(CLOSE_BRACKET)
+        segment.starts_with(OPEN_BRACKET) && segment.ends_with(CLOSE_BRACKET)
     }
 }
 
 #[inline(always)]
-pub(super) fn make_allowed_str<const N: usize>(handlers: &SmallVec<[RouteEndpoint; N]>) -> Arc<str> {
-    if handlers.is_empty() { 
+pub(super) fn make_allowed_str<const N: usize>(
+    handlers: &SmallVec<[RouteEndpoint; N]>,
+) -> Arc<str> {
+    if handlers.is_empty() {
         return Arc::from("");
-    } 
-    
+    }
+
     let mut allowed = String::with_capacity(handlers.len() * DEFAULT_DEPTH);
     let mut iter = handlers.iter().map(|h| h.method.as_str());
     if let Some(first) = iter.next() {
@@ -450,34 +430,30 @@ fn method_order(method: &Method) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use super::RouteEndpoint;
+    use crate::http::endpoints::handlers::{Func, RouteHandler};
+    use crate::http::endpoints::route::{
+        DEFAULT_DEPTH, RouteNode, make_allowed_str, method_order, split_path,
+    };
+    use crate::ok;
     use hyper::Method;
     use smallvec::SmallVec;
-    use crate::ok;
-    use crate::http::endpoints::handlers::{Func, RouteHandler};
-    use super::RouteEndpoint;
-    use crate::http::endpoints::route::{
-        make_allowed_str, 
-        method_order, 
-        split_path, 
-        RouteNode, 
-        DEFAULT_DEPTH
-    };
 
     #[cfg(debug_assertions)]
     use super::super::meta::RouteInfo;
-    
+
     #[test]
     fn it_inserts_and_finds_route() {
         let handler = || async { ok!() };
         let handler: RouteHandler = Func::new(handler);
-        
+
         let path = "test";
-        
+
         let mut route = RouteNode::new();
         route.insert(path, Method::GET, handler.into());
-        
+
         let route_params = route.find(path);
-        
+
         assert!(route_params.is_some());
     }
 
@@ -492,10 +468,10 @@ mod tests {
         route.insert(path, Method::GET, handler.into());
 
         let path = "test/some";
-        
+
         let route_params = route.find(path).unwrap();
         let param = route_params.params.first().unwrap();
-        
+
         assert_eq!(param.value.as_ref(), "some");
     }
 
@@ -588,7 +564,7 @@ mod tests {
         route.insert(path3, Method::GET, handler.into());
 
         let routes = route.collect();
-        
+
         assert_eq!(routes.len(), 3);
         assert!(routes.contains(&RouteInfo::new(Method::GET, path1)));
         assert!(routes.contains(&RouteInfo::new(Method::GET, path2)));
@@ -623,7 +599,11 @@ mod tests {
         // Add various routes
         route.insert("/api/v1/users", Method::GET, handler.clone().into());
         route.insert("/api/v1/users", Method::POST, handler.clone().into());
-        route.insert("/api/v1/users/{id:integer}", Method::GET, handler.clone().into());
+        route.insert(
+            "/api/v1/users/{id:integer}",
+            Method::GET,
+            handler.clone().into(),
+        );
         route.insert("/api/v1/users/{id}", Method::PUT, handler.clone().into());
         route.insert("/api/v1/users/{id}", Method::DELETE, handler.clone().into());
         route.insert("/api/v1/posts", Method::GET, handler.clone().into());
@@ -698,62 +678,53 @@ mod tests {
             assert_eq!(route.path, "/resource");
         }
     }
-    
+
     #[test]
     fn in_check_method_order() {
         let methods = [
-            Method::GET, 
-            Method::POST, 
-            Method::PUT, 
-            Method::DELETE, 
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
             Method::PATCH,
             Method::OPTIONS,
             Method::HEAD,
             Method::CONNECT,
-            Method::TRACE
+            Method::TRACE,
         ];
         for i in 0..methods.len() - 1 {
             assert!(method_order(&methods[i]) < method_order(&methods[i + 1]));
         }
     }
-    
+
     #[test]
     fn it_splits_path() {
         let path = "/a/b/c/d";
         let split = split_path(path);
-        assert_eq!(
-            split.collect::<Vec<_>>(),
-            vec!["a", "b", "c", "d"]
-        )
+        assert_eq!(split.collect::<Vec<_>>(), vec!["a", "b", "c", "d"])
     }
-    
+
     #[test]
     fn it_splits_path_with_trailing_slash() {
         let path = "/a/b/c/d/";
         let split = split_path(path);
-        assert_eq!(
-            split.collect::<Vec<_>>(),
-            vec!["a", "b", "c", "d"]
-        )
+        assert_eq!(split.collect::<Vec<_>>(), vec!["a", "b", "c", "d"])
     }
-    
+
     #[test]
     fn it_splits_path_without_leading_slash() {
         let path = "a/b/c/d";
         let split = split_path(path);
-        assert_eq!(
-            split.collect::<Vec<_>>(),
-            vec!["a", "b", "c", "d"]
-        )
+        assert_eq!(split.collect::<Vec<_>>(), vec!["a", "b", "c", "d"])
     }
-    
+
     #[test]
     fn it_makes_allowed_str() {
         let handlers: SmallVec<[RouteEndpoint; DEFAULT_DEPTH]> = smallvec::smallvec![
             RouteEndpoint::new(Method::GET),
             RouteEndpoint::new(Method::HEAD),
         ];
-        
+
         let allowed = make_allowed_str(&handlers);
         assert_eq!(allowed.as_ref(), "GET,HEAD");
     }

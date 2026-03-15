@@ -1,4 +1,4 @@
-﻿//! Macros for Form Data responses
+//! Macros for Form Data responses
 
 /// Produces `OK 200` response with Form Data body
 ///
@@ -31,7 +31,7 @@ macro_rules! form {
             Err(err) => Err(err),
         }
     };
-    
+
     // handles form!({ "key": "value" }; [("key", "val")])
     ({ $($json:tt)* }; [ $( $header:expr ),* $(,)? ]) => {
         match $crate::HttpBody::form($crate::json::json_internal!({ $($json)* })) {
@@ -46,7 +46,7 @@ macro_rules! form {
             Err(err) => Err(err),
         }
     };
-    
+
     // handles form!(object; [("key", "val")])
     ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
         match $crate::HttpBody::form($body) {
@@ -61,7 +61,7 @@ macro_rules! form {
             Err(err) => Err(err),
         }
     };
-    
+
     // handles form!(object)
     ($body:expr) => {
         match $crate::HttpBody::form($body) {
@@ -84,9 +84,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_form_data_response() {
-        let data = HashMap::from([
-            ("key", "value"),
-        ]);
+        let data = HashMap::from([("key", "value")]);
         let response = form!(data);
 
         assert!(response.is_ok());
@@ -96,14 +94,15 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert_eq!(String::from_utf8_lossy(body), "key=value");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/x-www-form-urlencoded");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/x-www-form-urlencoded"
+        );
     }
 
     #[tokio::test]
     async fn it_creates_form_data_response_with_headers() {
-        let data = HashMap::from([
-            ("key", "value"),
-        ]);
+        let data = HashMap::from([("key", "value")]);
         let response = form!(data; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
@@ -116,7 +115,10 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert_eq!(String::from_utf8_lossy(body), "key=value");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/x-www-form-urlencoded");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/x-www-form-urlencoded"
+        );
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
         assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
     }
@@ -132,7 +134,10 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert_eq!(String::from_utf8_lossy(body), "key=value");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/x-www-form-urlencoded");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/x-www-form-urlencoded"
+        );
     }
 
     #[tokio::test]
@@ -149,7 +154,10 @@ mod tests {
 
         assert_eq!(response.status(), 200);
         assert_eq!(String::from_utf8_lossy(body), "key=value");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/x-www-form-urlencoded");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/x-www-form-urlencoded"
+        );
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
         assert_eq!(response.headers().get("x-req-id").unwrap(), "some req id");
     }

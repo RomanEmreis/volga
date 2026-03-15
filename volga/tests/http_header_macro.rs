@@ -1,8 +1,8 @@
 #![allow(missing_docs)]
 #![cfg(feature = "macros")]
 
-use volga_macros::http_header;
 use volga::headers::FromHeaders;
+use volga_macros::http_header;
 
 #[test]
 fn it_implements_from_headers_for_struct_with_string_literal() {

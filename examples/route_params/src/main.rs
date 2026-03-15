@@ -5,12 +5,12 @@
 //! ```
 
 use serde::Deserialize;
-use volga::{App, Path, NamedPath, error::Error, ok};
+use volga::{App, NamedPath, Path, error::Error, ok};
 
 #[derive(Deserialize)]
 struct User {
     name: String,
-    age: u32
+    age: u32,
 }
 
 #[tokio::main]
@@ -39,6 +39,6 @@ async fn main() -> std::io::Result<()> {
     app.map_get("/hey/{age}", |age: Result<u32, Error>| async move {
         ok!("Age {:?}!", age)
     });
-    
+
     app.run().await
 }

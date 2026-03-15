@@ -2,19 +2,28 @@
 
 #[cfg(feature = "jwt-auth")]
 use {
-    crate::{App, routing::{Route, RouteGroup}, http::StatusCode, error::Error, status, HttpResult},
-    crate::headers::{HeaderValue, WWW_AUTHENTICATE, CACHE_CONTROL, cache_control::NO_STORE},
+    crate::headers::{CACHE_CONTROL, HeaderValue, WWW_AUTHENTICATE, cache_control::NO_STORE},
     crate::middleware::{HttpContext, NextFn},
+    crate::{
+        App, HttpResult,
+        error::Error,
+        http::StatusCode,
+        routing::{Route, RouteGroup},
+        status,
+    },
     std::{future::Future, sync::Arc},
 };
 
 #[cfg(feature = "jwt-auth")]
 pub use {
-    bearer::{BearerAuthConfig, Bearer, BearerTokenService},
     authenticated::Authenticated,
+    authorizer::{Authorizer, permissions, predicate, role, roles},
+    bearer::{Bearer, BearerAuthConfig, BearerTokenService},
     claims::AuthClaims,
-    jsonwebtoken::{Algorithm, EncodingKey, DecodingKey, errors::{ErrorKind, Error as JwtError}},
-    authorizer::{Authorizer, role, roles, permissions, predicate}
+    jsonwebtoken::{
+        Algorithm, DecodingKey, EncodingKey,
+        errors::{Error as JwtError, ErrorKind},
+    },
 };
 
 #[cfg(feature = "jwt-auth-full")]
@@ -23,16 +32,16 @@ pub use volga_macros::Claims;
 #[cfg(feature = "basic-auth")]
 pub use basic::Basic;
 
+#[cfg(feature = "jwt-auth")]
+pub mod authenticated;
+#[cfg(feature = "jwt-auth")]
+pub mod authorizer;
 #[cfg(feature = "basic-auth")]
 pub mod basic;
 #[cfg(feature = "jwt-auth")]
 pub mod bearer;
 #[cfg(feature = "jwt-auth")]
-pub mod authorizer;
-#[cfg(feature = "jwt-auth")]
 pub mod claims;
-#[cfg(feature = "jwt-auth")]
-pub mod authenticated;
 
 #[cfg(feature = "jwt-auth")]
 impl From<JwtError> for Error {
@@ -58,10 +67,7 @@ fn map_jwt_error_to_status(err: &ErrorKind) -> StatusCode {
         | ImmatureSignature
         | InvalidAlgorithmName
         | InvalidAlgorithm => StatusCode::UNAUTHORIZED,
-        Base64(_)
-        | Json(_)
-        | Utf8(_)
-        | InvalidKeyFormat => StatusCode::BAD_REQUEST,
+        Base64(_) | Json(_) | Utf8(_) | InvalidKeyFormat => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -70,19 +76,45 @@ fn map_jwt_error_to_status(err: &ErrorKind) -> StatusCode {
 fn map_jwt_error_to_www_authenticate(err: &ErrorKind) -> &'static str {
     use ErrorKind::*;
     match err {
-        ExpiredSignature => r#"Bearer error="invalid_token", error_description="Token has expired""#,
-        InvalidSignature => r#"Bearer error="invalid_token", error_description="Invalid signature""#,
-        InvalidToken => r#"Bearer error="invalid_token", error_description="Token is malformed or invalid""#,
-        ImmatureSignature => r#"Bearer error="invalid_token", error_description="Token is not valid yet (nbf)""#,
-        MissingRequiredClaim(_) => r#"Bearer error="invalid_token", error_description="Missing required claim""#,
-        InvalidIssuer => r#"Bearer error="invalid_token", error_description="Invalid issuer (iss)""#,
-        InvalidAudience => r#"Bearer error="invalid_token", error_description="Invalid audience (aud)""#,
-        InvalidSubject => r#"Bearer error="invalid_token", error_description="Invalid subject (sub)""#,
-        InvalidAlgorithm | InvalidAlgorithmName => r#"Bearer error="invalid_token", error_description="Invalid algorithm""#,
-        Base64(_) => r#"Bearer error="invalid_request", error_description="Token is not properly base64-encoded""#,
-        Json(_) => r#"Bearer error="invalid_request", error_description="Token payload is not valid JSON""#,
-        Utf8(_) => r#"Bearer error="invalid_request", error_description="Token contains invalid UTF-8 characters""#,
-        InvalidKeyFormat => r#"Bearer error="invalid_request", error_description="Invalid key format""#,
+        ExpiredSignature => {
+            r#"Bearer error="invalid_token", error_description="Token has expired""#
+        }
+        InvalidSignature => {
+            r#"Bearer error="invalid_token", error_description="Invalid signature""#
+        }
+        InvalidToken => {
+            r#"Bearer error="invalid_token", error_description="Token is malformed or invalid""#
+        }
+        ImmatureSignature => {
+            r#"Bearer error="invalid_token", error_description="Token is not valid yet (nbf)""#
+        }
+        MissingRequiredClaim(_) => {
+            r#"Bearer error="invalid_token", error_description="Missing required claim""#
+        }
+        InvalidIssuer => {
+            r#"Bearer error="invalid_token", error_description="Invalid issuer (iss)""#
+        }
+        InvalidAudience => {
+            r#"Bearer error="invalid_token", error_description="Invalid audience (aud)""#
+        }
+        InvalidSubject => {
+            r#"Bearer error="invalid_token", error_description="Invalid subject (sub)""#
+        }
+        InvalidAlgorithm | InvalidAlgorithmName => {
+            r#"Bearer error="invalid_token", error_description="Invalid algorithm""#
+        }
+        Base64(_) => {
+            r#"Bearer error="invalid_request", error_description="Token is not properly base64-encoded""#
+        }
+        Json(_) => {
+            r#"Bearer error="invalid_request", error_description="Token payload is not valid JSON""#
+        }
+        Utf8(_) => {
+            r#"Bearer error="invalid_request", error_description="Token contains invalid UTF-8 characters""#
+        }
+        InvalidKeyFormat => {
+            r#"Bearer error="invalid_request", error_description="Invalid key format""#
+        }
         _ => r#"Bearer error="server_error", error_description="Internal token processing error""#,
     }
 }
@@ -92,17 +124,17 @@ impl App {
     /// Configures a web server with a Bearer Token Authentication & Authorization configuration
     ///
     /// Default: `None`
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
-    /// 
+    ///
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth);
     /// ```
     pub fn with_bearer_auth<F>(mut self, config: F) -> Self
     where
-        F: FnOnce(BearerAuthConfig) -> BearerAuthConfig
+        F: FnOnce(BearerAuthConfig) -> BearerAuthConfig,
     {
         self.auth_config = Some(config(Default::default()));
         self
@@ -130,15 +162,18 @@ impl App {
     ///     .with_bearer_auth(|auth| auth);
     ///
     /// app.authorize::<MyClaims>(roles(["admin", "user"]));
-    /// 
+    ///
     /// app.map_get("/hello", || async { "Hello, World!" });
     /// ```
-    pub fn authorize<C: AuthClaims + Send +  Sync + 'static>(&mut self, authorizer: Authorizer<C>) -> &mut Self {
+    pub fn authorize<C: AuthClaims + Send + Sync + 'static>(
+        &mut self,
+        authorizer: Authorizer<C>,
+    ) -> &mut Self {
         self.ensure_bearer_auth_configured();
         let authorizer = Arc::new(authorizer);
         self.wrap(move |ctx, next| authorize_impl(authorizer.clone(), ctx, next))
     }
-    
+
     fn ensure_bearer_auth_configured(&self) {
         let config = match &self.auth_config {
             Some(config) => config,
@@ -154,30 +189,33 @@ impl App {
 #[cfg(feature = "jwt-auth")]
 impl<'a> Route<'a> {
     /// Adds authorization middleware for this route
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, auth::{AuthClaims, roles}};
     /// use serde::Deserialize;
-    /// 
+    ///
     /// #[derive(Clone, Deserialize)]
     /// struct MyClaims {
     ///     role: String
     /// }
-    /// 
+    ///
     /// impl AuthClaims for MyClaims {
     ///     fn role(&self) -> Option<&str> {
     ///         Some(self.role.as_str())
     ///     }
     /// }
-    /// 
+    ///
     /// let mut app = App::new()
     ///     .with_bearer_auth(|auth| auth);
-    /// 
+    ///
     /// app.map_get("/hello", || async { "Hello, World!" })
     ///     .authorize::<MyClaims>(roles(["admin", "user"]));
     /// ```
-    pub fn authorize<C: AuthClaims + Send +  Sync + 'static>(self, authorizer: Authorizer<C>) -> Self {
+    pub fn authorize<C: AuthClaims + Send + Sync + 'static>(
+        self,
+        authorizer: Authorizer<C>,
+    ) -> Self {
         self.ensure_bearer_auth_configured();
         let authorizer = Arc::new(authorizer);
         self.wrap(move |ctx, next| authorize_impl(authorizer.clone(), ctx, next))
@@ -212,7 +250,10 @@ impl<'a> RouteGroup<'a> {
     ///     api.map_get("/hello", || async { "Hello, World!" });
     /// });
     /// ```
-    pub fn authorize<C: AuthClaims + Send +  Sync + 'static>(&mut self, authorizer: Authorizer<C>) -> &mut Self {
+    pub fn authorize<C: AuthClaims + Send + Sync + 'static>(
+        &mut self,
+        authorizer: Authorizer<C>,
+    ) -> &mut Self {
         self.app.ensure_bearer_auth_configured();
         let authorizer = Arc::new(authorizer);
         self.wrap(move |ctx, next| authorize_impl(authorizer.clone(), ctx, next))
@@ -221,12 +262,12 @@ impl<'a> RouteGroup<'a> {
 
 #[cfg(feature = "jwt-auth")]
 fn authorize_impl<C>(
-    authorizer: Arc<Authorizer<C>>, 
-    mut ctx: HttpContext, 
-    next: NextFn
+    authorizer: Arc<Authorizer<C>>,
+    mut ctx: HttpContext,
+    next: NextFn,
 ) -> impl Future<Output = HttpResult>
 where
-    C: AuthClaims + Send +  Sync + 'static
+    C: AuthClaims + Send + Sync + 'static,
 {
     let authorizer = authorizer.clone();
     async move {
@@ -237,9 +278,9 @@ where
                 ctx.request_mut()
                     .extensions_mut()
                     .insert(Authenticated(claims));
-                
+
                 next(ctx).await
-            },
+            }
             Ok(_) => status!(403; [
                 (WWW_AUTHENTICATE, authorizer::DEFAULT_ERROR_MSG)
             ]),
@@ -255,10 +296,8 @@ where
             }
         };
         resp.map(|mut resp| {
-            resp.headers_mut().insert(
-                CACHE_CONTROL, 
-                HeaderValue::from_static(NO_STORE)
-            );
+            resp.headers_mut()
+                .insert(CACHE_CONTROL, HeaderValue::from_static(NO_STORE));
             resp
         })
     }
@@ -267,8 +306,8 @@ where
 #[cfg(all(test, feature = "jwt-auth"))]
 mod tests {
     use super::*;
-    use jsonwebtoken::errors::{ErrorKind, Error as JwtError};
     use crate::http::StatusCode;
+    use jsonwebtoken::errors::{Error as JwtError, ErrorKind};
 
     #[test]
     fn it_maps_expired_signature_to_unauthorized() {
@@ -332,7 +371,8 @@ mod tests {
 
     #[test]
     fn it_maps_base64_error_to_bad_request() {
-        let status = map_jwt_error_to_status(&ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)));
+        let status =
+            map_jwt_error_to_status(&ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)));
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
@@ -363,67 +403,103 @@ mod tests {
     #[test]
     fn it_maps_expired_signature_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::ExpiredSignature);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Token has expired""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Token has expired""#
+        );
     }
 
     #[test]
     fn it_maps_invalid_signature_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::InvalidSignature);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Invalid signature""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Invalid signature""#
+        );
     }
 
     #[test]
     fn it_maps_invalid_token_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::InvalidToken);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Token is malformed or invalid""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Token is malformed or invalid""#
+        );
     }
 
     #[test]
     fn it_maps_immature_signature_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::ImmatureSignature);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Token is not valid yet (nbf)""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Token is not valid yet (nbf)""#
+        );
     }
 
     #[test]
     fn it_maps_missing_required_claim_to_www_authenticate() {
-        let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::MissingRequiredClaim("test".to_string()));
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Missing required claim""#);
+        let www_auth =
+            map_jwt_error_to_www_authenticate(&ErrorKind::MissingRequiredClaim("test".to_string()));
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Missing required claim""#
+        );
     }
 
     #[test]
     fn it_maps_invalid_issuer_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::InvalidIssuer);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Invalid issuer (iss)""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Invalid issuer (iss)""#
+        );
     }
 
     #[test]
     fn it_maps_invalid_audience_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::InvalidAudience);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Invalid audience (aud)""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Invalid audience (aud)""#
+        );
     }
 
     #[test]
     fn it_maps_invalid_subject_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::InvalidSubject);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Invalid subject (sub)""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Invalid subject (sub)""#
+        );
     }
 
     #[test]
     fn it_maps_invalid_algorithm_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::InvalidAlgorithm);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Invalid algorithm""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Invalid algorithm""#
+        );
     }
 
     #[test]
     fn it_maps_invalid_algorithm_name_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::InvalidAlgorithmName);
-        assert_eq!(www_auth, r#"Bearer error="invalid_token", error_description="Invalid algorithm""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_token", error_description="Invalid algorithm""#
+        );
     }
 
     #[test]
     fn it_maps_base64_error_to_www_authenticate() {
-        let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)));
-        assert_eq!(www_auth, r#"Bearer error="invalid_request", error_description="Token is not properly base64-encoded""#);
+        let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::Base64(
+            base64::DecodeError::InvalidByte(0, 0),
+        ));
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_request", error_description="Token is not properly base64-encoded""#
+        );
     }
 
     #[test]
@@ -431,7 +507,10 @@ mod tests {
         let json_result: Result<serde_json::Value, _> = serde_json::from_str("invalid json");
         let json_error = json_result.unwrap_err();
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::Json(Arc::from(json_error)));
-        assert_eq!(www_auth, r#"Bearer error="invalid_request", error_description="Token payload is not valid JSON""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_request", error_description="Token payload is not valid JSON""#
+        );
     }
 
     #[test]
@@ -439,13 +518,19 @@ mod tests {
         let invalid_utf8_bytes = vec![0, 159, 146, 150];
         let utf8_error = String::from_utf8(invalid_utf8_bytes).unwrap_err();
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::Utf8(utf8_error));
-        assert_eq!(www_auth, r#"Bearer error="invalid_request", error_description="Token contains invalid UTF-8 characters""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_request", error_description="Token contains invalid UTF-8 characters""#
+        );
     }
 
     #[test]
     fn it_maps_invalid_key_format_to_www_authenticate() {
         let www_auth = map_jwt_error_to_www_authenticate(&ErrorKind::InvalidKeyFormat);
-        assert_eq!(www_auth, r#"Bearer error="invalid_request", error_description="Invalid key format""#);
+        assert_eq!(
+            www_auth,
+            r#"Bearer error="invalid_request", error_description="Invalid key format""#
+        );
     }
 
     #[test]
@@ -495,4 +580,3 @@ mod tests {
         assert!(error.instance.is_none());
     }
 }
-

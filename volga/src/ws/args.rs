@@ -1,18 +1,18 @@
-﻿//! Type extractors and converters for WebSockets
+//! Type extractors and converters for WebSockets
 
 use crate::error::Error;
 use crate::ws::WebSocket;
 use bytes::Bytes;
-use tokio_tungstenite::tungstenite;
 use std::{
-    borrow::Cow, 
-    fmt, 
-    future::Future, 
-    ops::{Deref, DerefMut}
+    borrow::Cow,
+    fmt,
+    future::Future,
+    ops::{Deref, DerefMut},
 };
+use tokio_tungstenite::tungstenite;
 
 /// Represents various forms of WebSockets message
-/// 
+///
 /// See also [`tungstenite::Message`]
 #[derive(Debug)]
 pub struct Message(pub(super) tungstenite::Message);
@@ -27,7 +27,7 @@ impl Message {
 
 impl Deref for Message {
     type Target = tungstenite::Message;
-    
+
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -64,7 +64,7 @@ impl From<Message> for tungstenite::Message {
 
 impl TryFrom<&str> for Message {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(str: &str) -> Result<Self, Self::Error> {
         Ok(Self(str.into()))
@@ -73,7 +73,7 @@ impl TryFrom<&str> for Message {
 
 impl TryFrom<String> for Message {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(str: String) -> Result<Self, Self::Error> {
         Ok(Self(str.into()))
@@ -85,9 +85,7 @@ impl TryFrom<Message> for String {
 
     #[inline]
     fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        let utf_bytes = msg.0
-            .into_text()
-            .map_err(Error::from)?;
+        let utf_bytes = msg.0.into_text().map_err(Error::from)?;
         Ok(utf_bytes.as_str().into())
     }
 }
@@ -106,8 +104,7 @@ impl TryFrom<Message> for Box<str> {
 
     #[inline]
     fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        String::try_from(msg)
-            .map(|s| s.into_boxed_str())
+        String::try_from(msg).map(|s| s.into_boxed_str())
     }
 }
 
@@ -152,9 +149,7 @@ impl TryFrom<Message> for Box<[u8]> {
 
     #[inline]
     fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        Ok(msg.0.into_data()
-            .to_vec()
-            .into_boxed_slice())
+        Ok(msg.0.into_data().to_vec().into_boxed_slice())
     }
 }
 
@@ -172,9 +167,7 @@ impl TryFrom<Message> for Cow<'_, str> {
 
     #[inline]
     fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        let utf_bytes = msg.0
-            .into_text()
-            .map_err(Error::from)?;
+        let utf_bytes = msg.0.into_text().map_err(Error::from)?;
         Ok(Cow::Owned(utf_bytes.as_str().into()))
     }
 }
@@ -215,7 +208,7 @@ impl TryFrom<Message> for Bytes {
     }
 }
 
-/// Describes a generic WebSocket/WebSocket-over-HTTP/2 handler that could take a [`WebSocket`] 
+/// Describes a generic WebSocket/WebSocket-over-HTTP/2 handler that could take a [`WebSocket`]
 /// and 0 or N parameters of types
 pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
     /// The type of value returned from a WebSocket handler
@@ -227,7 +220,7 @@ pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
     fn call(&self, ws: WebSocket, args: Args) -> Self::Future;
 }
 
-/// Describes a generic WebSocket/WebSocket-over-HTTP/2 message handler that could take a message 
+/// Describes a generic WebSocket/WebSocket-over-HTTP/2 message handler that could take a message
 /// in a format that implements the[`FromMessage`] and 0 or N parameters of types
 pub trait MessageHandler<M: TryFrom<Message>, Args>: Clone + Send + Sync + 'static {
     /// The type of valure returned from a WebSocket message handler
@@ -337,7 +330,7 @@ mod tests {
 
     #[test]
     fn it_handles_vec_messages() {
-        let expected = vec![1,2,3];
+        let expected = vec![1, 2, 3];
 
         let message: Message = expected.clone().try_into().unwrap();
         let vec = Vec::try_from(message).unwrap();
@@ -347,7 +340,7 @@ mod tests {
 
     #[test]
     fn it_handles_boxed_slice_messages() {
-        let expected = vec![1,2,3].into_boxed_slice();
+        let expected = vec![1, 2, 3].into_boxed_slice();
 
         let message: Message = expected.clone().try_into().unwrap();
         let vec = Box::try_from(message).unwrap();
@@ -357,7 +350,7 @@ mod tests {
 
     #[test]
     fn it_handles_slice_messages() {
-        let expected = [1,2,3];
+        let expected = [1, 2, 3];
 
         let message: Message = expected.as_ref().try_into().unwrap();
         let string = Vec::try_from(message).unwrap();
@@ -378,7 +371,7 @@ mod tests {
 
     #[test]
     fn it_handles_cow_slice_messages() {
-        let vec = vec![1,2,3];
+        let vec = vec![1, 2, 3];
         let expected = Cow::<[u8]>::Owned(vec);
 
         let message: Message = expected.clone().try_into().unwrap();
@@ -395,13 +388,11 @@ mod tests {
 
     #[tokio::test]
     async fn message_handler_invokes_function_with_args() {
-        let handler = |msg: String, tag: &'static str| async move {
-            format!("{tag}:{msg}")
-        };
+        let handler = |msg: String, tag: &'static str| async move { format!("{tag}:{msg}") };
         let message: Message = "ping".try_into().unwrap();
-        let output = MessageHandler::call(&handler, String::try_from(message).unwrap(), ("ws",)).await;
+        let output =
+            MessageHandler::call(&handler, String::try_from(message).unwrap(), ("ws",)).await;
 
         assert_eq!(output, "ws:ping");
     }
-
 }

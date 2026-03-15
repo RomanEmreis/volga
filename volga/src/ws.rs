@@ -1,27 +1,23 @@
 //! WebSockets and WebSocket-over-HTTP/2 protocol implementation and tools
 
-use crate::{App, error::Error, HttpRequest};
 use crate::http::IntoResponse;
 use crate::http::endpoints::{
-    args::{FromRequest, FromPayload, Payload},
-    handlers::GenericHandler
+    args::{FromPayload, FromRequest, Payload},
+    handlers::GenericHandler,
 };
+use crate::{App, HttpRequest, error::Error};
 
 pub use self::{
+    args::{Message, MessageHandler, WebSocketHandler},
     connection::WebSocketConnection,
     websocket::{WebSocket, WsEvent, WsSink, WsStream},
-    args::{
-        Message,
-        MessageHandler, 
-        WebSocketHandler
-    }
 };
 
+pub mod args;
 pub mod connection;
 pub mod websocket;
-pub mod args;
 
-const UPGRADE: &str = "upgrade"; 
+const UPGRADE: &str = "upgrade";
 const VERSION: &str = "13";
 const WEBSOCKET: &str = "websocket";
 const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -73,9 +69,9 @@ impl WebSocketError {
 }
 
 impl App {
-    /// Adds a `handler` that has to be called when a bidirectional connection to WebSocket 
+    /// Adds a `handler` that has to be called when a bidirectional connection to WebSocket
     /// or WebSocket-over-HTTP/2 protocol is requested.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, ws::{WebSocketConnection, WebSocket}};
@@ -83,13 +79,13 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_conn("/ws", |conn: WebSocketConnection| async {
     ///     
     ///     // extract HTTP metadata, DI, etc.
-    /// 
+    ///
     ///     conn.on(|ws: WebSocket| async move {
-    ///         // handle WebSocket connection 
+    ///         // handle WebSocket connection
     ///     })
     /// });
     ///# app.run().await
@@ -99,13 +95,10 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequest + Send + 'static
+        Args: FromRequest + Send + 'static,
     {
         // Using GET for WebSocket protocol and HTTP/1
-        #[cfg(all(
-            feature = "http1",
-            not(feature = "http2"
-        )))]
+        #[cfg(all(feature = "http1", not(feature = "http2")))]
         self.map_get(pattern, handler);
 
         // Using CONNECT for WebSocket-over-HTTP/2 protocol and HTTP/2
@@ -119,7 +112,7 @@ impl App {
     }
 
     /// Adds a `handler` that has to be called when a WebSocket connection is established
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, ws::WebSocket};
@@ -127,7 +120,7 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_ws("/ws", |ws: WebSocket| async {
     ///     // handle WebSocket connection
     /// });
@@ -150,11 +143,11 @@ impl App {
         })
     }
 
-    /// Adds a `handler` that has to be called when a message received 
+    /// Adds a `handler` that has to be called when a message received
     /// from a client over WebSocket protocol
-    /// 
+    ///
     /// Note: In case of a need to extract something, e.g., from DI, it must implement `Clone`.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, ws::WebSocket};
@@ -162,19 +155,19 @@ impl App {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_msg("/ws", |msg: String| async move {
     ///     format!("received msg: {}", msg)
     /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_msg<F, M, Args, R>(&mut self, pattern: &str, handler: F) -> &mut Self 
+    pub fn map_msg<F, M, Args, R>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
         F: MessageHandler<M, Args, Output = R> + 'static,
         Args: FromRequest + Clone + Send + 'static,
         M: TryFrom<Message, Error = Error> + Send,
-        R: TryInto<Message, Error = Error> + Send
+        R: TryInto<Message, Error = Error> + Send,
     {
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
@@ -183,7 +176,8 @@ impl App {
                 let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await?;
                 let args = Args::from_request(HttpRequest::from_parts(parts, body)).await?;
                 conn.on(|mut ws| async move {
-                    ws.on_msg(move |msg: M| handler.call(msg, args.clone())).await;
+                    ws.on_msg(move |msg: M| handler.call(msg, args.clone()))
+                        .await;
                 })
             }
         })

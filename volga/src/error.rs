@@ -1,44 +1,35 @@
-﻿//! Error Handling tools
+//! Error Handling tools
 
 use hyper::http::status::InvalidStatusCode;
 
 use std::{
     convert::Infallible,
+    error::Error as StdError,
     fmt,
-    io::{ErrorKind, Error as IoError},
-    error::Error as StdError
+    io::{Error as IoError, ErrorKind},
 };
 
 use super::{
     App,
     http::{
-        GenericHandler,
-        MapErrHandler,
-        FromRequestParts,
-        FromRawRequest,
-        StatusCode,
-        IntoResponse
-    }
+        FromRawRequest, FromRequestParts, GenericHandler, IntoResponse, MapErrHandler, StatusCode,
+    },
 };
 
 pub use self::{
-    handler::{ErrorHandler, ErrorFunc},
-    fallback::{FallbackHandler, FallbackFunc}
+    fallback::{FallbackFunc, FallbackHandler},
+    handler::{ErrorFunc, ErrorHandler},
 };
 
 #[cfg(feature = "problem-details")]
 pub use self::problem::{Problem, ProblemDetails};
 
-pub mod handler;
 pub mod fallback;
+pub mod handler;
 #[cfg(feature = "problem-details")]
 pub mod problem;
 
-pub(crate) type BoxError = Box<
-    dyn StdError
-    + Send 
-    + Sync
->;
+pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
 /// Generic error
 #[derive(Debug)]
@@ -107,7 +98,7 @@ impl From<IoError> for Error {
                         let err = IoError::new(kind, inner);
                         Error::from_io_error_fallback(err)
                     }
-                }
+                };
             }
 
             let err = IoError::new(kind, "io error (Other)");
@@ -164,10 +155,10 @@ impl Error {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             inner: err.into(),
-            instance: Some(instance.into())
+            instance: Some(instance.into()),
         }
     }
-    
+
     /// Creates an internal server error
     #[inline]
     pub fn server_error(err: impl Into<BoxError>) -> Self {
@@ -187,23 +178,31 @@ impl Error {
             instance: None,
         }
     }
-    
+
     /// Creates [`Error`] from status code, instance and underlying error
     #[inline]
-    pub fn from_parts(status: StatusCode, instance: Option<String>, err: impl Into<BoxError>) -> Self {
-        Self { status, instance, inner: err.into() }
+    pub fn from_parts(
+        status: StatusCode,
+        instance: Option<String>,
+        err: impl Into<BoxError>,
+    ) -> Self {
+        Self {
+            status,
+            instance,
+            inner: err.into(),
+        }
     }
-    
+
     /// Unwraps the inner error
     pub fn into_inner(self) -> BoxError {
         self.inner
     }
-    
+
     /// Unwraps the error into a tuple of status code, instance value and underlying error
     pub fn into_parts(self) -> (StatusCode, Option<String>, BoxError) {
         (self.status, self.instance, self.inner)
     }
-    
+
     /// Check if the status is within 500-599.
     #[inline]
     pub fn is_server_error(&self) -> bool {
@@ -248,11 +247,11 @@ impl Error {
 
 impl App {
     /// Adds a global error handler
-    /// 
+    ///
     /// # Example
     /// ```no_run
     ///  use volga::{App, error::Error, status};
-    /// 
+    ///
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     ///  let mut app = App::new();
@@ -294,7 +293,7 @@ impl App {
     where
         F: GenericHandler<Args, Output = R>,
         Args: FromRawRequest + Send + 'static,
-        R: IntoResponse
+        R: IntoResponse,
     {
         self.pipeline
             .set_fallback_handler(FallbackFunc::new(handler).into());
@@ -305,7 +304,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::{Error, StatusCode};
-    use std::io::{ErrorKind, Error as IoError};
+    use std::io::{Error as IoError, ErrorKind};
 
     #[test]
     fn it_creates_new_error() {
@@ -314,12 +313,12 @@ mod tests {
         assert!(err.is_server_error());
         assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
     }
-    
+
     #[test]
     fn it_converts_from_not_found_io_error() {
         let io_error = IoError::new(ErrorKind::NotFound, "not found");
         let err = Error::from(io_error);
-        
+
         assert!(err.is_client_error());
         assert_eq!(err.status, StatusCode::NOT_FOUND);
     }
@@ -440,32 +439,32 @@ mod tests {
         assert!(err.is_server_error());
         assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
     }
-    
+
     #[test]
     fn it_converts_error_to_io_error() {
         let error = Error::client_error("some error");
         let io_error = IoError::from(error);
-        
+
         assert_eq!(io_error.kind(), ErrorKind::Other);
     }
-    
+
     #[test]
     fn it_splits_into_parts() {
         let error = Error::server_error("some error");
-        
+
         let (status, instance, inner) = error.into_parts();
-        
+
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(instance.is_none());
         assert_eq!(format!("{inner}"), "some error");
     }
-    
+
     #[test]
     fn it_unwraps_into_inner() {
         let error = Error::server_error("some error");
-        
+
         let inner = error.into_inner();
-        
+
         assert_eq!(format!("{inner}"), "some error");
     }
 

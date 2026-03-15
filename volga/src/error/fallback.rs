@@ -1,14 +1,14 @@
-﻿//! Fallback handler
+//! Fallback handler
 
-use std::{marker::PhantomData, sync::Arc};
 use futures_util::future::BoxFuture;
 use hyper::{Request, body::Incoming};
+use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
-    error::handler::default_error_handler,
-    http::{GenericHandler, FromRawRequest, IntoResponse},
     HttpResult,
-    status
+    error::handler::default_error_handler,
+    http::{FromRawRequest, GenericHandler, IntoResponse},
+    status,
 };
 
 /// Trait for types that represents a fallback handler
@@ -25,7 +25,7 @@ impl<F, Args, R> FallbackFunc<F, Args>
 where
     F: GenericHandler<Args, Output = R>,
     Args: FromRawRequest + Send + 'static,
-    R: IntoResponse
+    R: IntoResponse,
 {
     pub(crate) fn new(func: F) -> Self {
         Self(func, PhantomData)
@@ -36,7 +36,7 @@ impl<F, Args, R> FallbackHandler for FallbackFunc<F, Args>
 where
     F: GenericHandler<Args, Output = R>,
     Args: FromRawRequest + Send + 'static,
-    R: IntoResponse
+    R: IntoResponse,
 {
     #[inline]
     fn call(&self, req: Request<Incoming>) -> BoxFuture<'_, HttpResult> {
@@ -57,7 +57,7 @@ impl<F, Args, R> From<FallbackFunc<F, Args>> for PipelineFallbackHandler
 where
     F: GenericHandler<Args, Output = R>,
     Args: FromRawRequest + Send + 'static,
-    R: IntoResponse
+    R: IntoResponse,
 {
     #[inline]
     fn from(func: FallbackFunc<F, Args>) -> Self {
@@ -66,11 +66,7 @@ where
 }
 
 /// Holds a reference to global error handler
-pub(crate) type PipelineFallbackHandler = Arc<
-    dyn FallbackHandler
-    + Send
-    + Sync
->;
+pub(crate) type PipelineFallbackHandler = Arc<dyn FallbackHandler + Send + Sync>;
 
 /// Default fallback handler that creates a 404 [`HttpResult`]
 #[inline]
@@ -80,23 +76,23 @@ pub(crate) async fn default_fallback_handler() -> HttpResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_fallback_handler, FallbackFunc};
+    use super::{FallbackFunc, default_fallback_handler};
     use crate::status;
 
     #[tokio::test]
     async fn default_fallback_handler_returns_404() {
         let response = default_fallback_handler().await;
         assert!(response.is_ok());
-        
+
         let response = response.unwrap();
         assert_eq!(response.status(), 404);
     }
-    
+
     #[tokio::test]
     async fn it_create_new_fallback() {
         let fallback = || async { status!(404) };
         let handler = FallbackFunc::new(fallback);
-        
+
         let response = handler.0().await;
         assert!(response.is_ok());
 

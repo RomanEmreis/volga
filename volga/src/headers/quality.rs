@@ -1,10 +1,7 @@
-﻿//! Q-factor tools and helpers
+//! Q-factor tools and helpers
 
 use super::Error;
-use std::{
-    num::ParseFloatError, 
-    str::FromStr
-};
+use std::{num::ParseFloatError, str::FromStr};
 
 /// Marks a struct as supporting q-factor
 pub trait Ranked {
@@ -13,7 +10,7 @@ pub trait Ranked {
 }
 
 /// Represents a quality used in q-factor values.
-/// 
+///
 /// See [more](https://datatracker.ietf.org/doc/html/rfc7231#section-5.3.1).
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Quality<T: FromStr + Ranked> {
@@ -27,13 +24,13 @@ pub struct Quality<T: FromStr + Ranked> {
 impl<T: FromStr + Ranked> Quality<T> {
     const PREFIX: [&'static str; 2] = ["q=", "Q="];
     const DELIMITER: &'static str = ";";
-    
+
     /// Creates a new [`Quality`]
     #[inline]
     pub fn new(item: T, value: f32) -> Self {
         Quality { item, value }
     }
-    
+
     /// Creates a new [`Quality`] with rank based on source q-factor
     #[inline]
     pub fn ranked(item: T) -> Self {
@@ -43,26 +40,26 @@ impl<T: FromStr + Ranked> Quality<T> {
 }
 
 impl<T: FromStr + Ranked> FromStr for Quality<T>
-where 
-    Error: From<<T as FromStr>::Err>
+where
+    Error: From<<T as FromStr>::Err>,
 {
     type Err = Error;
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.rsplit_once(Self::DELIMITER)
+        let parts = s
+            .rsplit_once(Self::DELIMITER)
             .map(|(item, q_val)| (item.trim(), q_val.trim()));
-        
+
         if let Some((item, q_val)) = parts {
             let item = T::from_str(item)?;
             let q = &q_val[0..2];
             if Self::PREFIX.contains(&q) {
                 let q_val = &q_val[2..];
-                let value = q_val.parse::<f32>()
-                    .map_err(QualityError::parsing_error)?;
+                let value = q_val.parse::<f32>().map_err(QualityError::parsing_error)?;
                 Ok(Quality::new(item, value))
-            } else { 
+            } else {
                 Ok(Quality::ranked(item))
-            } 
+            }
         } else if let Ok(item) = T::from_str(s) {
             Ok(Quality::ranked(item))
         } else {
@@ -86,20 +83,20 @@ impl QualityError {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use super::{super::Encoding, Quality};
     use crate::headers::quality::Ranked;
+    use std::str::FromStr;
 
     #[test]
     fn it_parses_from_str_with_value() {
         let str = "identity;q=0.8";
-        
+
         let quality = Quality::<Encoding>::from_str(str);
-        
+
         assert!(quality.is_ok());
 
         let quality = quality.unwrap();
-        
+
         assert_eq!(quality.value, 0.8);
         assert_eq!(quality.item, Encoding::Identity);
     }
@@ -111,9 +108,9 @@ mod tests {
         let quality = Quality::<Encoding>::from_str(str);
 
         assert!(quality.is_ok());
-        
+
         let quality = quality.unwrap();
-        
+
         assert_eq!(quality.value, Encoding::Identity.rank() as f32);
         assert_eq!(quality.item, Encoding::Identity);
     }

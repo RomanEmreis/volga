@@ -1,4 +1,4 @@
-﻿//! Tools for tracing, logging and observability
+//! Tools for tracing, logging and observability
 
 use crate::App;
 
@@ -8,12 +8,12 @@ const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
 #[derive(Debug, Clone, Copy)]
 pub struct TracingConfig {
     /// Specifies whether to include a span id HTTP header
-    /// 
+    ///
     /// Default: `false`
     pub(super) include_header: bool,
-    
+
     /// Specifies a span id HTTP header name
-    /// 
+    ///
     /// Default: `request-id`
     pub(super) span_header_name: &'static str,
 }
@@ -21,7 +21,7 @@ pub struct TracingConfig {
 impl Default for TracingConfig {
     #[inline]
     fn default() -> Self {
-        Self { 
+        Self {
             include_header: false,
             span_header_name: DEFAULT_SPAN_HEADER_NAME,
         }
@@ -37,9 +37,9 @@ impl TracingConfig {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Configures tracing to include the span id as an HTTP header
-    /// 
+    ///
     /// Default: `false`
     pub fn with_header(mut self) -> Self {
         self.include_header = true;
@@ -71,7 +71,7 @@ impl App {
     /// Defaults:
     /// - include_header: `false`
     /// - span_header_name: `request-id`
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
@@ -79,25 +79,25 @@ impl App {
     /// let app = App::new()
     ///     .with_tracing(|config| config.with_header());
     /// ```
-    /// 
+    ///
     /// If tracing was already preconfigured, it does not overwrite it
     /// ```no_run
     /// use volga::App;
     /// use volga::tracing::TracingConfig;
     ///
     /// let app = App::new()
-    ///     .set_tracing(TracingConfig::new().with_header()) // sets include_header to true 
+    ///     .set_tracing(TracingConfig::new().with_header()) // sets include_header to true
     ///     .with_tracing(|config| config
     ///         .with_header_name("x-span-id"));               // sets a specific header name, include_header remains true
     /// ```
-    pub fn with_tracing<T>(mut self, config: T) -> Self 
+    pub fn with_tracing<T>(mut self, config: T) -> Self
     where
-        T : FnOnce(TracingConfig) -> TracingConfig
+        T: FnOnce(TracingConfig) -> TracingConfig,
     {
         self.tracing_config = Some(config(self.tracing_config.unwrap_or_default()));
         self
     }
-    
+
     /// Configures web server with specific Tracing configurations
     ///
     /// Defaults:
@@ -109,16 +109,15 @@ impl App {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
+    use super::{DEFAULT_SPAN_HEADER_NAME, TracingConfig};
     use crate::App;
-    use super::{TracingConfig, DEFAULT_SPAN_HEADER_NAME};
-    
+
     #[test]
     fn it_creates_new() {
         let tracing_config = TracingConfig::new();
-        
+
         assert!(!tracing_config.include_header);
         assert_eq!(tracing_config.span_header_name, DEFAULT_SPAN_HEADER_NAME);
     }
@@ -153,16 +152,15 @@ mod tests {
     fn it_creates_app_with_default_tracing() {
         let app = App::new().with_default_tracing();
         let tracing_config = app.tracing_config.unwrap();
-        
+
         assert!(!tracing_config.include_header);
         assert_eq!(tracing_config.span_header_name, DEFAULT_SPAN_HEADER_NAME)
     }
 
     #[test]
     fn it_creates_app_with_span_header() {
-        let app = App::new()
-            .set_tracing(TracingConfig::new().with_header());
-        
+        let app = App::new().set_tracing(TracingConfig::new().with_header());
+
         let tracing_config = app.tracing_config.unwrap();
 
         assert!(tracing_config.include_header);
@@ -172,9 +170,7 @@ mod tests {
     #[test]
     fn it_creates_app_with_span_header_name() {
         let app = App::new()
-            .with_tracing(|tracing| tracing
-                .with_header()
-                .with_header_name("correlation-id"));
+            .with_tracing(|tracing| tracing.with_header().with_header_name("correlation-id"));
 
         let tracing_config = app.tracing_config.unwrap();
 

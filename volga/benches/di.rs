@@ -4,15 +4,15 @@ use volga::App;
 
 use volga::di::Dc;
 
-use std::hint::black_box;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use futures_util::future::join_all;
 use reqwest::Client;
+use std::hint::black_box;
 use tokio::{runtime::Runtime, time::Instant};
 
 use std::{
     sync::{Arc, RwLock},
-    time::Duration
+    time::Duration,
 };
 
 async fn routing(iters: u64, url: &str) -> Duration {
@@ -50,23 +50,29 @@ fn benchmark(c: &mut Criterion) {
             app.add_singleton(Counter::default());
             app.add_scoped_default::<Cache>();
             app.add_transient_default::<Transient>();
-            app.map_post("/singleton", |c: Dc<Counter>| async move { *c.0.write().unwrap() += 1; });
-            app.map_post("/scoped", |c: Dc<Cache>| async move { c.0.write().unwrap().push(1); });
-            app.map_put("/transient", |c: Dc<Transient>| async move { let _ = c; });
+            app.map_post("/singleton", |c: Dc<Counter>| async move {
+                *c.0.write().unwrap() += 1;
+            });
+            app.map_post("/scoped", |c: Dc<Cache>| async move {
+                c.0.write().unwrap().push(1);
+            });
+            app.map_put("/transient", |c: Dc<Transient>| async move {
+                let _ = c;
+            });
 
             _ = app.run().await;
         });
     });
 
-    c.bench_function("singleton", |b| b.iter_custom(
-        |iters| rt.block_on(routing(iters, black_box("/singleton")))
-    ));
-    c.bench_function("scoped", |b| b.iter_custom(
-        |iters| rt.block_on(routing(iters, black_box("/scoped")))
-    ));
-    c.bench_function("transient", |b| b.iter_custom(
-        |iters| rt.block_on(routing(iters, black_box("/transient")))
-    ));
+    c.bench_function("singleton", |b| {
+        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/singleton"))))
+    });
+    c.bench_function("scoped", |b| {
+        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/scoped"))))
+    });
+    c.bench_function("transient", |b| {
+        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/transient"))))
+    });
 }
 
 criterion_group!(benches, benchmark);

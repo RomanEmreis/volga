@@ -1,8 +1,8 @@
-﻿#![allow(missing_docs)]
+#![allow(missing_docs)]
 #![cfg(all(feature = "test", feature = "tracing"))]
 
-use volga::test::TestServer;
 use tracing_subscriber::util::SubscriberInitExt;
+use volga::test::TestServer;
 
 #[tokio::test]
 async fn it_adds_request_id() {
@@ -16,8 +16,9 @@ async fn it_adds_request_id() {
         })
         .build()
         .await;
-    
-    let response = server.client()
+
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -26,6 +27,6 @@ async fn it_adds_request_id() {
     assert!(response.status().is_success());
     assert!(response.headers().get("request-id").is_some());
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }

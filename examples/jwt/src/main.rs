@@ -4,29 +4,24 @@
 //! JWT_SECRET=secret cargo run -p jwt
 //! ```
 
-use std::{ops::Add, time::{SystemTime, UNIX_EPOCH, Duration}};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use std::{
+    ops::Add,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use volga::{
-    App, Json, HttpResult,
-    auth::{
-        Authenticated,
-        BearerTokenService, 
-        DecodingKey, 
-        EncodingKey,
-        Claims,
-        roles
-    },
-    ok, status, bad_request
+    App, HttpResult, Json,
+    auth::{Authenticated, BearerTokenService, Claims, DecodingKey, EncodingKey, roles},
+    bad_request, ok, status,
 };
 
 fn main() {
-    let secret = std::env::var("JWT_SECRET")
-        .expect("JWT_SECRET must be set");
+    let secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
 
-    let mut app = App::new()
-        .with_bearer_auth(|auth| auth
-            .set_encoding_key(EncodingKey::from_secret(secret.as_bytes()))
-            .set_decoding_key(DecodingKey::from_secret(secret.as_bytes())));
+    let mut app = App::new().with_bearer_auth(|auth| {
+        auth.set_encoding_key(EncodingKey::from_secret(secret.as_bytes()))
+            .set_decoding_key(DecodingKey::from_secret(secret.as_bytes()))
+    });
 
     app.map_post("/login", login);
     app.map_get("/me", me)
@@ -56,8 +51,7 @@ async fn login(payload: Json<Payload>, bts: BearerTokenService) -> HttpResult {
         exp,
     };
 
-    let access_token = bts.encode(&claims)?
-        .to_string();
+    let access_token = bts.encode(&claims)?.to_string();
 
     ok!(AuthData { access_token })
 }

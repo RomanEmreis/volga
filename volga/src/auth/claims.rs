@@ -101,14 +101,14 @@ macro_rules! claims {
             Some(&self.permissions)
         }
     };
-    
+
     (@gen_impl $field:ident) => {};
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Authorizer, role, roles, permissions, predicate};
-    use serde::{Serialize, Deserialize};
+    use super::super::{Authorizer, permissions, predicate, role, roles};
+    use serde::{Deserialize, Serialize};
 
     claims! {
         #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -126,7 +126,7 @@ mod tests {
             roles: Vec<String>,
         }
     }
-    
+
     #[test]
     fn it_creates_claims_and_test_role() {
         let claims = MyClaims {
@@ -134,7 +134,7 @@ mod tests {
             role: "admin".to_string(),
             permissions: vec!["read".to_string(), "write".to_string()],
         };
-        
+
         let validate: Authorizer<MyClaims> = role("admin");
         assert!(validate.validate(&claims))
     }

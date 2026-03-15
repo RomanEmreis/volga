@@ -10,12 +10,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  format_check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+        
   clippy_check:
     runs-on: ubuntu-latest
+    needs: format_check
+    
     steps:
       - uses: actions/checkout@v4
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+        
   build:
     environment: CICD
     runs-on: ubuntu-latest

@@ -1,21 +1,17 @@
-﻿//! CORS (Cross-Origin Resource Sharing) Middleware
+//! CORS (Cross-Origin Resource Sharing) Middleware
 //!
 //! Middleware that applies CORS headers for requests
 
-use hyper::Response;
 use crate::{
-    App,
-    http::{StatusCode, HttpBody, Method},
-    headers::{
-        ACCESS_CONTROL_REQUEST_METHOD,
-        ORIGIN,
-    },
-    HttpResponse
+    App, HttpResponse,
+    headers::{ACCESS_CONTROL_REQUEST_METHOD, ORIGIN},
+    http::{HttpBody, Method, StatusCode},
 };
+use hyper::Response;
 
 impl App {
     /// Adds CORS middleware to your web server's pipeline to allow cross-domain requests.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
@@ -26,7 +22,7 @@ impl App {
     ///         .with_any_method()
     ///         .with_any_header());
     ///
-    /// app.use_cors(); 
+    /// app.use_cors();
     /// ```
     ///
     /// # Panics
@@ -39,7 +35,7 @@ impl App {
         }
 
         self.cors.is_enabled = true;
-        
+
         let default_cors = self.cors.get_default().cloned();
 
         self.wrap(move |ctx, next| {
@@ -56,7 +52,8 @@ impl App {
                 // Preflight is only possible for OPTIONS
                 if method == Method::OPTIONS {
                     let origin = request.headers().get(&ORIGIN);
-                    let acrm = request.headers()
+                    let acrm = request
+                        .headers()
                         .get(ACCESS_CONTROL_REQUEST_METHOD)
                         .and_then(|v| Method::from_bytes(v.as_bytes()).ok());
 
@@ -66,7 +63,7 @@ impl App {
 
                         cors.apply_preflight_response(response.headers_mut(), origin.cloned());
 
-                        return Ok(HttpResponse::from_inner(response))
+                        return Ok(HttpResponse::from_inner(response));
                     }
 
                     // Not a valid preflight => fall through to user OPTIONS handler
@@ -86,7 +83,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use crate::App;
-    
+
     #[test]
     #[should_panic]
     fn it_panics_due_missing_cors_config() {
@@ -96,8 +93,7 @@ mod tests {
 
     #[test]
     fn it_validates_cors_config() {
-        let mut app = App::new()
-            .with_cors(|cors| cors.with_credentials(false));
+        let mut app = App::new().with_cors(|cors| cors.with_credentials(false));
         app.use_cors();
     }
 }

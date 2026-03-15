@@ -1,20 +1,12 @@
-﻿//! Extractors for the whole HTTP request
+//! Extractors for the whole HTTP request
 
-use crate::{error::Error, HttpRequest};
-use futures_util::future::{ok, Ready};
+use crate::{HttpRequest, error::Error};
+use futures_util::future::{Ready, ok};
 
-use hyper::{
-    http::request::Parts,
-    Method, 
-    Uri
-};
+use hyper::{Method, Uri, http::request::Parts};
 
 use crate::http::endpoints::args::{
-    FromRequestParts,
-    FromRequestRef,
-    FromPayload,
-    Payload,
-    Source
+    FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
 };
 
 impl FromRequestParts for Uri {
@@ -49,10 +41,12 @@ impl FromPayload for Uri {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ok(parts.uri.clone())
     }
 }
@@ -61,10 +55,12 @@ impl FromPayload for Method {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ok(parts.method.clone())
     }
 }
@@ -73,20 +69,22 @@ impl FromPayload for HttpRequest {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Request;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Request(req) = payload else { unreachable!() };
+        let Payload::Request(req) = payload else {
+            unreachable!()
+        };
         ok(*req)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FromRequestParts, FromPayload, Payload};
-    use hyper::{Method, Request, Uri};
+    use super::{FromPayload, FromRequestParts, Payload};
     use crate::error::Error;
     use crate::{HttpBody, HttpRequest};
+    use hyper::{Method, Request, Uri};
 
     #[test]
     fn it_gets_uri_from_parts() {
@@ -125,16 +123,14 @@ mod tests {
         assert!(req.is_ok());
 
         let req = req.unwrap();
-        
+
         assert_eq!(req.uri().path(), "/");
         assert_eq!(req.method(), Method::GET);
     }
 
     #[tokio::test]
     async fn it_gets_method_from_payload() {
-        let req = Request::get("/")
-            .body(())
-            .unwrap();
+        let req = Request::get("/").body(()).unwrap();
 
         let (parts, _) = req.into_parts();
 
@@ -148,9 +144,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_gets_uri_from_payload() {
-        let req = Request::get("/")
-            .body(())
-            .unwrap();
+        let req = Request::get("/").body(()).unwrap();
 
         let (parts, _) = req.into_parts();
 

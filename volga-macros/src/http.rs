@@ -6,7 +6,10 @@ use quote::quote;
 pub(super) mod attr;
 
 /// Expands a header struct into a FromHeaders implementation.
-pub(super) fn expand_http_header(header: &attr::HeaderInput, input: &syn::ItemStruct) -> syn::Result<TokenStream> {
+pub(super) fn expand_http_header(
+    header: &attr::HeaderInput,
+    input: &syn::ItemStruct,
+) -> syn::Result<TokenStream> {
     let struct_name = &input.ident;
     let header_expr = header.as_token_stream();
     Ok(quote! {
@@ -18,7 +21,7 @@ pub(super) fn expand_http_header(header: &attr::HeaderInput, input: &syn::ItemSt
             pub const fn from_static(value: &'static str) -> ::volga::headers::Header<#struct_name> {
                 ::volga::headers::Header::<#struct_name>::from_static(value)
             }
-                
+
             /// Construct a typed header from bytes (validated).
             #[inline]
             pub fn from_bytes(bytes: &[u8]) -> Result<::volga::headers::Header<#struct_name>, ::volga::error::Error> {
@@ -39,7 +42,7 @@ pub(super) fn expand_http_header(header: &attr::HeaderInput, input: &syn::ItemSt
         }
         impl ::volga::headers::FromHeaders for #struct_name {
             const NAME: ::volga::headers::HeaderName = ::volga::headers::HeaderName::from_static(#header_expr);
-            
+
             #[inline]
             fn from_headers(headers: &::volga::headers::HeaderMap) -> Option<&::volga::headers::HeaderValue> {
                 headers.get(Self::NAME)
