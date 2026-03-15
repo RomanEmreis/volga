@@ -1,18 +1,11 @@
-﻿use std::{sync::Arc, future::Future};
-use futures_util::future::BoxFuture;
-use crate::{HttpResult, HttpRequest};
 use crate::error::Error;
-use crate::http::{
-    endpoints::args::FromRequest,
-    IntoResponse
-};
+use crate::http::{IntoResponse, endpoints::args::FromRequest};
+use crate::{HttpRequest, HttpResult};
+use futures_util::future::BoxFuture;
+use std::{future::Future, sync::Arc};
 
 /// Represents a specific registered request handler
-pub(crate) type RouteHandler = Arc<
-    dyn Handler 
-    + Send 
-    + Sync
->;
+pub(crate) type RouteHandler = Arc<dyn Handler + Send + Sync>;
 
 pub(crate) trait Handler {
     fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult>;
@@ -24,17 +17,17 @@ pub(crate) struct Func<F, R, Args>
 where
     F: GenericHandler<Args, Output = R>,
     R: IntoResponse,
-    Args: FromRequest
+    Args: FromRequest,
 {
     func: F,
     _marker: std::marker::PhantomData<fn(Args)>,
 }
 
-impl<F, R ,Args> Func<F, R, Args>
+impl<F, R, Args> Func<F, R, Args>
 where
     F: GenericHandler<Args, Output = R>,
     R: IntoResponse,
-    Args: FromRequest
+    Args: FromRequest,
 {
     /// Creates a new [`Func`] wrapped into [`Arc`]
     #[inline]
@@ -45,7 +38,10 @@ where
     /// Creates a new [`Func`]
     #[inline]
     pub(crate) fn new_local(func: F) -> Self {
-        Self { func, _marker: std::marker::PhantomData }
+        Self {
+            func,
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
@@ -53,16 +49,13 @@ impl<F, R, Args> Handler for Func<F, R, Args>
 where
     F: GenericHandler<Args, Output = R>,
     R: IntoResponse,
-    Args: FromRequest + Send
+    Args: FromRequest + Send,
 {
     #[inline]
     fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult> {
         Box::pin(async move {
             let args = Args::from_request(req).await?;
-            self.func
-                .call(args)
-                .await
-                .into_response()
+            self.func.call(args).await.into_response()
         })
     }
 }

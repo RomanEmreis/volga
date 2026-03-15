@@ -7,7 +7,7 @@ const DEFAULT_PORT: u16 = 7878;
 /// Wraps a socket
 #[derive(Debug)]
 pub struct Connection {
-    pub(super) socket: SocketAddr
+    pub(super) socket: SocketAddr,
 }
 
 impl Default for Connection {
@@ -47,7 +47,9 @@ impl From<String> for Connection {
 impl<I: Into<IpAddr>> From<(I, u16)> for Connection {
     #[inline]
     fn from(value: (I, u16)) -> Self {
-        Self { socket: SocketAddr::from(value) }
+        Self {
+            socket: SocketAddr::from(value),
+        }
     }
 }
 
@@ -93,7 +95,10 @@ mod tests {
     fn it_debugs_connection() {
         let connection: Connection = ([127, 0, 0, 1], 5000).into();
 
-        assert_eq!(format!("{connection:?}"), "Connection { socket: 127.0.0.1:5000 }");
+        assert_eq!(
+            format!("{connection:?}"),
+            "Connection { socket: 127.0.0.1:5000 }"
+        );
     }
 
     #[test]

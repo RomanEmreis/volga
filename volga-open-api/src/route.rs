@@ -1,23 +1,19 @@
 //! Types and utils for OpenAPI route config.
 
-use std::collections::BTreeMap;
-use serde::de::DeserializeOwned;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde::de::DeserializeOwned;
+use serde_json::{Value, json};
+use std::collections::BTreeMap;
 
 use mime::{
-    APPLICATION_JSON,
-    APPLICATION_OCTET_STREAM,
-    APPLICATION_WWW_FORM_URLENCODED,
-    MULTIPART_FORM_DATA,
-    TEXT_EVENT_STREAM,
-    TEXT_PLAIN_UTF_8
+    APPLICATION_JSON, APPLICATION_OCTET_STREAM, APPLICATION_WWW_FORM_URLENCODED,
+    MULTIPART_FORM_DATA, TEXT_EVENT_STREAM, TEXT_PLAIN_UTF_8,
 };
 
 use super::{
-    schema::{OpenApiSchema, Probe},
-    param::OpenApiParameter,
     op::OpenApiOperation,
+    param::OpenApiParameter,
+    schema::{OpenApiSchema, Probe},
 };
 
 /// Converts a value into an HTTP status code.
@@ -28,28 +24,28 @@ pub trait IntoStatusCode {
 
 impl IntoStatusCode for u16 {
     #[inline]
-    fn into_status_code(self) -> u16 { 
+    fn into_status_code(self) -> u16 {
         self
     }
 }
 
 impl IntoStatusCode for u32 {
     #[inline]
-    fn into_status_code(self) -> u16 { 
+    fn into_status_code(self) -> u16 {
         self as u16
     }
 }
 
 impl IntoStatusCode for i32 {
     #[inline]
-    fn into_status_code(self) -> u16 { 
+    fn into_status_code(self) -> u16 {
         self as u16
     }
 }
 
 impl IntoStatusCode for http::StatusCode {
     #[inline]
-    fn into_status_code(self) -> u16 { 
+    fn into_status_code(self) -> u16 {
         self.as_u16()
     }
 }
@@ -144,13 +140,20 @@ impl OpenApiRouteConfig {
     }
 
     /// Sets the response schema for this operation.
-    pub fn with_response_schema(mut self, status: impl IntoStatusCode, schema: OpenApiSchema) -> Self {
+    pub fn with_response_schema(
+        mut self,
+        status: impl IntoStatusCode,
+        schema: OpenApiSchema,
+    ) -> Self {
         let status = status.into_status_code();
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(schema),
-            example: None,
-            content_type: APPLICATION_JSON.to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(schema),
+                example: None,
+                content_type: APPLICATION_JSON.to_string(),
+            },
+        );
         self
     }
 
@@ -187,11 +190,14 @@ impl OpenApiRouteConfig {
     /// Generates text/plain response schema.
     pub fn produces_text(mut self, status: impl IntoStatusCode) -> Self {
         let status = status.into_status_code();
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::string()),
-            example: None,
-            content_type: TEXT_PLAIN_UTF_8.to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::string()),
+                example: None,
+                content_type: TEXT_PLAIN_UTF_8.to_string(),
+            },
+        );
         self
     }
 
@@ -210,11 +216,14 @@ impl OpenApiRouteConfig {
     /// Generates empty JSON response schema.
     pub fn produces_empty_json(mut self, status: impl IntoStatusCode) -> Self {
         let status = status.into_status_code();
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::object()),
-            example: None,
-            content_type: APPLICATION_JSON.to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::object()),
+                example: None,
+                content_type: APPLICATION_JSON.to_string(),
+            },
+        );
         self
     }
 
@@ -226,50 +235,70 @@ impl OpenApiRouteConfig {
     /// Generates empty form response schema.
     pub fn produces_empty_form(mut self, status: impl IntoStatusCode) -> Self {
         let status = status.into_status_code();
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::object()),
-            example: None,
-            content_type: APPLICATION_WWW_FORM_URLENCODED.to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::object()),
+                example: None,
+                content_type: APPLICATION_WWW_FORM_URLENCODED.to_string(),
+            },
+        );
         self
     }
 
     /// Generates stream response schema.
     pub fn produces_stream(mut self, status: impl IntoStatusCode) -> Self {
         let status = status.into_status_code();
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::binary()),
-            example: None,
-            content_type: APPLICATION_OCTET_STREAM.to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::binary()),
+                example: None,
+                content_type: APPLICATION_OCTET_STREAM.to_string(),
+            },
+        );
         self
     }
 
     /// Generates SSE stream response schema.
     pub fn produces_sse(mut self, status: impl IntoStatusCode) -> Self {
         let status = status.into_status_code();
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::string().with_title("SSE stream")),
-            example: None,
-            content_type: TEXT_EVENT_STREAM.to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::string().with_title("SSE stream")),
+                example: None,
+                content_type: TEXT_EVENT_STREAM.to_string(),
+            },
+        );
         self
     }
 
     /// Generates JSON response schema and example.
-    pub fn produces_json_example<T: Serialize>(mut self, status: impl IntoStatusCode, example: T) -> Self {
+    pub fn produces_json_example<T: Serialize>(
+        mut self,
+        status: impl IntoStatusCode,
+        example: T,
+    ) -> Self {
         let status = status.into_status_code();
         let example = serde_json::to_value(example).unwrap_or_else(|_| json!({}));
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::from_example(&example)),
-            example: Some(example),
-            content_type: APPLICATION_JSON.to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::from_example(&example)),
+                example: Some(example),
+                content_type: APPLICATION_JSON.to_string(),
+            },
+        );
         self
     }
 
     /// Generates form response schema and example.
-    pub fn produces_form_example<T: Serialize>(mut self, status: impl IntoStatusCode, example: T) -> Self {
+    pub fn produces_form_example<T: Serialize>(
+        mut self,
+        status: impl IntoStatusCode,
+        example: T,
+    ) -> Self {
         let status = status.into_status_code();
         let example = serde_json::to_value(example).unwrap_or_else(|_| json!({}));
 
@@ -278,11 +307,14 @@ impl OpenApiRouteConfig {
             _ => String::new(),
         };
 
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::string()),
-            example: Some(Value::String(encoded)),
-            content_type: APPLICATION_WWW_FORM_URLENCODED.to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::string()),
+                example: Some(Value::String(encoded)),
+                content_type: APPLICATION_WWW_FORM_URLENCODED.to_string(),
+            },
+        );
         self
     }
 
@@ -301,11 +333,14 @@ impl OpenApiRouteConfig {
             "title": title,
             "status": status
         });
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::from_example(&example)),
-            example: Some(example),
-            content_type: "application/problem+json".to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::from_example(&example)),
+                example: Some(example),
+                content_type: "application/problem+json".to_string(),
+            },
+        );
         self
     }
 
@@ -313,14 +348,21 @@ impl OpenApiRouteConfig {
     ///
     /// The schema is inferred from the provided example value.
     #[cfg(feature = "problem-details")]
-    pub fn produces_problem_example<T: Serialize>(mut self, status: impl IntoStatusCode, example: T) -> Self {
+    pub fn produces_problem_example<T: Serialize>(
+        mut self,
+        status: impl IntoStatusCode,
+        example: T,
+    ) -> Self {
         let status = status.into_status_code();
         let example = serde_json::to_value(example).unwrap_or_else(|_| json!({}));
-        self.responses.insert(status, ResponseBody::Content {
-            schema: Box::new(OpenApiSchema::from_example(&example)),
-            example: Some(example),
-            content_type: "application/problem+json".to_string(),
-        });
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::from_example(&example)),
+                example: Some(example),
+                content_type: "application/problem+json".to_string(),
+            },
+        );
         self
     }
 
@@ -424,7 +466,9 @@ impl OpenApiRouteConfig {
             self.request_content_type = other.request_content_type.clone();
         }
         for (status, body) in &other.responses {
-            self.responses.entry(*status).or_insert_with(|| body.clone());
+            self.responses
+                .entry(*status)
+                .or_insert_with(|| body.clone());
         }
         if !other.extra_parameters.is_empty() {
             self.extra_parameters.extend(other.extra_parameters.clone());
@@ -446,7 +490,7 @@ impl OpenApiRouteConfig {
     pub(super) fn apply_to_operation(
         &self,
         operation: &mut OpenApiOperation,
-        schemas: &mut BTreeMap<String, OpenApiSchema>
+        schemas: &mut BTreeMap<String, OpenApiSchema>,
     ) {
         if let Some(summary) = &self.summary {
             operation.summary = Some(summary.clone());
@@ -463,9 +507,15 @@ impl OpenApiRouteConfig {
         }
 
         if self.request_schema.is_some() || self.request_example.is_some() {
-            let mut schema = self.request_schema.clone().unwrap_or_else(OpenApiSchema::object);
+            let mut schema = self
+                .request_schema
+                .clone()
+                .unwrap_or_else(OpenApiSchema::object);
             let example = self.request_example.clone();
-            let content_type = self.request_content_type.as_deref().unwrap_or(APPLICATION_JSON.as_ref());
+            let content_type = self
+                .request_content_type
+                .as_deref()
+                .unwrap_or(APPLICATION_JSON.as_ref());
 
             schema = intern_schema_if_object_named(schema, schemas);
             operation.set_request_body(schema, example, content_type);
@@ -478,7 +528,11 @@ impl OpenApiRouteConfig {
                     ResponseBody::NoContent => {
                         operation.clear_response_body(*status);
                     }
-                    ResponseBody::Content { schema, example, content_type } => {
+                    ResponseBody::Content {
+                        schema,
+                        example,
+                        content_type,
+                    } => {
                         let schema = intern_schema_if_object_named((**schema).clone(), schemas);
                         operation.set_response_body(*status, schema, example.clone(), content_type);
                     }
@@ -505,7 +559,7 @@ impl OpenApiRouteConfig {
 
 fn intern_schema_if_object_named(
     mut schema: OpenApiSchema,
-    schemas: &mut BTreeMap<String, OpenApiSchema>
+    schemas: &mut BTreeMap<String, OpenApiSchema>,
 ) -> OpenApiSchema {
     if schema.schema_ref.is_some() {
         return schema;
@@ -531,9 +585,7 @@ fn intern_schema_if_object_named(
 
     schema.title = None;
 
-    schemas
-        .entry(name.clone())
-        .or_insert(schema);
+    schemas.entry(name.clone()).or_insert(schema);
 
     OpenApiSchema::reference(&name)
 }
@@ -555,7 +607,7 @@ fn type_display_name<T>() -> String {
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
-    use super::{OpenApiRouteConfig, IntoStatusCode};
+    use super::{IntoStatusCode, OpenApiRouteConfig};
     use crate::{op::OpenApiOperation, schema::OpenApiSchema};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
@@ -658,9 +710,12 @@ mod tests {
                     .with_title("User")
                     .with_property("id", OpenApiSchema::integer()),
             )
-            .produces_json_example(200u16, ResponsePayload {
-                message: "ok".to_string(),
-            })
+            .produces_json_example(
+                200u16,
+                ResponsePayload {
+                    message: "ok".to_string(),
+                },
+            )
             .with_summary("create user")
             .with_operation_id("createUser");
 
@@ -695,11 +750,7 @@ mod tests {
         cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
 
         let op_json = serde_json::to_value(op).expect("serialize operation");
-        assert!(
-            op_json["responses"]["200"]
-                .get("content")
-                .is_none()
-        );
+        assert!(op_json["responses"]["200"].get("content").is_none());
     }
 
     #[test]
@@ -771,42 +822,68 @@ mod tests {
         }
 
         let text_json = apply(OpenApiRouteConfig::default().produces_text(200));
-        assert!(text_json["responses"]["200"]["content"].get("text/plain; charset=utf-8").is_some());
+        assert!(
+            text_json["responses"]["200"]["content"]
+                .get("text/plain; charset=utf-8")
+                .is_some()
+        );
         assert_eq!(
             text_json["responses"]["200"]["content"]["text/plain; charset=utf-8"]["schema"]["type"],
             "string"
         );
 
         let empty_json_json = apply(OpenApiRouteConfig::default().produces_empty_json(200));
-        assert!(empty_json_json["responses"]["200"]["content"].get("application/json").is_some());
+        assert!(
+            empty_json_json["responses"]["200"]["content"]
+                .get("application/json")
+                .is_some()
+        );
         assert_eq!(
             empty_json_json["responses"]["200"]["content"]["application/json"]["schema"]["type"],
             "object"
         );
 
         let form_json = apply(OpenApiRouteConfig::default().produces_form::<ResponsePayload>(200));
-        assert!(form_json["responses"]["200"]["content"].get("application/x-www-form-urlencoded").is_some());
+        assert!(
+            form_json["responses"]["200"]["content"]
+                .get("application/x-www-form-urlencoded")
+                .is_some()
+        );
         assert_eq!(
-            form_json["responses"]["200"]["content"]["application/x-www-form-urlencoded"]["schema"]["type"],
+            form_json["responses"]["200"]["content"]["application/x-www-form-urlencoded"]["schema"]
+                ["type"],
             "string"
         );
 
         let empty_form_json = apply(OpenApiRouteConfig::default().produces_empty_form(200));
-        assert!(empty_form_json["responses"]["200"]["content"].get("application/x-www-form-urlencoded").is_some());
+        assert!(
+            empty_form_json["responses"]["200"]["content"]
+                .get("application/x-www-form-urlencoded")
+                .is_some()
+        );
         assert_eq!(
-            empty_form_json["responses"]["200"]["content"]["application/x-www-form-urlencoded"]["schema"]["type"],
+            empty_form_json["responses"]["200"]["content"]["application/x-www-form-urlencoded"]["schema"]
+                ["type"],
             "object"
         );
 
         let stream_json = apply(OpenApiRouteConfig::default().produces_stream(200));
-        assert!(stream_json["responses"]["200"]["content"].get("application/octet-stream").is_some());
+        assert!(
+            stream_json["responses"]["200"]["content"]
+                .get("application/octet-stream")
+                .is_some()
+        );
         assert_eq!(
             stream_json["responses"]["200"]["content"]["application/octet-stream"]["schema"]["format"],
             "binary"
         );
 
         let sse_json = apply(OpenApiRouteConfig::default().produces_sse(200));
-        assert!(sse_json["responses"]["200"]["content"].get("text/event-stream").is_some());
+        assert!(
+            sse_json["responses"]["200"]["content"]
+                .get("text/event-stream")
+                .is_some()
+        );
         assert_eq!(
             sse_json["responses"]["200"]["content"]["text/event-stream"]["schema"]["title"],
             "SSE stream"
@@ -821,10 +898,13 @@ mod tests {
             second: i32,
         }
 
-        let cfg = OpenApiRouteConfig::default().produces_form_example(200u16, FormOut {
-            first: "hello".to_string(),
-            second: 7,
-        });
+        let cfg = OpenApiRouteConfig::default().produces_form_example(
+            200u16,
+            FormOut {
+                first: "hello".to_string(),
+                second: 7,
+            },
+        );
 
         let mut op = OpenApiOperation::default();
         cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
@@ -865,19 +945,29 @@ mod tests {
         let op_json = serde_json::to_value(op).expect("serialize");
 
         // Both statuses should appear
-        assert!(op_json["responses"]["200"]["content"].get("application/json").is_some());
-        assert!(op_json["responses"]["404"]["content"].get("application/json").is_some());
+        assert!(
+            op_json["responses"]["200"]["content"]
+                .get("application/json")
+                .is_some()
+        );
+        assert!(
+            op_json["responses"]["404"]["content"]
+                .get("application/json")
+                .is_some()
+        );
         // Default 200 is replaced by explicit responses
         assert_eq!(
-            op_json["responses"].as_object().expect("responses object").len(),
+            op_json["responses"]
+                .as_object()
+                .expect("responses object")
+                .len(),
             2
         );
     }
 
     #[test]
     fn explicit_responses_replace_default_200() {
-        let cfg = OpenApiRouteConfig::default()
-            .produces_json::<ResponsePayload>(201);
+        let cfg = OpenApiRouteConfig::default().produces_json::<ResponsePayload>(201);
 
         let mut op = OpenApiOperation::default();
         cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
@@ -885,7 +975,11 @@ mod tests {
 
         // The default "200" must be gone — only "201" remains
         assert!(op_json["responses"].get("200").is_none());
-        assert!(op_json["responses"]["201"]["content"].get("application/json").is_some());
+        assert!(
+            op_json["responses"]["201"]["content"]
+                .get("application/json")
+                .is_some()
+        );
         assert_eq!(op_json["responses"]["201"]["description"], "Created");
     }
 
@@ -903,10 +997,22 @@ mod tests {
         let op_json = serde_json::to_value(op).expect("serialize");
 
         // 200 should keep JSON (from base), not be overridden by text (from other)
-        assert!(op_json["responses"]["200"]["content"].get("application/json").is_some());
-        assert!(op_json["responses"]["200"]["content"].get("text/plain; charset=utf-8").is_none());
+        assert!(
+            op_json["responses"]["200"]["content"]
+                .get("application/json")
+                .is_some()
+        );
+        assert!(
+            op_json["responses"]["200"]["content"]
+                .get("text/plain; charset=utf-8")
+                .is_none()
+        );
         // 404 should come from other
-        assert!(op_json["responses"]["404"]["content"].get("application/json").is_some());
+        assert!(
+            op_json["responses"]["404"]["content"]
+                .get("application/json")
+                .is_some()
+        );
     }
 
     #[test]
@@ -930,10 +1036,16 @@ mod tests {
             let op_json = serde_json::to_value(op).expect("serialize");
 
             let content = &op_json["responses"]["400"]["content"]["application/problem+json"];
-            assert!(content.is_object(), "application/problem+json content should exist");
+            assert!(
+                content.is_object(),
+                "application/problem+json content should exist"
+            );
             assert_eq!(content["example"]["title"], "Bad Request");
             assert_eq!(content["example"]["status"], 400);
-            assert_eq!(content["example"]["type"], "https://tools.ietf.org/html/rfc9110");
+            assert_eq!(
+                content["example"]["type"],
+                "https://tools.ietf.org/html/rfc9110"
+            );
             assert_eq!(op_json["responses"]["400"]["description"], "Bad Request");
             // Default "200" must be gone
             assert!(op_json["responses"].get("200").is_none());
@@ -964,10 +1076,16 @@ mod tests {
             let op_json = serde_json::to_value(op).expect("serialize");
 
             let content = &op_json["responses"]["422"]["content"]["application/problem+json"];
-            assert!(content.is_object(), "application/problem+json content should exist");
+            assert!(
+                content.is_object(),
+                "application/problem+json content should exist"
+            );
             assert_eq!(content["example"]["detail"], "Validation failed");
             assert_eq!(content["example"]["status"], 422);
-            assert_eq!(op_json["responses"]["422"]["description"], "Unprocessable Entity");
+            assert_eq!(
+                op_json["responses"]["422"]["description"],
+                "Unprocessable Entity"
+            );
         }
 
         #[test]
@@ -981,9 +1099,21 @@ mod tests {
             cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
             let op_json = serde_json::to_value(op).expect("serialize");
 
-            assert!(op_json["responses"]["200"]["content"].get("application/json").is_some());
-            assert!(op_json["responses"]["400"]["content"].get("application/problem+json").is_some());
-            assert!(op_json["responses"]["500"]["content"].get("application/problem+json").is_some());
+            assert!(
+                op_json["responses"]["200"]["content"]
+                    .get("application/json")
+                    .is_some()
+            );
+            assert!(
+                op_json["responses"]["400"]["content"]
+                    .get("application/problem+json")
+                    .is_some()
+            );
+            assert!(
+                op_json["responses"]["500"]["content"]
+                    .get("application/problem+json")
+                    .is_some()
+            );
             assert_eq!(op_json["responses"].as_object().unwrap().len(), 3);
         }
     }

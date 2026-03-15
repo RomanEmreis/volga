@@ -1,28 +1,26 @@
-﻿//! CORS (Cross-Origin Resource Sharing) configuration
+//! CORS (Cross-Origin Resource Sharing) configuration
 
-use crate::{App, routing::{Route, RouteGroup}};
+use crate::{
+    App,
+    routing::{Route, RouteGroup},
+};
 use hyper::{
-    http::{HeaderValue, HeaderName, HeaderMap},
-    header::{ORIGIN, ACCESS_CONTROL_REQUEST_METHOD, ACCESS_CONTROL_REQUEST_HEADERS},
     Method,
+    header::{ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD, ORIGIN},
+    http::{HeaderMap, HeaderName, HeaderValue},
 };
 
 use std::{
-    sync::Arc,
-    collections::{HashSet, HashMap},
+    collections::{HashMap, HashSet},
     str::FromStr,
-    time::Duration
+    sync::Arc,
+    time::Duration,
 };
 
 use crate::headers::{
-    ACCESS_CONTROL_ALLOW_CREDENTIALS,
-    ACCESS_CONTROL_ALLOW_HEADERS,
-    ACCESS_CONTROL_ALLOW_METHODS,
-    ACCESS_CONTROL_ALLOW_ORIGIN,
-    ACCESS_CONTROL_EXPOSE_HEADERS,
-    ACCESS_CONTROL_MAX_AGE,
-    CONTENT_LENGTH,
-    VARY
+    ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+    ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE,
+    CONTENT_LENGTH, VARY,
 };
 
 const DEFAULT_MAX_AGE: u64 = 24 * 60 * 60; // 24 hours = 86,400 seconds
@@ -49,7 +47,7 @@ pub struct CorsConfig {
     expose_any: bool,
     max_age: Option<Duration>,
     allow_credentials: bool,
-    include_vary: bool
+    include_vary: bool,
 }
 
 /// represents pre-computed CORS headers
@@ -73,7 +71,7 @@ pub(crate) struct CorsRegistry {
     pub(crate) is_enabled: bool,
 }
 
-/// Describes how CORS bound to a route 
+/// Describes how CORS bound to a route
 #[derive(Debug, Default, Clone)]
 pub(crate) enum CorsOverride {
     #[default]
@@ -106,7 +104,7 @@ impl CorsConfig {
         self
     }
 
-    /// Configures CORS with allowed origins, 
+    /// Configures CORS with allowed origins,
     /// which will be used with the [`Access-Control-Allow-Origin`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Origin) HTTP header
     ///
     /// Default value: `None` (Any Origin is allowed)
@@ -121,21 +119,20 @@ impl CorsConfig {
     pub fn with_origins<T, S>(mut self, origins: T) -> Self
     where
         T: IntoIterator<Item = S>,
-        S: AsRef<str>
+        S: AsRef<str>,
     {
         let allowed_origins = origins
             .into_iter()
-            .map(|o| HeaderValue::from_str(o.as_ref())
-                .expect("CORS error: invalid origin value"))
+            .map(|o| HeaderValue::from_str(o.as_ref()).expect("CORS error: invalid origin value"))
             .collect::<HashSet<_>>();
         self.allow_origins = Some(allowed_origins);
         self
     }
 
-    /// Configures CORS to allow any origin 
+    /// Configures CORS to allow any origin
     ///
     /// Default value: `None` (Any Origin is allowed)
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::http::CorsConfig;
@@ -147,12 +144,12 @@ impl CorsConfig {
         self.allow_origins = None;
         self
     }
-    
-    /// Configures CORS with allowed HTTP headers list 
+
+    /// Configures CORS with allowed HTTP headers list
     /// which will be used with the [`Access-Control-Allow-Headers`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Headers) HTTP header
-    /// 
+    ///
     /// Default value: `None` (Any HTTP header is allowed)
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::http::CorsConfig;
@@ -163,21 +160,20 @@ impl CorsConfig {
     pub fn with_headers<T, S>(mut self, headers: T) -> Self
     where
         T: IntoIterator<Item = S>,
-        S: AsRef<str>
+        S: AsRef<str>,
     {
         let allowed_headers = headers
             .into_iter()
-            .map(|h| HeaderName::from_str(h.as_ref())
-                .expect("CORS error: invalid header value"))
+            .map(|h| HeaderName::from_str(h.as_ref()).expect("CORS error: invalid header value"))
             .collect::<HashSet<_>>();
         self.allow_headers = Some(allowed_headers);
         self
     }
 
-    /// Configures CORS to allow any HTTP header 
+    /// Configures CORS to allow any HTTP header
     ///
     /// Default value: `None` (Any HTTP header is allowed)
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::http::CorsConfig;
@@ -190,7 +186,7 @@ impl CorsConfig {
         self
     }
 
-    /// Configures CORS with allowed HTTP methods 
+    /// Configures CORS with allowed HTTP methods
     /// which will be used with the [`Access-Control-Allow-Methods`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Methods) HTTP header
     ///
     /// Default value: `None` (Any HTTP method is allowed)
@@ -216,10 +212,10 @@ impl CorsConfig {
         self
     }
 
-    /// Configures CORS to allow any HTTP method 
+    /// Configures CORS to allow any HTTP method
     ///
     /// Default value: `None` (Any HTTP method is allowed)
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::http::CorsConfig;
@@ -234,7 +230,7 @@ impl CorsConfig {
 
     /// Configures CORS with `max-age` value in seconds.
     /// Which will be used with the [`Access-Control-Max-Age`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age) HTTP header.
-    /// 
+    ///
     /// Default value: 86,400 seconds (24 hours)
     ///
     /// # Example
@@ -252,7 +248,7 @@ impl CorsConfig {
     /// Configures CORS to disable [`Access-Control-Max-Age`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age) header
     ///
     /// Default value: 86,400 seconds (24 hours)
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::http::CorsConfig;
@@ -312,12 +308,11 @@ impl CorsConfig {
     pub fn with_expose_headers<T, S>(mut self, headers: T) -> Self
     where
         T: IntoIterator<Item = S>,
-        S: AsRef<str>
+        S: AsRef<str>,
     {
         let allowed_headers = headers
             .into_iter()
-            .map(|h| HeaderName::from_str(h.as_ref())
-                .expect("CORS error: invalid header value"))
+            .map(|h| HeaderName::from_str(h.as_ref()).expect("CORS error: invalid header value"))
             .collect::<HashSet<_>>();
         self.expose_headers = Some(allowed_headers);
         self
@@ -339,17 +334,18 @@ impl CorsConfig {
         self.expose_headers = None;
         self
     }
-    
+
     /// Creates a value for the [`Access-Control-Allow-Methods`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Methods)
     /// HTTP header
     pub fn allow_methods(&self) -> Option<HeaderValue> {
-        match &self.allow_methods { 
+        match &self.allow_methods {
             None => Some(WILDCARD_VALUE),
             Some(allow_methods) => {
                 let allow_methods = allow_methods
                     .iter()
                     .map(|method| method.as_str())
-                    .collect::<Vec<_>>().join(", ");
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 HeaderValue::from_str(&allow_methods).ok()
             }
         }
@@ -358,14 +354,10 @@ impl CorsConfig {
     /// Creates a value for the [`Access-Control-Allow-Headers`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Headers)
     /// HTTP header
     pub fn allow_headers(&self) -> Option<HeaderValue> {
-        match &self.allow_headers { 
+        match &self.allow_headers {
             None => Some(WILDCARD_VALUE),
             Some(allow_headers) => {
-                let allow_headers = build_csv(
-                    allow_headers
-                        .iter()
-                        .map(|h| h.as_str())
-                );
+                let allow_headers = build_csv(allow_headers.iter().map(|h| h.as_str()));
                 HeaderValue::from_str(&allow_headers).ok()
             }
         }
@@ -378,11 +370,7 @@ impl CorsConfig {
             None if self.expose_any => Some(WILDCARD_VALUE),
             None => None,
             Some(expose_headers) => {
-                let expose_headers = build_csv(
-                    expose_headers
-                        .iter()
-                        .map(|h| h.as_str())
-                );
+                let expose_headers = build_csv(expose_headers.iter().map(|h| h.as_str()));
                 HeaderValue::from_str(&expose_headers).ok()
             }
         }
@@ -391,11 +379,11 @@ impl CorsConfig {
     /// Creates a value for the [`Access-Control-Max-Age`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age)
     /// HTTP header
     pub fn max_age(&self) -> Option<HeaderValue> {
-        match &self.max_age { 
+        match &self.max_age {
             None => None,
-            Some(max_age) => HeaderValue::from_str(
-                itoa::Buffer::new().format(max_age.as_secs())
-            ).ok()
+            Some(max_age) => {
+                HeaderValue::from_str(itoa::Buffer::new().format(max_age.as_secs())).ok()
+            }
         }
     }
 
@@ -463,7 +451,7 @@ impl CorsConfig {
             normal,
         }
     }
-    
+
     /// Validates the [`CorsConfig`] and panics if it's invalid
     pub(crate) fn validate(self) -> Self {
         if self.allow_credentials {
@@ -498,7 +486,7 @@ impl CorsConfig {
     #[inline(always)]
     fn needs_vary(&self) -> bool {
         (self.allow_credentials || self.allow_origins.is_some()) && self.include_vary
-    } 
+    }
 }
 
 impl CorsHeaders {
@@ -588,7 +576,7 @@ impl CorsHeaders {
                 }
 
                 let mut merged = String::with_capacity(s.len() + 2 + ORIGIN_STR.len());
-                
+
                 merged.push_str(s);
                 merged.push_str(SEPARATOR);
                 merged.push_str(ORIGIN_STR);
@@ -617,7 +605,8 @@ impl CorsRegistry {
     /// Inserts a named CORS policy
     #[inline]
     pub(crate) fn insert_named(&mut self, name: impl Into<Arc<str>>, cfg: CorsConfig) {
-        self.named.insert(name.into(), Arc::new(cfg.validate().precompute()));
+        self.named
+            .insert(name.into(), Arc::new(cfg.validate().precompute()));
     }
 
     /// Returns CORS policy by name
@@ -658,8 +647,8 @@ impl App {
     ///         .with_any_header());
     /// ```
     pub fn with_cors<T>(self, config: T) -> Self
-    where 
-        T: FnOnce(CorsConfig) -> CorsConfig
+    where
+        T: FnOnce(CorsConfig) -> CorsConfig,
     {
         self.set_cors(config(CorsConfig::default()))
     }
@@ -689,24 +678,17 @@ impl<'a> Route<'a> {
 
     /// Sets the named CORS policy for this route
     pub fn cors_with(self, name: &str) -> Self {
-        let policy = self.cors
-            .get_named(name)
-            .expect("cors policy")
-            .clone();
+        let policy = self.cors.get_named(name).expect("cors policy").clone();
 
         self.cors_override(CorsOverride::Named(policy))
     }
-    
+
     #[inline]
     pub(crate) fn cors_override(self, cors: CorsOverride) -> Self {
         self.app
             .pipeline
             .endpoints_mut()
-            .bind_cors(
-                &self.method,
-                self.pattern.as_ref(),
-                cors
-            );
+            .bind_cors(&self.method, self.pattern.as_ref(), cors);
         self
     }
 }
@@ -726,10 +708,7 @@ impl<'a> RouteGroup<'a> {
 
     /// Sets the named CORS policy for this route
     pub fn cors_with(&mut self, name: &str) -> &mut Self {
-        let policy = self.app.cors
-            .get_named(name)
-            .expect("cors policy")
-            .clone();
+        let policy = self.app.cors.get_named(name).expect("cors policy").clone();
 
         self.cors = CorsOverride::Named(policy);
         self
@@ -758,16 +737,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use super::*;
+    use crate::App;
     use hyper::{header::HeaderName, http::HeaderValue};
     use reqwest::Method;
-    use crate::App;
-    use super::*;
-    
+    use std::time::Duration;
+
     #[test]
     fn it_creates_default_cors_config() {
         let config = CorsConfig::default();
-        
+
         assert_eq!(config.allow_origins, None);
         assert_eq!(config.allow_headers, None);
         assert_eq!(config.allow_methods, None);
@@ -776,14 +755,14 @@ mod tests {
         assert!(!config.allow_credentials);
         assert!(config.include_vary);
     }
-    
+
     #[test]
     fn it_creates_cors_config_with_allow_origin() {
-        let config = CorsConfig::default()
-            .with_origins(["https://example.com", "https://example.net"]);
-        
+        let config =
+            CorsConfig::default().with_origins(["https://example.com", "https://example.net"]);
+
         let allowed_origins = config.allow_origins.unwrap();
-        
+
         assert!(allowed_origins.contains(&HeaderValue::from_static("https://example.com")));
         assert!(allowed_origins.contains(&HeaderValue::from_static("https://example.net")));
         assert!(!allowed_origins.contains(&HeaderValue::from_static("https://example.org")));
@@ -791,16 +770,14 @@ mod tests {
 
     #[test]
     fn it_creates_cors_config_with_allow_any_origin() {
-        let config = CorsConfig::default()
-            .with_any_origin();
+        let config = CorsConfig::default().with_any_origin();
 
         assert_eq!(config.allow_origins, None);
     }
 
     #[test]
     fn it_creates_cors_config_with_allow_headers() {
-        let config = CorsConfig::default()
-            .with_headers(["Content-Type", "X-Correlation-Id"]);
+        let config = CorsConfig::default().with_headers(["Content-Type", "X-Correlation-Id"]);
 
         let allowed_headers = config.allow_headers.unwrap();
 
@@ -811,16 +788,14 @@ mod tests {
 
     #[test]
     fn it_creates_cors_config_with_allow_any_header() {
-        let config = CorsConfig::default()
-            .with_any_header();
+        let config = CorsConfig::default().with_any_header();
 
         assert_eq!(config.allow_headers, None);
     }
 
     #[test]
     fn it_creates_cors_config_with_allow_methods() {
-        let config = CorsConfig::default()
-            .with_methods([Method::GET, Method::POST]);
+        let config = CorsConfig::default().with_methods([Method::GET, Method::POST]);
 
         let allowed_methods = config.allow_methods.unwrap();
 
@@ -831,48 +806,43 @@ mod tests {
 
     #[test]
     fn it_creates_cors_config_with_allow_any_method() {
-        let config = CorsConfig::default()
-            .with_any_method();
+        let config = CorsConfig::default().with_any_method();
 
         assert_eq!(config.allow_methods, None);
     }
 
     #[test]
     fn it_creates_cors_config_with_max_age() {
-        let config = CorsConfig::default()
-            .with_max_age(10);
+        let config = CorsConfig::default().with_max_age(10);
 
         assert_eq!(config.max_age, Some(Duration::from_secs(10)));
     }
-    
+
     #[test]
     fn it_creates_cors_config_without_max_age() {
-        let config = CorsConfig::default()
-            .without_max_age();
+        let config = CorsConfig::default().without_max_age();
 
         assert_eq!(config.max_age, None);
     }
 
     #[test]
     fn it_creates_cors_config_without_vary_header() {
-        let config = CorsConfig::default()
-            .with_vary_header(false);
+        let config = CorsConfig::default().with_vary_header(false);
 
         assert!(!config.include_vary);
     }
 
     #[test]
     fn it_creates_cors_config_with_include_credentials() {
-        let config = CorsConfig::default()
-            .with_credentials(true);
+        let config = CorsConfig::default().with_credentials(true);
 
         assert!(config.allow_credentials);
     }
 
     #[test]
     fn it_creates_cors_config_with_expose_headers() {
-        let config = CorsConfig::default()
-            .with_expose_headers(["Content-Type", "X-Correlation-Id"]);
+        let config =
+            CorsConfig::default().with_expose_headers(["Content-Type", "X-Correlation-Id"]);
 
         let exposed_headers = config.expose_headers.unwrap();
 
@@ -880,16 +850,16 @@ mod tests {
         assert!(exposed_headers.contains(&HeaderName::from_static("x-correlation-id")));
         assert!(!exposed_headers.contains(&HeaderName::from_static("x-some-header")));
     }
-    
+
     #[test]
     fn it_configures_cors_for_app() {
-        let app = App::new()
-            .with_cors(|cors| cors
-                .with_origins(["https://example.com"])
+        let app = App::new().with_cors(|cors| {
+            cors.with_origins(["https://example.com"])
                 .with_headers(["Content-Type"])
                 .with_methods([Method::GET, Method::POST])
                 .with_credentials(true)
-                .with_vary_header(false));
+                .with_vary_header(false)
+        });
 
         let config = app.cors.default.unwrap();
 
@@ -898,7 +868,9 @@ mod tests {
             assert!(!allowed_origins.contains(&HeaderValue::from_static("https://example.org")));
         }
 
-        let allow_methods = config.preflight.get(ACCESS_CONTROL_ALLOW_METHODS)
+        let allow_methods = config
+            .preflight
+            .get(ACCESS_CONTROL_ALLOW_METHODS)
             .unwrap()
             .to_str()
             .unwrap()
@@ -908,12 +880,21 @@ mod tests {
         assert!(allow_methods.contains("POST"));
         assert!(!allow_methods.contains("PUT"));
 
-        assert_eq!(config.preflight.get(ACCESS_CONTROL_ALLOW_HEADERS).unwrap(), "content-type");
-        assert_eq!(config.preflight.get(ACCESS_CONTROL_MAX_AGE).unwrap(), "86400");
+        assert_eq!(
+            config.preflight.get(ACCESS_CONTROL_ALLOW_HEADERS).unwrap(),
+            "content-type"
+        );
+        assert_eq!(
+            config.preflight.get(ACCESS_CONTROL_MAX_AGE).unwrap(),
+            "86400"
+        );
 
         assert!(config.normal.get(ACCESS_CONTROL_EXPOSE_HEADERS).is_none());
 
-        assert_eq!(config.common.get(ACCESS_CONTROL_ALLOW_CREDENTIALS).unwrap(), "true");
+        assert_eq!(
+            config.common.get(ACCESS_CONTROL_ALLOW_CREDENTIALS).unwrap(),
+            "true"
+        );
 
         assert!(config.allow_credentials);
         assert!(config.vary_normal.is_none());
@@ -928,9 +909,8 @@ mod tests {
             .with_methods([Method::GET, Method::POST])
             .with_credentials(true)
             .with_vary_header(false);
-        
-        let app = App::new()
-            .set_cors(config);
+
+        let app = App::new().set_cors(config);
 
         let config = app.cors.default.unwrap();
 
@@ -939,7 +919,9 @@ mod tests {
             assert!(!allowed_origins.contains(&HeaderValue::from_static("https://example.org")));
         }
 
-        let allow_methods = config.preflight.get(ACCESS_CONTROL_ALLOW_METHODS)
+        let allow_methods = config
+            .preflight
+            .get(ACCESS_CONTROL_ALLOW_METHODS)
             .unwrap()
             .to_str()
             .unwrap()
@@ -949,37 +931,44 @@ mod tests {
         assert!(allow_methods.contains("POST"));
         assert!(!allow_methods.contains("PUT"));
 
-        assert_eq!(config.preflight.get(ACCESS_CONTROL_ALLOW_HEADERS).unwrap(), "content-type");
-        assert_eq!(config.preflight.get(ACCESS_CONTROL_MAX_AGE).unwrap(), "86400");
+        assert_eq!(
+            config.preflight.get(ACCESS_CONTROL_ALLOW_HEADERS).unwrap(),
+            "content-type"
+        );
+        assert_eq!(
+            config.preflight.get(ACCESS_CONTROL_MAX_AGE).unwrap(),
+            "86400"
+        );
 
         assert!(config.normal.get(ACCESS_CONTROL_EXPOSE_HEADERS).is_none());
 
-        assert_eq!(config.common.get(ACCESS_CONTROL_ALLOW_CREDENTIALS).unwrap(), "true");
+        assert_eq!(
+            config.common.get(ACCESS_CONTROL_ALLOW_CREDENTIALS).unwrap(),
+            "true"
+        );
 
         assert!(config.allow_credentials);
         assert!(config.vary_normal.is_none());
         assert!(config.vary_preflight.is_none());
     }
-    
+
     #[test]
     fn it_returns_access_control_allow_origin_header() {
         let config = CorsConfig::default()
             .with_origins(["https://example.com"])
             .precompute();
-        
+
         let origin = Some(HeaderValue::from_static("https://example.com"));
         let header = config.allow_origin(origin);
-        
+
         assert!(header.is_some());
-        
+
         assert_eq!(header.unwrap(), "https://example.com");
     }
 
     #[test]
     fn it_returns_access_control_allow_origin_header_with_wildcard() {
-        let config = CorsConfig::default()
-            .with_any_origin()
-            .precompute();
+        let config = CorsConfig::default().with_any_origin().precompute();
 
         let origin = Some(HeaderValue::from_static("https://example.com"));
         let header = config.allow_origin(origin);
@@ -1027,8 +1016,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_allow_headers_header() {
-        let config = CorsConfig::default()
-            .with_headers(["Content-Type"]);
+        let config = CorsConfig::default().with_headers(["Content-Type"]);
 
         let header = config.allow_headers();
 
@@ -1039,8 +1027,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_allow_headers_header_with_wildcard() {
-        let config = CorsConfig::default()
-            .with_any_header();
+        let config = CorsConfig::default().with_any_header();
 
         let header = config.allow_headers();
 
@@ -1051,8 +1038,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_allow_methods_header() {
-        let config = CorsConfig::default()
-            .with_methods([Method::GET]);
+        let config = CorsConfig::default().with_methods([Method::GET]);
 
         let header = config.allow_methods();
 
@@ -1063,8 +1049,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_allow_methods_header_with_wildcard() {
-        let config = CorsConfig::default()
-            .with_any_method();
+        let config = CorsConfig::default().with_any_method();
 
         let header = config.allow_methods();
 
@@ -1075,8 +1060,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_expose_headers_header() {
-        let config = CorsConfig::default()
-            .with_expose_headers(["x-req-id"]);
+        let config = CorsConfig::default().with_expose_headers(["x-req-id"]);
 
         let header = config.expose_headers();
 
@@ -1087,8 +1071,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_expose_headers_header_with_wildcard() {
-        let config = CorsConfig::default()
-            .with_expose_any_header();
+        let config = CorsConfig::default().with_expose_any_header();
 
         let header = config.expose_headers();
 
@@ -1099,8 +1082,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_max_age_header() {
-        let config = CorsConfig::default()
-            .with_max_age(10);
+        let config = CorsConfig::default().with_max_age(10);
 
         let header = config.max_age();
 
@@ -1120,8 +1102,7 @@ mod tests {
 
     #[test]
     fn it_does_not_return_access_control_max_age_header() {
-        let config = CorsConfig::default()
-            .without_max_age();
+        let config = CorsConfig::default().without_max_age();
 
         let header = config.max_age();
 
@@ -1139,12 +1120,14 @@ mod tests {
 
     #[test]
     fn it_returns_vary_preflight_header() {
-        let config = CorsConfig::default()
-            .with_origins(["http://www.example.com"]);
+        let config = CorsConfig::default().with_origins(["http://www.example.com"]);
 
         let header = config.vary_preflight();
 
-        assert_eq!(header.unwrap(), "origin, access-control-request-method, access-control-request-headers");
+        assert_eq!(
+            header.unwrap(),
+            "origin, access-control-request-method, access-control-request-headers"
+        );
     }
 
     #[test]
@@ -1158,8 +1141,7 @@ mod tests {
 
     #[test]
     fn it_returns_vary_normal_header() {
-        let config = CorsConfig::default()
-            .with_origins(["http://www.example.com"]);
+        let config = CorsConfig::default().with_origins(["http://www.example.com"]);
 
         let header = config.vary_normal();
 
@@ -1168,8 +1150,7 @@ mod tests {
 
     #[test]
     fn it_does_not_return_vary_preflight_header() {
-        let config = CorsConfig::default()
-            .with_vary_header(false);
+        let config = CorsConfig::default().with_vary_header(false);
 
         let header = config.vary_preflight();
 
@@ -1178,8 +1159,7 @@ mod tests {
 
     #[test]
     fn it_does_not_return_vary_normal_header() {
-        let config = CorsConfig::default()
-            .with_vary_header(false);
+        let config = CorsConfig::default().with_vary_header(false);
 
         let header = config.vary_normal();
 
@@ -1215,8 +1195,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_allow_credentials_header() {
-        let config = CorsConfig::default()
-            .with_credentials(true);
+        let config = CorsConfig::default().with_credentials(true);
 
         let header = config.allow_credentials();
 
@@ -1224,7 +1203,7 @@ mod tests {
 
         assert_eq!(header.unwrap(), "true");
     }
-    
+
     #[test]
     fn it_validates_cors_config() {
         let config = CorsConfig::default();

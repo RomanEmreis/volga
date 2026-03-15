@@ -1,16 +1,23 @@
 //! Types and tools for working with byte streams
 
-use crate::{error::Error, http::endpoints::args::{FromPayload, Source, Payload}, HttpBody};
 use crate::http::sse::Message;
+use crate::{
+    HttpBody,
+    error::Error,
+    http::endpoints::args::{FromPayload, Payload, Source},
+};
 use bytes::{Bytes, BytesMut};
-use futures_util::{Stream, future::{Ready, ok}};
+use futures_util::{
+    Stream,
+    future::{Ready, ok},
+};
 use http_body_util::BodyDataStream;
 use pin_project_lite::pin_project;
 use std::{
-    task::{Context, Poll},
     borrow::Cow,
     fmt::Debug,
-    pin::Pin
+    pin::Pin,
+    task::{Context, Poll},
 };
 
 pin_project! {
@@ -61,17 +68,21 @@ where
 
 impl FromPayload for ByteStream<BodyDataStream<HttpBody>> {
     type Future = Ready<Result<Self, Error>>;
-    
+
     const SOURCE: Source = Source::Body;
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Body(body) = payload else { unreachable!() };
+        let Payload::Body(body) = payload else {
+            unreachable!()
+        };
         ok(Self::new(body.into_data_stream()))
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.consumes_stream()
     }
 }
@@ -117,7 +128,7 @@ macro_rules! impl_into_byte_result_with {
 }
 
 impl_into_byte_result! {
-    String, Box<[u8]>, Vec<u8>, 
+    String, Box<[u8]>, Vec<u8>,
     BytesMut, Bytes, Message
 }
 
@@ -161,7 +172,7 @@ macro_rules! byte_stream {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_util::{pin_mut, StreamExt};
+    use futures_util::{StreamExt, pin_mut};
 
     #[tokio::test]
     async fn it_creates_byte_stream() {
@@ -224,15 +235,15 @@ mod tests {
     #[tokio::test]
     async fn it_creates_byte_stream_of_strings() {
         let stream = ByteStream::new(futures_util::stream::iter([
-            String::from("hi!"), 
-            String::from("hi!")
+            String::from("hi!"),
+            String::from("hi!"),
         ]));
-        
+
         pin_mut!(stream);
-        
+
         let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "hi!");
-        
+
         let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "hi!");
     }
@@ -320,10 +331,10 @@ mod tests {
     #[tokio::test]
     async fn it_creates_byte_stream_from_payload() {
         let body = HttpBody::full("Hello, World!");
-        
+
         let stream = ByteStream::from_payload(Payload::Body(body)).await.unwrap();
         pin_mut!(stream);
-        
+
         let bytes = stream.next().await.unwrap().unwrap();
         assert_eq!(String::from_utf8_lossy(&bytes), "Hello, World!");
     }

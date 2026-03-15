@@ -1,10 +1,13 @@
 //! Tools and data structures for a token-bucket rate limiter.
 
-use super::{RateLimiter, SystemTimeSource, TimeSource, MICROS_PER_SEC};
+use super::{MICROS_PER_SEC, RateLimiter, SystemTimeSource, TimeSource};
 use dashmap::DashMap;
 use std::{
-    sync::{Arc, atomic::{AtomicU64, Ordering::*}},
-    time::Duration
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering::*},
+    },
+    time::Duration,
 };
 
 const DEFAULT_SCALE: u64 = MICROS_PER_SEC;
@@ -75,7 +78,7 @@ pub struct TokenBucketRateLimiter<T: TimeSource = SystemTimeSource> {
 
     /// Fixed-point scaling factor for fractional refill rates.
     scale: u64,
-    
+
     /// Precalculated scaled capacity scale * capacity (fixed-point).
     capacity_scaled: u64,
 
@@ -169,7 +172,7 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
         let capacity_scaled = capacity
             .checked_mul(scale)
             .expect("capacity * scale overflow");
-        
+
         Self {
             storage: Arc::new(DashMap::new()),
             capacity,
@@ -187,9 +190,7 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
     /// may be removed during subsequent `check` calls.
     #[inline]
     pub fn set_eviction(&mut self, eviction: Duration) {
-        self.eviction_grace_us = eviction.as_micros()
-            .try_into()
-            .unwrap_or(u64::MAX);
+        self.eviction_grace_us = eviction.as_micros().try_into().unwrap_or(u64::MAX);
     }
 
     /// Bucket capacity (max tokens).
@@ -221,7 +222,7 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
             if now <= last {
                 return;
             }
-            
+
             match entry
                 .last_refill_us
                 .compare_exchange(last, now, AcqRel, Acquire)
@@ -274,8 +275,8 @@ impl<T: TimeSource> TokenBucketRateLimiter<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_utils::MockTimeSource;
+    use super::*;
 
     #[test]
     fn token_bucket_allows_burst_up_to_capacity() {

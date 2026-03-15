@@ -1,22 +1,13 @@
-﻿//! HTTP response utilities
+//! HTTP response utilities
 
 use crate::error::Error;
-use crate::http::{
-    body::HttpBody,
-    Extensions,
-    StatusCode,
-    Version
-};
+use crate::http::{Extensions, StatusCode, Version, body::HttpBody};
 
 use hyper::{
-    header::{
-        HeaderMap,
-        HeaderName,
-        HeaderValue
-    }, 
-    body::{Body, SizeHint},
-    http::response::Parts, 
     Response,
+    body::{Body, SizeHint},
+    header::{HeaderMap, HeaderName, HeaderValue},
+    http::response::Parts,
 };
 
 use crate::headers::{FromHeaders, Header};
@@ -24,24 +15,24 @@ use crate::headers::{FromHeaders, Header};
 pub use builder::HttpResponseBuilder;
 
 pub mod builder;
-pub mod macros;
-pub mod ok;
-pub mod form;
 pub mod file;
-pub mod stream;
-pub mod status;
-pub mod into_response;
-pub mod redirect;
-pub mod html;
-pub mod sse;
 #[cfg(feature = "middleware")]
 pub mod filter_result;
+pub mod form;
+pub mod html;
+pub mod into_response;
+pub mod macros;
+pub mod ok;
+pub mod redirect;
+pub mod sse;
+pub mod status;
+pub mod stream;
 
 /// Represents an HTTP response
-/// 
+///
 /// See [`Response`]
 pub struct HttpResponse {
-    inner: Response<HttpBody>
+    inner: Response<HttpBody>,
 }
 
 impl std::fmt::Debug for HttpResponse {
@@ -51,7 +42,7 @@ impl std::fmt::Debug for HttpResponse {
     }
 }
 
-/// Represents a result of HTTP request that could be 
+/// Represents a result of HTTP request that could be
 /// either [`HttpResponse`] or [`Error`]
 pub type HttpResult = Result<HttpResponse, Error>;
 
@@ -72,7 +63,7 @@ impl HttpResponse {
     pub fn builder() -> HttpResponseBuilder {
         HttpResponseBuilder::new()
     }
-    
+
     /// Returns a reference to the associated HTTP header map.
     ///
     /// # Example
@@ -141,8 +132,8 @@ impl HttpResponse {
     }
 
     /// Returns the bounds on the remaining length of the stream.
-    /// 
-    /// When the exact remaining length of the stream is known, 
+    ///
+    /// When the exact remaining length of the stream is known,
     /// the upper bound will be set and will equal the lower bound.
     #[inline]
     pub fn size_hint(&self) -> SizeHint {
@@ -152,18 +143,13 @@ impl HttpResponse {
     /// Returns a typed HTTP header value
     #[inline]
     pub fn get_header<T: FromHeaders>(&self) -> Option<Header<T>> {
-        self.headers()
-            .get(T::NAME)
-            .map(Header::from_ref)
+        self.headers().get(T::NAME).map(Header::from_ref)
     }
 
     /// Returns a view of all values associated with this HTTP header.
     #[inline]
     pub fn get_all_headers<T: FromHeaders>(&self) -> impl Iterator<Item = Header<T>> {
-        self.headers()
-            .get_all(T::NAME)
-            .iter()
-            .map(Header::from_ref)
+        self.headers().get_all(T::NAME).iter().map(Header::from_ref)
     }
 
     /// Inserts the header into the response, replacing any existing values
@@ -175,10 +161,9 @@ impl HttpResponse {
     where
         T: FromHeaders,
     {
-        self.inner.headers_mut().insert(
-            header.name(),
-            header.value().clone()
-        );
+        self.inner
+            .headers_mut()
+            .insert(header.name(), header.value().clone());
         header
     }
 
@@ -189,7 +174,7 @@ impl HttpResponse {
     #[inline]
     pub fn try_insert_header<T>(
         &mut self,
-        header: impl TryInto<Header<T>, Error = Error>
+        header: impl TryInto<Header<T>, Error = Error>,
     ) -> Result<Header<T>, Error>
     where
         T: FromHeaders,
@@ -209,10 +194,8 @@ impl HttpResponse {
     /// with the same header name.
     #[inline]
     pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(Error::from)?;
-        let value = HeaderValue::from_str(value)
-            .map_err(Error::from)?;
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
+        let value = HeaderValue::from_str(value).map_err(Error::from)?;
 
         self.insert_raw_header(name, value);
         Ok(())
@@ -227,10 +210,9 @@ impl HttpResponse {
     where
         T: FromHeaders,
     {
-        self.inner.headers_mut().append(
-            header.name(),
-            header.value().clone()
-        );
+        self.inner
+            .headers_mut()
+            .append(header.name(), header.value().clone());
         Ok(header)
     }
 
@@ -240,7 +222,7 @@ impl HttpResponse {
     #[inline]
     pub fn try_append_header<T>(
         &mut self,
-        header: impl TryInto<Header<T>, Error = Error>
+        header: impl TryInto<Header<T>, Error = Error>,
     ) -> Result<Header<T>, Error>
     where
         T: FromHeaders,
@@ -258,10 +240,8 @@ impl HttpResponse {
     /// Attempts to append a new raww value for the given header name.
     #[inline]
     pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(Error::from)?;
-        let value = HeaderValue::from_str(value)
-            .map_err(Error::from)?;
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
+        let value = HeaderValue::from_str(value).map_err(Error::from)?;
 
         self.append_raw_header(name, value);
         Ok(())
@@ -275,10 +255,7 @@ impl HttpResponse {
     where
         T: FromHeaders,
     {
-        self.inner
-            .headers_mut()
-            .remove(&T::NAME)
-            .is_some()
+        self.inner.headers_mut().remove(&T::NAME).is_some()
     }
 
     /// Attempts to remove all values for the given header name.
@@ -286,8 +263,7 @@ impl HttpResponse {
     /// Returns `true` if at least one value was removed.
     #[inline]
     pub fn try_remove_header(&mut self, name: &str) -> Result<bool, Error> {
-        let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(Error::from)?;
+        let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
 
         Ok(self.inner.headers_mut().remove(name).is_some())
     }
@@ -297,13 +273,13 @@ impl HttpResponse {
     pub(crate) fn body_mut(&mut self) -> &mut HttpBody {
         self.inner.body_mut()
     }
-    
+
     /// Unwraps the inner request
     #[inline]
     pub(crate) fn into_inner(self) -> Response<HttpBody> {
         self.inner
     }
-    
+
     /// Consumes the response returning the head and body parts.
     #[inline]
     #[allow(unused)]
@@ -315,10 +291,12 @@ impl HttpResponse {
     #[inline]
     #[allow(unused)]
     pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
-        Self { inner: Response::from_parts(parts, body) }
+        Self {
+            inner: Response::from_parts(parts, body),
+        }
     }
 
-    /// Creates a new [`HttpResponse`] from [`Response<HttpBody>`] 
+    /// Creates a new [`HttpResponse`] from [`Response<HttpBody>`]
     #[inline]
     pub(crate) fn from_inner(inner: Response<HttpBody>) -> Self {
         Self { inner }
@@ -329,27 +307,27 @@ impl HttpResponse {
 #[allow(unreachable_pub)]
 #[allow(unused)]
 mod tests {
-    use hyper::StatusCode;
-    use http_body_util::BodyExt;
-    use serde::Serialize;
-    use tokio::fs::File;
-    use crate::{response, HttpResponse};
-    use crate::headers::{Header, HeaderValue, HeaderName, headers};
+    use crate::headers::{Header, HeaderName, HeaderValue, headers};
     use crate::http::body::HttpBody;
     use crate::test::TempFile;
     use crate::test::utils::read_file_bytes;
-    
+    use crate::{HttpResponse, response};
+    use http_body_util::BodyExt;
+    use hyper::StatusCode;
+    use serde::Serialize;
+    use tokio::fs::File;
+
     headers! {
         (ApiKey, "x-api-key")
     }
 
     #[derive(Serialize)]
     struct TestPayload {
-        name: String
+        name: String,
     }
-    
+
     #[tokio::test]
-    async fn in_creates_text_response_with_custom_headers() {       
+    async fn in_creates_text_response_with_custom_headers() {
         let mut response = HttpResponse::builder()
             .status(400)
             .header_raw("x-api-key", "some api key")
@@ -358,10 +336,13 @@ mod tests {
             .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(String::from_utf8_lossy(body), "Hello World!");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain"
+        );
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
@@ -378,14 +359,19 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(String::from_utf8_lossy(body), "Hello World!");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain"
+        );
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
     #[tokio::test]
     async fn in_creates_json_response_with_custom_headers() {
-        let content = TestPayload { name: "test".into() };
-        
+        let content = TestPayload {
+            name: "test".into(),
+        };
+
         let mut response = HttpResponse::builder()
             .status(200)
             .header_raw("x-api-key", "some api key")
@@ -397,7 +383,10 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/json"
+        );
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
@@ -405,7 +394,7 @@ mod tests {
     async fn it_creates_stream_response() {
         let file = TempFile::new("Hello, this is some file content!").await;
         let file = File::open(file.path).await.unwrap();
-        
+
         let mut response = HttpResponse::builder()
             .status(StatusCode::OK)
             .body(HttpBody::file(file))
@@ -414,14 +403,17 @@ mod tests {
         let body = read_file_bytes(&mut response).await;
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
+        assert_eq!(
+            String::from_utf8_lossy(body.as_slice()),
+            "Hello, this is some file content!"
+        );
     }
 
     #[tokio::test]
     async fn it_creates_file_response_with_custom_headers() {
         let file = TempFile::new("Hello, this is some file content!").await;
         let file = File::open(file.path).await.unwrap();
-        
+
         let mut response = response!(
             StatusCode::OK,
             HttpBody::file(file);
@@ -429,31 +421,42 @@ mod tests {
                 ("x-api-key", "some api key"),
                 ("Content-Type", "application/octet-stream")
             ]
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let body = read_file_bytes(&mut response).await;
-        
+
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(String::from_utf8_lossy(body.as_slice()), "Hello, this is some file content!");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/octet-stream");
+        assert_eq!(
+            String::from_utf8_lossy(body.as_slice()),
+            "Hello, this is some file content!"
+        );
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/octet-stream"
+        );
         assert_eq!(response.headers().get("x-api-key").unwrap(), "some api key");
     }
 
     #[tokio::test]
     async fn it_creates_empty_not_found_response() {
         let mut response = response!(
-            StatusCode::NOT_FOUND, 
+            StatusCode::NOT_FOUND,
             HttpBody::empty();
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain"
+        );
     }
 
     #[tokio::test]
@@ -464,13 +467,17 @@ mod tests {
             [
                 ("Content-Type", "application/pdf")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
         assert_eq!(body.len(), 0);
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/pdf");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/pdf"
+        );
     }
 
     #[tokio::test]
@@ -481,15 +488,19 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
         assert_eq!(String::from_utf8_lossy(body), "Hello World!");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "text/plain");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "text/plain"
+        );
     }
-    
+
     #[test]
     fn it_inserts_header() {
         let mut response = response!(
@@ -498,7 +509,8 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         let api_key_header: Header<ApiKey> = Header::from_static("some api key");
         let _ = response.insert_header(api_key_header);
@@ -514,11 +526,17 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
-        response.try_insert_header::<ApiKey>("some api key").unwrap();
+        response
+            .try_insert_header::<ApiKey>("some api key")
+            .unwrap();
 
-        assert_eq!(response.get_header::<ApiKey>().unwrap().value(), "some api key");  
+        assert_eq!(
+            response.get_header::<ApiKey>().unwrap().value(),
+            "some api key"
+        );
     }
 
     #[test]
@@ -529,7 +547,8 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         response.insert_raw_header(
             HeaderName::from_static("x-api-key"),
@@ -547,11 +566,17 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
-        response.try_insert_raw_header("x-api-key", "some api key").unwrap();
+        response
+            .try_insert_raw_header("x-api-key", "some api key")
+            .unwrap();
 
-        assert_eq!(response.get_header::<ApiKey>().unwrap().value(), "some api key");  
+        assert_eq!(
+            response.get_header::<ApiKey>().unwrap().value(),
+            "some api key"
+        );
     }
 
     #[test]
@@ -562,7 +587,8 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         let api_key_header: Header<ApiKey> = Header::from_static("1");
         let _ = response.append_header(api_key_header);
@@ -570,7 +596,14 @@ mod tests {
         let api_key_header: Header<ApiKey> = Header::from_static("2");
         let _ = response.append_header(api_key_header);
 
-        assert_eq!(response.headers().get_all("x-api-key").into_iter().collect::<Vec<_>>(), ["1", "2"]);
+        assert_eq!(
+            response
+                .headers()
+                .get_all("x-api-key")
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]
@@ -581,12 +614,19 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         response.try_append_header::<ApiKey>("1").unwrap();
         response.try_append_header::<ApiKey>("2").unwrap();
 
-        assert_eq!(response.get_all_headers::<ApiKey>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]);  
+        assert_eq!(
+            response
+                .get_all_headers::<ApiKey>()
+                .map(|h| h.into_inner())
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]
@@ -597,7 +637,8 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         response.append_raw_header(
             HeaderName::from_static("x-api-key"),
@@ -609,7 +650,13 @@ mod tests {
             HeaderValue::from_static("2"),
         );
 
-        assert_eq!(response.get_all_headers::<ApiKey>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]); 
+        assert_eq!(
+            response
+                .get_all_headers::<ApiKey>()
+                .map(|h| h.into_inner())
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]
@@ -620,12 +667,19 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         response.try_append_raw_header("x-api-key", "1").unwrap();
         response.try_append_raw_header("x-api-key", "2").unwrap();
 
-        assert_eq!(response.get_all_headers::<ApiKey>().map(|h| h.into_inner()).collect::<Vec<_>>(), ["1", "2"]); 
+        assert_eq!(
+            response
+                .get_all_headers::<ApiKey>()
+                .map(|h| h.into_inner())
+                .collect::<Vec<_>>(),
+            ["1", "2"]
+        );
     }
 
     #[test]
@@ -636,7 +690,8 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         let api_key_header: Header<ApiKey> = Header::from_static("some api key");
         let _ = response.insert_header(api_key_header);
@@ -654,7 +709,8 @@ mod tests {
             [
                 ("Content-Type", "text/plain")
             ]
-        ).unwrap();
+        )
+        .unwrap();
 
         let api_key_header: Header<ApiKey> = Header::from_static("some api key");
         let _ = response.insert_header(api_key_header);

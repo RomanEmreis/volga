@@ -8,12 +8,12 @@
 //! WebSocket messages in integration tests, without leaking protocol-specific
 //! details into test code.
 
-use std::fmt::Debug;
 use futures_util::{SinkExt, StreamExt};
 use hyper::upgrade::Upgraded;
 use hyper_util::rt::TokioIo;
+use std::fmt::Debug;
 use tokio::net::TcpStream;
-use tokio_tungstenite::{WebSocketStream, MaybeTlsStream, tungstenite::Message};
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, tungstenite::Message};
 
 /// Internal enum representing a WebSocket connection established
 /// over different HTTP protocols.
@@ -88,14 +88,8 @@ impl TestWebSocket {
         let msg = Message::Text(text.into());
 
         match &mut self.inner {
-            InnerWebSocket::Http1(ws) => ws
-                .send(msg)
-                .await
-                .unwrap(),
-            InnerWebSocket::Http2(ws) => ws
-                .send(msg)
-                .await
-                .unwrap(),
+            InnerWebSocket::Http1(ws) => ws.send(msg).await.unwrap(),
+            InnerWebSocket::Http2(ws) => ws.send(msg).await.unwrap(),
         }
     }
 
@@ -131,7 +125,7 @@ impl TestWebSocket {
     /// Any errors during close are ignored, as this method is intended
     /// for cleanup at the end of tests.
     pub async fn close(self) {
-        let _ = match self.inner { 
+        let _ = match self.inner {
             InnerWebSocket::Http1(mut ws) => ws.close(None).await,
             InnerWebSocket::Http2(mut ws) => ws.close(None).await,
         };

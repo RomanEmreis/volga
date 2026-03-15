@@ -1,18 +1,10 @@
-﻿//! Utilities for Cache-Control header
+//! Utilities for Cache-Control header
 
-use std::{fmt, time::SystemTime};
 use crate::{
-    headers::{
-        CACHE_CONTROL, 
-        FromHeaders,
-        HeaderMap, 
-        HeaderName, 
-        HeaderValue,
-        Header, 
-        ETag
-    },
-    error::Error
+    error::Error,
+    headers::{CACHE_CONTROL, ETag, FromHeaders, Header, HeaderMap, HeaderName, HeaderValue},
 };
+use std::{fmt, time::SystemTime};
 
 #[cfg(feature = "static-files")]
 use std::fs::Metadata;
@@ -20,10 +12,10 @@ use std::fs::Metadata;
 #[cfg(feature = "middleware")]
 use {
     crate::{
-        App, HttpResponse, HttpResult, 
-        routing::{Route, RouteGroup}
+        App, HttpResponse, HttpResult,
+        routing::{Route, RouteGroup},
     },
-    std::future::Future
+    std::future::Future,
 };
 
 #[cfg(feature = "static-files")]
@@ -46,70 +38,70 @@ pub const PUBLIC: &str = "public";
 /// "private" directive
 pub const PRIVATE: &str = "private";
 /// "immutable" directive
-pub const IMMUTABLE: &str = "immutable"; 
+pub const IMMUTABLE: &str = "immutable";
 /// "stale-if-error" directive
 pub const STALE_IF_ERROR: &str = "stale-if-error";
 /// "stale-while-revalidate" directive
 pub const STALE_WHILE_REVALIDATE: &str = "stale-while-revalidate";
 
 /// Represents the HTTP [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
-/// header holds directives (instructions) in both requests and responses that control caching 
+/// header holds directives (instructions) in both requests and responses that control caching
 /// in browsers and shared caches (e.g., Proxies, CDNs).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CacheControl {
-    /// The `no-cache` response directive indicates that the response can be stored in caches, 
-    /// but the response must be validated with the origin server before each reuse, 
+    /// The `no-cache` response directive indicates that the response can be stored in caches,
+    /// but the response must be validated with the origin server before each reuse,
     /// even when the cache is disconnected from the origin server.
     no_cache: bool,
-    
+
     /// The `no-store` response directive indicates that any caches of any kind (private or shared)
     /// should not store this response.
     no_store: bool,
-    
+
     /// The `max-age` response directive indicates that the response
     /// remains fresh until `N` seconds after the response is generated.
     max_age: Option<u32>,
-    
+
     /// The `s-maxage` response directive indicates how long the response remains fresh
-    /// in a shared cache. The `s-maxage` directive is ignored by private caches, and overrides 
-    /// the value specified by the `max-age` directive or 
-    /// the [`Expires`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Expires) header 
+    /// in a shared cache. The `s-maxage` directive is ignored by private caches, and overrides
+    /// the value specified by the `max-age` directive or
+    /// the [`Expires`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Expires) header
     /// for shared caches, if they are present.
     s_max_age: Option<u32>,
-    
+
     /// The `must-revalidate` response directive indicates that the response can be stored in caches
-    /// and can be reused while fresh. If the response becomes stale, it must be validated 
+    /// and can be reused while fresh. If the response becomes stale, it must be validated
     /// with the origin server before reuse.
-    /// 
+    ///
     /// Typically, must-revalidate is used with `max-age`.
     must_revalidate: bool,
-    
+
     /// The `proxy-revalidate` response directive is the equivalent of `must-revalidate`,
     /// but specifically for shared caches only.
     proxy_revalidate: bool,
 
-    /// The stale-while-revalidate response directive indicates that the cache could reuse 
+    /// The stale-while-revalidate response directive indicates that the cache could reuse
     /// a stale response while it revalidates it to a cache.
     stale_while_revalidate: Option<u32>,
 
-    /// The stale-if-error response directive indicates that the cache can reuse a stale response 
-    /// when an upstream server generates an error or when the error is generated locally. 
-    /// 
+    /// The stale-if-error response directive indicates that the cache can reuse a stale response
+    /// when an upstream server generates an error or when the error is generated locally.
+    ///
     /// Here, an error is considered any response with a status code of 500, 502, 503, or 504.
     stale_if_error: Option<u32>,
-    
+
     /// The `public` response directive indicates that the response can be stored in a shared cache.
-    /// Responses for requests with 
+    /// Responses for requests with
     /// [`Authorization`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Authorization) header
     /// fields must not be stored in a shared cache; however, the `public` directive will cause such
     /// responses to be stored in a shared cache.
     public: bool,
-    
-    /// The `private` response directive indicates that the response can be stored only 
+
+    /// The `private` response directive indicates that the response can be stored only
     /// in a private cache (e.g. local caches in browsers).
     private: bool,
-    
-    /// The `immutable` response directive indicates that the response will not be updated 
+
+    /// The `immutable` response directive indicates that the response will not be updated
     /// while it's fresh.
     immutable: bool,
 }
@@ -161,7 +153,7 @@ impl fmt::Display for CacheControl {
         if let Some(stale_if_error) = self.stale_if_error {
             directives.push(format!("{STALE_IF_ERROR}={stale_if_error}"));
         }
-        
+
         f.write_str(directives.join(", ").as_str())
     }
 }
@@ -175,11 +167,10 @@ impl From<CacheControl> for String {
 
 impl TryFrom<CacheControl> for HeaderValue {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(value: CacheControl) -> Result<Self, Self::Error> {
-        HeaderValue::from_str(value.to_string().as_str())
-            .map_err(Into::into)
+        HeaderValue::from_str(value.to_string().as_str()).map_err(Into::into)
     }
 }
 
@@ -198,7 +189,7 @@ impl CacheControl {
     pub const fn from_static(value: &'static str) -> Header<Self> {
         Header::<Self>::from_static(value)
     }
-                
+
     /// Construct a typed header from bytes (validated).
     #[inline]
     pub fn from_bytes(bytes: &[u8]) -> Result<Header<Self>, Error> {
@@ -294,7 +285,7 @@ impl CacheControl {
         self
     }
 
-    /// Sets `stale-while-revalidate`: indicates that the cache could reuse a stale response 
+    /// Sets `stale-while-revalidate`: indicates that the cache could reuse a stale response
     /// while it revalidates it to a cache.
     /// Disables `no-store` to allow caching.
     pub fn with_stale_while_revalidate(mut self, age: u32) -> Self {
@@ -303,10 +294,10 @@ impl CacheControl {
         self
     }
 
-    /// Sets `stale-if-error`: indicates that the cache can reuse a stale response 
-    /// when an upstream server generates an error or when the error is generated locally. 
+    /// Sets `stale-if-error`: indicates that the cache can reuse a stale response
+    /// when an upstream server generates an error or when the error is generated locally.
     /// Disables `no-store` to allow caching.
-    /// 
+    ///
     /// Here, an error is considered any response with a status code of 500, 502, 503, or 504.
     pub fn with_stale_if_error(mut self, age: u32) -> Self {
         self.stale_if_error = Some(age);
@@ -321,17 +312,17 @@ impl CacheControl {
 /// [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
 #[derive(Debug)]
 pub struct ResponseCaching {
-    /// Represents 
+    /// Represents
     /// [`ETag`](https://developer.mozilla.org/ru/docs/Web/HTTP/Headers/ETag)
     pub(crate) etag: ETag,
-    
-    /// Represents 
+
+    /// Represents
     /// [`Last-Modified`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified)
     pub(crate) last_modified: SystemTime,
-    
-    /// Represents 
+
+    /// Represents
     /// [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
-    pub(crate) cache_control: CacheControl
+    pub(crate) cache_control: CacheControl,
 }
 
 #[cfg(feature = "static-files")]
@@ -342,17 +333,17 @@ impl TryFrom<&Metadata> for ResponseCaching {
     fn try_from(meta: &Metadata) -> Result<Self, Self::Error> {
         let last_modified = meta.modified()?;
         let etag: ETag = meta.try_into()?;
-        let cache_control = CacheControl { 
-            public: true, 
-            immutable: true, 
-            max_age: Some(DEFAULT_MAX_AGE), 
+        let cache_control = CacheControl {
+            public: true,
+            immutable: true,
+            max_age: Some(DEFAULT_MAX_AGE),
             ..Default::default()
         };
-        
+
         let this = Self {
             cache_control,
             etag,
-            last_modified
+            last_modified,
         };
         Ok(this)
     }
@@ -364,7 +355,7 @@ impl ResponseCaching {
     pub fn etag(&self) -> &str {
         self.etag.as_ref()
     }
-    
+
     /// Returns [`Last-Modified`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified)
     /// as [`String`]
     #[inline]
@@ -382,9 +373,9 @@ impl ResponseCaching {
 
 #[cfg(feature = "middleware")]
 impl App {
-    /// Configures a `cache-control` header that will be added for all responses from this server 
+    /// Configures a `cache-control` header that will be added for all responses from this server
     /// if they are not explicitly configured for the route or route group.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, headers::CacheControl};
@@ -396,14 +387,14 @@ impl App {
     ///         .with_max_age(60)
     ///         .with_immutable()
     ///         .with_public());
-    /// 
+    ///
     /// app.map_get("/hello", || async move { "Hello, World!" });
-    /// 
+    ///
     ///# app.run().await
     ///# }
     /// ```
     pub fn with_cache_control<F>(mut self, config: F) -> Self
-    where 
+    where
         F: Fn(CacheControl) -> CacheControl,
     {
         self.cache_control = Some(config(CacheControl::default()));
@@ -414,7 +405,7 @@ impl App {
 #[cfg(feature = "middleware")]
 impl<'a> Route<'a> {
     /// Adds middleware that includes a configured `cache-control` header for all responses from this route.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, headers::CacheControl};
@@ -422,13 +413,13 @@ impl<'a> Route<'a> {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.map_get("/hello", || async move { "Hello, World!" })
     ///     .cache_control(|cache_control| cache_control
     ///         .with_max_age(60)
     ///         .with_immutable()
     ///         .with_public());
-    /// 
+    ///
     ///# app.run().await
     ///# }
     /// ```
@@ -449,7 +440,7 @@ impl<'a> Route<'a> {
 #[cfg(feature = "middleware")]
 impl<'a> RouteGroup<'a> {
     /// Adds middleware that includes a configured `cache-control` header for all responses from this group of routes.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, headers::CacheControl};
@@ -457,13 +448,13 @@ impl<'a> RouteGroup<'a> {
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
-    /// 
+    ///
     /// app.group("/greeting", |api| {
     ///     api.cache_control(|cache_control| cache_control
     ///         .with_max_age(60)
     ///         .with_immutable()
     ///         .with_public());
-    /// 
+    ///
     ///     api.map_get("/hello", || async move { "Hello, World!" });    
     /// });
     ///# app.run().await
@@ -513,8 +504,8 @@ fn make_cache_control_fn(
 
 #[cfg(test)]
 mod tests {
+    use crate::headers::{CacheControl, ETag, Header, ResponseCaching};
     use std::time::SystemTime;
-    use crate::headers::{Header, CacheControl, ETag, ResponseCaching};
 
     #[test]
     fn it_creates_cache_control_string() {
@@ -528,18 +519,21 @@ mod tests {
             s_max_age: 60.into(),
             ..Default::default()
         };
-        
-        assert_eq!("no-store, max-age=60, s-maxage=60, proxy-revalidate, public", cache_control.to_string());
+
+        assert_eq!(
+            "no-store, max-age=60, s-maxage=60, proxy-revalidate, public",
+            cache_control.to_string()
+        );
     }
-    
+
     #[test]
     fn if_returns_etag() {
         let caching = ResponseCaching {
-          etag: ETag::strong("123"), 
-          last_modified: SystemTime::now(), 
-          cache_control: Default::default()
+            etag: ETag::strong("123"),
+            last_modified: SystemTime::now(),
+            cache_control: Default::default(),
         };
-        
+
         assert_eq!(caching.etag(), "\"123\"");
     }
 
@@ -549,7 +543,7 @@ mod tests {
         let caching = ResponseCaching {
             etag: ETag::strong("123"),
             last_modified: now,
-            cache_control: Default::default()
+            cache_control: Default::default(),
         };
 
         assert_eq!(caching.last_modified(), httpdate::fmt_http_date(now));
@@ -563,11 +557,11 @@ mod tests {
             immutable: true,
             ..Default::default()
         };
-        
+
         let caching = ResponseCaching {
             etag: ETag::strong("123"),
             last_modified: SystemTime::now(),
-            cache_control
+            cache_control,
         };
 
         assert_eq!(caching.cache_control(), "max-age=60, private, immutable");
@@ -626,28 +620,28 @@ mod tests {
         assert_eq!(cc.max_age, Some(3600));
         assert!(cc.immutable);
     }
-    
+
     #[test]
     fn it_tests_stale_while_revalidate() {
         let cc = CacheControl::default().with_stale_while_revalidate(600);
         assert_eq!(cc.stale_while_revalidate, Some(600));
     }
-    
+
     #[test]
     fn it_tests_stale_if_error() {
         let cc = CacheControl::default().with_stale_if_error(600);
         assert_eq!(cc.stale_if_error, Some(600));
     }
-    
+
     #[test]
     fn it_converts_cache_control_to_header() {
         let cc = CacheControl::default()
             .with_no_cache()
             .with_must_revalidate()
             .with_max_age(0);
-        
+
         let header = Header::<CacheControl>::try_from(cc).unwrap();
-        
+
         assert_eq!(header.name(), "cache-control");
         assert_eq!(
             header.value().to_str().unwrap(),

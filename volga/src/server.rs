@@ -1,9 +1,9 @@
-﻿//! HTTP Server tools
+//! HTTP Server tools
 
-use std::sync::Weak;
-use std::net::SocketAddr;
-use hyper::rt::{Read, Write};
 use crate::app::{AppEnv, scope::Scope};
+use hyper::rt::{Read, Write};
+use std::net::SocketAddr;
+use std::sync::Weak;
 
 #[cfg(all(feature = "http1", not(feature = "http2")))]
 pub(super) mod http1;

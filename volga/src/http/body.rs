@@ -1,27 +1,23 @@
-﻿//! HTTP Body utilities
+//! HTTP Body utilities
 
+use crate::{
+    ByteStream,
+    error::{BoxError, Error},
+};
 use bytes::Bytes;
+use futures_util::{TryStream, TryStreamExt};
 use hyper::body::Frame;
 use pin_project_lite::pin_project;
 use serde::Serialize;
-use tokio_util::io::ReaderStream;
 use tokio::fs::File;
-use crate::{ByteStream, error::{BoxError, Error}};
-use futures_util::{TryStream, TryStreamExt};
+use tokio_util::io::ReaderStream;
 
-use http_body_util::{
-    BodyExt,
-    Empty, 
-    Full, 
-    StreamBody, 
-    Limited, 
-    BodyDataStream
-};
+use http_body_util::{BodyDataStream, BodyExt, Empty, Full, Limited, StreamBody};
 
 use std::{
     borrow::Cow,
-    task::{Context, Poll},
     pin::Pin,
+    task::{Context, Poll},
 };
 
 pub use hyper::body::{Body, Incoming, SizeHint};
@@ -76,7 +72,7 @@ pin_project! {
             #[pin]
             inner: Limited<Full<Bytes>>
         },
-    }   
+    }
 }
 
 impl Body for HttpBody {
@@ -84,15 +80,22 @@ impl Body for HttpBody {
     type Error = Error;
 
     #[inline]
-    fn poll_frame(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+    fn poll_frame(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
         match self.project().inner.project() {
             InnerBodyProj::Empty { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Full { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Incoming { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Limited { inner } => inner.poll_frame(cx).map_err(Error::client_error),
-            InnerBodyProj::BoxedLimited  { inner } => inner.poll_frame(cx).map_err(Error::client_error),
-            InnerBodyProj::Boxed  { inner } => inner.poll_frame(cx),
-            InnerBodyProj::FullLimited  { inner } => inner.poll_frame(cx).map_err(Error::client_error),
+            InnerBodyProj::BoxedLimited { inner } => {
+                inner.poll_frame(cx).map_err(Error::client_error)
+            }
+            InnerBodyProj::Boxed { inner } => inner.poll_frame(cx),
+            InnerBodyProj::FullLimited { inner } => {
+                inner.poll_frame(cx).map_err(Error::client_error)
+            }
         }
     }
 
@@ -103,12 +106,12 @@ impl Body for HttpBody {
             InnerBody::Full { inner } => inner.is_end_stream(),
             InnerBody::Incoming { inner } => inner.is_end_stream(),
             InnerBody::Limited { inner } => inner.is_end_stream(),
-            InnerBody::BoxedLimited  { inner } => inner.is_end_stream(),
+            InnerBody::BoxedLimited { inner } => inner.is_end_stream(),
             InnerBody::Boxed { inner } => inner.is_end_stream(),
             InnerBody::FullLimited { inner } => inner.is_end_stream(),
         }
     }
-    
+
     #[inline]
     fn size_hint(&self) -> SizeHint {
         match &self.inner {
@@ -127,39 +130,49 @@ impl HttpBody {
     /// Creates a new [`HttpBody`]
     #[inline]
     pub fn new(inner: UnsyncBoxBody) -> Self {
-        Self { inner: InnerBody::Boxed { inner } }
+        Self {
+            inner: InnerBody::Boxed { inner },
+        }
     }
 
     /// Create a new [`HttpBody`] from the incoming request stream
     #[inline]
     pub(crate) fn incoming(inner: Incoming) -> Self {
-        Self { inner: InnerBody::Incoming { inner } }
+        Self {
+            inner: InnerBody::Incoming { inner },
+        }
     }
 
     /// Create a new limited [`HttpBody`] from the incoming request stream
     #[inline]
     pub(crate) fn limited(inner: HttpBody, limit: usize) -> Self {
         match inner.inner {
-            InnerBody::Incoming { inner } => Self { 
-                inner: InnerBody::Limited { inner: Limited::new(inner, limit) }
+            InnerBody::Incoming { inner } => Self {
+                inner: InnerBody::Limited {
+                    inner: Limited::new(inner, limit),
+                },
             },
             InnerBody::Empty { inner } => Self {
-                inner: InnerBody::Empty { inner }
+                inner: InnerBody::Empty { inner },
             },
             InnerBody::Full { inner } => Self {
-                inner: InnerBody::FullLimited { inner: Limited::new(inner, limit) }
+                inner: InnerBody::FullLimited {
+                    inner: Limited::new(inner, limit),
+                },
             },
-            InnerBody::Limited { inner } => Self { 
-                inner: InnerBody::Limited { inner }
+            InnerBody::Limited { inner } => Self {
+                inner: InnerBody::Limited { inner },
             },
-            InnerBody::BoxedLimited { inner } => Self { 
-                inner: InnerBody::BoxedLimited { inner }
+            InnerBody::BoxedLimited { inner } => Self {
+                inner: InnerBody::BoxedLimited { inner },
             },
-            InnerBody::Boxed { inner } => Self { 
-                inner: InnerBody::BoxedLimited { inner: Limited::new(inner, limit) }
+            InnerBody::Boxed { inner } => Self {
+                inner: InnerBody::BoxedLimited {
+                    inner: Limited::new(inner, limit),
+                },
             },
-            InnerBody::FullLimited { inner } => Self { 
-                inner: InnerBody::FullLimited { inner }
+            InnerBody::FullLimited { inner } => Self {
+                inner: InnerBody::FullLimited { inner },
             },
         }
     }
@@ -167,11 +180,13 @@ impl HttpBody {
     /// Wraps the `inner` into [`HttpBody`] as boxed trait object
     #[allow(dead_code)]
     pub(crate) fn boxed<B>(inner: B) -> Self
-    where 
-        B: Body<Data = Bytes, Error = Error> + Send + 'static
+    where
+        B: Body<Data = Bytes, Error = Error> + Send + 'static,
     {
         let inner = inner.boxed_unsync();
-        Self { inner: InnerBody::Boxed { inner } }
+        Self {
+            inner: InnerBody::Boxed { inner },
+        }
     }
 
     /// Consumes the [`HttpBody`] and returns the body as a boxed trait object
@@ -179,24 +194,12 @@ impl HttpBody {
     pub fn into_boxed(self) -> UnsyncBoxBody {
         match self.inner {
             InnerBody::Boxed { inner } => inner,
-            InnerBody::Empty { inner } => inner
-                .map_err(Error::client_error)
-                .boxed_unsync(),
-            InnerBody::Full { inner } => inner
-                .map_err(Error::client_error)
-                .boxed_unsync(),
-            InnerBody::FullLimited { inner } => inner
-                .map_err(Error::client_error)
-                .boxed_unsync(),
-            InnerBody::BoxedLimited { inner } => inner
-                .map_err(Error::client_error)
-                .boxed_unsync(),
-            InnerBody::Limited { inner } => inner
-                .map_err(Error::client_error)
-                .boxed_unsync(),
-            InnerBody::Incoming { inner } => inner
-                .map_err(Error::client_error)
-                .boxed_unsync(),
+            InnerBody::Empty { inner } => inner.map_err(Error::client_error).boxed_unsync(),
+            InnerBody::Full { inner } => inner.map_err(Error::client_error).boxed_unsync(),
+            InnerBody::FullLimited { inner } => inner.map_err(Error::client_error).boxed_unsync(),
+            InnerBody::BoxedLimited { inner } => inner.map_err(Error::client_error).boxed_unsync(),
+            InnerBody::Limited { inner } => inner.map_err(Error::client_error).boxed_unsync(),
+            InnerBody::Incoming { inner } => inner.map_err(Error::client_error).boxed_unsync(),
         }
     }
 
@@ -230,7 +233,7 @@ impl HttpBody {
     {
         match s.into() {
             Cow::Borrowed(st) => Self::from_static_text(st),
-            Cow::Owned(owned) => Self::full(owned)
+            Cow::Owned(owned) => Self::full(owned),
         }
     }
 
@@ -248,7 +251,7 @@ impl HttpBody {
         Self::from_static(s.as_bytes())
     }
 
-    /// Creates a new [`HttpBody`] from `&str` object 
+    /// Creates a new [`HttpBody`] from `&str` object
     /// by copying it without `String` or `Box<str>` allocation.
     #[inline(always)]
     pub fn text_ref(s: &str) -> Self {
@@ -266,26 +269,42 @@ impl HttpBody {
     #[inline]
     pub fn json<T: Serialize>(content: T) -> Result<HttpBody, Error> {
         let content = serde_json::to_vec(&content)?;
-        Ok(Self { inner: InnerBody::Full { inner: Full::from(content) } })
+        Ok(Self {
+            inner: InnerBody::Full {
+                inner: Full::from(content),
+            },
+        })
     }
 
     /// Creates a new [`HttpBody`] from a Form Data object
     #[inline]
     pub fn form<T: Serialize>(content: T) -> Result<HttpBody, Error> {
         let content = serde_urlencoded::to_string(&content)?;
-        Ok(Self { inner: InnerBody::Full { inner: Full::from(content) } })
+        Ok(Self {
+            inner: InnerBody::Full {
+                inner: Full::from(content),
+            },
+        })
     }
 
     /// Creates a new [`HttpBody`] from an object that is convertable to a byte array
     #[inline]
     pub fn full<T: Into<Bytes>>(chunk: T) -> HttpBody {
-        Self { inner: InnerBody::Full { inner: Full::new(chunk.into()) } }
+        Self {
+            inner: InnerBody::Full {
+                inner: Full::new(chunk.into()),
+            },
+        }
     }
 
     /// Creates an empty [`HttpBody`]
     #[inline]
     pub fn empty() -> HttpBody {
-        Self { inner: InnerBody::Empty { inner: Empty::<Bytes>::new() } }
+        Self {
+            inner: InnerBody::Empty {
+                inner: Empty::<Bytes>::new(),
+            },
+        }
     }
 
     /// Creates a new [`HttpBody`] from [`File`] stream
@@ -302,35 +321,41 @@ impl HttpBody {
         S: futures_util::Stream<Item = Bytes> + Send + 'static,
     {
         use futures_util::StreamExt;
-        
+
         Self::stream(stream.map(Ok::<_, Error>))
     }
 
     /// Creates a new [`HttpBody`] from stream
     #[inline]
     pub fn stream<S>(stream: S) -> HttpBody
-    where 
+    where
         S: TryStream + Send + 'static,
         S::Ok: Into<Bytes>,
-        S::Error: Into<BoxError>
+        S::Error: Into<BoxError>,
     {
-        let stream_body = StreamBody::new(stream
-            .map_err(Error::client_error)
-            .map_ok(|msg| Frame::data(msg.into())));
-        Self { inner: InnerBody::Boxed { inner: stream_body.boxed_unsync() } }
+        let stream_body = StreamBody::new(
+            stream
+                .map_err(Error::client_error)
+                .map_ok(|msg| Frame::data(msg.into())),
+        );
+        Self {
+            inner: InnerBody::Boxed {
+                inner: stream_body.boxed_unsync(),
+            },
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::HttpBody;
     use http_body_util::BodyExt;
     use hyper::body::Body;
     use serde::{Serialize, Serializer};
-    use crate::HttpBody;
     use std::borrow::Cow;
-    
+
     struct FailStruct;
-    
+
     impl Serialize for FailStruct {
         fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -339,14 +364,14 @@ mod tests {
             Err(serde::ser::Error::custom("oops..."))
         }
     }
-    
+
     #[tokio::test]
     async fn it_returns_err_if_body_limit_exceeded() {
         let body = HttpBody::full("Hello, World!").into_boxed_http_body();
         let body = HttpBody::limited(body, 5);
-        
+
         let collected = body.collect().await;
-        
+
         assert!(collected.is_err());
     }
 
@@ -362,7 +387,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_returns_error_body_if_unable_to_serialize_json() {
-        let content =  FailStruct;
+        let content = FailStruct;
         let body = HttpBody::json(content);
 
         assert!(body.is_err());
@@ -370,7 +395,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_returns_error_body_if_unable_to_serialize_form() {
-        let content =  FailStruct;
+        let content = FailStruct;
         let body = HttpBody::form(content);
 
         assert!(body.is_err());
@@ -382,7 +407,7 @@ mod tests {
 
         let collected = body.collect().await;
         assert!(collected.is_ok());
-        
+
         let size = collected.unwrap().size_hint();
         assert_eq!(size.lower(), 0);
         assert_eq!(size.upper(), None)
@@ -391,65 +416,86 @@ mod tests {
     #[tokio::test]
     async fn it_works_with_static_str() {
         let body = HttpBody::from_static_text("Hello, World!");
-        
+
         let collected = body.collect().await;
-        
-        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+
+        assert_eq!(
+            String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(),
+            "Hello, World!"
+        );
     }
 
     #[tokio::test]
     async fn it_works_with_static_bytes() {
         let body = HttpBody::from_static(b"Hello, World!");
-        
+
         let collected = body.collect().await;
-        
-        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+
+        assert_eq!(
+            String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(),
+            "Hello, World!"
+        );
     }
 
     #[tokio::test]
     async fn it_works_with_string() {
         let body = HttpBody::text(String::from("Hello, World!"));
-        
+
         let collected = body.collect().await;
-        
-        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+
+        assert_eq!(
+            String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(),
+            "Hello, World!"
+        );
     }
 
     #[tokio::test]
     async fn it_works_with_static_str_to_text() {
         let body = HttpBody::text("Hello, World!");
-        
+
         let collected = body.collect().await;
-        
-        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+
+        assert_eq!(
+            String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(),
+            "Hello, World!"
+        );
     }
 
     #[tokio::test]
     async fn it_works_with_cow() {
         let body = HttpBody::text(Cow::<'static, str>::Borrowed("Hello, World!"));
-        
+
         let collected = body.collect().await;
-        
-        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+
+        assert_eq!(
+            String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(),
+            "Hello, World!"
+        );
     }
 
     #[tokio::test]
     async fn it_works_with_str() {
         let string = String::from("Hello, World!");
         let body = HttpBody::text_ref(string.as_str());
-        
+
         let collected = body.collect().await;
-        
-        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+
+        assert_eq!(
+            String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(),
+            "Hello, World!"
+        );
     }
 
     #[tokio::test]
     async fn it_works_with_slice() {
         let string = String::from("Hello, World!");
         let body = HttpBody::from_slice(string.as_bytes());
-        
+
         let collected = body.collect().await;
-        
-        assert_eq!(String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(), "Hello, World!");
+
+        assert_eq!(
+            String::from_utf8(collected.unwrap().to_bytes().into()).unwrap(),
+            "Hello, World!"
+        );
     }
 }

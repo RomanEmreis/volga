@@ -1,10 +1,13 @@
 //! Tools and data structures for a GCRA (Generic Cell Rate Algorithm) limiter.
 
-use super::{RateLimiter, SystemTimeSource, TimeSource, MICROS_PER_SEC};
+use super::{MICROS_PER_SEC, RateLimiter, SystemTimeSource, TimeSource};
 use dashmap::DashMap;
 use std::{
-    sync::{Arc, atomic::{AtomicU64, Ordering::*}},
-    time::Duration
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering::*},
+    },
+    time::Duration,
 };
 
 const DEFAULT_EVICTION: u64 = 60 * MICROS_PER_SEC; // 1 minute
@@ -17,7 +20,7 @@ const DEFAULT_EVICTION: u64 = 60 * MICROS_PER_SEC; // 1 minute
 struct Entry {
     /// Theoretical arrival time in seconds since UNIX_EPOCH.
     tat_us: AtomicU64,
-    
+
     /// Last access time in microseconds (for eviction)
     last_seen_us: AtomicU64,
 }
@@ -173,7 +176,10 @@ impl<T: TimeSource> GcraRateLimiter<T> {
     #[inline]
     pub fn with_time_source(rate_per_second: f64, burst: u32, time_source: T) -> Self {
         // Parameter validation
-        assert!(rate_per_second.is_finite(), "rate_per_second must be finite");
+        assert!(
+            rate_per_second.is_finite(),
+            "rate_per_second must be finite"
+        );
         assert!(rate_per_second > 0.0, "rate_per_second must be > 0");
         assert!(burst >= 1, "burst must be >= 1");
 
@@ -199,9 +205,7 @@ impl<T: TimeSource> GcraRateLimiter<T> {
     /// may be removed during subsequent `check` calls.
     #[inline]
     pub fn set_eviction(&mut self, eviction: Duration) {
-        self.eviction_grace_us = eviction.as_micros()
-            .try_into()
-            .unwrap_or(u64::MAX);
+        self.eviction_grace_us = eviction.as_micros().try_into().unwrap_or(u64::MAX);
     }
 
     /// Average allowed rate in requests per second.
@@ -225,8 +229,8 @@ impl<T: TimeSource> GcraRateLimiter<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_utils::MockTimeSource;
+    use super::*;
 
     #[test]
     fn gcra_allows_burst_then_limits() {

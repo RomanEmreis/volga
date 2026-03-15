@@ -1,14 +1,11 @@
-﻿//! Utilities for managing HTTP request scope
+//! Utilities for managing HTTP request scope
 
-use crate::http::endpoints::{
-    route::RoutePipeline,
-    args::FromRequestRef
-};
+use crate::http::endpoints::{args::FromRequestRef, route::RoutePipeline};
 use crate::{
     HttpRequest, HttpRequestMut, HttpResult,
     error::Error,
-    http::cors::{CorsOverride, CorsHeaders},
-    status
+    http::cors::{CorsHeaders, CorsOverride},
+    status,
 };
 
 use std::sync::Arc;
@@ -17,19 +14,19 @@ use std::sync::Arc;
 use crate::di::Container;
 
 #[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::{RateLimiter, GlobalRateLimiter};
+use crate::rate_limiting::{GlobalRateLimiter, RateLimiter};
 
-/// Describes current HTTP context which consists of the current HTTP request data 
+/// Describes current HTTP context which consists of the current HTTP request data
 /// and the reference to the method handler for this request
 pub struct HttpContext {
     /// Current HTTP request
     request: HttpRequestMut,
-    
+
     /// Current route middleware pipeline or handler that mapped to handle the HTTP request
     pipeline: Option<RoutePipeline>,
 
     /// CORS headers for this route
-    cors: CorsOverride
+    cors: CorsOverride,
 }
 
 impl std::fmt::Debug for HttpContext {
@@ -45,15 +42,15 @@ impl HttpContext {
     pub(crate) fn new(
         request: HttpRequest,
         pipeline: Option<RoutePipeline>,
-        cors: CorsOverride
+        cors: CorsOverride,
     ) -> Self {
-        Self { 
+        Self {
             request: HttpRequestMut::new(request),
             pipeline,
-            cors
+            cors,
         }
     }
-    
+
     /// Splits [`HttpContext`] into request parts and pipeline
     #[inline]
     #[allow(dead_code)]
@@ -63,10 +60,18 @@ impl HttpContext {
 
     /// Creates a new [`HttpContext`] from request parts and pipeline
     #[inline]
-    pub(crate) fn from_parts(request: HttpRequestMut, pipeline: Option<RoutePipeline>, cors: CorsOverride) -> Self {
-        Self { request, pipeline, cors }
+    pub(crate) fn from_parts(
+        request: HttpRequestMut,
+        pipeline: Option<RoutePipeline>,
+        cors: CorsOverride,
+    ) -> Self {
+        Self {
+            request,
+            pipeline,
+            cors,
+        }
     }
-    
+
     /// Extracts a payload from request parts
     ///
     /// # Example
@@ -79,7 +84,7 @@ impl HttpContext {
     ///     id: u32,
     ///     key: String
     /// }
-    /// 
+    ///
     /// # fn docs(ctx: HttpContext) -> std::io::Result<()> {
     /// let params: Query<Params> = ctx.extract()?;
     /// # Ok(())
@@ -94,35 +99,32 @@ impl HttpContext {
     #[inline]
     #[cfg(feature = "di")]
     pub(crate) fn container(&self) -> Result<&Container, Error> {
-        self.request
-            .extensions()
-            .try_into()
-            .map_err(Into::into)
+        self.request.extensions().try_into().map_err(Into::into)
     }
 
     /// Resolves a service from Dependency Container as a clone, service must implement [`Clone`]
     #[inline]
     #[cfg(feature = "di")]
     pub fn resolve<T: Send + Sync + Clone + 'static>(&self) -> Result<T, Error> {
-        self.container()?
-            .resolve::<T>()
-            .map_err(Into::into)
+        self.container()?.resolve::<T>().map_err(Into::into)
     }
 
     /// Resolves a service from Dependency Container
     #[inline]
     #[cfg(feature = "di")]
     pub fn resolve_shared<T: Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
-        self.container()?
-            .resolve_shared::<T>()
-            .map_err(Into::into)
+        self.container()?.resolve_shared::<T>().map_err(Into::into)
     }
 
     /// Returns a reference to a Fixed Window Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
-    pub(crate) fn fixed_window_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.request.extensions()
+    pub(crate) fn fixed_window_rate_limiter(
+        &self,
+        policy: Option<&str>,
+    ) -> Option<&impl RateLimiter> {
+        self.request
+            .extensions()
             .get::<Arc<GlobalRateLimiter>>()?
             .fixed_window(policy)
     }
@@ -130,8 +132,12 @@ impl HttpContext {
     /// Returns a reference to a Sliding Window Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
-    pub(crate) fn sliding_window_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.request.extensions()
+    pub(crate) fn sliding_window_rate_limiter(
+        &self,
+        policy: Option<&str>,
+    ) -> Option<&impl RateLimiter> {
+        self.request
+            .extensions()
             .get::<Arc<GlobalRateLimiter>>()?
             .sliding_window(policy)
     }
@@ -139,8 +145,12 @@ impl HttpContext {
     /// Returns a reference to a Token Bucket Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
-    pub(crate) fn token_bucket_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.request.extensions()
+    pub(crate) fn token_bucket_rate_limiter(
+        &self,
+        policy: Option<&str>,
+    ) -> Option<&impl RateLimiter> {
+        self.request
+            .extensions()
             .get::<Arc<GlobalRateLimiter>>()?
             .token_bucket(policy)
     }
@@ -149,7 +159,8 @@ impl HttpContext {
     #[inline]
     #[cfg(feature = "rate-limiting")]
     pub(crate) fn gcra_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.request.extensions()
+        self.request
+            .extensions()
             .get::<Arc<GlobalRateLimiter>>()?
             .gcra(policy)
     }
@@ -175,7 +186,10 @@ impl HttpContext {
 
     /// Resolves effective CORS policy (Route > Group > Default)
     #[inline]
-    pub(crate) fn resolve_cors(&self, default: Option<&Arc<CorsHeaders>>) -> Option<Arc<CorsHeaders>> {
+    pub(crate) fn resolve_cors(
+        &self,
+        default: Option<&Arc<CorsHeaders>>,
+    ) -> Option<Arc<CorsHeaders>> {
         match &self.cors {
             CorsOverride::Named(cors) => Some(cors.clone()),
             CorsOverride::Inherit => default.cloned(),
@@ -188,8 +202,14 @@ impl HttpContext {
     pub(crate) async fn execute(self) -> HttpResult {
         let (request, pipeline, cors) = self.into_parts();
         if let Some(pipeline) = pipeline {
-            pipeline.call(Self { request, cors, pipeline: None }).await
-        } else { 
+            pipeline
+                .call(Self {
+                    request,
+                    cors,
+                    pipeline: None,
+                })
+                .await
+        } else {
             status!(405)
         }
     }
@@ -197,10 +217,10 @@ impl HttpContext {
 
 #[cfg(test)]
 mod tests {
-    use hyper::Request;
-    use crate::HttpBody;
     use super::*;
-    
+    use crate::HttpBody;
+    use hyper::Request;
+
     #[cfg(feature = "di")]
     use std::collections::HashMap;
     #[cfg(feature = "di")]
@@ -214,9 +234,9 @@ mod tests {
     #[allow(dead_code)]
     #[derive(Clone, Default)]
     struct InMemoryCache {
-        inner: Arc<Mutex<HashMap<String, String>>>
+        inner: Arc<Mutex<HashMap<String, String>>>,
     }
-    
+
     fn create_ctx() -> HttpContext {
         let (parts, body) = Request::get("/")
             .body(HttpBody::empty())
@@ -226,22 +246,22 @@ mod tests {
         HttpContext::new(
             HttpRequest::from_parts(parts, body),
             None,
-            CorsOverride::Inherit
+            CorsOverride::Inherit,
         )
     }
-    
+
     #[test]
     fn it_debugs() {
         let ctx = create_ctx();
         assert_eq!(format!("{ctx:?}"), "HttpContext(..)");
     }
-    
+
     #[test]
     fn it_splits_into_parts() {
         let ctx = create_ctx();
 
         let (parts, _, _) = ctx.into_parts();
-        
+
         assert_eq!(parts.uri(), "/")
     }
 
@@ -307,22 +327,22 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let http_req = HttpRequest::from_parts(parts, body);
-        
+
         let permissive_cors = CorsConfig::default()
             .with_name("permissive")
             .with_any_method()
             .with_any_header()
             .with_any_origin()
             .precompute();
-        
+
         let ctx = HttpContext::new(
-            http_req, 
-            None, 
-            CorsOverride::Named(Arc::new(permissive_cors))
+            http_req,
+            None,
+            CorsOverride::Named(Arc::new(permissive_cors)),
         );
 
         let resolved_cors = ctx.resolve_cors(None);
-        
+
         assert!(resolved_cors.is_some());
     }
 
@@ -343,11 +363,7 @@ mod tests {
 
         let default_cors = Some(Arc::new(default_cors));
 
-        let ctx = HttpContext::new(
-            http_req,
-            None,
-            CorsOverride::Inherit
-        );
+        let ctx = HttpContext::new(http_req, None, CorsOverride::Inherit);
 
         let resolved_cors = ctx.resolve_cors(default_cors.as_ref());
 
@@ -371,11 +387,7 @@ mod tests {
 
         let default_cors = Some(Arc::new(default_cors));
 
-        let ctx = HttpContext::new(
-            http_req,
-            None,
-            CorsOverride::Disabled
-        );
+        let ctx = HttpContext::new(http_req, None, CorsOverride::Disabled);
 
         let resolved_cors = ctx.resolve_cors(default_cors.as_ref());
 

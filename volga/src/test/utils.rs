@@ -1,9 +1,9 @@
 //! Utilities for unit tests
 
-use std::path::Path;
-use http_body_util::BodyExt;
-use tokio::io::AsyncReadExt;
 use crate::HttpResponse;
+use http_body_util::BodyExt;
+use std::path::Path;
+use tokio::io::AsyncReadExt;
 
 /// Read response body bytes
 pub(crate) async fn read_file_bytes(response: &mut HttpResponse) -> Vec<u8> {

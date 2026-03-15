@@ -1,9 +1,12 @@
 //! Tools and data structures for a sliding-window rate limiter.
 
-use std::sync::{Arc, atomic::{AtomicU32, AtomicU64, Ordering::*}};
-use std::time::Duration;
+use super::{RateLimiter, SystemTimeSource, TimeSource};
 use dashmap::DashMap;
-use super::{SystemTimeSource, TimeSource, RateLimiter};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU32, AtomicU64, Ordering::*},
+};
+use std::time::Duration;
 
 /// Internal per-key state for the sliding window algorithm.
 ///
@@ -186,7 +189,7 @@ impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
     #[inline]
     pub fn with_time_source(max_requests: u32, window_size: Duration, time_source: T) -> Self {
         let window_size_secs = window_size.as_secs();
-        
+
         Self {
             storage: Arc::new(DashMap::new()),
             max_requests,
@@ -195,7 +198,7 @@ impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
             time_source,
         }
     }
-    
+
     /// Sets the eviction grace period for inactive entries.
     ///
     /// Entries that have not been accessed for longer than this duration
@@ -228,15 +231,13 @@ impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::test_utils::MockTimeSource;
+    use super::*;
 
     #[test]
     fn sliding_window_allows_within_limit() {
-        let limiter = SlidingWindowRateLimiter::new(
-            3, 
-            Duration::from_secs(10));
-        
+        let limiter = SlidingWindowRateLimiter::new(3, Duration::from_secs(10));
+
         let key = 7;
 
         assert!(limiter.check(key));
@@ -248,10 +249,8 @@ mod tests {
     #[test]
     fn it_tests_window_sliding() {
         let time = MockTimeSource::new(1000);
-        let limiter = SlidingWindowRateLimiter::with_time_source(
-            10, 
-            Duration::from_secs(10), 
-            time.clone());
+        let limiter =
+            SlidingWindowRateLimiter::with_time_source(10, Duration::from_secs(10), time.clone());
 
         for i in 0..10 {
             assert!(limiter.check(1), "Request {} should pass", i + 1);
@@ -263,13 +262,17 @@ mod tests {
         assert!(!limiter.check(1), "Should be denied at 50% of window");
 
         time.advance(6);
-        
+
         assert!(limiter.check(1), "Should allow in new window");
 
         time.advance(10);
 
         for i in 0..10 {
-            assert!(limiter.check(1), "Request {} should pass after reset", i + 1);
+            assert!(
+                limiter.check(1),
+                "Request {} should pass after reset",
+                i + 1
+            );
         }
         assert!(!limiter.check(1), "Request 11 should be denied");
     }
@@ -277,16 +280,14 @@ mod tests {
     #[test]
     fn it_tests_window_transition() {
         let time = MockTimeSource::new(2000);
-        let limiter = SlidingWindowRateLimiter::with_time_source(
-            3, 
-            Duration::from_secs(10), 
-            time.clone());
+        let limiter =
+            SlidingWindowRateLimiter::with_time_source(3, Duration::from_secs(10), time.clone());
 
         assert!(limiter.check(1));
         assert!(limiter.check(1));
         assert!(limiter.check(1));
         assert!(!limiter.check(1), "4th request should be denied");
-        
+
         time.advance(5);
 
         // progress = 5/10 = 0.5, previous_weight = 0.5
@@ -303,29 +304,39 @@ mod tests {
 
         // current = 1
         // effective = 3 * 0.9 + 1 = 3.7 > 3
-        assert!(!limiter.check(1), "Should be denied - effective = 3*0.9 + 1 = 3.7");
+        assert!(
+            !limiter.check(1),
+            "Should be denied - effective = 3*0.9 + 1 = 3.7"
+        );
 
         time.advance(2);
 
         // elapsed_in_window = 2013 - 2010 = 3
         // progress = 3/10 = 0.3, previous_weight = 0.7
         // effective = 3 * 0.7 + 1 = 3.1 > 3
-        assert!(!limiter.check(1), "Still denied - effective = 3*0.7 + 1 = 3.1");
-        
+        assert!(
+            !limiter.check(1),
+            "Still denied - effective = 3*0.7 + 1 = 3.1"
+        );
+
         time.advance(4);
 
         // elapsed_in_window = 2017 - 2010 = 7
         // progress = 7/10 = 0.7, previous_weight = 0.3
         // effective = 3 * 0.3 + 1 = 1.9 < 3
-        assert!(limiter.check(1), "Should allow - effective = 3*0.3 + 1 = 1.9");
-        assert!(limiter.check(1), "Should allow - effective = 3*0.3 + 2 = 2.9");
+        assert!(
+            limiter.check(1),
+            "Should allow - effective = 3*0.3 + 1 = 1.9"
+        );
+        assert!(
+            limiter.check(1),
+            "Should allow - effective = 3*0.3 + 2 = 2.9"
+        );
     }
 
     #[test]
     fn sliding_window_isolated_per_key() {
-        let limiter = SlidingWindowRateLimiter::new(
-            1, 
-            Duration::from_secs(5));
+        let limiter = SlidingWindowRateLimiter::new(1, Duration::from_secs(5));
 
         assert!(limiter.check(1));
         assert!(!limiter.check(1));
@@ -338,9 +349,7 @@ mod tests {
         use std::sync::Arc;
         use std::thread;
 
-        let limiter = Arc::new(SlidingWindowRateLimiter::new(
-            1000,
-            Duration::from_secs(10)));
+        let limiter = Arc::new(SlidingWindowRateLimiter::new(1000, Duration::from_secs(10)));
 
         let key = 123;
 

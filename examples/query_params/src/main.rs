@@ -4,18 +4,18 @@
 //! cargo run -p query_params
 //! ```
 
-use std::collections::HashMap;
 use serde::Deserialize;
+use std::collections::HashMap;
 use volga::{App, Query, ok, status};
 
 #[derive(Deserialize)]
 struct User {
-    name: String
+    name: String,
 }
 
 #[derive(Deserialize)]
 struct OptionalUser {
-    name: Option<String>
+    name: Option<String>,
 }
 
 #[tokio::main]
@@ -31,16 +31,19 @@ async fn main() -> std::io::Result<()> {
     app.map_get("/hello-optional", |user: Query<OptionalUser>| async move {
         match &user.name {
             Some(name) => ok!("Hello {}!", name),
-            None => status!(400, "Missing query params")
+            None => status!(400, "Missing query params"),
         }
     });
 
     // GET /hello-again?name=John
-    app.map_get("/hello-again", |query: Query<HashMap<String, String>>| async move {
-        let name = query.get("name").unwrap(); // "John"
+    app.map_get(
+        "/hello-again",
+        |query: Query<HashMap<String, String>>| async move {
+            let name = query.get("name").unwrap(); // "John"
 
-        ok!("Hello {}!", name)
-    });
+            ok!("Hello {}!", name)
+        },
+    );
 
     app.run().await
 }

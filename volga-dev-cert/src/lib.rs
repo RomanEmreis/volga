@@ -1,7 +1,11 @@
 //! A Rust library for generating self-signed TLS certificates for local development.
 
-use rcgen::{generate_simple_self_signed, CertifiedKey};
-use std::{fs, path::PathBuf, io::{Error, Result, Write}};
+use rcgen::{CertifiedKey, generate_simple_self_signed};
+use std::{
+    fs,
+    io::{Error, Result, Write},
+    path::PathBuf,
+};
 
 /// Default name of a folder with TLS certificates
 pub const DEFAULT_CERT_FOLDER: &str = "cert";
@@ -28,10 +32,10 @@ pub fn generate(names: impl Into<Vec<String>>) -> Result<()> {
     if names.is_empty() {
         return Err(Error::other("Certificate names cannot be empty"));
     }
-    
-    let CertifiedKey { cert, signing_key } = generate_simple_self_signed(names)
-        .map_err(|err| Error::other(format!("{:?}", err)))?;
-    
+
+    let CertifiedKey { cert, signing_key } =
+        generate_simple_self_signed(names).map_err(|err| Error::other(format!("{:?}", err)))?;
+
     fs::create_dir_all(DEFAULT_CERT_FOLDER)?;
     fs::write(get_cert_path(), cert.pem())?;
     fs::write(get_signing_key_path(), signing_key.serialize_pem())?;
@@ -52,30 +56,27 @@ pub fn ask_generate() -> Result<bool> {
 /// Checks whether a dev certificate exists
 #[inline]
 pub fn dev_cert_exists() -> bool {
-    get_cert_path().exists() && 
-    get_signing_key_path().exists()
+    get_cert_path().exists() && get_signing_key_path().exists()
 }
 
 /// Returns default path to the development TLS certificate .pem file
 #[inline]
 pub fn get_cert_path() -> PathBuf {
-    PathBuf::from(DEFAULT_CERT_FOLDER)
-        .join(DEFAULT_CERT_FILE_NAME)
+    PathBuf::from(DEFAULT_CERT_FOLDER).join(DEFAULT_CERT_FILE_NAME)
 }
 
-/// Returns default path to the signin key .pem file 
+/// Returns default path to the signin key .pem file
 #[inline]
 pub fn get_signing_key_path() -> PathBuf {
-    PathBuf::from(DEFAULT_CERT_FOLDER)
-        .join(DEFAULT_KEY_FILE_NAME)
+    PathBuf::from(DEFAULT_CERT_FOLDER).join(DEFAULT_KEY_FILE_NAME)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
     use std::path::Path;
-    use serial_test::serial;
 
     // Helper to clean up before and after test
     fn cleanup() {
@@ -253,10 +254,14 @@ mod tests {
 
         let key_content = fs::read_to_string(get_signing_key_path()).unwrap();
 
-        assert!(key_content.contains("-----BEGIN PRIVATE KEY-----") ||
-            key_content.contains("-----BEGIN RSA PRIVATE KEY-----"));
-        assert!(key_content.contains("-----END PRIVATE KEY-----") ||
-            key_content.contains("-----END RSA PRIVATE KEY-----"));
+        assert!(
+            key_content.contains("-----BEGIN PRIVATE KEY-----")
+                || key_content.contains("-----BEGIN RSA PRIVATE KEY-----")
+        );
+        assert!(
+            key_content.contains("-----END PRIVATE KEY-----")
+                || key_content.contains("-----END RSA PRIVATE KEY-----")
+        );
 
         cleanup();
     }
@@ -363,10 +368,7 @@ mod tests {
     fn it_handles_special_characters_in_names() {
         cleanup();
 
-        let names = vec![
-            "test-app.local".to_string(),
-            "my_service.dev".to_string(),
-        ];
+        let names = vec!["test-app.local".to_string(), "my_service.dev".to_string()];
 
         let result = generate(names);
 

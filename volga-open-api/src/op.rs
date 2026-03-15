@@ -1,14 +1,11 @@
 //! Types and utils for OpenAPI operations.
 
-use std::collections::{BTreeMap, BTreeSet};
 use mime::APPLICATION_JSON;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
 
-use super::{
-    param::OpenApiParameter,
-    schema::OpenApiSchema,
-};
+use super::{param::OpenApiParameter, schema::OpenApiSchema};
 
 /// Represents OpenAPI operation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -108,10 +105,13 @@ impl OpenApiOperation {
             .and_then(|s| s.canonical_reason())
             .unwrap_or("Response")
             .to_string();
-        let response = self
-            .responses
-            .entry(status.to_string())
-            .or_insert_with(|| OpenApiResponse { description, content: None });
+        let response =
+            self.responses
+                .entry(status.to_string())
+                .or_insert_with(|| OpenApiResponse {
+                    description,
+                    content: None,
+                });
         response.content = Some(media_content(content_type, schema, example));
     }
 
@@ -121,10 +121,13 @@ impl OpenApiOperation {
             .and_then(|s| s.canonical_reason())
             .unwrap_or("Response")
             .to_string();
-        let response = self
-            .responses
-            .entry(status.to_string())
-            .or_insert_with(|| OpenApiResponse { description, content: None });
+        let response =
+            self.responses
+                .entry(status.to_string())
+                .or_insert_with(|| OpenApiResponse {
+                    description,
+                    content: None,
+                });
         response.content = None;
     }
 
@@ -228,16 +231,15 @@ mod tests {
     fn set_response_body_non_200_status() {
         let mut operation = OpenApiOperation::default();
         operation.clear_all_responses();
-        operation.set_response_body(
-            201,
-            OpenApiSchema::object(),
-            None,
-            "application/json",
-        );
+        operation.set_response_body(201, OpenApiSchema::object(), None, "application/json");
 
         let json = serde_json::to_value(operation).expect("serialize");
         assert!(json["responses"].get("200").is_none());
-        assert!(json["responses"]["201"]["content"].get("application/json").is_some());
+        assert!(
+            json["responses"]["201"]["content"]
+                .get("application/json")
+                .is_some()
+        );
         assert_eq!(json["responses"]["201"]["description"], "Created");
     }
 
@@ -257,7 +259,12 @@ mod tests {
         operation.clear_all_responses();
 
         let json = serde_json::to_value(operation).expect("serialize");
-        assert!(json["responses"].as_object().expect("responses object").is_empty());
+        assert!(
+            json["responses"]
+                .as_object()
+                .expect("responses object")
+                .is_empty()
+        );
     }
 
     #[test]

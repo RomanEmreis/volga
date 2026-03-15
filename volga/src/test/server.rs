@@ -1,17 +1,22 @@
 //! Common test utilities
 
 use crate::App;
-use std::{net::TcpListener, fmt::{Debug, Formatter}};
+use std::{
+    fmt::{Debug, Formatter},
+    net::TcpListener,
+};
 use tokio::sync::oneshot;
 #[cfg(feature = "ws")]
 use {
     super::ws::TestWebSocket,
-    crate::http::{Uri, Request, Method, HttpBody},
     crate::headers::SEC_WEBSOCKET_PROTOCOL,
+    crate::http::{HttpBody, Method, Request, Uri},
     hyper_util::rt::{TokioExecutor, TokioIo},
-    tokio_tungstenite::{WebSocketStream, tungstenite::{protocol, ClientRequestBuilder}},
     tokio::net::TcpStream,
-    
+    tokio_tungstenite::{
+        WebSocketStream,
+        tungstenite::{ClientRequestBuilder, protocol},
+    },
 };
 
 type AppSetupFn = Box<dyn FnOnce(App) -> App + Send>;
@@ -110,7 +115,7 @@ impl TestServerBuilder {
         Self {
             app_config: None,
             routes: Vec::new(),
-            is_https: false
+            is_https: false,
         }
     }
 
@@ -142,7 +147,7 @@ impl TestServerBuilder {
         self.routes.push(Box::new(f));
         self
     }
-    
+
     /// Configures whether to use HTTPS
     pub fn with_https(mut self) -> Self {
         self.is_https = true;
@@ -224,10 +229,7 @@ impl TestServer {
     where
         F: FnOnce(&mut App) + Send + 'static,
     {
-        TestServerBuilder::new()
-            .setup(setup)
-            .build()
-            .await
+        TestServerBuilder::new().setup(setup).build().await
     }
 
     /// Constructs an absolute URL for the given path.
@@ -253,7 +255,7 @@ impl TestServer {
             reqwest::Client::builder().http2_prior_knowledge()
         }
     }
-    
+
     /// Creates an HTTP client configured for communicating with this server.
     ///
     /// The client is configured to match the server's HTTP protocol
@@ -296,10 +298,7 @@ impl TestServer {
         }
 
         if let Some(handle) = self.server_handle.take() {
-            let _ = tokio::time::timeout(
-                tokio::time::Duration::from_secs(5),
-                handle
-            ).await;
+            let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), handle).await;
         }
     }
 
@@ -314,11 +313,17 @@ impl TestServer {
     }
 
     #[cfg(feature = "ws")]
-    async fn ws_http1<const N: usize>(&self, path: &str, known_protocols: [&'static str; N]) -> TestWebSocket {
+    async fn ws_http1<const N: usize>(
+        &self,
+        path: &str,
+        known_protocols: [&'static str; N],
+    ) -> TestWebSocket {
         let uri = format!("ws://127.0.0.1:{}{}", self.port, path);
 
-        let req = ClientRequestBuilder::new(Uri::try_from(uri).unwrap())
-            .with_header(SEC_WEBSOCKET_PROTOCOL.to_string(), known_protocols.join(","));
+        let req = ClientRequestBuilder::new(Uri::try_from(uri).unwrap()).with_header(
+            SEC_WEBSOCKET_PROTOCOL.to_string(),
+            known_protocols.join(","),
+        );
         let (ws, _) = tokio_tungstenite::connect_async(req)
             .await
             .expect("WebSocket handshake failed");
@@ -327,23 +332,26 @@ impl TestServer {
     }
 
     #[cfg(feature = "ws")]
-    async fn ws_http2<const N: usize>(&self, path: &str, known_protocols: [&'static str; N]) -> TestWebSocket {
+    async fn ws_http2<const N: usize>(
+        &self,
+        path: &str,
+        known_protocols: [&'static str; N],
+    ) -> TestWebSocket {
         let io = TokioIo::new(
             TcpStream::connect(format!("127.0.0.1:{}", self.port))
                 .await
                 .expect("Failed to connect to test server"),
         );
 
-        let (mut sender, conn) =
-            hyper::client::conn::http2::Builder::new(TokioExecutor::new())
-                .handshake(io)
-                .await
-                .expect("HTTP/2 handshake failed");
+        let (mut sender, conn) = hyper::client::conn::http2::Builder::new(TokioExecutor::new())
+            .handshake(io)
+            .await
+            .expect("HTTP/2 handshake failed");
 
         tokio::spawn(async move {
             let _ = conn.await;
         });
-        
+
         let request = Request::builder()
             .method(Method::CONNECT)
             .extension(hyper::ext::Protocol::from_static("websocket"))
@@ -351,17 +359,12 @@ impl TestServer {
             .uri(path)
             .body(HttpBody::empty())
             .unwrap();
-        
+
         let mut response = sender.send_request(request).await.unwrap();
         let upgraded = hyper::upgrade::on(&mut response).await.unwrap();
 
         let io = TokioIo::new(upgraded);
-        let ws = WebSocketStream::from_raw_socket(
-            io,
-            protocol::Role::Client,
-            None,
-        )
-        .await;
+        let ws = WebSocketStream::from_raw_socket(io, protocol::Role::Client, None).await;
 
         TestWebSocket::from_http2(ws)
     }
@@ -385,19 +388,13 @@ mod tests {
         server.shutdown().await;
     }
 
-
     #[tokio::test]
     async fn it_binds_server_to_free_port() {
         let server = TestServer::builder().build().await;
-        let resp = server.client()
-            .get(server.url("/"))
-            .send()
-            .await
-            .unwrap();
-        
+        let resp = server.client().get(server.url("/")).send().await.unwrap();
+
         assert_eq!(resp.status(), 404);
     }
-
 
     #[tokio::test]
     async fn it_drops_server_gracefully() {

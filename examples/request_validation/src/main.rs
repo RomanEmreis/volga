@@ -9,7 +9,7 @@ use volga::{App, Path};
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut app = App::new();
-    
+
     // Sums only positive numbers
     app.group("/positive", |api| {
         api.filter(is_pos);
@@ -17,8 +17,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     // Sums only even negative numbers
-    app
-        .map_get("/negative/sum/{x}/{y}", sum)
+    app.map_get("/negative/sum/{x}/{y}", sum)
         .filter(is_neg)
         .filter(is_even);
 

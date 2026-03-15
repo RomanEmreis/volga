@@ -144,13 +144,19 @@ mod tests {
 
     #[test]
     fn it_parses_basic_pairs() {
-        assert_eq!(parse("a=1&b=2"), vec![("a".into(), "1".into()), ("b".into(), "2".into())]);
+        assert_eq!(
+            parse("a=1&b=2"),
+            vec![("a".into(), "1".into()), ("b".into(), "2".into())]
+        );
     }
 
     #[test]
     fn it_ignores_segments_without_equals() {
         // "flag" and "x" are ignored
-        assert_eq!(parse("flag&a=1&x&b=2"), vec![("a".into(), "1".into()), ("b".into(), "2".into())]);
+        assert_eq!(
+            parse("flag&a=1&x&b=2"),
+            vec![("a".into(), "1".into()), ("b".into(), "2".into())]
+        );
     }
 
     #[test]
@@ -161,24 +167,39 @@ mod tests {
     #[test]
     fn it_handles_trailing_ampersand_and_empty_segments() {
         assert_eq!(parse("a=1&"), vec![("a".into(), "1".into())]);
-        assert_eq!(parse("a=1&&b=2"), vec![("a".into(), "1".into()), ("b".into(), "2".into())]);
+        assert_eq!(
+            parse("a=1&&b=2"),
+            vec![("a".into(), "1".into()), ("b".into(), "2".into())]
+        );
         assert_eq!(parse("&&"), Vec::<(String, String)>::new());
     }
 
     #[test]
     fn it_allows_empty_key_or_value() {
-        assert_eq!(parse("=1&a="), vec![("".into(), "1".into()), ("a".into(), "".into())]);
+        assert_eq!(
+            parse("=1&a="),
+            vec![("".into(), "1".into()), ("a".into(), "".into())]
+        );
     }
 
     #[test]
     fn it_uses_first_equals_in_segment() {
-        assert_eq!(parse("a=1=2&b==3"), vec![("a".into(), "1=2".into()), ("b".into(), "=3".into())]);
+        assert_eq!(
+            parse("a=1=2&b==3"),
+            vec![("a".into(), "1=2".into()), ("b".into(), "=3".into())]
+        );
     }
 
     #[test]
     fn it_supports_utf8_content() {
         // UTF-8 is preserved as-is (no decoding).
-        assert_eq!(parse("name=Roman&city=London"), vec![("name".into(), "Roman".into()), ("city".into(), "London".into())]);
+        assert_eq!(
+            parse("name=Roman&city=London"),
+            vec![
+                ("name".into(), "Roman".into()),
+                ("city".into(), "London".into())
+            ]
+        );
     }
 
     #[test]
@@ -201,6 +222,9 @@ mod tests {
             assert!(!v.contains('&'));
         }
 
-        assert_eq!(cache.collect(q), vec![("a", "1"), ("bb", "22"), ("ccc", "333")]);
+        assert_eq!(
+            cache.collect(q),
+            vec![("a", "1"), ("bb", "22"), ("ccc", "333")]
+        );
     }
 }

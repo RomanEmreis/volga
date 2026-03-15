@@ -1,21 +1,17 @@
-﻿//! Extractors for multipart/form data
+//! Extractors for multipart/form data
 
-use bytes::Bytes;
 use crate::error::Error;
-use crate::headers::{HeaderMap, CONTENT_TYPE};
-use futures_util::future::{ready, Ready};
+use crate::headers::{CONTENT_TYPE, HeaderMap};
+use bytes::Bytes;
+use futures_util::future::{Ready, ready};
 use tokio::io::{AsyncWriteExt, BufWriter};
 
 use std::{
     ops::{Deref, DerefMut},
-    path::Path
+    path::Path,
 };
 
-use crate::http::endpoints::args::{
-    FromPayload,
-    Payload,
-    Source
-};
+use crate::http::endpoints::args::{FromPayload, Payload, Source};
 
 /// Describes multipart file/form data
 ///
@@ -32,7 +28,7 @@ use crate::http::endpoints::args::{
 pub struct Multipart(multer::Multipart<'static>);
 
 /// Represents a single field in a multipart stream
-/// 
+///
 ///> See also [`multer::Field`]
 #[derive(Debug)]
 pub struct Field(multer::Field<'static>);
@@ -41,19 +37,18 @@ impl Field {
     /// Tries to read a file name, if it's not present tries to read a field name, otherwise returns [`Error`]
     #[inline]
     pub fn try_get_file_name(&self) -> Result<&str, Error> {
-        self.0.file_name()
+        self.0
+            .file_name()
             .or(self.name())
             .ok_or(MultipartError::missing_file_name())
     }
 
     /// Get the full field data as text.
-    /// 
+    ///
     ///> See also [`multer::Field::text`]
     #[inline]
     pub async fn text(self) -> Result<String, Error> {
-        self.0.text()
-            .await
-            .map_err(MultipartError::read_error)
+        self.0.text().await.map_err(MultipartError::read_error)
     }
 
     /// Stream a chunk of the field data.
@@ -63,9 +58,7 @@ impl Field {
     ///> See also [`multer::Field::chunk`]
     #[inline]
     pub async fn chunk(&mut self) -> Result<Option<Bytes>, Error> {
-        self.0.chunk()
-            .await
-            .map_err(MultipartError::read_error)
+        self.0.chunk().await.map_err(MultipartError::read_error)
     }
 
     /// Asynchronously writes a multipart field as a file stream to disk with a name taken from [`CONTENT_DISPOSITION`] header
@@ -85,7 +78,7 @@ impl Field {
     pub async fn save(self, path: impl AsRef<Path>) -> Result<(), std::io::Error> {
         let file_name = self.try_get_file_name()?;
         let file_path = path.as_ref().join(file_name);
-        
+
         self.save_as(file_path).await
     }
 
@@ -151,15 +144,17 @@ impl Multipart {
         }
         Ok(())
     }
-    
+
     /// Yields the next [`Field`] if available
     #[inline]
     pub async fn next_field(&mut self) -> Result<Option<Field>, Error> {
-        self.0.next_field().await
+        self.0
+            .next_field()
+            .await
             .map_err(MultipartError::read_error)
             .map(|field| field.map(Field))
     }
-    
+
     #[inline]
     fn parse_boundary(headers: &HeaderMap) -> Option<String> {
         let content_type = headers.get(CONTENT_TYPE)?.to_str().ok()?;
@@ -185,13 +180,15 @@ impl DerefMut for Multipart {
 
 impl<'a> TryFrom<Payload<'a>> for Multipart {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(payload: Payload<'a>) -> Result<Self, Self::Error> {
-        let Payload::Full(parts, body) = payload else { unreachable!() };
+        let Payload::Full(parts, body) = payload else {
+            unreachable!()
+        };
 
-        let boundary = Self::parse_boundary(&parts.headers)
-            .ok_or(MultipartError::invalid_boundary())?;
+        let boundary =
+            Self::parse_boundary(&parts.headers).ok_or(MultipartError::invalid_boundary())?;
 
         let stream = body.into_data_stream();
         let multipart = multer::Multipart::new(stream, boundary);
@@ -205,14 +202,16 @@ impl FromPayload for Multipart {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Full;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         ready(payload.try_into())
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.consumes_multipart()
     }
 }
@@ -238,16 +237,18 @@ impl MultipartError {
 #[cfg(test)]
 mod tests {
     use super::Multipart;
-    use hyper::Request;
     use crate::headers::CONTENT_TYPE;
     use crate::http::body::HttpBody;
     use crate::http::endpoints::args::{FromPayload, Payload};
-    
+    use hyper::Request;
+
     #[tokio::test]
     async fn it_reads_from_payload() {
         let req = create_multipart_req();
         let (parts, body) = req.into_parts();
-        let mut multipart = Multipart::from_payload(Payload::Full(&parts, body)).await.unwrap();
+        let mut multipart = Multipart::from_payload(Payload::Full(&parts, body))
+            .await
+            .unwrap();
 
         while let Some(field) = multipart.next_field().await.unwrap() {
             assert_eq!(field.name().unwrap(), "my_text_field");
@@ -259,13 +260,15 @@ mod tests {
     async fn it_reads_file_name() {
         let req = create_multipart_req();
         let (parts, body) = req.into_parts();
-        let mut multipart = Multipart::from_payload(Payload::Full(&parts, body)).await.unwrap();
+        let mut multipart = Multipart::from_payload(Payload::Full(&parts, body))
+            .await
+            .unwrap();
 
         while let Some(field) = multipart.next_field().await.unwrap() {
             assert_eq!(field.try_get_file_name().unwrap(), "my_text_field");
         }
     }
-    
+
     fn create_multipart_req() -> Request<HttpBody> {
         let data = "--X-BOUNDARY\r\nContent-Disposition: form-data; name=\"my_text_field\"\r\n\r\nabcd\r\n--X-BOUNDARY--\r\n";
 

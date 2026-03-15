@@ -134,7 +134,7 @@ impl Default for DecompressionLimits {
             max_compressed_bytes: Limit::Limited(DEFAULT_MAX_COMPRESSED_BYTES),
             max_expansion_ratio: Some(ExpansionRatio::new(
                 DEFAULT_MAX_EXPANSION_RATIO,
-                DEFAULT_EXPANSION_SLACK_BYTES
+                DEFAULT_EXPANSION_SLACK_BYTES,
             )),
         }
     }
@@ -183,8 +183,14 @@ impl DecompressionLimits {
     #[inline]
     pub(crate) fn resolved(self) -> ResolvedDecompressionLimits {
         ResolvedDecompressionLimits {
-            max_decompressed_bytes: resolve_limit(self.max_decompressed_bytes, DEFAULT_MAX_DECOMPRESSED_BYTES),
-            max_compressed_bytes: resolve_limit(self.max_compressed_bytes, DEFAULT_MAX_COMPRESSED_BYTES),
+            max_decompressed_bytes: resolve_limit(
+                self.max_decompressed_bytes,
+                DEFAULT_MAX_DECOMPRESSED_BYTES,
+            ),
+            max_compressed_bytes: resolve_limit(
+                self.max_compressed_bytes,
+                DEFAULT_MAX_COMPRESSED_BYTES,
+            ),
             max_expansion_ratio: self.max_expansion_ratio,
         }
     }
@@ -222,9 +228,7 @@ fn resolve_limit(limit: Limit<usize>, default: usize) -> Option<usize> {
 fn warn_if_unlimited(_name: &str, limit: Limit<usize>) {
     if matches!(limit, Limit::Unlimited) {
         #[cfg(feature = "tracing")]
-        tracing::warn!(
-            "{_name} is set to Unlimited; decompression safety checks are disabled."
-        );
+        tracing::warn!("{_name} is set to Unlimited; decompression safety checks are disabled.");
     }
 }
 
@@ -247,12 +251,18 @@ mod tests {
 
         match limits.max_decompressed_bytes {
             Limit::Limited(v) => assert_eq!(v, DEFAULT_MAX_DECOMPRESSED_BYTES),
-            other => panic!("expected Limited for max_decompressed_bytes, got: {:?}", other),
+            other => panic!(
+                "expected Limited for max_decompressed_bytes, got: {:?}",
+                other
+            ),
         }
 
         match limits.max_compressed_bytes {
             Limit::Limited(v) => assert_eq!(v, DEFAULT_MAX_COMPRESSED_BYTES),
-            other => panic!("expected Limited for max_compressed_bytes, got: {:?}", other),
+            other => panic!(
+                "expected Limited for max_compressed_bytes, got: {:?}",
+                other
+            ),
         }
 
         let ratio = limits
@@ -265,8 +275,7 @@ mod tests {
 
     #[test]
     fn with_max_decompressed_overrides_value() {
-        let limits = DecompressionLimits::default()
-            .with_max_decompressed(Limit::Limited(123));
+        let limits = DecompressionLimits::default().with_max_decompressed(Limit::Limited(123));
 
         match limits.max_decompressed_bytes {
             Limit::Limited(v) => assert_eq!(v, 123),
@@ -276,8 +285,7 @@ mod tests {
 
     #[test]
     fn with_max_compressed_overrides_value() {
-        let limits = DecompressionLimits::default()
-            .with_max_compressed(Limit::Limited(321));
+        let limits = DecompressionLimits::default().with_max_compressed(Limit::Limited(321));
 
         match limits.max_compressed_bytes {
             Limit::Limited(v) => assert_eq!(v, 321),
@@ -287,8 +295,7 @@ mod tests {
 
     #[test]
     fn with_max_expansion_ratio_can_disable_ratio_guard() {
-        let limits = DecompressionLimits::default()
-            .without_max_expansion_ratio();
+        let limits = DecompressionLimits::default().without_max_expansion_ratio();
 
         assert!(limits.max_expansion_ratio.is_none());
     }
@@ -297,8 +304,7 @@ mod tests {
     fn with_max_expansion_ratio_can_set_custom_ratio() {
         let custom = ExpansionRatio::new(7, 999);
 
-        let limits = DecompressionLimits::default()
-            .with_max_expansion_ratio(custom);
+        let limits = DecompressionLimits::default().with_max_expansion_ratio(custom);
 
         let r = limits.max_expansion_ratio.unwrap();
         assert_eq!(r.ratio, 7);
@@ -315,8 +321,14 @@ mod tests {
 
         let resolved = limits.resolved();
 
-        assert_eq!(resolved.max_decompressed_bytes, Some(DEFAULT_MAX_DECOMPRESSED_BYTES));
-        assert_eq!(resolved.max_compressed_bytes, Some(DEFAULT_MAX_COMPRESSED_BYTES));
+        assert_eq!(
+            resolved.max_decompressed_bytes,
+            Some(DEFAULT_MAX_DECOMPRESSED_BYTES)
+        );
+        assert_eq!(
+            resolved.max_compressed_bytes,
+            Some(DEFAULT_MAX_COMPRESSED_BYTES)
+        );
         assert!(resolved.max_expansion_ratio.is_none());
     }
 
@@ -355,18 +367,9 @@ mod tests {
 
     #[test]
     fn resolve_limit_behavior() {
-        assert_eq!(
-            resolve_limit(Limit::Default, 111),
-            Some(111)
-        );
-        assert_eq!(
-            resolve_limit(Limit::Limited(222), 111),
-            Some(222)
-        );
-        assert_eq!(
-            resolve_limit(Limit::Unlimited, 111),
-            None
-        );
+        assert_eq!(resolve_limit(Limit::Default, 111), Some(111));
+        assert_eq!(resolve_limit(Limit::Limited(222), 111), Some(222));
+        assert_eq!(resolve_limit(Limit::Unlimited, 111), None);
     }
 
     #[test]

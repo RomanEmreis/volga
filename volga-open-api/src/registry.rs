@@ -1,14 +1,17 @@
 //! Types and utils for the OpenAPI registry.
 
-use std::{collections::{BTreeMap, HashSet}, sync::{Arc, Mutex}};
 use http::Method;
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::{Arc, Mutex},
+};
 
 use super::{
-    doc::{OpenApiDocument, OpenApiComponents, OpenApiInfo},
     config::{OpenApiConfig, OpenApiSpec},
-    route::OpenApiRouteConfig,
+    doc::{OpenApiComponents, OpenApiDocument, OpenApiInfo},
     op::OpenApiOperation,
-    param::normalize_openapi_path
+    param::normalize_openapi_path,
+    route::OpenApiRouteConfig,
 };
 
 const DEFAULT_OPENAPI_VERSION: &str = "3.0.0";
@@ -41,7 +44,6 @@ impl OpenApiRegistry {
                 },
             };
 
-
         let mut docs = BTreeMap::new();
         for s in &config.specs {
             docs.insert(
@@ -49,7 +51,7 @@ impl OpenApiRegistry {
                 base_doc(
                     config.title.clone(),
                     config.version.clone(),
-                    config.description.clone()
+                    config.description.clone(),
                 ),
             );
         }
@@ -63,12 +65,7 @@ impl OpenApiRegistry {
     }
 
     /// Registers a route in the OpenAPI registry.
-    pub fn register_route(
-        &self,
-        method: &Method,
-        path: &str,
-        cfg: &OpenApiRouteConfig
-    ) {
+    pub fn register_route(&self, method: &Method, path: &str, cfg: &OpenApiRouteConfig) {
         if self.is_excluded_path(path) {
             return;
         }
@@ -81,9 +78,7 @@ impl OpenApiRegistry {
 
         for doc_name in targets {
             if let Some(doc) = docs.get_mut(doc_name) {
-                let entry = doc.paths
-                    .entry(spec_path.clone())
-                    .or_default();
+                let entry = doc.paths.entry(spec_path.clone()).or_default();
 
                 let op = entry
                     .entry(method.clone())
@@ -103,7 +98,7 @@ impl OpenApiRegistry {
         }
 
         let (spec_path, path_params) = normalize_openapi_path(path);
-        
+
         let method_lc = method.as_str().to_ascii_lowercase();
         let targets = self.target_doc_names(cfg);
 
@@ -131,7 +126,7 @@ impl OpenApiRegistry {
                 && let Some(op) = methods.remove(&method_lc)
             {
                 op_opt = Some(op);
-                if methods.is_empty() { 
+                if methods.is_empty() {
                     doc.paths.remove(&spec_path);
                 }
             }
@@ -144,7 +139,7 @@ impl OpenApiRegistry {
         }
 
         for name in valid_targets.drain(..) {
-            let Some(doc) = docs.get_mut(name) else { 
+            let Some(doc) = docs.get_mut(name) else {
                 continue;
             };
 
@@ -162,12 +157,7 @@ impl OpenApiRegistry {
     }
 
     /// Applies route configuration
-    pub fn apply_route_config(
-        &self,
-        method: &Method,
-        path: &str,
-        cfg: &OpenApiRouteConfig,
-    ) {
+    pub fn apply_route_config(&self, method: &Method, path: &str, cfg: &OpenApiRouteConfig) {
         if self.is_excluded_path(path) {
             return;
         }
@@ -179,11 +169,13 @@ impl OpenApiRegistry {
         let targets = self.target_doc_names(cfg);
 
         for doc_name in targets {
-            let Some(doc) = docs.get_mut(doc_name) else { 
+            let Some(doc) = docs.get_mut(doc_name) else {
                 continue;
             };
 
-            let OpenApiDocument { paths, components, .. } = doc;
+            let OpenApiDocument {
+                paths, components, ..
+            } = doc;
 
             let entry = paths.entry(spec_path.clone()).or_default();
             let op = entry
@@ -259,11 +251,7 @@ fn validate_specs(specs: &[OpenApiSpec]) {
 #[inline]
 fn normalize_path_for_compare(p: &str) -> String {
     // treat "" as "/"
-    let p = if p.is_empty() { 
-        "/" 
-    } else { 
-        p
-    };
+    let p = if p.is_empty() { "/" } else { p };
 
     // ensure leading slash
     let p = if p.starts_with('/') {
@@ -361,7 +349,8 @@ mod tests {
 
     #[test]
     fn rebind_route_prunes_unreferenced_component_schemas() {
-        let registry = OpenApiRegistry::new(OpenApiConfig::new().with_specs([OpenApiSpec::new("v1")]));
+        let registry =
+            OpenApiRegistry::new(OpenApiConfig::new().with_specs([OpenApiSpec::new("v1")]));
 
         let first = OpenApiRouteConfig::default().with_response_schema(
             200u16,
@@ -387,10 +376,13 @@ mod tests {
         assert!(!v1_doc.components.schemas.contains_key("User"));
         assert!(v1_doc.components.schemas.contains_key("User_2"));
     }
-    
+
     #[test]
     fn it_tests_normalization_for_excluded_paths() {
-        assert_eq!(normalize_path_for_compare("/v1/openapi.json").as_str(), "/v1/openapi.json");
+        assert_eq!(
+            normalize_path_for_compare("/v1/openapi.json").as_str(),
+            "/v1/openapi.json"
+        );
         assert_eq!(normalize_path_for_compare("openapi"), "/openapi");
         assert_eq!(normalize_path_for_compare(""), "/");
         assert_eq!(normalize_path_for_compare("/openapi/"), "/openapi");

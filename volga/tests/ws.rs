@@ -7,7 +7,8 @@ use volga::test::TestServer;
 async fn it_works() {
     let server = TestServer::spawn(|app| {
         app.map_msg("/ws", |msg: String| async { msg });
-    }).await;
+    })
+    .await;
 
     let mut ws = server.ws("/ws").await;
 
@@ -15,7 +16,7 @@ async fn it_works() {
     let response = ws.recv_text().await;
 
     assert_eq!(response, "Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -27,13 +28,14 @@ async fn it_works_with_split() {
         app.map_ws("/ws", |ws: WebSocket| async move {
             let (mut write, mut read) = ws.split();
             while let Some(Ok(msg)) = read.recv::<String>().await {
-                match msg { 
+                match msg {
                     WsEvent::Data(msg) => write.send(msg).await.unwrap(),
-                    WsEvent::Close(_frame) => write.close().await.unwrap()
+                    WsEvent::Close(_frame) => write.close().await.unwrap(),
                 }
             }
         });
-    }).await;
+    })
+    .await;
 
     let mut ws = server.ws("/ws").await;
 
@@ -47,7 +49,7 @@ async fn it_works_with_split() {
 
 #[tokio::test]
 async fn it_works_with_custom_protocol() {
-    use volga::ws::{WebSocketConnection, WebSocket, WsEvent};
+    use volga::ws::{WebSocket, WebSocketConnection, WsEvent};
 
     let server = TestServer::spawn(|app| {
         app.map_conn("/ws", |conn: WebSocketConnection| async {
@@ -55,14 +57,17 @@ async fn it_works_with_custom_protocol() {
                 let protocol = ws.protocol().unwrap().to_str().unwrap().to_string();
                 let (mut write, mut read) = ws.split();
                 while let Some(Ok(msg)) = read.recv::<String>().await {
-                    match msg { 
-                        WsEvent::Data(msg) => write.send(format!("[{protocol}]: {msg}")).await.unwrap(),
-                        WsEvent::Close(_frame) => write.close().await.unwrap()
+                    match msg {
+                        WsEvent::Data(msg) => {
+                            write.send(format!("[{protocol}]: {msg}")).await.unwrap()
+                        }
+                        WsEvent::Close(_frame) => write.close().await.unwrap(),
                     }
                 }
             })
         });
-    }).await;
+    })
+    .await;
 
     let mut ws = server.ws_with_protocols("/ws", ["foo-ws"]).await;
 
@@ -70,7 +75,7 @@ async fn it_works_with_custom_protocol() {
     let response = ws.recv_text().await;
 
     assert_eq!(response, "[foo-ws]: Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -87,7 +92,8 @@ async fn it_allows_ws_sink_stream_into_inner() {
                 inner_sink.send(msg).await.unwrap();
             }
         });
-    }).await;
+    })
+    .await;
 
     let mut ws = server.ws("/ws").await;
 
@@ -98,4 +104,3 @@ async fn it_allows_ws_sink_stream_into_inner() {
 
     server.shutdown().await;
 }
-

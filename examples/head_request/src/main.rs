@@ -12,9 +12,7 @@ async fn main() -> std::io::Result<()> {
 
     // HEAD /hello
     app.map_head("/hello", || async {
-        ok!([
-            ("x-custom-head", "some-value")
-        ])
+        ok!([("x-custom-head", "some-value")])
     });
 
     // GET /hello

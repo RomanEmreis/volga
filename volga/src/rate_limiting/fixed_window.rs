@@ -1,7 +1,7 @@
 //! Tools and structs for a fixed-window rate limiting configuration
 
-use std::time::Duration;
 use super::FixedWindowRateLimiter;
+use std::time::Duration;
 
 /// Configuration for a **fixed window** rate limiting policy.
 ///
@@ -58,10 +58,7 @@ impl FixedWindow {
     /// Builds a `FixedWindowRateLimiter` instance based on this policy.
     #[inline]
     pub(super) fn build(&self) -> FixedWindowRateLimiter {
-        let mut limiter = FixedWindowRateLimiter::new(
-            self.max_requests,
-            self.window_size
-        );
+        let mut limiter = FixedWindowRateLimiter::new(self.max_requests, self.window_size);
 
         if let Some(eviction) = self.eviction {
             limiter.set_eviction(eviction);
@@ -88,16 +85,15 @@ mod tests {
 
     #[test]
     fn it_sets_eviction_period() {
-        let policy = FixedWindow::new(100, Duration::from_secs(60))
-            .with_eviction(Duration::from_secs(300));
+        let policy =
+            FixedWindow::new(100, Duration::from_secs(60)).with_eviction(Duration::from_secs(300));
 
         assert_eq!(policy.eviction, Some(Duration::from_secs(300)));
     }
 
     #[test]
     fn it_sets_policy_name_from_string() {
-        let policy = FixedWindow::new(100, Duration::from_secs(60))
-            .with_name("api_limiter");
+        let policy = FixedWindow::new(100, Duration::from_secs(60)).with_name("api_limiter");
 
         assert_eq!(policy.name, Some("api_limiter".to_string()));
     }
@@ -105,8 +101,7 @@ mod tests {
     #[test]
     fn it_sets_policy_name_from_string_slice() {
         let name = String::from("test_policy");
-        let policy = FixedWindow::new(100, Duration::from_secs(60))
-            .with_name(name.clone());
+        let policy = FixedWindow::new(100, Duration::from_secs(60)).with_name(name.clone());
 
         assert_eq!(policy.name, Some(name));
     }
@@ -135,8 +130,8 @@ mod tests {
 
     #[test]
     fn it_builds_rate_limiter_with_eviction() {
-        let policy = FixedWindow::new(100, Duration::from_secs(60))
-            .with_eviction(Duration::from_secs(300));
+        let policy =
+            FixedWindow::new(100, Duration::from_secs(60)).with_eviction(Duration::from_secs(300));
         let limiter = policy.build();
 
         assert_eq!(limiter.max_requests(), 100);
@@ -188,10 +183,8 @@ mod tests {
 
     #[test]
     fn it_creates_multiple_independent_policies() {
-        let policy1 = FixedWindow::new(100, Duration::from_secs(60))
-            .with_name("policy1");
-        let policy2 = FixedWindow::new(200, Duration::from_secs(120))
-            .with_name("policy2");
+        let policy1 = FixedWindow::new(100, Duration::from_secs(60)).with_name("policy1");
+        let policy2 = FixedWindow::new(200, Duration::from_secs(120)).with_name("policy2");
 
         assert_eq!(policy1.max_requests, 100);
         assert_eq!(policy2.max_requests, 200);

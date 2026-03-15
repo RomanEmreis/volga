@@ -1,7 +1,7 @@
-﻿//! Macros for HTML responses
+//! Macros for HTML responses
 
 /// Produces `OK 200` response with HTML body
-/// 
+///
 /// # Examples
 /// ## Default usage
 ///```no_run
@@ -28,7 +28,7 @@ macro_rules! html {
     };
     ($body:expr; [ $( $header:expr ),* $(,)? ]) => {
         $crate::response!(
-            $crate::http::StatusCode::OK, 
+            $crate::http::StatusCode::OK,
             $crate::HttpBody::full($body);
             [
                 $crate::headers::ContentType::html_utf_8(),
@@ -39,7 +39,7 @@ macro_rules! html {
 }
 
 /// Produces `OK 200` response with HTML file body
-/// 
+///
 /// # Examples
 /// ## Default usage
 ///```no_run
@@ -61,7 +61,7 @@ macro_rules! html_file {
     ($file_name:expr, $body:expr; [ $( $header:expr ),* $(,)? ]) => {{
         let mime = $crate::fs::get_mime_or_octet_stream($file_name);
         $crate::response!(
-            $crate::http::StatusCode::OK, 
+            $crate::http::StatusCode::OK,
             $crate::HttpBody::file($body);
             [
                 ($crate::headers::CONTENT_TYPE, mime.as_ref()),
@@ -72,7 +72,7 @@ macro_rules! html_file {
 }
 
 /// Produces `NO CONTENT 204` response
-/// 
+///
 /// # Examples
 /// ## Default usage
 ///```no_run
@@ -82,7 +82,7 @@ macro_rules! html_file {
 /// # async fn dox(request: HttpRequest) -> std::io::Result<()> {
 /// no_content!();
 /// # Ok(())
-/// # } 
+/// # }
 #[macro_export]
 macro_rules! no_content {
     () => {
@@ -95,13 +95,12 @@ macro_rules! no_content {
 
 #[cfg(test)]
 mod tests {
-    use http_body_util::BodyExt;
     use crate::test::utils::read_file_bytes;
+    use http_body_util::BodyExt;
 
     #[tokio::test]
     async fn it_creates_html_response() {
-        let html_text = 
-            r#"
+        let html_text = r#"
             <!doctype html>
             <html>
                 <head>Hello!</head>
@@ -110,7 +109,7 @@ mod tests {
                 </body>
             </html>
             "#;
-        
+
         let response = html!(html_text);
 
         assert!(response.is_ok());
@@ -124,8 +123,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_html_response_with_headers() {
-        let html_text =
-            r#"
+        let html_text = r#"
             <!doctype html>
             <html>
                 <head>Hello!</head>

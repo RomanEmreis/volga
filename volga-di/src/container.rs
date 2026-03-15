@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     hash::{BuildHasherDefault, Hasher},
-    sync::{Arc, OnceLock}
+    sync::{Arc, OnceLock},
 };
 
 pub use factory::GenericFactory;
@@ -20,13 +20,11 @@ fn make_resolver_fn<T, F, Args>(resolver: F) -> ResolverFn
 where
     T: Send + Sync + 'static,
     F: GenericFactory<Args, Output = T>,
-    Args: Inject
+    Args: Inject,
 {
     Arc::new(move |c: &Container| -> Result<ArcService, Error> {
         let args = Args::inject(c)?;
-        resolver
-            .call(args)
-            .map(|t| Arc::new(t) as ArcService)
+        resolver.call(args).map(|t| Arc::new(t) as ArcService)
     })
 }
 
@@ -42,18 +40,10 @@ where
 }
 
 /// A dynamic resolver function for resolving objects
-type ResolverFn = Arc<
-    dyn Fn(&Container) -> Result<ArcService, Error> 
-    + Send 
-    + Sync
->;
+type ResolverFn = Arc<dyn Fn(&Container) -> Result<ArcService, Error> + Send + Sync>;
 
 /// A dynamic wrapper for object in DI container
-type ArcService = Arc<
-    dyn Any
-    + Send
-    + Sync
->;
+type ArcService = Arc<dyn Any + Send + Sync>;
 
 /// Represents a service registered with a spwcific lifetime in DI container
 pub(crate) enum ServiceEntry {
@@ -100,11 +90,7 @@ impl ServiceEntry {
 }
 
 /// Inner HashMap of dependencies
-type ServiceMap = HashMap<
-    TypeId, 
-    ServiceEntry, 
-    BuildHasherDefault<TypeIdHasher>
->;
+type ServiceMap = HashMap<TypeId, ServiceEntry, BuildHasherDefault<TypeIdHasher>>;
 
 /// A hasher for types in DI container
 #[derive(Default)]
@@ -132,7 +118,7 @@ impl Hasher for TypeIdHasher {
 #[derive(Debug)]
 pub struct ContainerBuilder {
     /// Configurable HashMap of dependencies
-    services: ServiceMap
+    services: ServiceMap,
 }
 
 impl Default for ContainerBuilder {
@@ -146,7 +132,9 @@ impl ContainerBuilder {
     /// Creates a new DI container builder
     #[inline]
     pub fn new() -> Self {
-        Self { services: ServiceMap::default() }
+        Self {
+            services: ServiceMap::default(),
+        }
     }
 
     /// Build a DI container
@@ -159,9 +147,8 @@ impl ContainerBuilder {
 
     /// Register a singleton service
     pub fn register_singleton<T: Send + Sync + 'static>(&mut self, instance: T) {
-        self.services.insert(
-            TypeId::of::<T>(), 
-            ServiceEntry::singleton(instance));
+        self.services
+            .insert(TypeId::of::<T>(), ServiceEntry::singleton(instance));
     }
 
     /// Register a scoped service
@@ -169,17 +156,18 @@ impl ContainerBuilder {
     where
         T: Send + Sync + 'static,
         F: GenericFactory<Args, Output = T>,
-        Args: Inject
+        Args: Inject,
     {
         self.services.insert(
-            TypeId::of::<T>(), 
-            ServiceEntry::scoped(make_resolver_fn(factory)));
+            TypeId::of::<T>(),
+            ServiceEntry::scoped(make_resolver_fn(factory)),
+        );
     }
 
     /// Register a transient service that required to be resolved as [`Default`]
     pub fn register_scoped_default<T>(&mut self)
     where
-        T: Default + Send + Sync + 'static
+        T: Default + Send + Sync + 'static,
     {
         self.register_scoped_factory(T::default);
     }
@@ -187,26 +175,28 @@ impl ContainerBuilder {
     /// Register a transient service that required to be resolved as [`Inject`]
     pub fn register_scoped<T: Inject + 'static>(&mut self) {
         self.services.insert(
-            TypeId::of::<T>(), 
-            ServiceEntry::scoped(make_inject_resolver_fn::<T>()));
+            TypeId::of::<T>(),
+            ServiceEntry::scoped(make_inject_resolver_fn::<T>()),
+        );
     }
-    
+
     /// Register a transient service
     pub fn register_transient_factory<T, F, Args>(&mut self, factory: F)
     where
         T: Send + Sync + 'static,
         F: GenericFactory<Args, Output = T>,
-        Args: Inject
+        Args: Inject,
     {
         self.services.insert(
-            TypeId::of::<T>(), 
-            ServiceEntry::transient(make_resolver_fn(factory)));
+            TypeId::of::<T>(),
+            ServiceEntry::transient(make_resolver_fn(factory)),
+        );
     }
 
     /// Register a transient service that required to be resolved as [`Default`]
     pub fn register_transient_default<T>(&mut self)
     where
-        T: Default + Send + Sync + 'static
+        T: Default + Send + Sync + 'static,
     {
         self.register_transient_factory(T::default);
     }
@@ -214,8 +204,9 @@ impl ContainerBuilder {
     /// Register a transient service that required to be resolved as [`Inject`]
     pub fn register_transient<T: Inject + 'static>(&mut self) {
         self.services.insert(
-            TypeId::of::<T>(), 
-            ServiceEntry::transient(make_inject_resolver_fn::<T>()));
+            TypeId::of::<T>(),
+            ServiceEntry::transient(make_inject_resolver_fn::<T>()),
+        );
     }
 }
 
@@ -223,7 +214,7 @@ impl ContainerBuilder {
 #[derive(Debug, Clone)]
 pub struct Container {
     /// Read-only HashMap of dependencies
-    services: Arc<ServiceMap>
+    services: Arc<ServiceMap>,
 }
 
 impl Container {
@@ -242,19 +233,22 @@ impl Container {
     /// of the root container.
     #[inline]
     pub fn create_scope(&self) -> Self {
-        let services = self.services.iter()
+        let services = self
+            .services
+            .iter()
             .map(|(key, value)| (*key, value.to_scope()))
             .collect::<HashMap<_, _, _>>();
-        Self { services: Arc::new(services) }
+        Self {
+            services: Arc::new(services),
+        }
     }
 
-    /// Resolves a service and returns a cloned instance. 
-    /// `T` must implement [`Clone`] otherwise use [`resolve_shared`] method 
+    /// Resolves a service and returns a cloned instance.
+    /// `T` must implement [`Clone`] otherwise use [`resolve_shared`] method
     /// that returns a shared pointer.
     #[inline]
     pub fn resolve<T: Send + Sync + Clone + 'static>(&self) -> Result<T, Error> {
-        self.resolve_shared::<T>()
-            .map(|s| s.as_ref().clone())
+        self.resolve_shared::<T>().map(|s| s.as_ref().clone())
     }
 
     /// Resolves a service and returns a shared pointer
@@ -263,7 +257,7 @@ impl Container {
         match self.get_service_entry::<T>()? {
             ServiceEntry::Transient(r) => r(self).and_then(|s| Self::resolve_internal(&s)),
             ServiceEntry::Scoped(cell, r) => self.resolve_scoped(cell, r),
-            ServiceEntry::Singleton(instance) => Self::resolve_internal(instance)
+            ServiceEntry::Singleton(instance) => Self::resolve_internal(instance),
         }
     }
 
@@ -279,9 +273,9 @@ impl Container {
     /// Resolves scoped service fro DI container
     #[inline]
     fn resolve_scoped<T: Send + Sync + 'static>(
-        &self, 
+        &self,
         cell: &OnceLock<Result<ArcService, Error>>,
-        resolver_fn: &ResolverFn
+        resolver_fn: &ResolverFn,
     ) -> Result<Arc<T>, Error> {
         cell.get_or_init(|| resolver_fn(self))
             .as_ref()
@@ -304,8 +298,7 @@ impl<'a> TryFrom<&'a Extensions> for &'a Container {
 
     #[inline]
     fn try_from(extensions: &'a Extensions) -> Result<Self, Self::Error> {
-        extensions.get::<Container>()
-            .ok_or(Error::ContainerMissing)
+        extensions.get::<Container>().ok_or(Error::ContainerMissing)
     }
 }
 
@@ -330,10 +323,10 @@ impl TryFrom<&Parts> for Container {
 
 #[cfg(test)]
 mod tests {
+    use super::{Container, ContainerBuilder, Error, Inject};
+    use http::Request;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
-    use http::Request;
-    use super::{Error, Container, ContainerBuilder, Inject};
 
     trait Cache: Send + Sync {
         fn get(&self, key: &str) -> Option<String>;
@@ -342,16 +335,12 @@ mod tests {
 
     #[derive(Clone, Default)]
     struct InMemoryCache {
-        inner: Arc<Mutex<HashMap<String, String>>>
+        inner: Arc<Mutex<HashMap<String, String>>>,
     }
 
     impl Cache for InMemoryCache {
         fn get(&self, key: &str) -> Option<String> {
-            self.inner
-                .lock()
-                .unwrap()
-                .get(key)
-                .cloned()
+            self.inner.lock().unwrap().get(key).cloned()
         }
 
         fn set(&self, key: &str, value: &str) {
@@ -364,7 +353,7 @@ mod tests {
 
     #[derive(Clone)]
     struct CacheWrapper {
-        inner: InMemoryCache
+        inner: InMemoryCache,
     }
 
     impl Inject for CacheWrapper {
@@ -538,9 +527,7 @@ mod tests {
 
     #[test]
     fn it_returns_error_when_resolve_unregistered_from_scope() {
-        let container = ContainerBuilder::new()
-            .build()
-            .create_scope();
+        let container = ContainerBuilder::new().build().create_scope();
 
         let cache = container.resolve::<CacheWrapper>();
 

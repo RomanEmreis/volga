@@ -1,31 +1,29 @@
-﻿//! Main application entry point
+//! Main application entry point
 
 use self::pipeline::PipelineBuilder;
-use hyper_util::rt::TokioIo;
-use connection::Connection;
 use crate::{
-    http::request::request_body_limit::RequestBodyLimit,
-    headers::cache_control::CacheControl,
-    server::Server,
-    Limit
+    Limit, headers::cache_control::CacheControl,
+    http::request::request_body_limit::RequestBodyLimit, server::Server,
 };
+use connection::Connection;
+use hyper_util::rt::TokioIo;
 
 use std::{
     future::Future,
-    sync::{Arc, Weak}
+    sync::{Arc, Weak},
 };
 
 use tokio::{
-    io::self,
+    io,
     net::{TcpListener, TcpStream},
     signal,
-    sync::{watch, Semaphore}
+    sync::{Semaphore, watch},
 };
 
 #[cfg(feature = "rate-limiting")]
 use {
     crate::rate_limiting::GlobalRateLimiter,
-    std::{net::IpAddr, collections::HashSet},
+    std::{collections::HashSet, net::IpAddr},
 };
 
 #[cfg(any(
@@ -65,13 +63,13 @@ pub(crate) use app_env::GRACEFUL_SHUTDOWN_TIMEOUT;
 
 pub(crate) use app_env::AppEnv;
 
-pub mod router;
-pub(crate) mod pipeline;
-pub(crate) mod scope;
-mod connection;
 mod app_env;
+mod connection;
 #[cfg(feature = "static-files")]
 mod host_env;
+pub(crate) mod pipeline;
+pub mod router;
+pub(crate) mod scope;
 
 /// The main entry point for building and running a Volga application.
 ///
@@ -83,7 +81,7 @@ mod host_env;
 /// **Note:** A _blocking context_ means that the current thread (typically `main`)
 /// will wait until the application finishes running. Internally, however,
 /// the application still runs asynchronously on the Tokio runtime.
-/// 
+///
 /// # Async Example
 /// ```no_run
 /// use volga::App;
@@ -107,11 +105,11 @@ pub struct App {
     /// Dependency Injection container builder
     #[cfg(feature = "di")]
     pub(super) container: ContainerBuilder,
-    
+
     /// TLS configuration options
     #[cfg(feature = "tls")]
     pub(super) tls_config: Option<TlsConfig>,
-    
+
     /// Tracing configuration options
     #[cfg(feature = "tracing")]
     pub(super) tracing_config: Option<TracingConfig>,
@@ -119,15 +117,15 @@ pub struct App {
     /// CORS configuration options
     #[cfg(feature = "middleware")]
     pub(super) cors: CorsRegistry,
-    
+
     /// Web Server's Hosting Environment
     #[cfg(feature = "static-files")]
     pub(super) host_env: HostEnv,
-    
+
     /// Bearer Token Authentication & Authorization configuration options
     #[cfg(feature = "jwt-auth")]
     pub(super) auth_config: Option<BearerAuthConfig>,
-    
+
     /// Global rate limiter
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<GlobalRateLimiter>,
@@ -140,7 +138,7 @@ pub struct App {
     pub(super) pipeline: PipelineBuilder,
 
     /// Default `Cache-Control`
-    /// 
+    ///
     /// Default: `None`
     pub(super) cache_control: Option<CacheControl>,
 
@@ -160,22 +158,22 @@ pub struct App {
     /// OpenAPI registry and configuration.
     #[cfg(feature = "openapi")]
     pub(super) openapi: OpenApiState,
-    
+
     /// TCP connection parameters
     connection: Connection,
-    
+
     /// Request body limit
-    /// 
+    ///
     /// Default: 5 MB
     body_limit: RequestBodyLimit,
-    
+
     /// `TCP_NODELAY` flag
-    /// 
+    ///
     /// Default: `false`
     no_delay: bool,
-    
+
     /// Determines whether to show a welcome screen
-    /// 
+    ///
     /// Default: `true`
     show_greeter: bool,
 
@@ -202,7 +200,7 @@ impl Default for App {
 /// General impl
 impl App {
     /// Initializes a new instance of the [`App`] which will be bound to the 127.0.0.1:7878 socket by default.
-    /// 
+    ///
     ///# Examples
     /// ```no_run
     /// use volga::App;
@@ -255,7 +253,7 @@ impl App {
     }
 
     /// Binds the `App` to the specified `socket` address.
-    /// 
+    ///
     ///# Examples
     /// ```no_run
     ///use volga::App;
@@ -267,40 +265,40 @@ impl App {
         self.connection = socket.into();
         self
     }
-    
+
     /// Sets a specific HTTP request body limit (in bytes)
-    /// 
+    ///
     /// # Parameters
     /// - `Limit::Default` — use the framework default (5 MB)
     /// - `Limit::Limited(n)` — enforce an explicit limit
     /// - `Limit::Unlimited` — disables the body size check completely
-    /// 
+    ///
     /// Default: 5 MB
     pub fn with_body_limit(mut self, limit: Limit<usize>) -> Self {
         self.body_limit = limit.into();
         self
     }
-    
+
     /// Disables a request body limit
     pub fn without_body_limit(mut self) -> Self {
         self.body_limit = RequestBodyLimit::Disabled;
         self
     }
-    
+
     ///Sets the value of the `TCP_NODELAY` option on this socket.
-    /// 
-    /// If set, this option disables the Nagle algorithm. 
-    /// This means that segments are always sent as soon as possible, 
+    ///
+    /// If set, this option disables the Nagle algorithm.
+    /// This means that segments are always sent as soon as possible,
     /// even if there is only a small amount of data.
-    /// When not set, data is buffered until there is a sufficient amount to send out, 
+    /// When not set, data is buffered until there is a sufficient amount to send out,
     /// thereby avoiding the frequent sending of small packets.
     pub fn with_no_delay(mut self) -> Self {
         self.no_delay = true;
         self
     }
-    
+
     /// Disables a welcome message on start
-    /// 
+    ///
     /// Default: *enabled*
     pub fn without_greeter(mut self) -> Self {
         self.show_greeter = false;
@@ -328,19 +326,21 @@ impl App {
     /// - `limit` — a [`Limit<u32>`]:
     ///   - `Limit::Default` — uses the framework default (recommended)
     ///   - `Limit::Limited(n)` — enforces an explicit upper bound
-    ///   - `Limit::Unlimited` — treated as `u32::MAX` in production; 
+    ///   - `Limit::Unlimited` — treated as `u32::MAX` in production;
     ///     in debug builds this will **panic** to catch misconfiguration early.
     pub fn with_max_header_list_size(mut self, size: Limit<usize>) -> Self {
         self.max_header_size = match size {
             Limit::Limited(size) => {
                 assert!(u32::try_from(size).is_ok(), "header limit too big");
                 Limit::Limited(size)
-            },
+            }
 
             Limit::Unlimited => {
                 #[cfg(debug_assertions)]
-                panic!("HTTP/2 max_header_list_size cannot be Unlimited; use Limit::Limited(u32) instead");
-            
+                panic!(
+                    "HTTP/2 max_header_list_size cannot be Unlimited; use Limit::Limited(u32) instead"
+                );
+
                 #[cfg(not(debug_assertions))]
                 {
                     #[cfg(feature = "tracing")]
@@ -350,9 +350,9 @@ impl App {
 
                     Limit::Limited(u32::MAX as usize)
                 }
-            },
+            }
 
-            Limit::Default => Limit::Default
+            Limit::Default => Limit::Default,
         };
 
         self
@@ -364,7 +364,7 @@ impl App {
     ///
     /// - For HTTP/1, the limit is applied by the HTTP/1 parser,
     ///   rejecting the request before it reaches application code.
-    /// 
+    ///
     /// - For HTTP/2, the limit is validated after headers are decoded,
     ///   using a middleware check.
     ///
@@ -373,7 +373,7 @@ impl App {
     ///
     /// If not set, the framework relies on the underlying HTTP implementation
     /// defaults.
-    pub fn with_max_header_count(mut self, count: Limit<usize>) -> Self { 
+    pub fn with_max_header_count(mut self, count: Limit<usize>) -> Self {
         self.max_header_count = count;
         self
     }
@@ -438,7 +438,7 @@ impl App {
     /// # fn docs() -> std::io::Result<()> {
     /// let app = App::new();
     /// let listener = TcpListener::bind("localhost:7878")?;
-    /// 
+    ///
     /// app.run_blocking_with_std_listener(listener);
     /// # Ok(())
     /// # }
@@ -483,7 +483,7 @@ impl App {
     #[cfg(feature = "middleware")]
     pub async fn run(mut self) -> io::Result<()> {
         self.use_endpoints();
-        
+
         let tcp_listener = TcpListener::bind(self.connection.socket).await?;
         self.run_internal(tcp_listener).await
     }
@@ -529,11 +529,11 @@ impl App {
     /// ```no_run
     /// use volga::App;
     /// use tokio::net::TcpListener;
-    /// 
+    ///
     /// #[tokio::main]
     /// async fn main() -> std::io::Result<()> {
     ///     let app = App::new();
-    /// 
+    ///
     ///     let listener = TcpListener::bind("localhost:7878").await?;
     ///     
     ///     app.run_with_listener(listener).await
@@ -544,8 +544,8 @@ impl App {
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(feature = "middleware")]
     pub fn run_with_listener(
-        mut self, 
-        tcp_listener: TcpListener
+        mut self,
+        tcp_listener: TcpListener,
     ) -> impl Future<Output = io::Result<()>> {
         self.use_endpoints();
 
@@ -581,7 +581,7 @@ impl App {
     #[cfg(not(feature = "middleware"))]
     pub fn run_with_listener(
         self,
-        tcp_listener: TcpListener
+        tcp_listener: TcpListener,
     ) -> impl Future<Output = io::Result<()>> {
         self.run_internal(tcp_listener)
     }
@@ -615,7 +615,7 @@ impl App {
     #[cfg(feature = "middleware")]
     pub async fn run_with_std_listener(
         mut self,
-        tcp_listener: std::net::TcpListener
+        tcp_listener: std::net::TcpListener,
     ) -> io::Result<()> {
         self.use_endpoints();
 
@@ -653,38 +653,38 @@ impl App {
     #[cfg(not(feature = "middleware"))]
     pub async fn run_with_std_listener(
         self,
-        tcp_listener: std::net::TcpListener
+        tcp_listener: std::net::TcpListener,
     ) -> io::Result<()> {
         tcp_listener.set_nonblocking(true)?;
         let tcp_listener = TcpListener::from_std(tcp_listener)?;
         self.run_internal(tcp_listener).await
     }
-    
+
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
         #[cfg(all(debug_assertions, feature = "openapi"))]
-        if self.openapi.is_configure_but_not_exposed() { 
+        if self.openapi.is_configure_but_not_exposed() {
             #[cfg(feature = "tracing")]
             tracing::warn!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
             #[cfg(not(feature = "tracing"))]
             eprintln!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
-        } 
-        
+        }
+
         #[cfg(any(feature = "tls", feature = "tracing"))]
         let socket = tcp_listener.local_addr()?;
-        
+
         let no_delay = self.no_delay;
-        
+
         #[cfg(debug_assertions)]
         self.print_welcome();
-        
+
         #[cfg(feature = "tracing")]
         {
             #[cfg(feature = "tls")]
-            if self.tls_config.is_some() { 
+            if self.tls_config.is_some() {
                 tracing::info!("listening on: https://{socket}")
-            } else { 
-                tracing::info!("listening on: http://{socket}") 
+            } else {
+                tracing::info!("listening on: http://{socket}")
             };
             #[cfg(not(feature = "tls"))]
             tracing::info!("listening on: http://{socket}");
@@ -695,17 +695,20 @@ impl App {
         Self::shutdown_signal(shutdown_rx);
 
         #[cfg(feature = "tls")]
-        let redirection_config = self.tls_config
+        let redirection_config = self
+            .tls_config
             .as_ref()
             .map(|config| config.https_redirection_config);
-        
+
         #[cfg(feature = "tls")]
-        if let Some(redirection_config) = redirection_config 
-            && redirection_config.enabled {
+        if let Some(redirection_config) = redirection_config
+            && redirection_config.enabled
+        {
             Self::run_https_redirection_middleware(
                 socket,
                 redirection_config.http_port,
-                shutdown_tx.clone());
+                shutdown_tx.clone(),
+            );
         }
 
         let active_connections = self.active_connections();
@@ -722,7 +725,9 @@ impl App {
                     Ok(p) => Some(p),
                     Err(_) => {
                         #[cfg(feature = "tracing")]
-                        tracing::warn!("incoming connection rejected: max_connections limit reached");
+                        tracing::warn!(
+                            "incoming connection rejected: max_connections limit reached"
+                        );
                         drop(stream);
                         continue;
                     }
@@ -741,7 +746,7 @@ impl App {
                 Self::handle_connection(stream, instance).await
             });
         }
-    
+
         drop(tcp_listener);
 
         if let Some(app_instance) = Arc::into_inner(app_instance) {
@@ -749,13 +754,11 @@ impl App {
         }
         Ok(())
     }
-    
+
     #[inline]
     fn active_connections(&self) -> Option<Arc<Semaphore>> {
         match self.max_connections {
-            Limit::Limited(n) => Some(
-                Arc::new(Semaphore::new(n))
-            ),
+            Limit::Limited(n) => Some(Arc::new(Semaphore::new(n))),
             _ => None,
         }
     }
@@ -768,17 +771,17 @@ impl App {
                 #[cfg(feature = "tracing")]
                 Err(err) => tracing::error!("unable to listen for shutdown signal: {err:#}"),
                 #[cfg(not(feature = "tracing"))]
-                Err(_) => ()
+                Err(_) => (),
             }
             #[cfg(feature = "tracing")]
             tracing::trace!("shutdown signal received, not accepting new requests");
-            drop(shutdown_rx); 
+            drop(shutdown_rx);
         });
     }
 
     #[inline]
     async fn handle_connection(stream: TcpStream, app_instance: Weak<AppEnv>) {
-        let peer_addr = match stream.peer_addr() { 
+        let peer_addr = match stream.peer_addr() {
             Ok(addr) => addr,
             Err(_err) => {
                 #[cfg(feature = "tracing")]
@@ -786,10 +789,12 @@ impl App {
                 return;
             }
         };
-        
+
         #[cfg(not(feature = "tls"))]
-        Server::new(TokioIo::new(stream), peer_addr).serve(app_instance).await;
-        
+        Server::new(TokioIo::new(stream), peer_addr)
+            .serve(app_instance)
+            .await;
+
         #[cfg(feature = "tls")]
         if let Some(acceptor) = app_instance.upgrade().and_then(|app| app.acceptor()) {
             let stream = match acceptor.accept(stream).await {
@@ -831,10 +836,8 @@ impl App {
         println!("│                >> Volga v{version:<5}                │");
         println!("│     Listening on: {url:<28}│");
         println!("╰───────────────────────────────────────────────╯\x1b[0m");
-        
-        let routes = self.pipeline
-            .endpoints()
-            .collect();
+
+        let routes = self.pipeline.endpoints().collect();
         println!("{routes}");
     }
 }
@@ -842,7 +845,9 @@ impl App {
 #[inline]
 fn create_tokio_runtime() -> Option<tokio::runtime::Runtime> {
     if tokio::runtime::Handle::try_current().is_ok() {
-        panic!("`App::run_blocking()` cannot be called inside an existing Tokio runtime. Use `run().await` instead.");
+        panic!(
+            "`App::run_blocking()` cannot be called inside an existing Tokio runtime. Use `run().await` instead."
+        );
     }
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
@@ -864,31 +869,42 @@ fn create_tokio_runtime() -> Option<tokio::runtime::Runtime> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
     use crate::http::request::request_body_limit::RequestBodyLimit;
     use crate::{App, Limit};
+    use std::net::SocketAddr;
 
     #[test]
     fn it_creates_app_with_default_socket() {
         let app = App::new();
-        
+
         #[cfg(target_os = "windows")]
-        assert_eq!(app.connection.socket, SocketAddr::from(([127, 0, 0, 1], 7878)));
+        assert_eq!(
+            app.connection.socket,
+            SocketAddr::from(([127, 0, 0, 1], 7878))
+        );
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(app.connection.socket, SocketAddr::from(([0, 0, 0, 0], 7878)));
+        assert_eq!(
+            app.connection.socket,
+            SocketAddr::from(([0, 0, 0, 0], 7878))
+        );
     }
 
     #[test]
     fn it_binds_app_to_socket() {
         let app = App::new().bind("127.0.0.1:5001");
 
-        assert_eq!(app.connection.socket, SocketAddr::from(([127, 0, 0, 1], 5001)));
+        assert_eq!(
+            app.connection.socket,
+            SocketAddr::from(([127, 0, 0, 1], 5001))
+        );
     }
 
     #[test]
     fn it_sets_default_body_limit() {
         let app = App::new();
-        let RequestBodyLimit::Enabled(limit) = app.body_limit else { unreachable!() };
+        let RequestBodyLimit::Enabled(limit) = app.body_limit else {
+            unreachable!()
+        };
 
         assert_eq!(limit, 5242880)
     }
@@ -896,7 +912,9 @@ mod tests {
     #[test]
     fn it_sets_body_limit() {
         let app = App::new().with_body_limit(Limit::Limited(10));
-        let RequestBodyLimit::Enabled(limit) = app.body_limit else { unreachable!() };
+        let RequestBodyLimit::Enabled(limit) = app.body_limit else {
+            unreachable!()
+        };
 
         assert_eq!(limit, 10)
     }
@@ -905,13 +923,17 @@ mod tests {
     fn it_disables_body_limit() {
         let app = App::new().without_body_limit();
 
-        let RequestBodyLimit::Disabled = app.body_limit else { panic!() };
+        let RequestBodyLimit::Disabled = app.body_limit else {
+            panic!()
+        };
     }
 
     #[test]
     fn it_sets_max_headers_size_limit() {
         let app = App::new().with_max_header_list_size(Limit::Limited(1024));
-        let Limit::Limited(limit) = app.max_header_size else { unreachable!() };
+        let Limit::Limited(limit) = app.max_header_size else {
+            unreachable!()
+        };
 
         assert_eq!(limit, 1024)
     }
@@ -931,7 +953,9 @@ mod tests {
     #[test]
     fn it_sets_max_headers_count_limit() {
         let app = App::new().with_max_header_count(Limit::Limited(10));
-        let Limit::Limited(limit) = app.max_header_count else { unreachable!() };
+        let Limit::Limited(limit) = app.max_header_count else {
+            unreachable!()
+        };
 
         assert_eq!(limit, 10)
     }
@@ -946,7 +970,9 @@ mod tests {
     #[test]
     fn it_sets_max_connections_limit() {
         let app = App::new().with_max_connections(Limit::Limited(1000));
-        let Limit::Limited(limit) = app.max_connections else { unreachable!() };
+        let Limit::Limited(limit) = app.max_connections else {
+            unreachable!()
+        };
 
         assert_eq!(limit, 1000)
     }

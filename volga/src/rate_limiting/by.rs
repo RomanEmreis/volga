@@ -18,10 +18,17 @@
 //! by::header("x-api-key");
 //! ```
 
+use super::{
+    PolicyName, RateLimitBinding, RateLimitKey, RateLimitKeyExt, extract_partition_key_from_ip,
+    stable_hash,
+};
+use crate::{
+    HttpRequest,
+    error::Error,
+    headers::{HeaderError, HeaderName},
+};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use super::{extract_partition_key_from_ip, stable_hash, PolicyName, RateLimitBinding, RateLimitKey, RateLimitKeyExt};
-use crate::{HttpRequest, headers::{HeaderName, HeaderError}, error::Error};
 
 #[cfg(feature = "cookie")]
 use crate::http::Cookies;
@@ -112,12 +119,8 @@ impl RateLimitKeySource {
 ///
 /// This type is internally type-erased and stored behind an `Arc`
 /// to allow cheap cloning and thread-safe sharing.
-type PartitionKeyExtractor = Arc<
-    dyn Fn(&HttpRequest) -> Result<u64, Error>
-    + Send
-    + Sync
-    + 'static
->;
+type PartitionKeyExtractor =
+    Arc<dyn Fn(&HttpRequest) -> Result<u64, Error> + Send + Sync + 'static>;
 
 /// Represents a source from which a rate-limiting partition key is derived.
 ///
@@ -143,7 +146,7 @@ enum PartitionKey {
 impl Debug for PartitionKey {
     #[inline]
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self { 
+        match self {
             PartitionKey::Ip => f.debug_tuple("PartitionKey::Ip").finish(),
             PartitionKey::Custom(_) => f.debug_tuple("PartitionKey::Custom").finish(),
         }
@@ -155,7 +158,7 @@ impl RateLimitKey for PartitionKey {
     fn extract(&self, req: &HttpRequest) -> Result<u64, Error> {
         match self {
             PartitionKey::Ip => extract_partition_key_from_ip(req),
-            PartitionKey::Custom(extractor) => extractor(req)
+            PartitionKey::Custom(extractor) => extractor(req),
         }
     }
 }
@@ -189,7 +192,7 @@ impl RateLimitKeyExt for RateLimitKeySource {
 /// # Example
 /// ```no_run
 /// use volga::{App, rate_limiting::by};
-/// 
+///
 /// let mut app = App::new();
 /// app.use_fixed_window(by::ip());
 /// ```
@@ -220,12 +223,12 @@ pub fn header(name: &'static str) -> RateLimitKeySource {
     let header = HeaderName::from_static(name);
 
     let key = PartitionKey::Custom(Arc::new(move |req| {
-        let value = req.headers()
+        let value = req
+            .headers()
             .get(&header)
             .ok_or_else(|| HeaderError::header_missing_impl(name))?;
 
-        let value = value.to_str()
-            .map_err(Error::from)?;
+        let value = value.to_str().map_err(Error::from)?;
 
         Ok(stable_hash(value))
     }));
@@ -251,13 +254,14 @@ pub fn header(name: &'static str) -> RateLimitKeySource {
 #[inline]
 pub fn query(name: &'static str) -> RateLimitKeySource {
     let key = PartitionKey::Custom(Arc::new(move |req| {
-        let value = req.query_args()
+        let value = req
+            .query_args()
             .find_map(|(k, v)| if k == name { Some(v) } else { None })
-            .ok_or_else(|| Error::client_error(format!("Query parameter {name} not found", )))?;
+            .ok_or_else(|| Error::client_error(format!("Query parameter {name} not found",)))?;
 
         Ok(stable_hash(value))
     }));
-    
+
     RateLimitKeySource { inner: key }
 }
 
@@ -279,13 +283,14 @@ pub fn query(name: &'static str) -> RateLimitKeySource {
 #[inline]
 pub fn path(name: &'static str) -> RateLimitKeySource {
     let key = PartitionKey::Custom(Arc::new(move |req| {
-        let value = req.path_args()
+        let value = req
+            .path_args()
             .find_map(|(k, v)| if k == name { Some(v) } else { None })
-            .ok_or_else(|| Error::client_error(format!("Path parameter {name} not found", )))?;
+            .ok_or_else(|| Error::client_error(format!("Path parameter {name} not found",)))?;
 
         Ok(stable_hash(value))
     }));
-    
+
     RateLimitKeySource { inner: key }
 }
 
@@ -309,12 +314,13 @@ pub fn path(name: &'static str) -> RateLimitKeySource {
 pub fn cookie(name: &'static str) -> RateLimitKeySource {
     let key = PartitionKey::Custom(Arc::new(move |req| {
         let cookies = req.extract::<Cookies>()?;
-        let cookie = cookies.get(name)
-            .ok_or_else(|| Error::client_error(format!("Cookie {name} not found", )))?;
+        let cookie = cookies
+            .get(name)
+            .ok_or_else(|| Error::client_error(format!("Cookie {name} not found",)))?;
 
         Ok(stable_hash(cookie.value()))
     }));
-    
+
     RateLimitKeySource { inner: key }
 }
 
@@ -337,17 +343,17 @@ pub fn cookie(name: &'static str) -> RateLimitKeySource {
 /// ```no_run
 /// use volga::{App, auth::AuthClaims, rate_limiting::by};
 /// use serde::Deserialize;;
-/// 
+///
 /// #[derive(Clone, Deserialize)]
 /// struct Claims {
 ///     sub: String,
 ///     email: String,
 /// }
-/// 
+///
 /// impl AuthClaims for Claims {}
-/// 
+///
 /// let mut app = App::new();
-/// 
+///
 /// // Rate limit per user subject
 /// app.use_fixed_window(by::user(|claims: &Claims| claims.sub.as_str()));
 ///
@@ -364,14 +370,14 @@ pub fn cookie(name: &'static str) -> RateLimitKeySource {
 pub fn user<C, F>(f: F) -> RateLimitKeySource
 where
     C: AuthClaims + Send + Sync + 'static,
-    F: Fn(&C) -> &str + Send + Sync + 'static
+    F: Fn(&C) -> &str + Send + Sync + 'static,
 {
     let key = PartitionKey::Custom(Arc::new(move |req| {
         let auth = req.extract::<Authenticated<C>>()?;
         let key = f(auth.claims());
         Ok(stable_hash(key))
     }));
-    
+
     RateLimitKeySource { inner: key }
 }
 
@@ -379,8 +385,8 @@ where
 mod tests {
     use super::*;
     use crate::{HttpBody, HttpRequest};
-    use std::sync::Arc;
     use hyper::Request;
+    use std::sync::Arc;
 
     fn create_request() -> HttpRequest {
         let (parts, body) = Request::get("/")
@@ -550,9 +556,7 @@ mod tests {
 
     #[test]
     fn it_propagates_errors_from_custom_extractor() {
-        let key = PartitionKey::Custom(Arc::new(|_req| {
-            Err(Error::client_error("Test error"))
-        }));
+        let key = PartitionKey::Custom(Arc::new(|_req| Err(Error::client_error("Test error"))));
         let req = create_request();
 
         let result = key.extract(&req);

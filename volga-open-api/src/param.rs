@@ -1,7 +1,7 @@
 //! Type and utils for OpenAPI parameters.
 
-use serde::{Deserialize, Serialize};
 use crate::schema::OpenApiSchema;
+use serde::{Deserialize, Serialize};
 
 /// OpenAPI parameter definition.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -18,12 +18,8 @@ pub(super) fn normalize_openapi_path(path: &str) -> (String, Vec<OpenApiParamete
     let mut params = Vec::new();
     let mut out = String::with_capacity(path.len());
 
-    let path = if path.is_empty() { 
-        "/" 
-    } else { 
-        path
-    };
-    
+    let path = if path.is_empty() { "/" } else { path };
+
     if path.starts_with('/') {
         out.push('/');
     }
@@ -56,11 +52,15 @@ pub(super) fn normalize_openapi_path(path: &str) -> (String, Vec<OpenApiParamete
 
 fn parse_typed_param_segment(seg: &str) -> Option<(String, Option<OpenApiSchema>)> {
     let inner = seg.strip_prefix('{')?.strip_suffix('}')?.trim();
-    if inner.is_empty() { return None; }
+    if inner.is_empty() {
+        return None;
+    }
 
     let mut it = inner.split(':').map(str::trim);
     let name = it.next()?.trim();
-    if name.is_empty() { return None; }
+    if name.is_empty() {
+        return None;
+    }
 
     let ty = it.next().filter(|s| !s.is_empty());
     let fmt = it.next().filter(|s| !s.is_empty());
@@ -83,7 +83,6 @@ fn parse_typed_param_segment(seg: &str) -> Option<(String, Option<OpenApiSchema>
 
     Some((name.to_string(), Some(schema)))
 }
-
 
 #[cfg(test)]
 mod tests {

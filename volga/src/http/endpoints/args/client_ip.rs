@@ -1,14 +1,17 @@
 //! Extractors for client IP address
 
-use std::{ops::Deref, net::SocketAddr};
-use std::fmt::Display;
-use futures_util::future::{ready, Ready};
-use hyper::http::{request::Parts, Extensions};
 use crate::{
-    http::{FromRequestParts, FromRequestRef, endpoints::args::{FromPayload, Payload, Source}},
-    error::Error,
     HttpRequest,
+    error::Error,
+    http::{
+        FromRequestParts, FromRequestRef,
+        endpoints::args::{FromPayload, Payload, Source},
+    },
 };
+use futures_util::future::{Ready, ready};
+use hyper::http::{Extensions, request::Parts};
+use std::fmt::Display;
+use std::{net::SocketAddr, ops::Deref};
 
 /// Wraps the client's [`SocketAddr`]
 ///
@@ -32,7 +35,7 @@ impl Display for ClientIp {
 
 impl Deref for ClientIp {
     type Target = SocketAddr;
-    
+
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -52,7 +55,8 @@ impl TryFrom<&Extensions> for ClientIp {
 
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
-        extensions.get::<ClientIp>()
+        extensions
+            .get::<ClientIp>()
             .cloned()
             .ok_or_else(|| Error::server_error("Client IP: missing"))
     }
@@ -60,7 +64,7 @@ impl TryFrom<&Extensions> for ClientIp {
 
 impl TryFrom<&Parts> for ClientIp {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
         ClientIp::try_from(&parts.extensions)
@@ -88,31 +92,32 @@ impl FromPayload for ClientIp {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(parts.try_into())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use hyper::{Request, http::Extensions};
+    use super::*;
     use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
     use crate::{HttpBody, HttpRequest};
-    use super::*;
+    use hyper::{Request, http::Extensions};
 
     #[tokio::test]
     async fn it_reads_from_payload() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
-        let req = Request::get("/")
-            .extension(ip)
-            .body(())
-            .unwrap();
+        let req = Request::get("/").extension(ip).body(()).unwrap();
 
         let (parts, _) = req.into_parts();
-        let client_ip = ClientIp::from_payload(Payload::Parts(&parts)).await.unwrap();
+        let client_ip = ClientIp::from_payload(Payload::Parts(&parts))
+            .await
+            .unwrap();
 
         assert_eq!(client_ip, ip);
     }
@@ -140,10 +145,7 @@ mod tests {
     #[test]
     fn it_gets_from_request_parts() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
-        let req = Request::get("/")
-            .extension(ip)
-            .body(())
-            .unwrap();
+        let req = Request::get("/").extension(ip).body(()).unwrap();
 
         let (parts, _) = req.into_parts();
         let client_ip = ClientIp::from_parts(&parts).unwrap();

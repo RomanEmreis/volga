@@ -1,4 +1,4 @@
-﻿#![allow(missing_docs)]
+#![allow(missing_docs)]
 #![cfg(all(feature = "test", feature = "compression-full"))]
 
 use volga::ok;
@@ -9,12 +9,14 @@ async fn it_returns_brotli_compressed() {
     let server = TestServer::spawn(|app| {
         app.use_compression();
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "br")
         .send()
@@ -22,7 +24,10 @@ async fn it_returns_brotli_compressed() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
 
     server.shutdown().await;
 }
@@ -31,12 +36,15 @@ async fn it_returns_brotli_compressed() {
 async fn it_returns_brotli_compressed_for_route() {
     let server = TestServer::spawn(|app| {
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
-        }).with_compression();
-    }).await;
+        })
+        .with_compression();
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "br")
         .send()
@@ -44,25 +52,30 @@ async fn it_returns_brotli_compressed_for_route() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
 
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_returns_brotli_compressed_for_group() {
-    let server = TestServer::spawn(|app| { 
+    let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
             api.with_compression();
-            
+
             api.map_get("/compressed", || async {
-                let values= get_test_data();
+                let values = get_test_data();
                 ok!(values)
             });
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/tests/compressed"))
         .header("accept-encoding", "br")
         .send()
@@ -70,8 +83,11 @@ async fn it_returns_brotli_compressed_for_group() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
-    
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
+
     server.shutdown().await;
 }
 
@@ -80,12 +96,14 @@ async fn it_returns_gzip_compressed() {
     let server = TestServer::spawn(|app| {
         app.use_compression();
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "gzip")
         .send()
@@ -93,8 +111,11 @@ async fn it_returns_gzip_compressed() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
-    
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
+
     server.shutdown().await;
 }
 
@@ -103,12 +124,14 @@ async fn it_returns_deflate_compressed() {
     let server = TestServer::spawn(|app| {
         app.use_compression();
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "deflate")
         .send()
@@ -116,8 +139,11 @@ async fn it_returns_deflate_compressed() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
-    
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
+
     server.shutdown().await;
 }
 
@@ -126,12 +152,14 @@ async fn it_returns_zstd_compressed() {
     let server = TestServer::spawn(|app| {
         app.use_compression();
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
-        });   
-    }).await;
+        });
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "zstd")
         .send()
@@ -139,8 +167,11 @@ async fn it_returns_zstd_compressed() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
-    
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
+
     server.shutdown().await;
 }
 
@@ -149,12 +180,14 @@ async fn it_returns_multiple_default_quality_compressed() {
     let server = TestServer::spawn(|app| {
         app.use_compression();
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "br, gzip, zstd")
         .send()
@@ -162,8 +195,11 @@ async fn it_returns_multiple_default_quality_compressed() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
-    
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
+
     server.shutdown().await;
 }
 
@@ -172,12 +208,14 @@ async fn it_returns_multiple_different_quality_compressed() {
     let server = TestServer::spawn(|app| {
         app.use_compression();
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "br;q=0.9, gzip;q=1, zstd;q=0.8")
         .send()
@@ -185,8 +223,11 @@ async fn it_returns_multiple_different_quality_compressed() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
-    
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
+
     server.shutdown().await;
 }
 
@@ -195,12 +236,14 @@ async fn it_returns_uncompressed() {
     let server = TestServer::spawn(|app| {
         app.use_compression();
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
-        });   
-    }).await;
+        });
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "identity")
         .send()
@@ -208,8 +251,11 @@ async fn it_returns_uncompressed() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
-    
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
+
     server.shutdown().await;
 }
 
@@ -218,12 +264,14 @@ async fn it_returns_default_brotli_compressed() {
     let server = TestServer::spawn(|app| {
         app.use_compression();
         app.map_get("/compressed", || async {
-            let values= get_test_data();
+            let values = get_test_data();
             ok!(values)
-        });   
-    }).await;
+        });
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/compressed"))
         .header("accept-encoding", "*")
         .send()
@@ -231,8 +279,11 @@ async fn it_returns_default_brotli_compressed() {
         .unwrap();
 
     assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
-    assert_eq!(response.json::<Vec<serde_json::Value>>().await.unwrap(), get_test_data());
-    
+    assert_eq!(
+        response.json::<Vec<serde_json::Value>>().await.unwrap(),
+        get_test_data()
+    );
+
     server.shutdown().await;
 }
 

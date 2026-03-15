@@ -21,7 +21,10 @@ async fn main() -> std::io::Result<()> {
     app.map_get("/compressed", || async {
         let mut values = Vec::new();
         for i in 0..10000 {
-            values.push(User { age: i, name: i.to_string() });
+            values.push(User {
+                age: i,
+                name: i.to_string(),
+            });
         }
         ok!(values)
     });

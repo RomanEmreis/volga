@@ -1,35 +1,34 @@
 //! WebSocket connection extractors and utils
 
 use super::{WebSocket, WebSocketError};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use futures_util::future::{Ready, ready};
 use hyper_util::rt::TokioIo;
-use std::future::Future;
-use futures_util::future::{ready, Ready};
 use sha1::{Digest, Sha1};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use std::future::Future;
 
 use hyper::{
-    http::{request::Parts, Method, Version},
-    upgrade::OnUpgrade
+    http::{Method, Version, request::Parts},
+    upgrade::OnUpgrade,
 };
 
 use crate::{
-    HttpResult, ok, status,
-    http::endpoints::args::{FromPayload, Payload, Source},
-    error::{Error, handler::{WeakErrorHandler, ErasedErrorArgs, extract_error_args}},
+    HttpResult,
+    error::{
+        Error,
+        handler::{ErasedErrorArgs, WeakErrorHandler, extract_error_args},
+    },
     headers::{
-        HeaderValue, 
-        CONNECTION, 
-        SEC_WEBSOCKET_ACCEPT,
-        SEC_WEBSOCKET_KEY,
-        SEC_WEBSOCKET_PROTOCOL,
-        SEC_WEBSOCKET_VERSION,
-        UPGRADE
-    } 
+        CONNECTION, HeaderValue, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL,
+        SEC_WEBSOCKET_VERSION, UPGRADE,
+    },
+    http::endpoints::args::{FromPayload, Payload, Source},
+    ok, status,
 };
 
 use tokio_tungstenite::{
-    tungstenite::protocol::{Role, WebSocketConfig},
     WebSocketStream,
+    tungstenite::protocol::{Role, WebSocketConfig},
 };
 
 /// Represents the extractor for establishing WebSockets connections
@@ -51,8 +50,8 @@ impl std::fmt::Debug for WebSocketConnection {
 }
 
 impl WebSocketConnection {
-    /// Sets the read buffer capacity. 
-    /// 
+    /// Sets the read buffer capacity.
+    ///
     /// Default: 128KiB
     pub fn with_read_buffer_size(mut self, size: usize) -> Self {
         self.config.read_buffer_size = size;
@@ -90,7 +89,7 @@ impl WebSocketConnection {
     }
 
     /// Sets the maximum message size
-    /// 
+    ///
     /// Default: 64 MiB
     pub fn with_max_message_size(mut self, max: usize) -> Self {
         self.config.max_message_size = Some(max);
@@ -98,7 +97,7 @@ impl WebSocketConnection {
     }
 
     /// Sets the maximum frame size
-    /// 
+    ///
     /// Default: 16 MiB
     pub fn with_max_frame_size(mut self, max: usize) -> Self {
         self.config.max_frame_size = Some(max);
@@ -106,7 +105,7 @@ impl WebSocketConnection {
     }
 
     /// Sets/unsets a web-server to accept unmasked frames
-    /// 
+    ///
     /// Default: `false`
     pub fn with_accept_unmasked_frames(mut self, accept: bool) -> Self {
         self.config.accept_unmasked_frames = accept;
@@ -114,7 +113,7 @@ impl WebSocketConnection {
     }
 
     /// Sets the protocols known by the server.
-    /// 
+    ///
     /// Default: empty list
     pub fn with_protocols<const N: usize>(mut self, known: [&'static str; N]) -> Self {
         if let Some(sec_websocket_protocol) = self
@@ -122,9 +121,7 @@ impl WebSocketConnection {
             .as_ref()
             .and_then(|p| p.to_str().ok())
         {
-            let mut split = sec_websocket_protocol
-                .split(',')
-                .map(str::trim);
+            let mut split = sec_websocket_protocol.split(',').map(str::trim);
             self.protocol = known
                 .iter()
                 .find(|&&proto| split.any(|req_proto| req_proto == proto))
@@ -132,7 +129,7 @@ impl WebSocketConnection {
         }
         self
     }
-    
+
     /// Upgrades a connection and call a mapped `handler` with the stream.
     pub fn on<F, Fut>(self, func: F) -> HttpResult
     where
@@ -145,7 +142,7 @@ impl WebSocketConnection {
             protocol,
             on_upgrade,
             sec_websocket_key,
-            sec_websocket_protocol: _
+            sec_websocket_protocol: _,
         } = self;
 
         let response_protocol = protocol.clone();
@@ -161,11 +158,8 @@ impl WebSocketConnection {
                 }
             };
 
-            let stream = WebSocketStream::from_raw_socket(
-                upgraded,
-                Role::Server,
-                Some(config))
-                .await;
+            let stream =
+                WebSocketStream::from_raw_socket(upgraded, Role::Server, Some(config)).await;
 
             let socket = WebSocket::new(stream, protocol);
             func(socket).await;
@@ -207,7 +201,7 @@ impl WebSocketConnection {
 fn header_contains_token(value: &HeaderValue, token: &str) -> bool {
     let bytes = value.as_bytes();
     let token = token.as_bytes();
-    
+
     let mut start = 0;
 
     while start < bytes.len() {
@@ -224,9 +218,11 @@ fn header_contains_token(value: &HeaderValue, token: &str) -> bool {
             slice = &slice[..slice.len() - 1];
         }
 
-        if slice.len() == token.len() && slice.iter()
-            .zip(token.iter())
-            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        if slice.len() == token.len()
+            && slice
+                .iter()
+                .zip(token.iter())
+                .all(|(a, b)| a.eq_ignore_ascii_case(b))
         {
             return true;
         }
@@ -246,19 +242,23 @@ impl TryFrom<&Parts> for WebSocketConnection {
                 return Err(WebSocketError::invalid_method());
             }
 
-            if !matches!(parts.headers.get(&UPGRADE), Some(upgrade) if header_contains_token(upgrade, super::WEBSOCKET)) {
+            if !matches!(parts.headers.get(&UPGRADE), Some(upgrade) if header_contains_token(upgrade, super::WEBSOCKET))
+            {
                 return Err(WebSocketError::invalid_upgrade_header());
             }
 
-            if !matches!(parts.headers.get(&CONNECTION), Some(conn) if header_contains_token(conn, super::UPGRADE)) {
-                return Err(WebSocketError::invalid_connection_header()); 
+            if !matches!(parts.headers.get(&CONNECTION), Some(conn) if header_contains_token(conn, super::UPGRADE))
+            {
+                return Err(WebSocketError::invalid_connection_header());
             }
 
-            if !matches!(parts.headers.get(&SEC_WEBSOCKET_VERSION), Some(version) if version == super::VERSION) {
-                return Err(WebSocketError::invalid_version_header()); 
+            if !matches!(parts.headers.get(&SEC_WEBSOCKET_VERSION), Some(version) if version == super::VERSION)
+            {
+                return Err(WebSocketError::invalid_version_header());
             }
 
-            let key = parts.headers
+            let key = parts
+                .headers
                 .get(&SEC_WEBSOCKET_KEY)
                 .ok_or(WebSocketError::websocket_key_missing())?
                 .clone();
@@ -279,22 +279,25 @@ impl TryFrom<&Parts> for WebSocketConnection {
 
             None
         };
-        
+
         // use remove instead of get
-        let on_upgrade = parts.extensions
+        let on_upgrade = parts
+            .extensions
             .get::<OnUpgrade>()
             .ok_or(WebSocketError::not_upgradable_connection())?
             .clone();
-        
-        let error_handler = parts.extensions
-            .get::<WeakErrorHandler>()
-            .ok_or(Error::server_error("Server error: error handler is missing"))?;
+
+        let error_handler =
+            parts
+                .extensions
+                .get::<WeakErrorHandler>()
+                .ok_or(Error::server_error(
+                    "Server error: error handler is missing",
+                ))?;
 
         let error_args = extract_error_args(error_handler, parts);
 
-        let sec_websocket_protocol = parts.headers
-            .get(&SEC_WEBSOCKET_PROTOCOL)
-            .cloned();
+        let sec_websocket_protocol = parts.headers.get(&SEC_WEBSOCKET_PROTOCOL).cloned();
 
         Ok(Self {
             config: Default::default(),
@@ -311,24 +314,26 @@ impl FromPayload for WebSocketConnection {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(parts.try_into())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use super::WebSocketConnection;
-    use crate::http::endpoints::args::{FromPayload, Payload};
-    use hyper::{Request, Version};
-    use hyper::http::HeaderValue;
     use crate::error::ErrorFunc;
     use crate::error::handler::PipelineErrorHandler;
     use crate::headers::SEC_WEBSOCKET_PROTOCOL;
+    use crate::http::endpoints::args::{FromPayload, Payload};
+    use hyper::http::HeaderValue;
+    use hyper::{Request, Version};
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn it_creates_ws_connection_from_payload() {
@@ -340,21 +345,24 @@ mod tests {
             .header("sec-websocket-key", "123abc")
             .body(())
             .unwrap();
-        
+
         let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
-        
+
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
         req.extensions_mut().insert(Arc::downgrade(&error_handler));
-        
+
         let (parts, _) = req.into_parts();
-        
+
         let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
             .await
             .unwrap();
 
         assert_eq!(conn.protocol, None);
-        assert_eq!(conn.sec_websocket_key, parts.headers.get("Sec-WebSocket-Key").cloned());
+        assert_eq!(
+            conn.sec_websocket_key,
+            parts.headers.get("Sec-WebSocket-Key").cloned()
+        );
     }
 
     #[tokio::test]
@@ -373,9 +381,8 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
-            .await;
-        
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
+
         assert!(conn.is_err());
     }
 
@@ -395,8 +402,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
-            .await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
 
         assert!(conn.is_err());
     }
@@ -419,8 +425,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
-            .await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
 
         assert!(conn.is_err());
     }
@@ -443,8 +448,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
-            .await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
 
         assert!(conn.is_err());
     }
@@ -467,8 +471,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
-            .await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
 
         assert!(conn.is_err());
     }
@@ -491,8 +494,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
-            .await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
 
         assert!(conn.is_err());
     }
@@ -515,10 +517,10 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::try_from(&parts)
-            .unwrap();
-        
-        let conn = conn.with_max_frame_size(1024)
+        let conn = WebSocketConnection::try_from(&parts).unwrap();
+
+        let conn = conn
+            .with_max_frame_size(1024)
             .with_accept_unmasked_frames(true)
             .with_protocols(["foo-ws"])
             .with_max_message_size(1024)
@@ -526,7 +528,7 @@ mod tests {
             .with_max_write_buffer_size(1024)
             .with_write_buffer_size(1024)
             .with_max_frame_size(1024);
-        
+
         assert_eq!(conn.protocol, Some(HeaderValue::from_static("foo-ws")));
         assert_eq!(conn.sec_websocket_key, None);
         assert!(conn.config.accept_unmasked_frames);
@@ -536,11 +538,11 @@ mod tests {
         assert_eq!(conn.config.write_buffer_size, 1024);
         assert_eq!(conn.config.max_frame_size, Some(1024usize));
     }
-    
+
     #[test]
     fn it_generates_websocket_accept_key() {
         let key = WebSocketConnection::generate_websocket_accept_key(b"123");
-        
+
         assert_eq!(key, "V5hz1RKy1V4JclILDswC1e3Fek0=");
     }
 }

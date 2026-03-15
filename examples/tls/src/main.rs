@@ -11,23 +11,27 @@ use volga::{App, Json, ok};
 async fn main() -> std::io::Result<()> {
     let mut app = App::new()
         .bind("127.0.0.1:7878")
-        .with_tls(|tls| tls
-            .set_pem("examples/tls/cert")
-            // Uncomment to generate self-signed certificates for local development
-            //.with_dev_cert(tls::DevCertMode::Ask)
-            .with_https_redirection()
-            .with_http_port(7879))
-        .with_hsts(|hsts| hsts
-            .with_max_age(Duration::from_secs(30))
-            .with_exclude_hosts(["example.com", "example.net"]));
+        .with_tls(|tls| {
+            tls.set_pem("examples/tls/cert")
+                // Uncomment to generate self-signed certificates for local development
+                //.with_dev_cert(tls::DevCertMode::Ask)
+                .with_https_redirection()
+                .with_http_port(7879)
+        })
+        .with_hsts(|hsts| {
+            hsts.with_max_age(Duration::from_secs(30))
+                .with_exclude_hosts(["example.com", "example.net"])
+        });
 
     app.group("/user", |api| {
-        api.map_get("/{name}", |name: String| async move {
-            ok!("Hello {name}!")
-        });
-        api.map_post("/create", |user: Json<serde_json::Value>| async move { 
-            user
-        }); 
+        api.map_get(
+            "/{name}",
+            |name: String| async move { ok!("Hello {name}!") },
+        );
+        api.map_post(
+            "/create",
+            |user: Json<serde_json::Value>| async move { user },
+        );
     });
 
     app.run().await

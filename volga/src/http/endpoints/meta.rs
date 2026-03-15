@@ -1,8 +1,8 @@
 //! Utilities for routes metadata
 
+use crate::http::Method;
 use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
-use crate::http::Method;
 
 /// Represents a route metadata
 #[derive(Debug, PartialEq)]
@@ -85,7 +85,10 @@ impl PartialEq<RouteInfo> for (Method, String) {
 impl RouteInfo {
     /// Creates a new route metadata
     pub(crate) fn new(method: Method, path: &str) -> Self {
-        Self { method, path: path.into() }
+        Self {
+            method,
+            path: path.into(),
+        }
     }
 }
 

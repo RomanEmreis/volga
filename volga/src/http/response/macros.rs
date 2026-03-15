@@ -1,4 +1,4 @@
-﻿//! Macros for various HTTP responses
+//! Macros for various HTTP responses
 
 /// Produces HTTP 404 NOT FOUND response
 ///
@@ -318,13 +318,13 @@ macro_rules! accepted {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
     use http_body_util::BodyExt;
     use serde::Serialize;
-    use bytes::Bytes;
 
     #[derive(Serialize)]
     struct TestPayload {
-        name: String
+        name: String,
     }
 
     async fn body_to_bytes(resp: &mut crate::http::HttpResponse) -> Bytes {
@@ -334,7 +334,7 @@ mod tests {
     fn assert_header(resp: &crate::http::HttpResponse, k: &str, v: &str) {
         assert_eq!(resp.headers().get(k).unwrap(), v);
     }
-    
+
     #[tokio::test]
     async fn it_creates_400_response() {
         let response = bad_request!();
@@ -343,7 +343,7 @@ mod tests {
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(body.len(), 0);
         assert_eq!(response.status(), 400);
     }
@@ -357,7 +357,7 @@ mod tests {
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(String::from_utf8_lossy(body), "\"test\"");
         assert_eq!(response.status(), 400);
     }
@@ -392,14 +392,16 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_400_with_json_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = bad_request!(payload);
 
         assert!(response.is_ok());
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 400);
     }
@@ -412,14 +414,16 @@ mod tests {
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 400);
     }
 
     #[tokio::test]
     async fn it_creates_anonymous_type_400_response_with_json_body_and_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = bad_request!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
@@ -446,7 +450,10 @@ mod tests {
 
         assert_eq!(String::from_utf8_lossy(&body), "test");
         assert_eq!(response.status(), 400);
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -460,7 +467,10 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "test");
         assert_eq!(response.status(), 400);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -474,7 +484,10 @@ mod tests {
 
         assert_eq!(String::from_utf8_lossy(&body), "Error: test");
         assert_eq!(response.status(), 400);
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -487,7 +500,10 @@ mod tests {
 
         assert_eq!(String::from_utf8_lossy(&body), "Error: a 1");
         assert_eq!(response.status(), 400);
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -501,7 +517,10 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "Error: x");
         assert_eq!(response.status(), 400);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -515,10 +534,12 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 400);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
     }
 
-    
     #[tokio::test]
     async fn it_creates_404_response() {
         let response = not_found!();
@@ -527,7 +548,7 @@ mod tests {
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(body.len(), 0);
         assert_eq!(response.status(), 404);
     }
@@ -575,7 +596,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_404_with_json_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = not_found!(payload);
 
         assert!(response.is_ok());
@@ -602,10 +625,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_404_response_with_headers() {
-        let response = not_found!([
-            ("x-api-key", "some api key"),
-            ("x-req-id", "some req id"),
-        ]);
+        let response = not_found!([("x-api-key", "some api key"), ("x-req-id", "some req id"),]);
 
         assert!(response.is_ok());
 
@@ -620,7 +640,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_anonymous_type_404_response_with_json_body_and_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = not_found!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
@@ -647,7 +669,10 @@ mod tests {
 
         assert_eq!(String::from_utf8_lossy(&body), "User not found");
         assert_eq!(response.status(), 404);
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -662,7 +687,10 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "User not found");
         assert_eq!(response.status(), 404);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -675,12 +703,17 @@ mod tests {
 
         assert_eq!(String::from_utf8_lossy(&body), "User not found");
         assert_eq!(response.status(), 404);
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
     async fn it_creates_404_with_json_prefixed_response_and_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = not_found!(json: payload; [("x-req-id", "1")]);
         assert!(response.is_ok());
 
@@ -690,7 +723,10 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 404);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
     }
 
     #[tokio::test]
@@ -701,7 +737,7 @@ mod tests {
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(body.len(), 0);
         assert_eq!(response.status(), 201);
     }
@@ -749,7 +785,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_201_with_json_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = created!(payload);
 
         assert!(response.is_ok());
@@ -776,10 +814,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_201_response_with_headers() {
-        let response = created!([
-            ("x-api-key", "some api key"),
-            ("x-req-id", "some req id"),
-        ]);
+        let response = created!([("x-api-key", "some api key"), ("x-req-id", "some req id"),]);
 
         assert!(response.is_ok());
 
@@ -794,7 +829,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_anonymous_type_201_response_with_json_body_and_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = created!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
@@ -821,7 +858,10 @@ mod tests {
 
         assert_eq!(String::from_utf8_lossy(&body), "User created");
         assert_eq!(response.status(), 201);
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
@@ -835,12 +875,17 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "User created");
         assert_eq!(response.status(), 201);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
     async fn it_creates_201_with_json_prefixed_response_and_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = created!(json: payload; [("x-req-id", "1")]);
         assert!(response.is_ok());
 
@@ -850,7 +895,10 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 201);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
     }
 
     #[tokio::test]
@@ -864,9 +912,12 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 201);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
     }
-    
+
     #[tokio::test]
     async fn it_creates_202_response() {
         let response = accepted!();
@@ -875,7 +926,7 @@ mod tests {
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
-        
+
         assert_eq!(body.len(), 0);
         assert_eq!(response.status(), 202);
     }
@@ -977,7 +1028,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_202_with_json_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = accepted!(payload);
 
         assert!(response.is_ok());
@@ -1004,10 +1057,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_202_response_with_headers() {
-        let response = accepted!([
-            ("x-api-key", "some api key"),
-            ("x-req-id", "some req id"),
-        ]);
+        let response = accepted!([("x-api-key", "some api key"), ("x-req-id", "some req id"),]);
 
         assert!(response.is_ok());
 
@@ -1022,7 +1072,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_anonymous_type_202_response_with_json_body_and_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = accepted!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
@@ -1051,12 +1103,17 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "Task accepted");
         assert_eq!(response.status(), 202);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "text/plain; charset=utf-8");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "text/plain; charset=utf-8"
+        );
     }
 
     #[tokio::test]
     async fn it_creates_202_with_json_prefixed_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = accepted!(json: payload);
         assert!(response.is_ok());
 
@@ -1065,12 +1122,17 @@ mod tests {
 
         assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 202);
-        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
     }
 
     #[tokio::test]
     async fn it_creates_202_with_json_prefixed_response_and_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = accepted!(json: payload; [("x-req-id", "1")]);
         assert!(response.is_ok());
 
@@ -1080,6 +1142,9 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&body), "{\"name\":\"test\"}");
         assert_eq!(response.status(), 202);
         assert_header(&response, "x-req-id", "1");
-        assert_eq!(response.headers().get("content-type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
     }
 }

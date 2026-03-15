@@ -21,7 +21,7 @@ use crate::error::Error;
 ///
 /// #[derive(Clone)]
 /// struct TransientService {
-///     service: ScopedService 
+///     service: ScopedService
 /// }
 ///
 /// impl Inject for TransientService {
@@ -70,7 +70,7 @@ macro_rules! define_inject {
                 let tuple = (
                     $(
                     $T::inject(container)?,
-                    )*    
+                    )*
                 );
                 Ok(tuple)
             }
@@ -141,7 +141,7 @@ mod tests {
             Err(Error::Other("Injection failed"))
         }
     }
-    
+
     #[test]
     fn it_injects_default_service() {
         let container = ContainerBuilder::new().build();
@@ -270,4 +270,3 @@ mod tests {
         assert_send_sync::<ComplexService>();
     }
 }
-

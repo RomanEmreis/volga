@@ -1,9 +1,9 @@
 #![allow(missing_docs)]
 #![cfg(all(feature = "macros", feature = "jwt-auth-full"))]
 
+use serde::{Deserialize, Serialize};
 use volga::auth::AuthClaims;
 use volga_macros::Claims;
-use serde::{Deserialize, Serialize};
 
 #[test]
 fn it_derives_claims_for_struct_with_role() {
@@ -39,7 +39,10 @@ fn it_derives_claims_for_struct_with_roles() {
 
     // Test that roles() method is implemented
     assert_eq!(claims.role(), None);
-    assert_eq!(claims.roles(), Some(&["admin".to_string(), "user".to_string()][..]));
+    assert_eq!(
+        claims.roles(),
+        Some(&["admin".to_string(), "user".to_string()][..])
+    );
     assert_eq!(claims.permissions(), None);
 }
 
@@ -79,7 +82,11 @@ fn it_derives_claims_for_struct_with_all_fields() {
         sub: "user123".to_string(),
         role: "admin".to_string(),
         roles: vec!["admin".to_string(), "moderator".to_string()],
-        permissions: vec!["read".to_string(), "write".to_string(), "delete".to_string()],
+        permissions: vec![
+            "read".to_string(),
+            "write".to_string(),
+            "delete".to_string(),
+        ],
     };
 
     // Test that all methods are implemented
@@ -90,7 +97,13 @@ fn it_derives_claims_for_struct_with_all_fields() {
     );
     assert_eq!(
         claims.permissions(),
-        Some(&["read".to_string(), "write".to_string(), "delete".to_string()][..])
+        Some(
+            &[
+                "read".to_string(),
+                "write".to_string(),
+                "delete".to_string()
+            ][..]
+        )
     );
 }
 

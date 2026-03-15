@@ -30,18 +30,17 @@
 //! how rate limiting is applied to HTTP requests.
 //! Those concerns are intentionally left to higher-level layers.
 
-
 use std::time::Instant;
 
 pub use fixed_window::FixedWindowRateLimiter;
+pub use gcra::GcraRateLimiter;
 pub use sliding_window::SlidingWindowRateLimiter;
 pub use token_bucket::TokenBucketRateLimiter;
-pub use gcra::GcraRateLimiter;
 
 mod fixed_window;
+mod gcra;
 mod sliding_window;
 mod token_bucket;
-mod gcra;
 
 const MICROS_PER_SEC: u64 = 1_000_000;
 
@@ -89,7 +88,7 @@ pub trait RateLimiter {
 pub trait TimeSource: Send + Sync {
     /// Returns a monotonic timestamp in microseconds.
     fn now_micros(&self) -> u64;
-    
+
     /// Returns the number of seconds elapsed since [`UNIX_EPOCH`]
     /// (`1970-01-01 00:00:00 UTC`).
     ///
@@ -126,17 +125,14 @@ impl TimeSource for SystemTimeSource {
     fn now_micros(&self) -> u64 {
         let elapsed = Self::anchor().elapsed();
         // Saturating conversion to be extra defensive (though practically safe).
-        elapsed
-            .as_micros()
-            .try_into()
-            .unwrap_or(u64::MAX)
+        elapsed.as_micros().try_into().unwrap_or(u64::MAX)
     }
 }
 
 #[cfg(test)]
 pub(super) mod test_utils {
+    use super::{MICROS_PER_SEC, TimeSource};
     use std::sync::{Arc, Mutex};
-    use super::{TimeSource, MICROS_PER_SEC};
 
     #[derive(Clone)]
     pub(super) struct MockTimeSource {

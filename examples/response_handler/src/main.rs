@@ -16,11 +16,10 @@ async fn main() -> std::io::Result<()> {
 
     app.group("/positive", |api| {
         api.map_ok(handler_group_response);
-        api.map_get("/sum/{x}/{y}", sum);        
+        api.map_get("/sum/{x}/{y}", sum);
     });
 
-    app
-        .map_get("/negative/sum/{x}/{y}", sum)
+    app.map_get("/negative/sum/{x}/{y}", sum)
         .map_ok(handler_response);
 
     app.run().await

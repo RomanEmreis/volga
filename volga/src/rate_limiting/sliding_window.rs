@@ -1,7 +1,7 @@
 //! Tools and structs for a sliding-window rate limiting configuration
 
-use std::time::Duration;
 use super::SlidingWindowRateLimiter;
+use std::time::Duration;
 
 /// Configuration for a **sliding window** rate limiting policy.
 ///
@@ -37,7 +37,7 @@ impl SlidingWindow {
             name: None,
             eviction: None,
             max_requests,
-            window_size
+            window_size,
         }
     }
 
@@ -58,10 +58,7 @@ impl SlidingWindow {
     /// Builds a `SlidingWindowRateLimiter` instance based on this policy.
     #[inline]
     pub(super) fn build(&self) -> SlidingWindowRateLimiter {
-        let mut limiter = SlidingWindowRateLimiter::new(
-            self.max_requests,
-            self.window_size
-        );
+        let mut limiter = SlidingWindowRateLimiter::new(self.max_requests, self.window_size);
 
         if let Some(eviction) = self.eviction {
             limiter.set_eviction(eviction);
@@ -70,7 +67,6 @@ impl SlidingWindow {
         limiter
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -97,8 +93,7 @@ mod tests {
 
     #[test]
     fn it_sets_policy_name_from_string() {
-        let policy = SlidingWindow::new(100, Duration::from_secs(60))
-            .with_name("api_limiter");
+        let policy = SlidingWindow::new(100, Duration::from_secs(60)).with_name("api_limiter");
 
         assert_eq!(policy.name, Some("api_limiter".to_string()));
     }
@@ -106,8 +101,7 @@ mod tests {
     #[test]
     fn it_sets_policy_name_from_string_slice() {
         let name = String::from("test_policy");
-        let policy = SlidingWindow::new(100, Duration::from_secs(60))
-            .with_name(name.clone());
+        let policy = SlidingWindow::new(100, Duration::from_secs(60)).with_name(name.clone());
 
         assert_eq!(policy.name, Some(name));
     }
@@ -189,10 +183,8 @@ mod tests {
 
     #[test]
     fn it_creates_multiple_independent_policies() {
-        let policy1 = SlidingWindow::new(100, Duration::from_secs(60))
-            .with_name("policy1");
-        let policy2 = SlidingWindow::new(200, Duration::from_secs(120))
-            .with_name("policy2");
+        let policy1 = SlidingWindow::new(100, Duration::from_secs(60)).with_name("policy1");
+        let policy2 = SlidingWindow::new(200, Duration::from_secs(120)).with_name("policy2");
 
         assert_eq!(policy1.max_requests, 100);
         assert_eq!(policy2.max_requests, 200);

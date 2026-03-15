@@ -1,14 +1,9 @@
-﻿//! Tools for Dependency Injection
+//! Tools for Dependency Injection
 
 use super::{App, error::Error};
 pub use {
     self::dc::Dc,
-    volga_di::{
-        Container, 
-        ContainerBuilder,
-        GenericFactory,
-        Inject
-    },
+    volga_di::{Container, ContainerBuilder, GenericFactory, Inject},
 };
 
 pub mod dc;
@@ -41,14 +36,14 @@ impl From<error::Error> for Error {
 /// DI specific impl for [`App`]
 impl App {
     /// Registers singleton service
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
-    /// 
+    ///
     /// #[derive(Default, Clone)]
     /// struct Singleton;
-    /// 
+    ///
     /// let mut app = App::new();
     /// let singleton = Singleton::default();
     /// app.add_singleton(singleton);
@@ -66,7 +61,7 @@ impl App {
     ///
     /// #[derive(Clone)]
     /// struct ScopedService;
-    /// 
+    ///
     /// impl Inject for ScopedService {
     ///     fn inject(_: &Container) -> Result<Self, Error> {
     ///         Ok(Self)
@@ -83,16 +78,16 @@ impl App {
 
     /// Registers scoped service that required to be resolved via factory
     ///
-    /// > **Note:** Provided factory function will be called once per scope 
+    /// > **Note:** Provided factory function will be called once per scope
     /// > and the result will be available and reused per this scope lifetime.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
     ///
     /// #[derive(Clone)]
     /// struct ScopedService;
-    /// 
+    ///
     /// impl ScopedService {
     ///     fn new() -> Self {
     ///         ScopedService
@@ -106,7 +101,7 @@ impl App {
     where
         T: Send + Sync + 'static,
         F: GenericFactory<Args, Output = T>,
-        Args: Inject
+        Args: Inject,
     {
         self.container.register_scoped_factory(factory);
         self
@@ -114,9 +109,9 @@ impl App {
 
     /// Registers scoped service that required to be resolved as [`Default`]
     ///
-    /// > **Note:** the [`Default::default`] method will be called once per scope 
+    /// > **Note:** the [`Default::default`] method will be called once per scope
     /// > and the result will be available and reused per this scope lifetime.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
@@ -134,7 +129,7 @@ impl App {
         self.container.register_scoped_default::<T>();
         self
     }
-    
+
     /// Registers transient service
     ///
     /// # Example
@@ -149,7 +144,7 @@ impl App {
     ///         Ok(Self)
     ///     }
     /// }
-    /// 
+    ///
     /// let mut app = App::new();
     /// app.add_transient::<TransientService>();
     /// ```
@@ -160,9 +155,9 @@ impl App {
 
     /// Registers transient service that required to be resolved via factory
     ///
-    /// > **Note:** Provided factory function will be called 
+    /// > **Note:** Provided factory function will be called
     /// > every time once this service requested.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
@@ -183,7 +178,7 @@ impl App {
     where
         T: Send + Sync + 'static,
         F: GenericFactory<Args, Output = T>,
-        Args: Inject
+        Args: Inject,
     {
         self.container.register_transient_factory(factory);
         self
@@ -191,9 +186,9 @@ impl App {
 
     /// Registers transient service that required to be resolved as [`Default`]
     ///
-    /// > **Note:** the [`Default::default`] method will be called 
+    /// > **Note:** the [`Default::default`] method will be called
     /// > every time once this service requested.
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
@@ -215,18 +210,18 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use volga_di::{Container, Inject};
     use super::App;
-    
+    use volga_di::{Container, Inject};
+
     #[derive(Default)]
     struct TestDependency;
-    
+
     impl Inject for TestDependency {
         fn inject(_: &Container) -> Result<Self, volga_di::error::Error> {
             Ok(TestDependency)
         }
     }
-    
+
     #[test]
     fn it_adds_singleton() {
         let mut app = App::new();
@@ -234,7 +229,7 @@ mod tests {
 
         let container = app.container.build();
         let dep = container.resolve_shared::<TestDependency>();
-        
+
         assert!(dep.is_ok());
     }
 
@@ -281,7 +276,7 @@ mod tests {
 
         assert!(dep.is_ok());
     }
-    
+
     #[test]
     fn it_adds_transient_factory() {
         let mut app = App::new();

@@ -1,4 +1,4 @@
-﻿//! Macros for `OK 200` HTTP responses.
+//! Macros for `OK 200` HTTP responses.
 
 /// Creates a `200 OK` response.
 ///
@@ -376,7 +376,7 @@ mod tests {
 
     #[derive(Serialize)]
     struct TestPayload {
-        name: String
+        name: String,
     }
 
     headers! {
@@ -386,26 +386,36 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_json_ok_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = ok!(payload);
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/json"
+        );
         assert_eq!(response.status(), 200);
     }
 
     #[tokio::test]
     async fn it_creates_json_from_inline_struct_ok_response() {
-        let response = ok!(TestPayload { name: "test".into() });
+        let response = ok!(TestPayload {
+            name: "test".into()
+        });
 
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
         assert_eq!(String::from_utf8_lossy(body), "{\"name\":\"test\"}");
-        assert_eq!(response.headers().get("Content-Type").unwrap(), "application/json");
+        assert_eq!(
+            response.headers().get("Content-Type").unwrap(),
+            "application/json"
+        );
         assert_eq!(response.status(), 200);
     }
 
@@ -428,7 +438,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_anonymous_type_json_ok_variant_2_response() {
-        let response = ok! { 
+        let response = ok! {
             "name_1": 1,
             "name_2": "test 2"
         };
@@ -438,7 +448,10 @@ mod tests {
         let mut response = response.unwrap();
         let body = &response.body_mut().collect().await.unwrap().to_bytes();
 
-        assert_eq!(String::from_utf8_lossy(body), "{\"name_1\":1,\"name_2\":\"test 2\"}");
+        assert_eq!(
+            String::from_utf8_lossy(body),
+            "{\"name_1\":1,\"name_2\":\"test 2\"}"
+        );
         assert_eq!(
             response.headers().get("Content-Type").unwrap(),
             "application/json"
@@ -557,7 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_array_ok_response() {
-        let vec = vec![1,2,3];
+        let vec = vec![1, 2, 3];
         let response = ok!(vec);
 
         assert!(response.is_ok());
@@ -666,7 +679,9 @@ mod tests {
 
     #[tokio::test]
     async fn in_creates_json_response_with_custom_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = ok!(payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
@@ -730,10 +745,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_empty_ok_response_with_raw_headers() {
-        let response = ok!([
-            ("x-api-key", "some api key"),
-            ("x-req-id", "some req id"),
-        ]);
+        let response = ok!([("x-api-key", "some api key"), ("x-req-id", "some req id"),]);
 
         assert!(response.is_ok());
 
@@ -865,7 +877,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_explicit_json_ok_response() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = ok!(json: payload);
 
         assert!(response.is_ok());
@@ -901,7 +915,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_creates_explicit_json_response_with_custom_headers() {
-        let payload = TestPayload { name: "test".into() };
+        let payload = TestPayload {
+            name: "test".into(),
+        };
         let response = ok!(json: payload; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),

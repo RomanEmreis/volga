@@ -5,14 +5,17 @@
 //! user-defined authentication claims to handlers.
 
 use super::claims::AuthClaims;
-use std::ops::Deref;
-use futures_util::future::{ready, Ready};
-use hyper::http::{request::Parts, Extensions};
 use crate::{
-    http::{FromRequestParts, FromRequestRef, endpoints::args::{FromPayload, Payload, Source}},
-    error::Error,
     HttpRequest,
+    error::Error,
+    http::{
+        FromRequestParts, FromRequestRef,
+        endpoints::args::{FromPayload, Payload, Source},
+    },
 };
+use futures_util::future::{Ready, ready};
+use hyper::http::{Extensions, request::Parts};
+use std::ops::Deref;
 
 /// Extractor that enforces authentication for a handler.
 ///
@@ -23,18 +26,18 @@ use crate::{
 /// ```no_run
 /// use volga::{App, auth::{Authenticated, AuthClaims, roles}};
 /// use serde::Deserialize;
-/// 
+///
 /// #[derive(Clone, Deserialize)]
 /// struct MyClaims {
 ///     role: String
 /// }
-/// 
+///
 /// impl AuthClaims for MyClaims {
 ///     fn role(&self) -> Option<&str> {
 ///         Some(self.role.as_str())
 ///     }
 /// }
-/// 
+///
 /// async fn handler(auth: Authenticated<MyClaims>) {
 ///     println!("{}", auth.role);
 /// }
@@ -45,9 +48,7 @@ pub struct Authenticated<T: AuthClaims>(pub(crate) T);
 impl<T: AuthClaims> std::fmt::Debug for Authenticated<T> {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Authenticated")
-            .field(&"[redacted]")
-            .finish()
+        f.debug_tuple("Authenticated").field(&"[redacted]").finish()
     }
 }
 
@@ -79,13 +80,14 @@ impl<T: AuthClaims> Authenticated<T> {
 
 impl<T> TryFrom<&Extensions> for Authenticated<T>
 where
-    T: AuthClaims + Send + Sync + 'static
+    T: AuthClaims + Send + Sync + 'static,
 {
     type Error = Error;
 
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
-        extensions.get()
+        extensions
+            .get()
             .cloned()
             .ok_or_else(|| Error::server_error("Client IP: missing"))
     }
@@ -93,10 +95,10 @@ where
 
 impl<T> TryFrom<&Parts> for Authenticated<T>
 where
-    T: AuthClaims + Send + Sync + 'static
+    T: AuthClaims + Send + Sync + 'static,
 {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
         Self::try_from(&parts.extensions)
@@ -106,7 +108,7 @@ where
 /// Extracts `Authenticated<T>` from request parts
 impl<T> FromRequestParts for Authenticated<T>
 where
-    T: AuthClaims + Send + Sync + 'static
+    T: AuthClaims + Send + Sync + 'static,
 {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
@@ -117,7 +119,7 @@ where
 /// Extracts `Authenticated<T>` from request
 impl<T> FromRequestRef for Authenticated<T>
 where
-    T: AuthClaims + Send + Sync + 'static
+    T: AuthClaims + Send + Sync + 'static,
 {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
@@ -128,27 +130,29 @@ where
 /// Extracts `Authenticated<T>` from the request payload
 impl<T> FromPayload for Authenticated<T>
 where
-    T: AuthClaims + Send + Sync + 'static
+    T: AuthClaims + Send + Sync + 'static,
 {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(parts.try_into())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use hyper::{Request, http::Extensions};
-    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
-    use serde::{Serialize, Deserialize};
-    use crate::{HttpBody, HttpRequest};
-    use crate::claims;
     use super::*;
+    use crate::claims;
+    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
+    use crate::{HttpBody, HttpRequest};
+    use hyper::{Request, http::Extensions};
+    use serde::{Deserialize, Serialize};
 
     claims! {
         #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -160,12 +164,9 @@ mod tests {
     #[tokio::test]
     async fn it_reads_from_payload() {
         let auth = Authenticated(MyClaims {
-            sub: "sub".to_string()
+            sub: "sub".to_string(),
         });
-        let req = Request::get("/")
-            .extension(auth.clone())
-            .body(())
-            .unwrap();
+        let req = Request::get("/").extension(auth.clone()).body(()).unwrap();
 
         let (parts, _) = req.into_parts();
         let from_payload = Authenticated::<MyClaims>::from_payload(Payload::Parts(&parts))
@@ -178,7 +179,7 @@ mod tests {
     #[test]
     fn it_gets_from_extensions() {
         let auth = Authenticated(MyClaims {
-            sub: "sub".to_string()
+            sub: "sub".to_string(),
         });
         let mut extensions = Extensions::new();
         extensions.insert(auth.clone());
@@ -200,12 +201,9 @@ mod tests {
     #[test]
     fn it_gets_from_request_parts() {
         let auth = Authenticated(MyClaims {
-            sub: "sub".to_string()
+            sub: "sub".to_string(),
         });
-        let req = Request::get("/")
-            .extension(auth.clone())
-            .body(())
-            .unwrap();
+        let req = Request::get("/").extension(auth.clone()).body(()).unwrap();
 
         let (parts, _) = req.into_parts();
         let from_parts = Authenticated::<MyClaims>::from_parts(&parts).unwrap();
@@ -216,7 +214,7 @@ mod tests {
     #[test]
     fn it_gets_from_request_ref() {
         let auth = Authenticated(MyClaims {
-            sub: "sub".to_string()
+            sub: "sub".to_string(),
         });
         let req = Request::get("/")
             .extension(auth.clone())
@@ -234,7 +232,7 @@ mod tests {
     #[test]
     fn it_debugs() {
         let auth = Authenticated(MyClaims {
-            sub: "sub".to_string()
+            sub: "sub".to_string(),
         });
 
         assert_eq!(format!("{auth:?}"), r#"Authenticated("[redacted]")"#);

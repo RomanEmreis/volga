@@ -1,6 +1,6 @@
 //! Helpers for OpenAPI UI.
 
-use super::config::{OpenApiSpec, DEFAULT_SPEC_PATH};
+use super::config::{DEFAULT_SPEC_PATH, OpenApiSpec};
 
 const SWAGGER_UI_CDN_BASE: &str = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.31.2";
 
@@ -15,20 +15,26 @@ pub fn ui_html(specs: &[OpenApiSpec], ui_title: &str) -> String {
         format!(r#"url: {},"#, js_string(url))
     } else {
         // urls: [{url, name}, ...] + primaryName
-        let urls = specs.iter().map(|s| {
-            format!(
-                r#"{{ url: {}, name: {} }}"#,
-                js_string(&s.spec_path),
-                js_string(&s.name),
-            )
-        }).collect::<Vec<_>>().join(",\n          ");
+        let urls = specs
+            .iter()
+            .map(|s| {
+                format!(
+                    r#"{{ url: {}, name: {} }}"#,
+                    js_string(&s.spec_path),
+                    js_string(&s.name),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",\n          ");
 
         let primary = js_string(&specs[0].name);
 
-        format!(r#"urls: [
+        format!(
+            r#"urls: [
             {urls}
         ],
-        "urls.primaryName": {primary},"#)
+        "urls.primaryName": {primary},"#
+        )
     };
 
     format!(
@@ -125,9 +131,14 @@ mod tests {
 
     #[test]
     fn ui_html_escapes_title_html() {
-        let html = ui_html(&[OpenApiSpec::new("v1")], r#"</title><script>alert(1)</script>"#);
+        let html = ui_html(
+            &[OpenApiSpec::new("v1")],
+            r#"</title><script>alert(1)</script>"#,
+        );
 
-        assert!(html.contains("<title>&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title>"));
+        assert!(
+            html.contains("<title>&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;</title>")
+        );
         assert!(!html.contains("</title><script>alert(1)</script>"));
     }
 

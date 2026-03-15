@@ -1,13 +1,13 @@
-﻿//! Extractors for middleware functions
+//! Extractors for middleware functions
 
 use futures_util::future::BoxFuture;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use super::{HttpContext, NextFn};
 use crate::error::Error;
 use crate::{HttpRequestMut, HttpResponse, HttpResult};
-use super::{HttpContext, NextFn};
 
 /// Internal state machine for [`Next`]
 ///
@@ -36,7 +36,7 @@ enum NextState {
 /// });
 /// ```
 pub struct Next {
-    state: Option<NextState>
+    state: Option<NextState>,
 }
 
 impl std::fmt::Debug for Next {
@@ -80,7 +80,9 @@ impl Next {
     /// this future is first polled. This avoids a heap allocation when the
     /// middleware exits early without awaiting `next`.
     pub fn new(ctx: HttpContext, next: NextFn) -> Self {
-        Self { state: Some(NextState::Pending(ctx, next)) }
+        Self {
+            state: Some(NextState::Pending(ctx, next)),
+        }
     }
 }
 
@@ -125,7 +127,7 @@ where
 {
     type Output = Fut::Output;
     type Future = Fut;
-    
+
     #[inline]
     fn call(&self, req: HttpRequestMut, _args: ()) -> Self::Future {
         self(req)
@@ -187,12 +189,12 @@ define_generic_mw_handler! { T1 T2 T3 T4 T5 }
 
 #[cfg(test)]
 mod tests {
+    use super::{MapOkHandler, MiddlewareHandler, Next, NextState};
+    use crate::error::Error;
+    use crate::{HttpBody, HttpResponse, status};
+    use futures_util::task::noop_waker_ref;
     use std::pin::Pin;
     use std::task::{Context, Poll};
-    use futures_util::task::noop_waker_ref;
-    use crate::{HttpBody, HttpResponse, status};
-    use crate::error::Error;
-    use super::{MapOkHandler, MiddlewareHandler, Next, NextState};
 
     #[test]
     fn next_returns_error_when_polled_after_completion() {

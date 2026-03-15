@@ -1,3 +1,3 @@
-﻿//! Utilities and reusable helpers
+//! Utilities and reusable helpers
 
 pub mod str;

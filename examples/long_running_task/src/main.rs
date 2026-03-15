@@ -4,7 +4,7 @@
 //! cargo run -p long_running_task
 //! ```
 
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 use volga::{App, CancellationToken};
 
 async fn long_running_task() {
@@ -36,27 +36,33 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     // Example of a long-running task
-    app.map_get("/long-task", |cancellation_token: CancellationToken| async move {
-        let cancellation_token = cancellation_token.into_inner();
-        tokio::select! {
-            _ = cancellation_token.cancelled() => {
-                println!("Task was cancelled");
-            },
-            _ = long_running_task() => ()
-        }
-        "done"
-    });
+    app.map_get(
+        "/long-task",
+        |cancellation_token: CancellationToken| async move {
+            let cancellation_token = cancellation_token.into_inner();
+            tokio::select! {
+                _ = cancellation_token.cancelled() => {
+                    println!("Task was cancelled");
+                },
+                _ = long_running_task() => ()
+            }
+            "done"
+        },
+    );
 
     // Example of a long-running task with a spawned task
-    app.map_get("/another-long-task", |cancellation_token: CancellationToken| async move {
-        let long_running_task = tokio::task::spawn(async move {
-            another_long_running_task(cancellation_token.clone()).await;
-        });
+    app.map_get(
+        "/another-long-task",
+        |cancellation_token: CancellationToken| async move {
+            let long_running_task = tokio::task::spawn(async move {
+                another_long_running_task(cancellation_token.clone()).await;
+            });
 
-        long_running_task.await.unwrap();
+            long_running_task.await.unwrap();
 
-        "done"
-    });
+            "done"
+        },
+    );
 
     app.run().await
 }

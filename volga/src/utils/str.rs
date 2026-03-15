@@ -1,4 +1,4 @@
-﻿//! Utilities for `String`, `str`, `[u8]`
+//! Utilities for `String`, `str`, `[u8]`
 
 use memchr::memchr_iter;
 
@@ -35,7 +35,7 @@ pub(crate) struct MemchrSplitIter<'a> {
     last: usize,
 }
 
-/// An iterator over the substrings of a byte slice separated by a delimiter, 
+/// An iterator over the substrings of a byte slice separated by a delimiter,
 /// excluding empty substrings.
 pub(crate) struct MemchrSplitNonEmpty<'a> {
     value: &'a [u8],
@@ -87,19 +87,18 @@ impl<'a> Iterator for MemchrSplitIter<'a> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn it_splits_str() {
         let str = "asdsa,faf,dfd,dfffffff,fdfsdfdsfd,";
-        
+
         let parts = memchr_split(b',', str.as_bytes()).collect::<Vec<_>>();
-        
+
         assert_eq!(parts.len(), 6);
-        
+
         assert_eq!(parts[0], b"asdsa");
         assert_eq!(parts[1], b"faf");
         assert_eq!(parts[2], b"dfd");
@@ -122,13 +121,13 @@ mod tests {
         assert_eq!(parts[3], b"dfffffff");
         assert_eq!(parts[4], b"fdfsdfdsfd");
     }
-    
+
     #[test]
     fn it_splits_empty_str() {
         let str = "";
-        
+
         let parts = memchr_split(b',', str.as_bytes()).collect::<Vec<_>>();
-        
+
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0], b"");
     }

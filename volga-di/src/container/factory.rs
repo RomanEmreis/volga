@@ -2,22 +2,22 @@
 
 use super::Error;
 
-/// A trait that describes a generic factory function 
+/// A trait that describes a generic factory function
 /// that can resolve objects registered in a DI container
 pub trait GenericFactory<Args>: Send + Sync + 'static {
     /// A type of object that will be resolved
     type Output;
-    
+
     /// Calls a generic function and returns either a resolved object or error
     fn call(&self, args: Args) -> Result<Self::Output, Error>;
 }
 
 impl<F, R> GenericFactory<()> for F
 where
-    F: Fn() -> R + Send + Sync + 'static
+    F: Fn() -> R + Send + Sync + 'static,
 {
     type Output = R;
-    
+
     #[inline]
     fn call(&self, _: ()) -> Result<Self::Output, Error> {
         Ok(self())
@@ -36,7 +36,7 @@ macro_rules! define_generic_factory ({ $($param:ident)* } => {
         fn call(&self, ($($param,)*): ($($param,)*)) -> Result<Self::Output, Error> {
             (self)($($param,)*)
         }
-    } 
+    }
 });
 
 define_generic_factory! { T1 }
@@ -47,8 +47,8 @@ define_generic_factory! { T1 T2 T3 T4 T5 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Container, ContainerBuilder, Inject};
     use super::*;
+    use crate::{Container, ContainerBuilder, Inject};
 
     #[derive(Debug, Clone, Copy)]
     struct X(i32);
@@ -81,7 +81,7 @@ mod tests {
         let container = container.build();
 
         let point = container.resolve::<Point>().unwrap();
-        
+
         assert_eq!(point.0.0, 1);
         assert_eq!(point.1.0, 2);
     }
@@ -100,7 +100,7 @@ mod tests {
         let container = container.build();
 
         let point = container.resolve::<Point>().unwrap();
-        
+
         assert_eq!(point.0.0, 1);
         assert_eq!(point.1.0, 2);
     }

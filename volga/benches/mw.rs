@@ -2,10 +2,10 @@
 
 use volga::App;
 
-use std::hint::black_box;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use futures_util::future::join_all;
 use reqwest::Client;
+use std::hint::black_box;
 use tokio::{runtime::Runtime, time::Instant};
 
 use std::time::Duration;
@@ -43,18 +43,19 @@ fn benchmark(c: &mut Criterion) {
                 .without_greeter();
 
             app.map_get("/valid", || async {}).filter(|| async { true });
-            app.map_get("/invalid", || async {}).filter(|| async { false });
+            app.map_get("/invalid", || async {})
+                .filter(|| async { false });
 
             _ = app.run().await;
         });
     });
 
-    c.bench_function("valid filter", |b| b.iter_custom(
-        |iters| rt.block_on(routing(iters, black_box("/valid")))
-    ));
-    c.bench_function("invalid filter", |b| b.iter_custom(
-        |iters| rt.block_on(routing(iters, black_box("/invalid")))
-    ));
+    c.bench_function("valid filter", |b| {
+        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/valid"))))
+    });
+    c.bench_function("invalid filter", |b| {
+        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/invalid"))))
+    });
 }
 
 criterion_group!(benches, benchmark);

@@ -1,18 +1,19 @@
 //! OpenAPI registry and configuration.
 
+use crate::{
+    App,
+    headers::{CacheControl, ETag, Header, HttpHeaders},
+    http::Method,
+};
 use std::{collections::HashMap, sync::Arc};
-use crate::{App, http::Method, headers::{Header, HttpHeaders, CacheControl, ETag}};
 use volga_open_api::ui_html;
 
 pub use volga_open_api::{
-    OpenApiConfig, 
-    OpenApiRegistry, 
-    OpenApiSpec, 
-    OpenApiRouteConfig,
-    OpenApiDocument
+    OpenApiConfig, OpenApiDocument, OpenApiRegistry, OpenApiRouteConfig, OpenApiSpec,
 };
 
-pub(super) const OPEN_API_NOT_EXPOSED_WARN: &str = "OpenAPI configured but endpoints not exposed; call app.use_open_api() to serve spec/UI.";
+pub(super) const OPEN_API_NOT_EXPOSED_WARN: &str =
+    "OpenAPI configured but endpoints not exposed; call app.use_open_api() to serve spec/UI.";
 
 #[derive(Debug, Default)]
 pub(super) struct OpenApiState {
@@ -31,9 +32,7 @@ impl OpenApiState {
     /// Returns `true` if OpenAPI endpoints were exposed
     #[inline]
     pub(super) fn is_configure_but_not_exposed(&self) -> bool {
-        self.config
-            .as_ref()
-            .is_some_and(|cfg| !cfg.exposed)
+        self.config.as_ref().is_some_and(|cfg| !cfg.exposed)
     }
 
     /// Updates OpenAPI configuration for the route
@@ -58,11 +57,7 @@ impl OpenApiState {
 
     /// Applies new route registration
     #[inline]
-    pub(super) fn on_route_mapped(
-        &mut self,
-        key: RouteKey,
-        auto: OpenApiRouteConfig
-    ) {
+    pub(super) fn on_route_mapped(&mut self, key: RouteKey, auto: OpenApiRouteConfig) {
         if let Some(entry) = self.route_configs.get_mut(&key) {
             *entry = auto;
 
@@ -76,7 +71,7 @@ impl OpenApiState {
             reg.register_route(&key.method, &key.pattern, &auto);
             reg.apply_route_config(&key.method, &key.pattern, &auto);
         }
-        
+
         self.route_configs.insert(key, auto);
     }
 
@@ -112,7 +107,7 @@ impl App {
     {
         let config = config(self.openapi.config.unwrap_or_default());
         let registry = OpenApiRegistry::new(config.clone());
-        
+
         self.openapi.config = Some(config);
         self.openapi.registry = Some(registry);
         self.openapi.replay_all_routes_to_registry();
@@ -129,30 +124,32 @@ impl App {
 
     /// Registers the OpenAPI JSON endpoint.
     pub fn use_open_api(&mut self) -> &mut Self {
-        let (Some(registry), Some(config)) = (self.openapi.registry.clone(), &mut self.openapi.config) else {
+        let (Some(registry), Some(config)) =
+            (self.openapi.registry.clone(), &mut self.openapi.config)
+        else {
             panic!(
                 "OpenAPI is not configured. Use `App::with_open_api` or `App::set_open_api` to configure it."
             );
         };
-        
+
         config.exposed = true;
-        
+
         let config = config.clone();
         let cache_control = create_spec_cache_control();
         for spec in registry.specs().to_vec() {
             let registry = registry.clone();
             let cache_control = cache_control.clone();
-            
+
             self.map_get(&spec.spec_path, move || {
                 let spec_name = spec.name.clone();
                 let registry = registry.clone();
                 let cache_control = cache_control.clone();
-                
+
                 async move {
                     let Some(doc) = registry.document_by_name(&spec_name) else {
                         return crate::status!(404);
                     };
-                    
+
                     crate::ok!(doc; [cache_control])
                 }
             });
@@ -162,19 +159,19 @@ impl App {
             let html = ui_html(registry.specs(), config.title());
             let etag = create_etag(html.as_bytes());
             let cache_control = create_ui_cache_control();
-            
+
             self.map_get(config.ui_path(), move |headers: HttpHeaders| {
                 let etag = etag.clone();
                 let cache_control = cache_control.clone();
                 let html = html.clone();
-                
+
                 async move {
                     if crate::headers::helpers::validate_etag(&etag, &headers) {
                         return crate::status!(304; [Header::<ETag>::try_from(etag)?]);
                     }
-                    
+
                     crate::html!(html; [
-                        cache_control, 
+                        cache_control,
                         Header::<ETag>::try_from(etag)?
                     ])
                 }
@@ -190,8 +187,9 @@ fn create_spec_cache_control() -> Header<CacheControl> {
         CacheControl::default()
             .with_public()
             .with_max_age(60)
-            .with_stale_while_revalidate(600))
-        .expect("invalid cache control header")
+            .with_stale_while_revalidate(600),
+    )
+    .expect("invalid cache control header")
 }
 
 fn create_ui_cache_control() -> Header<CacheControl> {
@@ -199,13 +197,14 @@ fn create_ui_cache_control() -> Header<CacheControl> {
         CacheControl::default()
             .with_public()
             .with_max_age(3600)
-            .with_stale_while_revalidate(86400))
-        .expect("invalid cache control header")
+            .with_stale_while_revalidate(86400),
+    )
+    .expect("invalid cache control header")
 }
 
 fn create_etag(bytes: &[u8]) -> ETag {
-    use sha1::{Sha1, Digest};
-    
+    use sha1::{Digest, Sha1};
+
     let mut hasher = Sha1::new();
     hasher.update(bytes);
 
@@ -290,12 +289,15 @@ mod tests {
         let json = serde_json::to_value(doc).expect("serialize openapi doc");
 
         assert_eq!(
-            json["paths"]["/users"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]["type"],
+            json["paths"]["/users"]["get"]["responses"]["200"]["content"]["application/json"]["schema"]
+                ["type"],
             Value::String("object".to_string())
         );
-        assert!(json["paths"]["/users"]["get"]["responses"]["200"]["content"]
-            .get("text/plain; charset=utf-8")
-            .is_none());
+        assert!(
+            json["paths"]["/users"]["get"]["responses"]["200"]["content"]
+                .get("text/plain; charset=utf-8")
+                .is_none()
+        );
     }
 
     #[test]
@@ -320,14 +322,18 @@ mod tests {
             super::OpenApiRouteConfig::default().produces_text(200u16),
         );
 
-        let before = replacement_registry.document_by_name("v1").expect("document");
+        let before = replacement_registry
+            .document_by_name("v1")
+            .expect("document");
         let before_json = serde_json::to_value(before).expect("serialize");
         assert!(before_json["paths"].get("/users").is_none());
 
         state.registry = Some(replacement_registry.clone());
         state.replay_all_routes_to_registry();
 
-        let after = replacement_registry.document_by_name("v1").expect("document");
+        let after = replacement_registry
+            .document_by_name("v1")
+            .expect("document");
         let after_json = serde_json::to_value(after).expect("serialize");
         assert!(after_json["paths"].get("/users").is_some());
     }

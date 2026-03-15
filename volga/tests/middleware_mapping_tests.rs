@@ -1,12 +1,12 @@
-﻿#![allow(missing_docs)]
+#![allow(missing_docs)]
 #![allow(unused)]
 #![cfg(all(feature = "test", feature = "middleware"))]
 
 use hyper::StatusCode;
-use volga::{HttpRequestMut, HttpResponse, ok};
 use volga::error::Error;
-use volga::headers::{HttpHeaders, headers, Header};
+use volga::headers::{Header, HttpHeaders, headers};
 use volga::test::TestServer;
+use volga::{HttpRequestMut, HttpResponse, ok};
 
 headers! {
     (XTest, "x-test")
@@ -15,18 +15,14 @@ headers! {
 #[tokio::test]
 async fn it_adds_middleware_request() {
     let server = TestServer::spawn(|app| {
-        app.wrap(|context, next| async move {
-            next(context).await
-        });
-        app.wrap(|_, _| async move {
-            ok!("Pass!")
-        });
-        app.map_get("/test", || async {
-            ok!("Unreachable!")
-        });
-    }).await;
-    
-    let response = server.client()
+        app.wrap(|context, next| async move { next(context).await });
+        app.wrap(|_, _| async move { ok!("Pass!") });
+        app.map_get("/test", || async { ok!("Unreachable!") });
+    })
+    .await;
+
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -34,7 +30,7 @@ async fn it_adds_middleware_request() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -45,12 +41,12 @@ async fn it_adds_map_ok_middleware() {
             resp.insert_header(Header::<XTest>::try_from("Test").unwrap());
             resp
         });
-        app.map_get("/test", || async {
-            ok!("Pass!")
-        });
-    }).await;
+        app.map_get("/test", || async { ok!("Pass!") });
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -59,7 +55,7 @@ async fn it_adds_map_ok_middleware() {
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("X-Test").unwrap(), "Test");
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -74,9 +70,11 @@ async fn it_adds_map_req_middleware() {
             let val = headers.try_get::<XTest>()?;
             Ok::<_, Error>(val.to_string())
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -84,22 +82,23 @@ async fn it_adds_map_req_middleware() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_adds_map_ok_middleware_for_route() {
     let server = TestServer::spawn(|app| {
-        app
-            .map_get("/test", async || "Pass!")
+        app.map_get("/test", async || "Pass!")
             .map_ok(|mut resp: HttpResponse| async move {
                 resp.try_insert_header::<XTest>("Test").unwrap();
                 resp
             });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -108,33 +107,34 @@ async fn it_adds_map_ok_middleware_for_route() {
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("X-Test").unwrap(), "Test");
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_adds_map_req_middleware_for_route() {
     let server = TestServer::spawn(|app| {
-        app
-            .map_get("/test", |headers: HttpHeaders| async move {
-                let val = headers.try_get::<XTest>()?;
-                Ok::<_, Error>(val.to_string())
-            })
-            .tap_req(|mut req: HttpRequestMut| async move {
-                req.insert_header(Header::<XTest>::try_from("Pass!").unwrap());
-                req
-            });
-    }).await;
+        app.map_get("/test", |headers: HttpHeaders| async move {
+            let val = headers.try_get::<XTest>()?;
+            Ok::<_, Error>(val.to_string())
+        })
+        .tap_req(|mut req: HttpRequestMut| async move {
+            req.insert_header(Header::<XTest>::try_from("Pass!").unwrap());
+            req
+        });
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
         .unwrap();
-    
+
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -148,9 +148,11 @@ async fn it_adds_map_ok_middleware_for_group() {
             });
             api.map_get("/test", async || "Pass!");
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/tests/test"))
         .send()
         .await
@@ -159,7 +161,7 @@ async fn it_adds_map_ok_middleware_for_group() {
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("X-Test").unwrap(), "Test");
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -176,9 +178,11 @@ async fn it_adds_map_req_middleware_for_group() {
                 Ok::<_, Error>(val.to_string())
             });
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/tests/test"))
         .send()
         .await
@@ -186,7 +190,7 @@ async fn it_adds_map_req_middleware_for_group() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -201,9 +205,11 @@ async fn it_adds_map_err_middleware_for_route() {
         .map_get("/test", || async {
             Err::<(), Error>(Error::server_error("Some Error"))
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -211,7 +217,7 @@ async fn it_adds_map_err_middleware_for_route() {
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(response.text().await.unwrap(), "Some Error occurred!");
-    
+
     server.shutdown().await;
 }
 
@@ -228,9 +234,11 @@ async fn it_adds_map_err_middleware_for_group() {
                 Err::<(), Error>(Error::server_error("Some Error"))
             });
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/tests/test"))
         .send()
         .await
@@ -238,19 +246,19 @@ async fn it_adds_map_err_middleware_for_group() {
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(response.text().await.unwrap(), "Some Error occurred!");
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_adds_invalid_filter_middleware_for_route() {
     let server = TestServer::spawn(|app| {
-        app
-            .map_get("/test", async || ())
-            .filter(async || false);
-    }).await;
+        app.map_get("/test", async || ()).filter(async || false);
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -258,22 +266,22 @@ async fn it_adds_invalid_filter_middleware_for_route() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
-        response.text().await.unwrap(), 
+        response.text().await.unwrap(),
         "Validation: One or more request parameters are incorrect"
     );
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_adds_valid_filter_middleware_for_route() {
     let server = TestServer::spawn(|app| {
-        app
-            .map_get("/test", async || "Pass!")
-            .filter(async || true);
-    }).await;
+        app.map_get("/test", async || "Pass!").filter(async || true);
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -281,7 +289,7 @@ async fn it_adds_valid_filter_middleware_for_route() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -292,9 +300,11 @@ async fn it_adds_invalid_filter_middleware_for_group() {
             api.filter(async || false);
             api.map_get("/test", async || ());
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/tests/test"))
         .send()
         .await
@@ -302,10 +312,10 @@ async fn it_adds_invalid_filter_middleware_for_group() {
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(
-        response.text().await.unwrap(), 
+        response.text().await.unwrap(),
         "Validation: One or more request parameters are incorrect"
     );
-    
+
     server.shutdown().await;
 }
 
@@ -316,9 +326,11 @@ async fn it_adds_valid_filter_middleware_for_group() {
             api.filter(async || true);
             api.map_get("/test", async || "Pass!");
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/tests/test"))
         .send()
         .await
@@ -326,7 +338,7 @@ async fn it_adds_valid_filter_middleware_for_group() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -336,9 +348,11 @@ async fn it_adds_with_middleware() {
         app.wrap(|ctx, next| async move { next(ctx).await })
             .with(|next| next)
             .map_get("/test", || async { "Pass!" });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -346,21 +360,22 @@ async fn it_adds_with_middleware() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_adds_shortcut_with_middleware() {
     let server = TestServer::spawn(|app| {
-        app
-            .wrap(async |ctx, next| next(ctx).await)
+        app.wrap(async |ctx, next| next(ctx).await)
             .with(async |_| volga::bad_request!("Error!"))
             .with(|next| next)
             .map_get("/test", async || "Pass!");
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -368,21 +383,21 @@ async fn it_adds_shortcut_with_middleware() {
 
     assert!(!response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Error!");
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_adds_with_middleware_for_route() {
     let server = TestServer::spawn(|app| {
-        app
-            .map_get("/test", async || "Pass!")
+        app.map_get("/test", async || "Pass!")
             .wrap(async |ctx, next| next(ctx).await)
             .with(|next| next);
+    })
+    .await;
 
-    }).await;
-
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -390,21 +405,22 @@ async fn it_adds_with_middleware_for_route() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn it_adds_shortcut_with_middleware_for_route() {
     let server = TestServer::spawn(|app| {
-        app
-            .map_get("/test", async || "Pass!")
+        app.map_get("/test", async || "Pass!")
             .wrap(|ctx, next| async move { next(ctx).await })
             .with(|_| async move { volga::bad_request!("Error!") })
             .with(|next| next);
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/test"))
         .send()
         .await
@@ -412,7 +428,7 @@ async fn it_adds_shortcut_with_middleware_for_route() {
 
     assert!(!response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Error!");
-    
+
     server.shutdown().await;
 }
 
@@ -420,15 +436,16 @@ async fn it_adds_shortcut_with_middleware_for_route() {
 async fn it_adds_with_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
-            api
-                .wrap(async |ctx, next| next(ctx).await)
+            api.wrap(async |ctx, next| next(ctx).await)
                 .with(|next| next);
 
             api.map_get("/test", || async { "Pass!" });
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/tests//test"))
         .send()
         .await
@@ -436,7 +453,7 @@ async fn it_adds_with_middleware_for_group() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
-    
+
     server.shutdown().await;
 }
 
@@ -444,16 +461,17 @@ async fn it_adds_with_middleware_for_group() {
 async fn it_adds_shortcut_with_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
-            api
-                .wrap(|ctx, next| async move { next(ctx).await })
+            api.wrap(|ctx, next| async move { next(ctx).await })
                 .with(|_| async move { volga::bad_request!("Error!") })
                 .with(|next| next);
-            
+
             api.map_get("/test", || async { "Pass!" });
         })
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/tests//test"))
         .send()
         .await
@@ -461,7 +479,7 @@ async fn it_adds_shortcut_with_middleware_for_group() {
 
     assert!(!response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Error!");
-    
+
     server.shutdown().await;
 }
 #[tokio::test]
@@ -474,9 +492,11 @@ async fn it_routes_nested_group() {
                 users.map_get("/{id}", |id: i32| async move { id.to_string() });
             });
         });
-    }).await;
+    })
+    .await;
 
-    let info = server.client()
+    let info = server
+        .client()
         .get(server.url("/api/info"))
         .send()
         .await
@@ -485,7 +505,8 @@ async fn it_routes_nested_group() {
     assert!(info.status().is_success());
     assert_eq!(info.text().await.unwrap(), "api");
 
-    let user = server.client()
+    let user = server
+        .client()
         .get(server.url("/api/users/42"))
         .send()
         .await
@@ -510,9 +531,11 @@ async fn it_inherits_parent_middleware_in_nested_group() {
                 users.map_get("/list", async || "users");
             });
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/api/users/list"))
         .send()
         .await
@@ -539,9 +562,11 @@ async fn it_applies_child_middleware_only_to_nested_group() {
                 users.map_get("/list", async || "users");
             });
         });
-    }).await;
+    })
+    .await;
 
-    let nested = server.client()
+    let nested = server
+        .client()
         .get(server.url("/api/users/list"))
         .send()
         .await
@@ -550,7 +575,8 @@ async fn it_applies_child_middleware_only_to_nested_group() {
     assert!(nested.status().is_success());
     assert_eq!(nested.headers().get("X-Test").unwrap(), "from-child");
 
-    let parent = server.client()
+    let parent = server
+        .client()
         .get(server.url("/api/info"))
         .send()
         .await
@@ -577,9 +603,11 @@ async fn it_applies_middleware_top_to_bottom_in_nested_group() {
                 });
             });
         });
-    }).await;
+    })
+    .await;
 
-    let response = server.client()
+    let response = server
+        .client()
         .get(server.url("/api/inner/test"))
         .send()
         .await

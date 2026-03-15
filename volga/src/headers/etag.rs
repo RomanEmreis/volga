@@ -1,15 +1,11 @@
-﻿//! Utilities for ETAG header
+//! Utilities for ETAG header
 
 use super::{ETAG, FromHeaders, Header, HeaderMap, HeaderName, HeaderValue};
 use crate::error::Error;
-use std::{
-    borrow::Cow,
-    fmt::Display,
-    ops::Deref
-};
+use std::{borrow::Cow, fmt::Display, ops::Deref};
 
 #[cfg(feature = "static-files")]
-use sha1::{Sha1, Digest};
+use sha1::{Digest, Sha1};
 #[cfg(feature = "static-files")]
 use std::fs::Metadata;
 #[cfg(feature = "static-files")]
@@ -42,18 +38,19 @@ impl FromHeaders for ETag {
 #[cfg(feature = "static-files")]
 impl TryFrom<&Metadata> for ETag {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(metadata: &Metadata) -> Result<Self, Self::Error> {
         let mut hasher = Sha1::new();
         hasher.update(metadata.len().to_string());
-        
+
         let mod_time = metadata.modified()?;
-        let duration = mod_time.duration_since(UNIX_EPOCH)
+        let duration = mod_time
+            .duration_since(UNIX_EPOCH)
             .map_err(Self::Error::server_error)?;
 
         hasher.update(duration.as_secs().to_string());
-        
+
         let tag = format!("{:x}", hasher.finalize());
         ETag::try_weak(tag)
     }
@@ -96,8 +93,7 @@ impl TryFrom<&ETag> for HeaderValue {
 
     #[inline]
     fn try_from(v: &ETag) -> Result<HeaderValue, Error> {
-        HeaderValue::from_str(v.as_ref())
-            .map_err(|_| Error::client_error("Invalid ETag"))
+        HeaderValue::from_str(v.as_ref()).map_err(|_| Error::client_error("Invalid ETag"))
     }
 }
 
@@ -112,9 +108,9 @@ impl TryFrom<ETag> for Header<ETag> {
 
 impl ETag {
     /// Creates a strong [`ETag`]
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// if a tag contains control chars: " or \
     #[inline]
     pub fn strong(tag: impl AsRef<str>) -> Self {
@@ -122,9 +118,9 @@ impl ETag {
     }
 
     /// Creates a weak [`ETag`]
-    /// 
+    ///
     /// # Panics
-    /// 
+    ///
     /// if a tag contains control chars: " or \
     #[inline]
     pub fn weak(tag: impl AsRef<str>) -> Self {
@@ -132,23 +128,27 @@ impl ETag {
     }
 
     /// Creates a strong [`ETag`]
-    /// 
+    ///
     /// Validation: forbid CTL + CRLF, forbid `"` and `\` in tag.
     #[inline]
     pub fn try_strong(tag: impl AsRef<str>) -> Result<Self, Error> {
         let tag = tag.as_ref();
         validate_tag(tag)?;
-        Ok(Self { inner: Cow::Owned(format!("\"{tag}\"")) })
+        Ok(Self {
+            inner: Cow::Owned(format!("\"{tag}\"")),
+        })
     }
 
     ///  Creates a weak [`ETag`]
-    /// 
+    ///
     ///  Validation: forbid CTL + CRLF, forbid `"` and `\` in tag.
     #[inline]
     pub fn try_weak(tag: impl AsRef<str>) -> Result<Self, Error> {
         let tag = tag.as_ref();
         validate_tag(tag)?;
-        Ok(Self { inner: Cow::Owned(format!("W/\"{tag}\"")) })
+        Ok(Self {
+            inner: Cow::Owned(format!("W/\"{tag}\"")),
+        })
     }
 
     /// Parse raw ETag header value: `"..."` or `W/"..."` only.
@@ -156,7 +156,9 @@ impl ETag {
     pub fn parse(raw: impl AsRef<str>) -> Result<Self, Error> {
         let raw = raw.as_ref();
         let r = parse_etag_ref(raw)?;
-        Ok(Self { inner: Cow::Owned(r.raw.to_owned()) })
+        Ok(Self {
+            inner: Cow::Owned(r.raw.to_owned()),
+        })
     }
 
     /// Returns true if this etag is a weak
@@ -194,7 +196,7 @@ impl ETag {
     pub const fn from_static(value: &'static str) -> Header<Self> {
         Header::<Self>::from_static(value)
     }
-                
+
     /// Construct a typed header from bytes (validated).
     #[inline]
     pub fn from_bytes(bytes: &[u8]) -> Result<Header<Self>, Error> {
@@ -222,17 +224,25 @@ impl<'a> ETagRef<'a> {
 
     #[inline]
     #[allow(unused)]
-    pub(crate) fn is_weak(&self) -> bool { self.weak }
+    pub(crate) fn is_weak(&self) -> bool {
+        self.weak
+    }
 
     #[inline]
-    pub(crate) fn tag(&self) -> &'a str { &self.raw[self.start..self.end] }
+    pub(crate) fn tag(&self) -> &'a str {
+        &self.raw[self.start..self.end]
+    }
 
     #[inline]
-    pub(crate) fn weak_eq_tag(&self, other_tag: &str) -> bool { self.tag() == other_tag }
+    pub(crate) fn weak_eq_tag(&self, other_tag: &str) -> bool {
+        self.tag() == other_tag
+    }
 
     #[inline]
     #[allow(unused)]
-    pub(crate) fn weak_eq(&self, other: &ETagRef<'_>) -> bool { self.tag() == other.tag() }
+    pub(crate) fn weak_eq(&self, other: &ETagRef<'_>) -> bool {
+        self.tag() == other.tag()
+    }
 
     #[inline]
     #[allow(unused)]
@@ -277,7 +287,12 @@ pub(crate) fn parse_etag_ref(raw: &str) -> Result<ETagRef<'_>, Error> {
         }
     }
 
-    Ok(ETagRef { raw, start, end, weak })
+    Ok(ETagRef {
+        raw,
+        start,
+        end,
+        weak,
+    })
 }
 
 /// Disallow CRLF + CTL and also disallow `"` and `\` in tag.
@@ -305,13 +320,13 @@ fn validate_tag(tag: &str) -> Result<(), Error> {
 
 #[cfg(test)]
 mod tests {
-    use crate::headers::{ETag, Header};
     use super::parse_etag_ref;
+    use crate::headers::{ETag, Header};
 
     #[test]
     fn it_creates_etag() {
         let etag = ETag::strong("foo");
-        
+
         assert_eq!(etag.as_ref(), "\"foo\"");
     }
 
@@ -553,12 +568,12 @@ mod tests {
         assert!(w1.weak_eq(&w2));
         assert!(!w1.weak_eq(&s3));
     }
-    
+
     #[test]
     fn it_converts_etag_to_header() {
         let etag = ETag::weak("123");
         let header = Header::<ETag>::try_from(etag).unwrap();
-        
+
         assert_eq!(header.name(), "etag");
         assert_eq!(header.value(), "W/\"123\"")
     }

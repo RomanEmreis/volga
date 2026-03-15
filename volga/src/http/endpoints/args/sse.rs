@@ -1,14 +1,14 @@
-﻿//! Utilities for SSE (Server-Sent Events)
+//! Utilities for SSE (Server-Sent Events)
 
-use std::fmt::Debug;
-use crate::{ByteStream, utils::str::memchr_split, error::Error};
+use crate::{ByteStream, error::Error, utils::str::memchr_split};
+use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::stream::{Stream, TryStream};
-use std::time::Duration;
+use pin_project_lite::pin_project;
+use serde::Serialize;
+use std::fmt::Debug;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use bytes::{BufMut, Bytes, BytesMut};
-use serde::Serialize;
-use pin_project_lite::pin_project;
+use std::time::Duration;
 
 const ID: &str = "id";
 const EVENT: &str = "event";
@@ -35,12 +35,12 @@ impl<S> Debug for SseStream<S> {
 
 impl SseStream<()> {
     /// Creates a new [`SseStream`] from an inner stream.
-    /// 
+    ///
     /// Safe: takes `Message` items and encodes them to SSE bytes.
     #[inline]
-    pub fn from_try_messages<T>(stream: T) -> SseStream<
-        impl Stream<Item = Result<Message, Error>> + Send + 'static
-    >
+    pub fn from_try_messages<T>(
+        stream: T,
+    ) -> SseStream<impl Stream<Item = Result<Message, Error>> + Send + 'static>
     where
         T: TryStream<Ok = Message, Error = Error> + Send + 'static,
     {
@@ -58,17 +58,19 @@ where
     pub fn new(inner: S) -> Self {
         Self { inner }
     }
-    
+
     /// Consumes the stream of SSE messages and returns the stream of bytes.
     #[inline]
     pub fn into_bytes(self) -> impl Stream<Item = Result<Bytes, Error>> + Send + 'static {
         use futures_util::StreamExt;
         self.map(|m| m.map(Bytes::from))
     }
-    
+
     /// Consumes the stream of SSE messages and returns the [`ByteStream`].
     #[inline]
-    pub fn into_byte_stream(self) -> ByteStream<impl Stream<Item = Result<Bytes, Error>> + Send + 'static> {
+    pub fn into_byte_stream(
+        self,
+    ) -> ByteStream<impl Stream<Item = Result<Bytes, Error>> + Send + 'static> {
         ByteStream::new(self.into_bytes())
     }
 
@@ -96,11 +98,11 @@ where
 }
 
 /// Creates an asynchronous SSE stream
-/// 
+///
 /// # Example
 /// ```no_run
 /// use volga::{http::sse::Message, error::Error, sse_stream};
-/// 
+///
 /// # async fn docs() {
 /// let stream = sse_stream! {
 ///     // ...
@@ -123,11 +125,11 @@ macro_rules! sse_stream {
 }
 
 /// Represents a single SSE message
-/// 
+///
 /// # Example
 /// ```no_run
 /// use volga::http::sse::Message;
-/// 
+///
 /// let msg = Message::new()
 ///     .data("Hello, World!");
 /// ```
@@ -173,7 +175,7 @@ impl Message {
     }
 
     /// Creates an empty [`Message`] (":\n")
-    /// 
+    ///
     /// This can be useful as a keep-alive mechanism if messages might not be sent regularly.
     #[inline]
     pub fn empty() -> Self {
@@ -184,7 +186,7 @@ impl Message {
         });
         msg
     }
-    
+
     /// Specifies a text `data` for a [`Message`]
     ///
     /// # Example
@@ -238,16 +240,16 @@ impl Message {
     /// use futures_util::TryStreamExt;
     /// use volga::http::sse::Message;
     /// use serde::Serialize;
-    /// 
+    ///
     /// #[derive(Serialize)]
     /// struct Event {
-    ///     msg: String 
+    ///     msg: String
     /// }
-    /// 
-    /// let event = Event { 
+    ///
+    /// let event = Event {
     ///     msg: String::from("Hello, World!")
     /// };
-    /// 
+    ///
     /// let msg = Message::new()
     ///     .json(event);
     /// ```
@@ -289,7 +291,7 @@ impl Message {
     ///     .id("id")
     ///     .event("greeting")
     ///     .data("Hello, World!");
-    /// ``` 
+    /// ```
     #[inline]
     pub fn id(mut self, value: impl AsRef<[u8]>) -> Self {
         self.remove_fields(FieldKind::Id);
@@ -301,9 +303,9 @@ impl Message {
     }
 
     /// Specifies the `retry` field for a [`Message`]
-    /// 
-    /// This represents the reconnection time. If the connection to the server is lost, 
-    /// the client will wait for the specified time before attempting to reconnect. 
+    ///
+    /// This represents the reconnection time. If the connection to the server is lost,
+    /// the client will wait for the specified time before attempting to reconnect.
     ///
     /// # Example
     /// ```no_run
@@ -313,7 +315,7 @@ impl Message {
     /// let msg = Message::new()
     ///     .data("Hello, World!")
     ///     .retry(Duration::from_secs(10));
-    /// ``` 
+    /// ```
     #[inline]
     pub fn retry(mut self, duration: Duration) -> Self {
         let mut buffer = BytesMut::new();
@@ -331,7 +333,7 @@ impl Message {
     }
 
     /// Adds a new comment for a [`Message`].
-    /// 
+    ///
     /// Multiple calls add multiple comments
     ///
     /// # Example
@@ -342,7 +344,7 @@ impl Message {
     ///     .data("Hello, World!")
     ///     .comment("comment 1")
     ///     .comment("comment 2");
-    /// ``` 
+    /// ```
     #[inline]
     pub fn comment(mut self, value: impl AsRef<[u8]>) -> Self {
         self.fields.push(SseField {
@@ -362,13 +364,13 @@ impl Message {
     #[inline]
     fn field(name: &str, value: impl AsRef<[u8]>) -> Bytes {
         let mut buffer = BytesMut::new();
-        
+
         buffer.extend_from_slice(name.as_bytes());
         buffer.put_u8(b':');
         buffer.put_u8(b' ');
         buffer.extend_from_slice(value.as_ref());
         buffer.put_u8(NEW_LINE);
-        
+
         buffer.freeze()
     }
 }
@@ -388,7 +390,7 @@ impl From<Message> for Bytes {
         for field in message.fields {
             buffer.extend(field.bytes);
         }
-        
+
         buffer.put_u8(NEW_LINE);
         buffer.freeze()
     }
@@ -396,11 +398,11 @@ impl From<Message> for Bytes {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-    use bytes::Bytes;
-    use futures_util::{pin_mut, StreamExt, TryStreamExt};
-    use serde::Serialize;
     use super::Message;
+    use bytes::Bytes;
+    use futures_util::{StreamExt, TryStreamExt, pin_mut};
+    use serde::Serialize;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn it_creates_message_repeat_stream() {
@@ -417,7 +419,7 @@ mod tests {
     async fn it_creates_message_once_stream() {
         let stream = Message::new().data("hi!").once();
         pin_mut!(stream);
-        
+
         let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
 
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
@@ -431,7 +433,7 @@ mod tests {
             yield Message::new().data("hi!");
             yield Message::new().data("hi!");
         };
-        
+
         pin_mut!(stream);
 
         let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
@@ -442,7 +444,7 @@ mod tests {
 
         let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
-        
+
         assert!(stream.next().await.is_none());
     }
 
@@ -464,7 +466,6 @@ mod tests {
 
         let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
-
     }
 
     #[tokio::test]
@@ -473,14 +474,15 @@ mod tests {
             yield Message::new().data("hi!");
         };
 
-        let stream = stream.map_ok(|msg| {
-            msg.comment("some comment")
-        });
-        
+        let stream = stream.map_ok(|msg| msg.comment("some comment"));
+
         pin_mut!(stream);
 
         let bytes = Bytes::from(stream.next().await.unwrap().unwrap());
-        assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n: some comment\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "data: hi!\n: some comment\n\n"
+        );
 
         assert!(stream.next().await.is_none());
     }
@@ -492,7 +494,7 @@ mod tests {
         };
 
         let stream = stream.into_bytes();
-        
+
         pin_mut!(stream);
 
         let bytes = stream.next().await.unwrap().unwrap();
@@ -537,13 +539,14 @@ mod tests {
 
     #[test]
     fn it_creates_data_message_with_comment() {
-        let event = Message::new()
-            .comment("some comment")
-            .data("hi!");
+        let event = Message::new().comment("some comment").data("hi!");
 
         let bytes: Bytes = event.into();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), ": some comment\ndata: hi!\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            ": some comment\ndata: hi!\n\n"
+        );
     }
 
     #[test]
@@ -556,13 +559,16 @@ mod tests {
 
         let bytes: Bytes = event.into();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), ": some comment\ndata: hi!\n: another comment\n: one more comment\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            ": some comment\ndata: hi!\n: another comment\n: one more comment\n\n"
+        );
     }
-    
+
     #[test]
     fn it_creates_string_message() {
         let event = Message::new().data("hi!");
-        
+
         let bytes: Bytes = event.into();
 
         assert_eq!(String::from_utf8_lossy(&bytes), "data: hi!\n\n");
@@ -570,53 +576,55 @@ mod tests {
 
     #[test]
     fn it_appends_string_data() {
-        let event = Message::new()
-            .data("Hello")
-            .append("World");
+        let event = Message::new().data("Hello").append("World");
 
         let bytes: Bytes = event.into();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), "data: Hello\ndata: World\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "data: Hello\ndata: World\n\n"
+        );
     }
 
     #[test]
     fn it_creates_multiline_string_data() {
-        let event = Message::new()
-            .data("Hello \nbeautiful \nworld!");
+        let event = Message::new().data("Hello \nbeautiful \nworld!");
 
         let bytes: Bytes = event.into();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), "data: Hello \ndata: beautiful \ndata: world!\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "data: Hello \ndata: beautiful \ndata: world!\n\n"
+        );
     }
 
     #[test]
     fn it_creates_string_event() {
-        let event = Message::new()
-            .event("greet")
-            .data("hi!");
+        let event = Message::new().event("greet").data("hi!");
 
         let bytes: Bytes = event.into();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), "event: greet\ndata: hi!\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "event: greet\ndata: hi!\n\n"
+        );
     }
 
     #[test]
     fn it_creates_string_event_with_id() {
-        let event = Message::new()
-            .id("some id")
-            .event("greet")
-            .data("hi!");
+        let event = Message::new().id("some id").event("greet").data("hi!");
 
         let bytes: Bytes = event.into();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), "id: some id\nevent: greet\ndata: hi!\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "id: some id\nevent: greet\ndata: hi!\n\n"
+        );
     }
 
     #[test]
     fn it_creates_message_with_retry() {
-        let event = Message::new()
-            .data("hi!")
-            .retry(Duration::from_secs(5));
+        let event = Message::new().data("hi!").retry(Duration::from_secs(5));
 
         let bytes: Bytes = event.into();
 
@@ -625,21 +633,31 @@ mod tests {
 
     #[test]
     fn it_creates_json_event() {
-        let event = Message::new().json(Test { value: "test".into() });
+        let event = Message::new().json(Test {
+            value: "test".into(),
+        });
 
         let bytes: Bytes = event.into();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), "data: {\"value\":\"test\"}\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "data: {\"value\":\"test\"}\n\n"
+        );
     }
 
     #[test]
     fn it_converts_json_into_event() {
-        let data = Test { value: "test".into() };
+        let data = Test {
+            value: "test".into(),
+        };
         let event: Message = data.into();
 
         let bytes: Bytes = event.into();
 
-        assert_eq!(String::from_utf8_lossy(&bytes), "data: {\"value\":\"test\"}\n\n");
+        assert_eq!(
+            String::from_utf8_lossy(&bytes),
+            "data: {\"value\":\"test\"}\n\n"
+        );
     }
 
     #[derive(Serialize)]

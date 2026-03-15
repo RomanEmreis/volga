@@ -1,26 +1,25 @@
-﻿use std::sync::Arc;
 use hyper::{Request, body::Incoming};
+use std::sync::Arc;
 
 use crate::{
+    HttpResult,
     error::{
-        ErrorFunc,
-        FallbackFunc,
+        ErrorFunc, FallbackFunc,
         fallback::{PipelineFallbackHandler, default_fallback_handler},
-        handler::{PipelineErrorHandler, WeakErrorHandler, default_error_handler}
+        handler::{PipelineErrorHandler, WeakErrorHandler, default_error_handler},
     },
     http::endpoints::Endpoints,
-    HttpResult
 };
 
 #[cfg(feature = "middleware")]
-use crate::{middleware::{Middlewares, HttpContext, NextFn}};
+use crate::middleware::{HttpContext, Middlewares, NextFn};
 
 pub(crate) struct PipelineBuilder {
     #[cfg(feature = "middleware")]
     middlewares: Middlewares,
     endpoints: Endpoints,
     error_handler: PipelineErrorHandler,
-    fallback_handler: PipelineFallbackHandler
+    fallback_handler: PipelineFallbackHandler,
 }
 
 impl std::fmt::Debug for PipelineBuilder {
@@ -35,7 +34,7 @@ pub(crate) struct Pipeline {
     start: Option<NextFn>,
     endpoints: Endpoints,
     error_handler: PipelineErrorHandler,
-    fallback_handler: PipelineFallbackHandler
+    fallback_handler: PipelineFallbackHandler,
 }
 
 impl PipelineBuilder {
@@ -45,16 +44,16 @@ impl PipelineBuilder {
             middlewares: Middlewares::new(),
             endpoints: Endpoints::new(),
             error_handler: ErrorFunc::new(default_error_handler).into(),
-            fallback_handler: FallbackFunc::new(default_fallback_handler).into()
+            fallback_handler: FallbackFunc::new(default_fallback_handler).into(),
         }
     }
 
     #[cfg(not(feature = "middleware"))]
     pub(super) fn new() -> Self {
-        Self { 
+        Self {
             endpoints: Endpoints::new(),
             error_handler: ErrorFunc::new(default_error_handler).into(),
-            fallback_handler: FallbackFunc::new(default_fallback_handler).into()
+            fallback_handler: FallbackFunc::new(default_fallback_handler).into(),
         }
     }
 
@@ -66,16 +65,16 @@ impl PipelineBuilder {
             endpoints: self.endpoints,
             error_handler: self.error_handler,
             fallback_handler: self.fallback_handler,
-            start
+            start,
         }
     }
 
     #[cfg(not(feature = "middleware"))]
     pub(super) fn build(self) -> Pipeline {
-        Pipeline { 
+        Pipeline {
             endpoints: self.endpoints,
             error_handler: self.error_handler,
-            fallback_handler: self.fallback_handler
+            fallback_handler: self.fallback_handler,
         }
     }
 
@@ -97,7 +96,7 @@ impl PipelineBuilder {
     pub(crate) fn endpoints(&self) -> &Endpoints {
         &self.endpoints
     }
-    
+
     pub(crate) fn set_error_handler(&mut self, handler: PipelineErrorHandler) {
         self.error_handler = handler;
     }
@@ -117,12 +116,12 @@ impl Pipeline {
     pub(super) fn error_handler(&self) -> WeakErrorHandler {
         Arc::downgrade(&self.error_handler)
     }
-    
+
     #[inline]
     pub(super) async fn fallback(&self, req: Request<Incoming>) -> HttpResult {
         self.fallback_handler.call(req).await
     }
-    
+
     #[cfg(feature = "middleware")]
     pub(crate) fn has_middleware_pipeline(&self) -> bool {
         self.start.is_some()
@@ -140,26 +139,31 @@ impl Pipeline {
 
 #[cfg(test)]
 mod tests {
-    use crate::status;
-    use crate::error::{
-        ErrorFunc,
-        FallbackFunc,
-        fallback::PipelineFallbackHandler,
-        handler::PipelineErrorHandler,
-    };
     use super::PipelineBuilder;
+    use crate::error::{
+        ErrorFunc, FallbackFunc, fallback::PipelineFallbackHandler, handler::PipelineErrorHandler,
+    };
+    use crate::status;
 
     #[test]
     fn it_sets_error_and_fallback_handlers() {
         let mut builder = PipelineBuilder::new();
 
-        let error_handler: PipelineErrorHandler = ErrorFunc::new(|_err| async { status!(418) }).into();
+        let error_handler: PipelineErrorHandler =
+            ErrorFunc::new(|_err| async { status!(418) }).into();
         builder.set_error_handler(error_handler.clone());
-        assert!(std::sync::Arc::ptr_eq(&builder.error_handler, &error_handler));
+        assert!(std::sync::Arc::ptr_eq(
+            &builder.error_handler,
+            &error_handler
+        ));
 
-        let fallback_handler: PipelineFallbackHandler = FallbackFunc::new(|| async { status!(404) }).into();
+        let fallback_handler: PipelineFallbackHandler =
+            FallbackFunc::new(|| async { status!(404) }).into();
         builder.set_fallback_handler(fallback_handler.clone());
-        assert!(std::sync::Arc::ptr_eq(&builder.fallback_handler, &fallback_handler));
+        assert!(std::sync::Arc::ptr_eq(
+            &builder.fallback_handler,
+            &fallback_handler
+        ));
     }
 
     #[cfg(feature = "middleware")]

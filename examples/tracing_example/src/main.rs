@@ -4,9 +4,9 @@
 //! cargo run -p tracing_example
 //! ```
 
-use volga::{App, error::Error, status};
-use tracing::{info, trace, error};
+use tracing::{error, info, trace};
 use tracing_subscriber::prelude::*;
+use volga::{App, error::Error, status};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -17,9 +17,7 @@ async fn main() -> std::io::Result<()> {
 
     let mut app = App::new()
         // Configuring tracing
-        .with_tracing(|tracing| tracing
-            .with_header()
-            .with_header_name("x-span-id"));
+        .with_tracing(|tracing| tracing.with_header().with_header_name("x-span-id"));
 
     // Global error handler will be in the request span scope
     app.map_err(|err| async move {

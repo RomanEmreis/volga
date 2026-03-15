@@ -1,16 +1,19 @@
 //! Tools and utils for Basic Authorization
 
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine;
-use std::fmt::{Display, Formatter};
-use futures_util::future::{ready, Ready};
-use hyper::http::request::Parts;
 use crate::{
-    http::{FromRequestParts, FromRequestRef, endpoints::args::{FromPayload, Payload, Source}},
-    headers::{Authorization, Header, HeaderMap, HeaderValue, AUTHORIZATION},
+    HttpRequest,
     error::Error,
-    HttpRequest
+    headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
+    http::{
+        FromRequestParts, FromRequestRef,
+        endpoints::args::{FromPayload, Payload, Source},
+    },
 };
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use futures_util::future::{Ready, ready};
+use hyper::http::request::Parts;
+use std::fmt::{Display, Formatter};
 
 const SCHEME: &str = "Basic ";
 
@@ -20,9 +23,7 @@ pub struct Basic(Box<str>);
 impl std::fmt::Debug for Basic {
     #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Basic")
-            .field(&"[redacted]")
-            .finish()
+        f.debug_tuple("Basic").field(&"[redacted]").finish()
     }
 }
 
@@ -31,10 +32,9 @@ impl TryFrom<&HeaderValue> for Basic {
 
     #[inline]
     fn try_from(header: &HeaderValue) -> Result<Self, Self::Error> {
-        let token = header
-            .to_str()
-            .map_err(Error::from)?;
-        let token = token.strip_prefix(SCHEME)
+        let token = header.to_str().map_err(Error::from)?;
+        let token = token
+            .strip_prefix(SCHEME)
             .map(str::trim)
             .ok_or_else(|| Error::client_error("Header: Missing Credentials"))?;
         Ok(Self(token.into()))
@@ -97,10 +97,12 @@ impl FromPayload for Basic {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(Self::from_parts(parts))
     }
 }
@@ -121,9 +123,9 @@ impl Basic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::headers::{HeaderMap, HeaderValue, Authorization, AUTHORIZATION};
-    use base64::engine::general_purpose::STANDARD;
+    use crate::headers::{AUTHORIZATION, Authorization, HeaderMap, HeaderValue};
     use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
     use hyper::Request;
 
     fn create_basic_auth_header(username: &str, password: &str) -> HeaderValue {
@@ -199,7 +201,10 @@ mod tests {
     #[test]
     fn it_tests_try_from_parts() {
         let req = Request::builder()
-            .header(AUTHORIZATION, create_basic_auth_header("user123", "pass456"))
+            .header(
+                AUTHORIZATION,
+                create_basic_auth_header("user123", "pass456"),
+            )
             .body(())
             .unwrap();
         let (parts, _) = req.into_parts();
@@ -283,7 +288,11 @@ mod tests {
     fn it_tests_validate_with_special_characters() {
         let username = "user@domain.com";
         let password = "p@$$w0rd!";
-        let basic = Basic(STANDARD.encode(format!("{username}:{password}")).into_boxed_str());
+        let basic = Basic(
+            STANDARD
+                .encode(format!("{username}:{password}"))
+                .into_boxed_str(),
+        );
 
         assert!(basic.validate(username, password));
         assert!(!basic.validate("user@domain.com", "wrongpass"));
@@ -328,7 +337,11 @@ mod tests {
     fn it_tests_unicode_credentials() {
         let username = "użytkownik";
         let password = "hasło123";
-        let basic = Basic(STANDARD.encode(format!("{username}:{password}")).into_boxed_str());
+        let basic = Basic(
+            STANDARD
+                .encode(format!("{username}:{password}"))
+                .into_boxed_str(),
+        );
 
         assert!(basic.validate(username, password));
         assert!(!basic.validate("user", password));
@@ -338,7 +351,11 @@ mod tests {
     fn it_tests_colon_in_password() {
         let username = "user";
         let password = "pass:with:colons";
-        let basic = Basic(STANDARD.encode(format!("{username}:{password}")).into_boxed_str());
+        let basic = Basic(
+            STANDARD
+                .encode(format!("{username}:{password}"))
+                .into_boxed_str(),
+        );
 
         assert!(basic.validate(username, password));
         assert!(!basic.validate(username, "pass"));

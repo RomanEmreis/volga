@@ -1,11 +1,11 @@
-﻿//! HTTPS/TLS protocol implementations and middlewares
+//! HTTPS/TLS protocol implementations and middlewares
 
-use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 use crate::{App, app::AppEnv, error::Error, headers::HeaderValue};
+use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 
 use std::{
-    fmt, 
-    net::SocketAddr, 
+    fmt,
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -14,21 +14,16 @@ use std::{
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::watch,
-    time::sleep
+    time::sleep,
 };
 
 use tokio_rustls::{
+    TlsAcceptor,
     rustls::{
-        pki_types::{
-            pem::PemObject,
-            CertificateDer,
-            PrivateKeyDer
-        },
+        RootCertStore, ServerConfig,
+        pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
         server::WebPkiClientVerifier,
-        RootCertStore,
-        ServerConfig,
     },
-    TlsAcceptor
 };
 
 use crate::tls::https_redirect::HttpsRedirectionMiddleware;
@@ -55,7 +50,7 @@ pub enum DevCertMode {
     /// Always creates self-signed certificates if they're missing
     Auto,
     /// Asks whether to create of not self-signed certificates if they're missing
-    Ask
+    Ask,
 }
 
 pub(super) mod https_redirect;
@@ -70,16 +65,16 @@ const DEFAULT_MAX_AGE: u64 = 30 * 24 * 60 * 60; // 30 days = 2,592,000 seconds
 pub struct TlsConfig {
     /// Path to a certificate
     pub cert: PathBuf,
-    
+
     /// Path to a private key
     pub key: PathBuf,
-    
+
     /// HTTPS redirection configuration options
     pub https_redirection_config: RedirectionConfig,
-    
+
     /// HSTS configuration options
     pub(super) hsts_config: HstsConfig,
-    
+
     /// Client Auth options
     client_auth: ClientAuth,
 }
@@ -88,36 +83,36 @@ pub struct TlsConfig {
 #[derive(Debug, Clone, Copy)]
 pub struct RedirectionConfig {
     /// Specifies whether HTTPS redirection is enabled
-    /// 
+    ///
     /// Default: `false`
     pub enabled: bool,
-    
+
     /// Specifies HTTP port for redirection middleware
-    /// 
+    ///
     /// Default: `7879`
     pub http_port: u16,
-} 
+}
 
 /// Represents HSTS (HTTP Strict Transport Security Protocol) configuration options
 #[derive(Debug, Clone)]
 pub struct HstsConfig {
     /// Specifies whether include a `preload` to HSTS header
-    /// 
+    ///
     /// Default: `true`
     preload: bool,
-    
+
     /// Specifies whether include an ` includeSubDomains ` to HSTS header
-    /// 
+    ///
     /// Default: `true`
     include_sub_domains: bool,
-    
+
     /// Max age for HSTS header
-    /// 
+    ///
     /// Default: 30 days (2,592,000 seconds)
     max_age: Duration,
-    
+
     /// A list of hosts names that will not add the HSTS header.
-    exclude_hosts: Vec<String>
+    exclude_hosts: Vec<String>,
 }
 
 /// Represents HSTS (HTTP Strict Transport Security Protocol) header
@@ -125,9 +120,9 @@ pub struct HstsConfig {
 pub struct HstsHeader {
     /// Inner [`HeaderValue`]
     pub(super) inner: HeaderValue,
-    
+
     /// A list of hosts names that will not add the HSTS header.
-    pub(super) exclude_hosts: Vec<String>
+    pub(super) exclude_hosts: Vec<String>,
 }
 
 /// Represents a type of Client Auth
@@ -135,12 +130,12 @@ pub struct HstsHeader {
 enum ClientAuth {
     None,
     Optional(PathBuf),
-    Required(PathBuf)
+    Required(PathBuf),
 }
 
 impl Default for RedirectionConfig {
     fn default() -> Self {
-        Self { 
+        Self {
             enabled: false,
             http_port: DEFAULT_PORT,
         }
@@ -153,24 +148,23 @@ impl Default for HstsConfig {
             preload: true,
             include_sub_domains: true,
             max_age: Duration::from_secs(DEFAULT_MAX_AGE), // 30 days = 2,592,000 seconds
-            exclude_hosts: Vec::new()
+            exclude_hosts: Vec::new(),
         }
     }
 }
 
 impl Default for TlsConfig {
     fn default() -> Self {
-        let path = std::env::current_dir()
-            .unwrap_or_default();
-        
+        let path = std::env::current_dir().unwrap_or_default();
+
         let cert = path.join(CERT_FILE_NAME);
         let key = path.join(KEY_FILE_NAME);
-        Self { 
+        Self {
             https_redirection_config: RedirectionConfig::default(),
             client_auth: ClientAuth::None,
             hsts_config: HstsConfig::default(),
-            key, 
-            cert, 
+            key,
+            cert,
         }
     }
 }
@@ -179,7 +173,7 @@ impl fmt::Display for HstsConfig {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "max-age={}", self.max_age.as_secs())?;
-        
+
         if self.include_sub_domains {
             f.write_str("; includeSubDomains")?;
         }
@@ -187,7 +181,7 @@ impl fmt::Display for HstsConfig {
         if self.preload {
             f.write_str("; preload")?;
         }
-        
+
         Ok(())
     }
 }
@@ -240,8 +234,7 @@ impl HstsHeader {
         let mut value = String::with_capacity(64);
 
         use std::fmt::Write;
-        write!(&mut value, "max-age={}", config.max_age.as_secs())
-            .expect("valid HSTS header");
+        write!(&mut value, "max-age={}", config.max_age.as_secs()).expect("valid HSTS header");
 
         if config.include_sub_domains {
             value.push_str("; includeSubDomains");
@@ -251,12 +244,11 @@ impl HstsHeader {
             value.push_str("; preload");
         }
 
-        let header_value = HeaderValue::from_str(&value)
-            .expect("valid HSTS header");
+        let header_value = HeaderValue::from_str(&value).expect("valid HSTS header");
 
         Self {
             exclude_hosts: config.exclude_hosts,
-            inner: header_value
+            inner: header_value,
         }
     }
 
@@ -272,7 +264,7 @@ impl TlsConfig {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Creates a configuration by loading cert and key files with default names from a specified folder
     pub fn from_pem(path: impl AsRef<Path>) -> Self {
         let path = path.as_ref();
@@ -282,15 +274,15 @@ impl TlsConfig {
             https_redirection_config: RedirectionConfig::default(),
             client_auth: ClientAuth::None,
             hsts_config: HstsConfig::default(),
-            key, 
-            cert, 
+            key,
+            cert,
         }
     }
 
     /// Creates a configuration by specifying a path to cert and key files specifically
     pub fn from_pem_files(cert_file_path: &str, key_file_path: &str) -> Self {
-        Self { 
-            key: key_file_path.into(), 
+        Self {
+            key: key_file_path.into(),
             cert: cert_file_path.into(),
             client_auth: ClientAuth::None,
             https_redirection_config: RedirectionConfig::default(),
@@ -305,7 +297,7 @@ impl TlsConfig {
         self.cert = path.join(CERT_FILE_NAME);
         self
     }
-    
+
     /// Configure the path to the certificate
     pub fn with_cert_path(mut self, path: impl AsRef<Path>) -> Self {
         self.cert = path.as_ref().into();
@@ -317,9 +309,9 @@ impl TlsConfig {
         self.key = path.as_ref().into();
         self
     }
-    
+
     /// Configures the trust anchor for optional TLS client authentication.
-    /// 
+    ///
     /// Default: `None`
     pub fn with_optional_client_auth(mut self, path: impl AsRef<Path>) -> Self {
         self.client_auth = ClientAuth::Optional(path.as_ref().into());
@@ -335,7 +327,7 @@ impl TlsConfig {
     }
 
     /// Configures web server to redirect HTTP requests to HTTPS
-    /// 
+    ///
     /// Default: `false`
     pub fn with_https_redirection(mut self) -> Self {
         self.https_redirection_config.enabled = true;
@@ -348,7 +340,7 @@ impl TlsConfig {
         self
     }
 
-    /// Configures HSTS header. 
+    /// Configures HSTS header.
     /// If HSTS has already been preconfigured, it does not overwrite it
     ///
     /// Default values:
@@ -366,7 +358,7 @@ impl TlsConfig {
     /// ```
     pub fn with_hsts<T>(mut self, config: T) -> Self
     where
-        T: FnOnce(HstsConfig) -> HstsConfig
+        T: FnOnce(HstsConfig) -> HstsConfig,
     {
         self.hsts_config = config(self.hsts_config);
         self
@@ -383,9 +375,9 @@ impl TlsConfig {
         self.hsts_config = hsts_config;
         self
     }
-    
+
     /// Configures whether to set `preload` in HSTS header
-    /// 
+    ///
     /// Default value: `true`
     pub fn with_hsts_preload(mut self, preload: bool) -> Self {
         self.hsts_config = self.hsts_config.with_preload(preload);
@@ -393,7 +385,7 @@ impl TlsConfig {
     }
 
     /// Configures whether to set `includeSubDomains` in the HSTS header
-    /// 
+    ///
     /// Default: `true`
     pub fn with_hsts_sub_domains(mut self, include: bool) -> Self {
         self.hsts_config = self.hsts_config.with_sub_domains(include);
@@ -401,7 +393,7 @@ impl TlsConfig {
     }
 
     /// Configures `max_age` for HSTS header
-    /// 
+    ///
     /// Default: 30 days (2,592,000 seconds)
     pub fn with_hsts_max_age(mut self, max_age: Duration) -> Self {
         self.hsts_config = self.hsts_config.with_max_age(max_age);
@@ -409,7 +401,7 @@ impl TlsConfig {
     }
 
     /// Configures a list of host names that will not add the HSTS header.
-    /// 
+    ///
     /// Default: empty list
     pub fn with_hsts_exclude_hosts<I, S>(mut self, exclude_hosts: I) -> Self
     where
@@ -438,31 +430,33 @@ impl TlsConfig {
     pub fn with_dev_cert(self, _mode: DevCertMode) -> Self {
         // do nothing for release mode
         #[cfg(not(debug_assertions))]
-        { 
+        {
             return self;
         }
         #[cfg(debug_assertions)]
         {
-            use volga_dev_cert::{dev_cert_exists, ask_generate, generate, DEV_CERT_NAMES};
+            use volga_dev_cert::{DEV_CERT_NAMES, ask_generate, dev_cert_exists, generate};
 
             if dev_cert_exists() {
                 return self.use_dev_cert();
             }
-            
+
             #[inline]
             fn generate_impl(tls: TlsConfig) -> TlsConfig {
-                if let Err(_err) = generate(DEV_CERT_NAMES
-                    .iter()
-                    .map(|n| n.to_string())
-                    .collect::<Vec<_>>()) {
+                if let Err(_err) = generate(
+                    DEV_CERT_NAMES
+                        .iter()
+                        .map(|n| n.to_string())
+                        .collect::<Vec<_>>(),
+                ) {
                     #[cfg(feature = "tracing")]
                     tracing::error!("Failed to generate self-signed TLS certificates: {_err:#}");
                     return tls;
                 }
                 tls.use_dev_cert()
             }
-            
-            match _mode { 
+
+            match _mode {
                 DevCertMode::Auto => generate_impl(self),
                 DevCertMode::Ask => match ask_generate() {
                     Ok(true) => generate_impl(self),
@@ -472,7 +466,7 @@ impl TlsConfig {
                         tracing::error!("Failed to ask for certificate generation: {_err:#}");
                         self
                     }
-                }
+                },
             }
         }
     }
@@ -488,8 +482,8 @@ impl TlsConfig {
     pub(super) fn build(self) -> Result<ServerConfig, Error> {
         let certs = Self::load_cert_file(&self.cert)?;
         let key = Self::load_key_file(&self.key)?;
-        
-        let builder = match self.client_auth { 
+
+        let builder = match self.client_auth {
             ClientAuth::None => ServerConfig::builder().with_no_client_auth(),
             ClientAuth::Optional(trust_anchor) => {
                 let verifier =
@@ -498,7 +492,7 @@ impl TlsConfig {
                         .build()
                         .map_err(Error::from)?;
                 ServerConfig::builder().with_client_cert_verifier(verifier)
-            },
+            }
             ClientAuth::Required(trust_anchor) => {
                 let verifier =
                     WebPkiClientVerifier::builder(Self::read_trust_anchor(trust_anchor)?.into())
@@ -507,21 +501,19 @@ impl TlsConfig {
                 ServerConfig::builder().with_client_cert_verifier(verifier)
             }
         };
-        
-        let mut config = builder
-            .with_single_cert(certs, key)
-            .map_err(Error::from)?;
-        
+
+        let mut config = builder.with_single_cert(certs, key).map_err(Error::from)?;
+
         config.alpn_protocols = vec![
             #[cfg(feature = "http2")]
             b"h2".into(),
             b"http/1.1".into(),
-            b"http/1.0".into()
+            b"http/1.0".into(),
         ];
-        
+
         Ok(config)
     }
-    
+
     #[inline]
     fn load_cert_file<'a>(path: impl AsRef<Path>) -> Result<Vec<CertificateDer<'a>>, Error> {
         CertificateDer::pem_file_iter(path)
@@ -529,7 +521,7 @@ impl TlsConfig {
             .collect::<Result<Vec<_>, _>>()
             .map_err(Error::from)
     }
-    
+
     #[inline]
     fn load_key_file<'a>(path: impl AsRef<Path>) -> Result<PrivateKeyDer<'a>, Error> {
         PrivateKeyDer::from_pem_file(path).map_err(Error::from)
@@ -540,7 +532,9 @@ impl TlsConfig {
         let mut store = RootCertStore::empty();
         let (added, _skipped) = store.add_parsable_certificates(trust_anchors);
         if added == 0 {
-            return Err(Error::server_error("TLS config error: certificate parse error"));
+            return Err(Error::server_error(
+                "TLS config error: certificate parse error",
+            ));
         }
         Ok(store)
     }
@@ -577,7 +571,7 @@ impl AppEnv {
 /// TLS specific impl for [`App`]
 impl App {
     /// Configures web server with specified TLS configuration
-    /// 
+    ///
     /// Default: `None`
     ///
     /// # Example
@@ -599,7 +593,7 @@ impl App {
     /// ```
     pub fn with_tls<T>(mut self, config: T) -> Self
     where
-        T: FnOnce(TlsConfig) -> TlsConfig
+        T: FnOnce(TlsConfig) -> TlsConfig,
     {
         let tls = self.tls_config.unwrap_or_default();
         self.tls_config = Some(config(tls));
@@ -614,7 +608,7 @@ impl App {
         self
     }
 
-    /// If the [`TlsConfig`] has been specified, it configures HSTS header. 
+    /// If the [`TlsConfig`] has been specified, it configures HSTS header.
     /// If HSTS has already been preconfigured, it does not overwrite it
     ///
     /// Default values:
@@ -632,9 +626,9 @@ impl App {
     ///     .set_tls(TlsConfig::new().with_hsts_sub_domains(false)) // sets include_sub_domains to true
     ///     .with_hsts(|hsts| hsts.with_preload(true));             // sets preload to true, include_sub_domains remains true
     /// ```
-    pub fn with_hsts<T>(mut self, config: T) -> Self 
+    pub fn with_hsts<T>(mut self, config: T) -> Self
     where
-        T: FnOnce(HstsConfig) -> HstsConfig
+        T: FnOnce(HstsConfig) -> HstsConfig,
     {
         self.tls_config = self
             .tls_config
@@ -649,34 +643,32 @@ impl App {
     /// - include_sub_domains: `true`
     /// - max-age: 30 days (2,592,000 seconds)
     /// - exclude_hosts: empty list
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
     /// use volga::tls::{TlsConfig, HstsConfig};
-    /// 
+    ///
     /// let app = App::new()
     ///     .set_tls(TlsConfig::new())
     ///     .set_hsts(HstsConfig::default());
     /// ```
     pub fn set_hsts(mut self, hsts_config: HstsConfig) -> Self {
-        self.tls_config = self
-            .tls_config
-            .map(|config| config.set_hsts(hsts_config));
+        self.tls_config = self.tls_config.map(|config| config.set_hsts(hsts_config));
         self
     }
-    
+
     pub(super) fn run_https_redirection_middleware(
-        socket: SocketAddr, 
+        socket: SocketAddr,
         http_port: u16,
-        shutdown_tx: Arc<watch::Sender<()>>
+        shutdown_tx: Arc<watch::Sender<()>>,
     ) {
         tokio::spawn(async move {
             let https_port = socket.port();
             let socket = SocketAddr::new(socket.ip(), http_port);
             #[cfg(feature = "tracing")]
             tracing::info!("listening on: http://{socket}");
-            
+
             if let Ok(tcp_listener) = TcpListener::bind(socket).await {
                 let graceful_shutdown = GracefulShutdown::new();
                 loop {
@@ -699,12 +691,12 @@ impl App {
             }
         });
     }
-    
+
     #[inline]
     fn serve_http_redirection(
-        https_port: u16, 
-        stream: TcpStream, 
-        graceful_shutdown: &GracefulShutdown
+        https_port: u16,
+        stream: TcpStream,
+        graceful_shutdown: &GracefulShutdown,
     ) {
         let io = TokioIo::new(stream);
 
@@ -717,10 +709,9 @@ impl App {
         ))]
         let connection_builder = http2::Builder::new(TokioExecutor::new());
 
-        let connection = connection_builder.serve_connection(
-            io,
-            HttpsRedirectionMiddleware::new(https_port));
-        
+        let connection =
+            connection_builder.serve_connection(io, HttpsRedirectionMiddleware::new(https_port));
+
         let connection = graceful_shutdown.watch(connection);
         tokio::spawn(async move {
             if let Err(_err) = connection.await {
@@ -738,42 +729,37 @@ fn normalize_host(host: &str) -> String {
         _ => host,
     };
 
-    host
-        .trim_end_matches('.')
-        .to_ascii_lowercase()
+    host.trim_end_matches('.').to_ascii_lowercase()
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        CERT_FILE_NAME, ClientAuth, DEFAULT_MAX_AGE, DEFAULT_PORT, HstsConfig, KEY_FILE_NAME,
+        RedirectionConfig, TlsConfig,
+    };
+    use crate::{App, tls::HstsHeader};
     use std::path::PathBuf;
     use std::time::Duration;
-    use crate::{App, tls::HstsHeader};
-    use super::{
-        TlsConfig, 
-        HstsConfig, 
-        RedirectionConfig,
-        ClientAuth,
-        KEY_FILE_NAME,
-        CERT_FILE_NAME,
-        DEFAULT_PORT,
-        DEFAULT_MAX_AGE
-    };
-    
+
     #[test]
     fn it_creates_new_tls_config() {
         let tls_config = TlsConfig::new();
-        
+
         let path = std::env::current_dir().unwrap_or_default();
 
         assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
         assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
         assert_eq!(tls_config.client_auth, ClientAuth::None);
-        
+
         assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
-        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert_eq!(
+            tls_config.hsts_config.max_age,
+            Duration::from_secs(DEFAULT_MAX_AGE)
+        );
         assert!(tls_config.hsts_config.preload);
         assert!(tls_config.hsts_config.include_sub_domains);
-        
+
         assert!(!tls_config.https_redirection_config.enabled);
         assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
     }
@@ -783,13 +769,16 @@ mod tests {
         let tls_config = TlsConfig::default();
 
         let path = std::env::current_dir().unwrap_or_default();
-        
+
         assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
         assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
         assert_eq!(tls_config.client_auth, ClientAuth::None);
 
         assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
-        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert_eq!(
+            tls_config.hsts_config.max_age,
+            Duration::from_secs(DEFAULT_MAX_AGE)
+        );
         assert!(tls_config.hsts_config.preload);
         assert!(tls_config.hsts_config.include_sub_domains);
 
@@ -808,7 +797,10 @@ mod tests {
         assert_eq!(tls_config.client_auth, ClientAuth::None);
 
         assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
-        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert_eq!(
+            tls_config.hsts_config.max_age,
+            Duration::from_secs(DEFAULT_MAX_AGE)
+        );
         assert!(tls_config.hsts_config.preload);
         assert!(tls_config.hsts_config.include_sub_domains);
 
@@ -818,13 +810,12 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_set_hsts() {
-        let tls_config = TlsConfig::from_pem("tls")
-            .set_hsts(HstsConfig { 
-                max_age: Duration::from_secs(1),
-                preload: false, 
-                include_sub_domains: false, 
-                exclude_hosts: vec!["example.com".to_string()]
-            });
+        let tls_config = TlsConfig::from_pem("tls").set_hsts(HstsConfig {
+            max_age: Duration::from_secs(1),
+            preload: false,
+            include_sub_domains: false,
+            exclude_hosts: vec!["example.com".to_string()],
+        });
 
         let path = PathBuf::from("tls");
 
@@ -845,11 +836,11 @@ mod tests {
     fn it_creates_tls_config_with_hsts() {
         let tls_config = TlsConfig::from_pem("tls")
             .with_hsts_exclude_hosts(["example.com"])
-            .with_hsts(|hsts| hsts
-                .with_preload(false)
-                .with_sub_domains(false)
-                .with_max_age(Duration::from_secs(1)))
-            ;
+            .with_hsts(|hsts| {
+                hsts.with_preload(false)
+                    .with_sub_domains(false)
+                    .with_max_age(Duration::from_secs(1))
+            });
 
         let path = PathBuf::from("tls");
 
@@ -868,8 +859,7 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_preload() {
-        let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_preload(false);
+        let tls_config = TlsConfig::from_pem("tls").with_hsts_preload(false);
 
         let path = PathBuf::from("tls");
 
@@ -878,7 +868,10 @@ mod tests {
         assert_eq!(tls_config.client_auth, ClientAuth::None);
 
         assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
-        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert_eq!(
+            tls_config.hsts_config.max_age,
+            Duration::from_secs(DEFAULT_MAX_AGE)
+        );
         assert!(!tls_config.hsts_config.preload);
         assert!(tls_config.hsts_config.include_sub_domains);
 
@@ -888,8 +881,7 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_sub_domains() {
-        let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_sub_domains(false);
+        let tls_config = TlsConfig::from_pem("tls").with_hsts_sub_domains(false);
 
         let path = PathBuf::from("tls");
 
@@ -898,7 +890,10 @@ mod tests {
         assert_eq!(tls_config.client_auth, ClientAuth::None);
 
         assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
-        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert_eq!(
+            tls_config.hsts_config.max_age,
+            Duration::from_secs(DEFAULT_MAX_AGE)
+        );
         assert!(tls_config.hsts_config.preload);
         assert!(!tls_config.hsts_config.include_sub_domains);
 
@@ -908,8 +903,7 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_max_age() {
-        let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_max_age(Duration::from_secs(5));
+        let tls_config = TlsConfig::from_pem("tls").with_hsts_max_age(Duration::from_secs(5));
 
         let path = PathBuf::from("tls");
 
@@ -928,8 +922,7 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_exclude_hosts() {
-        let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_exclude_hosts(["example.com"]);
+        let tls_config = TlsConfig::from_pem("tls").with_hsts_exclude_hosts(["example.com"]);
 
         let path = PathBuf::from("tls");
 
@@ -938,7 +931,10 @@ mod tests {
         assert_eq!(tls_config.client_auth, ClientAuth::None);
 
         assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 1);
-        assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
+        assert_eq!(
+            tls_config.hsts_config.max_age,
+            Duration::from_secs(DEFAULT_MAX_AGE)
+        );
         assert!(tls_config.hsts_config.preload);
         assert!(tls_config.hsts_config.include_sub_domains);
 
@@ -963,13 +959,13 @@ mod tests {
         assert!(!https_redirection_config.enabled);
         assert_eq!(https_redirection_config.http_port, DEFAULT_PORT);
     }
-    
+
     #[test]
     fn it_displays_hsts_config() {
         let hsts_config = HstsConfig::default();
-        
+
         let hsts_string = hsts_config.to_string();
-        
+
         assert_eq!(hsts_string, "max-age=2592000; includeSubDomains; preload");
     }
 
@@ -977,11 +973,12 @@ mod tests {
     fn it_creates_app_with_tls_config_and_hsts_custom_config() {
         let app = App::new()
             .with_tls(|tls| tls.with_https_redirection())
-            .with_hsts(|hsts| hsts
-                .with_max_age(Duration::from_secs(1))
-                .with_preload(false)
-                .with_sub_domains(false)
-                .with_exclude_hosts(["example.com"]));
+            .with_hsts(|hsts| {
+                hsts.with_max_age(Duration::from_secs(1))
+                    .with_preload(false)
+                    .with_sub_domains(false)
+                    .with_exclude_hosts(["example.com"])
+            });
 
         let tls_config = app.tls_config.unwrap();
 
@@ -1001,7 +998,7 @@ mod tests {
             .with_preload(false)
             .with_sub_domains(false)
             .with_exclude_hosts(["example.com"]);
-        
+
         let app = App::new()
             .with_tls(|tls| tls.with_https_redirection())
             .set_hsts(hsts);
@@ -1019,21 +1016,20 @@ mod tests {
 
     #[test]
     fn it_sets_tls_key_and_cert() {
-        let app = App::new()
-            .with_tls(|tls| tls
-                .with_key_path(KEY_FILE_NAME)
-                .with_cert_path(CERT_FILE_NAME));
+        let app = App::new().with_tls(|tls| {
+            tls.with_key_path(KEY_FILE_NAME)
+                .with_cert_path(CERT_FILE_NAME)
+        });
 
         let tls_config = app.tls_config.unwrap();
-        
+
         assert_eq!(tls_config.key, PathBuf::from(KEY_FILE_NAME));
         assert_eq!(tls_config.cert, PathBuf::from(CERT_FILE_NAME));
     }
 
     #[test]
     fn it_sets_tls_pem() {
-        let app = App::new()
-            .with_tls(|tls| tls.set_pem("tls"));
+        let app = App::new().with_tls(|tls| tls.set_pem("tls"));
 
         let path = PathBuf::from("tls");
         let tls_config = app.tls_config.unwrap();
@@ -1044,20 +1040,28 @@ mod tests {
 
     #[test]
     fn it_creates_hsts_header() {
-        let hsts_config = HstsConfig::default()
-            .with_exclude_hosts(["www.example.com"]);
-        
+        let hsts_config = HstsConfig::default().with_exclude_hosts(["www.example.com"]);
+
         let hsts_header = HstsHeader::new(hsts_config);
-        
+
         assert_eq!(hsts_header.exclude_hosts, &["www.example.com"]);
-        assert_eq!(hsts_header.inner, "max-age=2592000; includeSubDomains; preload");
+        assert_eq!(
+            hsts_header.inner,
+            "max-age=2592000; includeSubDomains; preload"
+        );
     }
 
     #[test]
     fn it_normalizes_excluded_hosts() {
-        let hsts_config = HstsConfig::default()
-            .with_exclude_hosts(["www.ExAmplE.com.", "www.ExAmplE.net:80", "www.ExAmplE.org:443"]);
-        
-        assert_eq!(hsts_config.exclude_hosts, &["www.example.com", "www.example.net:80", "www.example.org"]);
+        let hsts_config = HstsConfig::default().with_exclude_hosts([
+            "www.ExAmplE.com.",
+            "www.ExAmplE.net:80",
+            "www.ExAmplE.org:443",
+        ]);
+
+        assert_eq!(
+            hsts_config.exclude_hosts,
+            &["www.example.com", "www.example.net:80", "www.example.org"]
+        );
     }
 }

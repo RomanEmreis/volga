@@ -1,18 +1,14 @@
-﻿//! Compression middleware
-//! 
+//! Compression middleware
+//!
 //! Middleware that compresses HTTP response body
 
-use std::{
-    collections::HashSet,
-    cmp::Ordering,
-    str::FromStr,
-};
+use std::{cmp::Ordering, collections::HashSet, str::FromStr};
 
 #[cfg(feature = "compression-brotli")]
 use async_compression::tokio::bufread::BrotliEncoder;
 
 #[cfg(feature = "compression-gzip")]
-use async_compression::tokio::bufread::{ZlibEncoder, GzipEncoder};
+use async_compression::tokio::bufread::{GzipEncoder, ZlibEncoder};
 
 #[cfg(feature = "compression-zstd")]
 use async_compression::tokio::bufread::ZstdEncoder;
@@ -22,29 +18,18 @@ use futures_util::TryStreamExt;
 use http_body_util::StreamBody;
 use hyper::body::Frame;
 use hyper::http::response::Parts;
-use tokio_util::io::{
-    ReaderStream, 
-    StreamReader
-};
+use tokio_util::io::{ReaderStream, StreamReader};
 
 use crate::{
-    App,
-    routing::{Route, RouteGroup},
+    App, HttpBody, HttpResponse, HttpResult,
     error::Error,
-    middleware::{HttpContext, NextFn},
     headers::{
-        AcceptEncoding,
-        Header,
-        Encoding,
-        Quality,
-        ACCEPT_ENCODING, ACCEPT_RANGES,
-        CONTENT_ENCODING, CONTENT_LENGTH,
-        VARY
+        ACCEPT_ENCODING, ACCEPT_RANGES, AcceptEncoding, CONTENT_ENCODING, CONTENT_LENGTH, Encoding,
+        Header, Quality, VARY,
     },
-    HttpResponse,
-    HttpResult,
-    HttpBody,
-    status
+    middleware::{HttpContext, NextFn},
+    routing::{Route, RouteGroup},
+    status,
 };
 
 static SUPPORTED_ENCODINGS: &[Encoding] = &[
@@ -66,9 +51,11 @@ macro_rules! impl_compressor {
             let stream_reader = StreamReader::new(body.into_data_stream());
             let encoder = $encoder::with_quality(stream_reader, $level);
             let compressed_body = ReaderStream::new(encoder);
-            HttpBody::boxed(StreamBody::new(compressed_body
-                .map_err(Error::server_error)
-                .map_ok(Frame::data)))
+            HttpBody::boxed(StreamBody::new(
+                compressed_body
+                    .map_err(Error::server_error)
+                    .map_ok(Frame::data),
+            ))
         }
     };
 }
@@ -118,7 +105,7 @@ async fn make_compression_fn(ctx: HttpContext, next: NextFn) -> HttpResult {
 
 fn negotiate(accept_encoding: Header<AcceptEncoding>, http_result: HttpResult) -> HttpResult {
     let accept_encoding = accept_encoding.into_inner();
-    if  accept_encoding.is_empty() {
+    if accept_encoding.is_empty() {
         return http_result;
     }
 
@@ -130,41 +117,33 @@ fn negotiate(accept_encoding: Header<AcceptEncoding>, http_result: HttpResult) -
             }
         }
         encodings_with_weights
-            .sort_by(|a, b| b.value
-                .partial_cmp(&a.value)
-                .unwrap_or(Ordering::Equal)
-            );
+            .sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(Ordering::Equal));
     }
 
     if !encodings_with_weights.is_empty() && encodings_with_weights[0].item.is_any() {
         #[cfg(feature = "compression-brotli")]
         return compress(Encoding::Brotli, http_result);
 
-        #[cfg(all(
-            feature = "compression-gzip",
-            not(feature = "compression-brotli"
-            )))]
+        #[cfg(all(feature = "compression-gzip", not(feature = "compression-brotli")))]
         return compress(Encoding::Gzip, http_result);
 
         #[cfg(all(
             feature = "compression-zstd",
             not(feature = "compression-brotli"),
-            not(feature = "compression-gzip"
-            )))]
+            not(feature = "compression-gzip")
+        ))]
         return compress(Encoding::Gzip, http_result);
 
         #[cfg(all(
             not(feature = "compression-brotli"),
             not(feature = "compression-gzip"),
             not(feature = "compression-zstd"),
-            not(feature = "compression-full"
-            )))]
+            not(feature = "compression-full")
+        ))]
         return http_result;
     }
 
-    let supported = SUPPORTED_ENCODINGS
-        .iter()
-        .collect::<HashSet<_>>();
+    let supported = SUPPORTED_ENCODINGS.iter().collect::<HashSet<_>>();
 
     for encoding in encodings_with_weights {
         if supported.contains(&encoding.item) {
@@ -197,49 +176,60 @@ fn compress_body(parts: &mut Parts, encoding: Encoding, body: HttpBody) -> HttpB
     match encoding {
         #[cfg(feature = "compression-brotli")]
         Encoding::Brotli => {
-            parts.headers.append(CONTENT_ENCODING, Encoding::Brotli.into());
+            parts
+                .headers
+                .append(CONTENT_ENCODING, Encoding::Brotli.into());
             brotli(body)
-        },
+        }
         #[cfg(feature = "compression-gzip")]
         Encoding::Gzip => {
-            parts.headers.append(CONTENT_ENCODING, Encoding::Gzip.into());
+            parts
+                .headers
+                .append(CONTENT_ENCODING, Encoding::Gzip.into());
             gzip(body)
-        },
+        }
         #[cfg(feature = "compression-gzip")]
         Encoding::Deflate => {
-            parts.headers.append(CONTENT_ENCODING, Encoding::Deflate.into());
+            parts
+                .headers
+                .append(CONTENT_ENCODING, Encoding::Deflate.into());
             deflate(body)
-        },
+        }
         #[cfg(feature = "compression-zstd")]
         Encoding::Zstd => {
-            parts.headers.append(CONTENT_ENCODING, Encoding::Zstd.into());
+            parts
+                .headers
+                .append(CONTENT_ENCODING, Encoding::Zstd.into());
             zstd(body)
-        },
-        _ => body
+        }
+        _ => body,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-    use tokio::io::AsyncWriteExt;
-    use http_body_util::BodyExt;
     use super::*;
     use crate::HttpBody;
-    
+    use http_body_util::BodyExt;
+    use serde_json::json;
+    use tokio::io::AsyncWriteExt;
+
     #[tokio::test]
     #[cfg(feature = "compression-brotli")]
     async fn in_compress_brotli() {
         use async_compression::tokio::write::BrotliDecoder;
-        
+
         let body = HttpBody::json(json!({ "age": 33, "name": "John" }));
         let body = brotli(body.unwrap());
 
         let mut decoder = BrotliDecoder::new(Vec::new());
-        decoder.write_all(&body.collect().await.unwrap().to_bytes()).await.unwrap();
+        decoder
+            .write_all(&body.collect().await.unwrap().to_bytes())
+            .await
+            .unwrap();
         decoder.shutdown().await.unwrap();
         let body = decoder.into_inner();
-        
+
         assert_eq!(body, b"{\"age\":33,\"name\":\"John\"}".to_vec());
     }
 
@@ -252,7 +242,10 @@ mod tests {
         let body = gzip(body.unwrap());
 
         let mut decoder = GzipDecoder::new(Vec::new());
-        decoder.write_all(&body.collect().await.unwrap().to_bytes()).await.unwrap();
+        decoder
+            .write_all(&body.collect().await.unwrap().to_bytes())
+            .await
+            .unwrap();
         decoder.shutdown().await.unwrap();
         let body = decoder.into_inner();
 
@@ -268,7 +261,10 @@ mod tests {
         let body = deflate(body.unwrap());
 
         let mut decoder = ZlibDecoder::new(Vec::new());
-        decoder.write_all(&body.collect().await.unwrap().to_bytes()).await.unwrap();
+        decoder
+            .write_all(&body.collect().await.unwrap().to_bytes())
+            .await
+            .unwrap();
         decoder.shutdown().await.unwrap();
         let body = decoder.into_inner();
 
@@ -284,7 +280,10 @@ mod tests {
         let body = zstd(body.unwrap());
 
         let mut decoder = ZstdDecoder::new(Vec::new());
-        decoder.write_all(&body.collect().await.unwrap().to_bytes()).await.unwrap();
+        decoder
+            .write_all(&body.collect().await.unwrap().to_bytes())
+            .await
+            .unwrap();
         decoder.shutdown().await.unwrap();
         let body = decoder.into_inner();
 

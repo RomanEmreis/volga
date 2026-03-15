@@ -6,11 +6,8 @@
 
 use uuid::Uuid;
 use volga::{
-    App, HttpResult, http::Cookies,
-    headers::WWW_AUTHENTICATE,
-    auth::Basic,
-    error::Error,
-    status, ok, see_other
+    App, HttpResult, auth::Basic, error::Error, headers::WWW_AUTHENTICATE, http::Cookies, ok,
+    see_other, status,
 };
 
 #[tokio::main]
@@ -29,12 +26,10 @@ async fn login(cookies: Cookies, auth: Basic) -> Result<(HttpResult, Cookies), E
 }
 
 async fn me(cookies: Cookies) -> HttpResult {
-    cookies
-        .get("session-id")
-        .map_or_else(
-            || status!(401, "Unauthorized"; [(WWW_AUTHENTICATE, "Basic realm=\"Restricted area\"")]),
-            |_session_id| ok!("Success"))
-
+    cookies.get("session-id").map_or_else(
+        || status!(401, "Unauthorized"; [(WWW_AUTHENTICATE, "Basic realm=\"Restricted area\"")]),
+        |_session_id| ok!("Success"),
+    )
 }
 
 fn authorize(auth: Basic) -> Result<String, Error> {

@@ -70,16 +70,15 @@
 //!
 //! [`TestServer`]: crate::test::TestServer
 
-
-pub use server::{TestServer, TestServerBuilder};
 pub use fs::TempFile;
+pub use server::{TestServer, TestServerBuilder};
 
 #[cfg(feature = "ws")]
 pub use ws::TestWebSocket;
 
-pub mod server;
 pub mod fs;
-#[cfg(feature = "ws")]
-pub mod ws;
+pub mod server;
 #[cfg(test)]
 pub(crate) mod utils;
+#[cfg(feature = "ws")]
+pub mod ws;

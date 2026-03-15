@@ -1,26 +1,21 @@
-﻿//! Extractors for Dependency Injection
+//! Extractors for Dependency Injection
 
-use super::{Container, Inject, FromContainer, error::Error as DiError};
-use futures_util::future::{ready, Ready};
-use hyper::http::{request::Parts, Extensions};
+use super::{Container, FromContainer, Inject, error::Error as DiError};
 use crate::{
-    error::Error, http::endpoints::args::{
-        FromRequestRef,
-        FromRequestParts,
-        FromPayload,
-        Payload,
-        Source
-    },
-    HttpRequest
+    HttpRequest,
+    error::Error,
+    http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
 };
+use futures_util::future::{Ready, ready};
+use hyper::http::{Extensions, request::Parts};
 
 use std::{
     ops::{Deref, DerefMut},
-    sync::Arc
+    sync::Arc,
 };
 
 /// `Dc` stands for Dependency Container.
-/// 
+///
 /// This struct wraps an injectable type `T` that is **shared** between all handlers
 /// through an [`Arc`].  
 ///
@@ -83,7 +78,7 @@ impl<T: Send + Sync> Dc<T> {
 
 impl<T: Send + Sync + Clone> Dc<T> {
     /// Clones and returns the inner `T`.
-    /// 
+    ///
     /// Equivalent to calling [`Clone::clone`] on the inner `T`.
     #[inline]
     pub fn cloned(&self) -> T {
@@ -93,7 +88,7 @@ impl<T: Send + Sync + Clone> Dc<T> {
 
 impl<T: Send + Sync + 'static> TryFrom<&Extensions> for Dc<T> {
     type Error = Error;
-    
+
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
         let container = Container::try_from(extensions)?;
@@ -105,7 +100,7 @@ impl<T: Send + Sync + 'static> FromRequestRef for Dc<T> {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         req.extensions().try_into()
-    }    
+    }
 }
 
 impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
@@ -119,10 +114,7 @@ impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
 impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
     #[inline]
     fn from_container(container: &Container) -> Result<Self, Error> {
-        container
-            .resolve_shared::<T>()
-            .map_err(Into::into)
-            .map(Dc)
+        container.resolve_shared::<T>().map_err(Into::into).map(Dc)
     }
 }
 
@@ -130,10 +122,12 @@ impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Parts;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(Self::from_parts(parts))
     }
 }
@@ -141,21 +135,19 @@ impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
 impl<T: Send + Sync + 'static> Inject for Dc<T> {
     #[inline]
     fn inject(container: &Container) -> Result<Self, DiError> {
-        container
-            .resolve_shared::<T>()
-            .map(Dc)
+        container.resolve_shared::<T>().map(Dc)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex};
-    use hyper::http::Extensions;
-    use hyper::Request;
     use super::{Dc, DiError};
-    use crate::di::{ContainerBuilder, Inject, Container};
-    use crate::http::endpoints::args::{FromPayload, FromRequestRef, FromRequestParts, Payload};
+    use crate::di::{Container, ContainerBuilder, Inject};
+    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
     use crate::{HttpBody, HttpRequest};
+    use hyper::Request;
+    use hyper::http::Extensions;
+    use std::sync::{Arc, Mutex};
 
     type Cache = Arc<Mutex<Vec<i32>>>;
 
@@ -179,33 +171,39 @@ mod tests {
             container.resolve()
         }
     }
-    
+
     #[tokio::test]
     async fn it_reads_from_payload() {
         let mut container = ContainerBuilder::new();
-        
+
         container.register_scoped_default::<Cache>();
-        
+
         let container = container.build();
-        
+
         let scope = container.create_scope();
         let vec = scope.resolve::<Cache>().unwrap();
         vec.lock().unwrap().push(1);
-        
+
         let mut req = Request::get("/").body(()).unwrap();
         req.extensions_mut().insert(scope);
-            
+
         let (parts, _) = req.into_parts();
-        
-        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts)).await.unwrap();
+
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts))
+            .await
+            .unwrap();
         dc.lock().unwrap().push(2);
 
-        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts)).await.unwrap();
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts))
+            .await
+            .unwrap();
         dc.lock().unwrap().push(3);
 
-        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts)).await.unwrap();
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts))
+            .await
+            .unwrap();
         let dc = dc.lock().unwrap();
-        
+
         assert_eq!(dc[0], 1);
         assert_eq!(dc[1], 2);
         assert_eq!(dc[2], 3);
@@ -307,10 +305,8 @@ mod tests {
 
         let container = container.build();
 
-        let point = Dc::<Point>::inject(&container)
-            .unwrap()
-            .into_inner();
-        
+        let point = Dc::<Point>::inject(&container).unwrap().into_inner();
+
         assert_eq!(point.0.0, 1);
         assert_eq!(point.1.0, 2);
     }
@@ -328,10 +324,8 @@ mod tests {
 
         let container = container.build();
 
-        let point = Dc::<Point>::inject(&container)
-            .unwrap()
-            .into_inner();
-        
+        let point = Dc::<Point>::inject(&container).unwrap().into_inner();
+
         assert_eq!(point.0.0, 1);
         assert_eq!(point.1.0, 2);
     }
@@ -343,9 +337,8 @@ mod tests {
 
         let container = container.build();
 
-        let x = Dc::<X>::inject(&container)
-            .unwrap();
-        
+        let x = Dc::<X>::inject(&container).unwrap();
+
         let mut copy = x.cloned();
         copy.0 = 2;
 

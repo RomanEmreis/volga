@@ -3,11 +3,11 @@ use std::sync::OnceLock;
 
 use hyper::{Method, Uri};
 
+use crate::headers::{ContentType, Header, HttpHeaders};
 use crate::http::endpoints::Endpoints;
 use crate::http::endpoints::args::{FromPayload, Payload};
 use crate::http::endpoints::handlers::Func;
 use crate::{App, Form, HttpBody, Json, Query, ok};
-use crate::headers::{ContentType, Header, HttpHeaders};
 
 fn build_router() -> Endpoints {
     let mut endpoints = Endpoints::new();
@@ -81,12 +81,13 @@ pub fn fuzz_extractor_typed(headers: &[(String, String)], body: &[u8]) {
         let _ = Header::<ContentType>::from_payload(Payload::Parts(&parts)).await;
 
         // Body extractors (Source::Body).
-        let _ = Json::<serde_json::Value>::from_payload(
-            Payload::Body(HttpBody::full(body.to_vec()))
-        ).await;
-        let _ = Form::<HashMap<String, String>>::from_payload(
-            Payload::Body(HttpBody::full(body.to_vec()))
-        ).await;
+        let _ =
+            Json::<serde_json::Value>::from_payload(Payload::Body(HttpBody::full(body.to_vec())))
+                .await;
+        let _ = Form::<HashMap<String, String>>::from_payload(Payload::Body(HttpBody::full(
+            body.to_vec(),
+        )))
+        .await;
     });
 }
 

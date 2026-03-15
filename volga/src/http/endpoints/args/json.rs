@@ -1,27 +1,24 @@
-﻿//! Extractors for typed JSON data
+//! Extractors for typed JSON data
 
 use futures_util::ready;
+use http_body_util::{BodyExt, combinators::Collect};
 use pin_project_lite::pin_project;
-use serde::de::DeserializeOwned;
-use http_body_util::{combinators::Collect, BodyExt};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use std::{
-    future::Future,
     fmt::{self, Display, Formatter},
+    future::Future,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     pin::Pin,
-    task::{Context, Poll}
+    task::{Context, Poll},
 };
 
 use crate::{
-    error::Error, HttpBody,
-    http::endpoints::args::{
-        FromPayload,
-        Payload,
-        Source
-    }
+    HttpBody,
+    error::Error,
+    http::endpoints::args::{FromPayload, Payload, Source},
 };
 
 #[cfg(feature = "ws")]
@@ -99,8 +96,7 @@ impl<T: DeserializeOwned + Send> Future for ExtractJsonPayloadFut<T> {
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let result = ready!(this.fut.poll(cx))
-            .map_err(JsonError::collect_error)?;
+        let result = ready!(this.fut.poll(cx)).map_err(JsonError::collect_error)?;
         let body = result.to_bytes();
         let json = serde_json::from_slice(&body)
             .map(Json::<T>)
@@ -115,15 +111,22 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
     type Future = ExtractJsonPayloadFut<T>;
 
     const SOURCE: Source = Source::Body;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Body(body) = payload else { unreachable!() };
-        ExtractJsonPayloadFut { fut: body.collect(), _marker: PhantomData }
+        let Payload::Body(body) = payload else {
+            unreachable!()
+        };
+        ExtractJsonPayloadFut {
+            fut: body.collect(),
+            _marker: PhantomData,
+        }
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.consumes_json::<T>()
     }
 }
@@ -141,7 +144,7 @@ impl<T: Serialize> TryFrom<Json<T>> for Message {
 #[cfg(feature = "ws")]
 impl<T: DeserializeOwned> TryFrom<Message> for Json<T> {
     type Error = Error;
-    
+
     fn try_from(msg: Message) -> Result<Self, Self::Error> {
         let bytes = msg.into_inner().into_data();
         serde_json::from_slice(&bytes)
@@ -166,14 +169,14 @@ impl JsonError {
 
 #[cfg(test)]
 mod tests {
-    use http_body_util::BodyExt;
-    use std::fmt::{Display, Formatter};
-    use std::marker::PhantomData;
-    use serde::{Deserialize, Serialize};
+    use super::{ExtractJsonPayloadFut, Json};
     use crate::HttpBody;
     use crate::http::endpoints::args::{FromPayload, Payload};
-    use super::{ExtractJsonPayloadFut, Json};
-    
+    use http_body_util::BodyExt;
+    use serde::{Deserialize, Serialize};
+    use std::fmt::{Display, Formatter};
+    use std::marker::PhantomData;
+
     #[derive(Debug, Serialize, Deserialize)]
     struct User {
         age: i32,
@@ -185,21 +188,29 @@ mod tests {
             f.write_str(&format!("{self:?}"))
         }
     }
-    
+
     #[tokio::test]
     async fn it_reads_from_payload() {
-        let user = User { age: 33, name: "John".into() };
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let body = HttpBody::boxed(HttpBody::json(user).unwrap());
-        
-        let user = Json::<User>::from_payload(Payload::Body(body)).await.unwrap();
-        
+
+        let user = Json::<User>::from_payload(Payload::Body(body))
+            .await
+            .unwrap();
+
         assert_eq!(user.age, 33);
         assert_eq!(user.name, "John");
     }
-    
+
     #[test]
     fn it_converts_to_json() {
-        let user = User { age: 33, name: "John".into() };
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let json: Json<User> = user.into();
 
         assert_eq!(json.age, 33);
@@ -208,30 +219,45 @@ mod tests {
 
     #[test]
     fn it_derefs_mut() {
-        let user = User { age: 33, name: "John".into() };
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let mut json: Json<User> = user.into();
 
-        *json = User { age: 30, name: "Jack".into() };
-        
+        *json = User {
+            age: 30,
+            name: "Jack".into(),
+        };
+
         assert_eq!(json.age, 30);
         assert_eq!(json.name, "Jack");
     }
-    
+
     #[test]
     fn it_displays_json() {
-        let user = User { age: 33, name: "John".into() };
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let json: Json<User> = user.into();
-        
+
         assert_eq!(json.to_string(), "User { age: 33, name: \"John\" }");
     }
-    
+
     #[tokio::test]
     async fn it_deserializes_json_from_fut() {
-        let user = User { age: 33, name: "John".into() };
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let body = HttpBody::json(user).unwrap();
-        
-        let fut = ExtractJsonPayloadFut::<User> { fut: body.collect(), _marker: PhantomData };
-        
+
+        let fut = ExtractJsonPayloadFut::<User> {
+            fut: body.collect(),
+            _marker: PhantomData,
+        };
+
         let json = fut.await.unwrap();
 
         assert_eq!(json.age, 33);
@@ -242,23 +268,29 @@ mod tests {
     async fn it_deserializes_json_from_fut_with_err() {
         let body = HttpBody::full("{\"age\":33,\"name\":\"John}");
 
-        let fut = ExtractJsonPayloadFut::<User> { fut: body.collect(), _marker: PhantomData };
+        let fut = ExtractJsonPayloadFut::<User> {
+            fut: body.collect(),
+            _marker: PhantomData,
+        };
 
         let json = fut.await;
 
         assert!(json.is_err());
     }
-    
+
     #[test]
     #[cfg(feature = "ws")]
     fn it_converts_into_ws_msg() {
         use crate::ws::Message;
-        
-        let user = User { age: 33, name: "John".into() };
+
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
         let json: Json<User> = user.into();
-        
+
         let msg = Message::try_from(json).unwrap();
-        
+
         assert_eq!(msg.to_string(), "{\"age\":33,\"name\":\"John\"}");
     }
 
@@ -269,7 +301,7 @@ mod tests {
 
         let msg = Message::try_from("{\"age\":33,\"name\":\"John\"}").unwrap();
         let json: Json<User> = msg.try_into().unwrap();
-        
+
         assert_eq!(json.age, 33);
         assert_eq!(json.name, "John");
     }

@@ -1,8 +1,8 @@
 //! Types and utils for OpenAPI documents.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
-use serde::{Deserialize, Serialize};
 use super::{op::OpenApiOperation, schema::OpenApiSchema};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 /// Represents OpenAPI document.
 #[derive(Clone, Debug, Serialize, Deserialize)]

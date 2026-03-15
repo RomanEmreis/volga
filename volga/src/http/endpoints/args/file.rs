@@ -1,28 +1,24 @@
-﻿//! Extractors for file stream
+//! Extractors for file stream
 
+use crate::{ByteStream, error::Error, headers::CONTENT_DISPOSITION};
 use bytes::Bytes;
-use futures_util::future::{ok, Ready};
+use futures_util::future::{Ready, ok};
+use futures_util::{TryFutureExt, TryStreamExt};
 use http_body_util::BodyExt;
 use hyper::body::Body;
-use tokio::io::{AsyncWriteExt, BufWriter};
 use std::path::Path;
-use futures_util::{TryFutureExt, TryStreamExt};
-use crate::{error::Error, headers::CONTENT_DISPOSITION, ByteStream};
+use tokio::io::{AsyncWriteExt, BufWriter};
 
 use crate::http::{
     HttpBody,
-    endpoints::args::{
-        FromPayload,
-        Payload,
-        Source
-    }
+    endpoints::args::{FromPayload, Payload, Source},
 };
 
 /// See [`FileStream<B>`] for more details.
 pub type File = FileStream<HttpBody>;
 
 /// Describes a single file stream
-/// 
+///
 /// # Example
 /// ```no_run
 /// use volga::{HttpResult, File, ok};
@@ -34,7 +30,7 @@ pub type File = FileStream<HttpBody>;
 /// ```
 pub struct FileStream<B: Body<Data = Bytes, Error = Error> + Unpin> {
     name: Option<String>,
-    stream: B
+    stream: B,
 }
 
 impl<B: Body<Data = Bytes, Error = Error> + Unpin> std::fmt::Debug for FileStream<B> {
@@ -47,12 +43,12 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> std::fmt::Debug for FileStrea
 impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     /// Create a new file stream
     fn new(name: Option<&str>, stream: B) -> Self {
-        Self { 
+        Self {
             name: name.map(|s| s.to_string()),
-            stream
+            stream,
         }
     }
-    
+
     /// Returns a file name
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
@@ -74,12 +70,12 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     pub async fn save(self, path: impl AsRef<Path>) -> Result<(), Error> {
         let file_name = self.name().ok_or(FileStreamError::missing_name())?;
         let file_path = path.as_ref().join(file_name);
-        
+
         self.save_as(file_path).await
     }
-    
+
     /// Asynchronously writes a file stream to disk with a provided name in `file_path`
-    /// 
+    ///
     /// # Example
     /// ```no_run
     /// # use volga::{HttpResult, ok};
@@ -93,32 +89,34 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     #[inline]
     pub async fn save_as(self, file_path: impl AsRef<Path>) -> Result<(), Error> {
         let file = tokio::fs::File::create(file_path).await?;
-        
+
         let mut writer = BufWriter::new(file);
         let mut stream = self.stream;
-        
+
         while let Some(next) = stream.frame().await {
             match next {
                 Ok(frame) => {
                     if let Some(chunk) = frame.data_ref() {
                         writer.write_all(chunk).await?
                     } else {
-                        break
+                        break;
                     }
-                },
-                Err(err) => return Err(FileStreamError::read_error(err))
+                }
+                Err(err) => return Err(FileStreamError::read_error(err)),
             };
         }
         writer.flush().map_err(FileStreamError::flush_error).await
     }
-    
+
     /// Consumes file stream into raw bytes stream
     pub fn into_stream(self) -> impl futures_util::Stream<Item = Result<Bytes, Error>> {
         self.stream.into_data_stream().into_stream()
     }
-    
+
     /// Consumes file into [`ByteStream`]
-    pub fn into_byte_stream(self) -> ByteStream<impl futures_util::Stream<Item = Result<Bytes, Error>>> {
+    pub fn into_byte_stream(
+        self,
+    ) -> ByteStream<impl futures_util::Stream<Item = Result<Bytes, Error>>> {
         ByteStream::new(self.into_stream())
     }
 
@@ -128,9 +126,7 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
         for part in parts {
             let part = part.trim();
             if part.starts_with("filename=") {
-                let file_name = part
-                    .trim_start_matches("filename=")
-                    .trim_matches('"');
+                let file_name = part.trim_start_matches("filename=").trim_matches('"');
                 return Some(file_name);
             }
         }
@@ -143,11 +139,14 @@ impl FromPayload for File {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::Full;
-    
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Full(parts, body) = payload else { unreachable!() };
-        let name = parts.headers
+        let Payload::Full(parts, body) = payload else {
+            unreachable!()
+        };
+        let name = parts
+            .headers
             .get(&CONTENT_DISPOSITION)
             .and_then(|header| header.to_str().ok())
             .and_then(Self::parse_file_name);
@@ -155,7 +154,9 @@ impl FromPayload for File {
     }
 
     #[cfg(feature = "openapi")]
-    fn describe_openapi(config: crate::openapi::OpenApiRouteConfig) -> crate::openapi::OpenApiRouteConfig {
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
         config.consumes_stream()
     }
 }
@@ -175,19 +176,21 @@ impl FileStreamError {
 
     #[inline]
     fn missing_name() -> Error {
-        Error::client_error("File Stream error: file name is missing in the \"Content-Disposition\" header")
+        Error::client_error(
+            "File Stream error: file name is missing in the \"Content-Disposition\" header",
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-    use hyper::Request;
     use crate::headers::CONTENT_DISPOSITION;
     use crate::http::body::HttpBody;
     use crate::http::endpoints::args::file::FileStream;
     use crate::http::endpoints::args::{FromPayload, Payload};
     use crate::test::{TempFile, utils::read_file};
+    use hyper::Request;
+    use std::path::Path;
     use uuid::Uuid;
 
     #[tokio::test]
@@ -199,10 +202,12 @@ mod tests {
             .header(CONTENT_DISPOSITION, "attachment; filename=test_file.txt")
             .body(HttpBody::file(file))
             .unwrap();
-        
+
         let (parts, body) = req.into_parts();
-        
-        let file_stream = FileStream::from_payload(Payload::Full(&parts, body)).await.unwrap();
+
+        let file_stream = FileStream::from_payload(Payload::Full(&parts, body))
+            .await
+            .unwrap();
 
         assert_eq!(file_stream.name(), Some("test_file.txt"));
 
@@ -217,7 +222,7 @@ mod tests {
 
         tokio::fs::remove_file(path).await.unwrap();
     }
-    
+
     #[tokio::test]
     async fn it_saves_request_body_to_file() {
         let file = TempFile::new("Hello, this is some file content!").await;
@@ -235,7 +240,7 @@ mod tests {
 
         assert_eq!(content, "Hello, this is some file content!");
         assert_eq!(content.len(), 33);
-        
+
         tokio::fs::remove_file(path).await.unwrap();
     }
 }

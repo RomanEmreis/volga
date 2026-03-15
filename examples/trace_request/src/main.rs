@@ -4,8 +4,8 @@
 //! cargo run -p trace_request
 //! ```
 
-use volga::{App, http::HttpBodyStream, stream};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use volga::{App, http::HttpBodyStream, stream};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {

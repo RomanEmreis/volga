@@ -4,8 +4,8 @@
 //! such as [`TempFile`], which is useful when testing file uploads
 //! or filesystem-backed APIs.
 
-use tokio::{fs::File as TokioFile, io::AsyncWriteExt};
 use std::path::{Path, PathBuf};
+use tokio::{fs::File as TokioFile, io::AsyncWriteExt};
 use uuid::Uuid;
 
 /// A temporary file utility intended for use in integration tests.
@@ -84,19 +84,18 @@ impl TempFile {
     ///
     /// ```no_run
     /// use volga::test::TempFile;
-    /// 
+    ///
     /// let file = TempFile::empty();
     ///
     /// assert!(!file.path.exists());
     /// ```
     pub fn empty() -> Self {
-        let dir = tempfile::TempDir::new()
-            .expect("Failed to create temp dir");
+        let dir = tempfile::TempDir::new().expect("Failed to create temp dir");
 
         let random_name = format!("{}.txt", Uuid::new_v4());
         let path = dir.path().join(random_name);
-        
-        Self { dir, path }       
+
+        Self { dir, path }
     }
 
     /// Creates a new temporary file with the specified file name and
@@ -110,29 +109,25 @@ impl TempFile {
     /// use volga::test::TempFile;
     /// # async fn docs() {
     /// let file = TempFile::with_name("data.json", "{}").await;
-    /// 
+    ///
     /// assert_eq!(file.file_name(), "data.json");
     /// # }
     /// ```
     pub async fn with_name(name: &str, content: &str) -> Self {
-        let dir = tempfile::TempDir::new()
-            .expect("Failed to create temp dir");
-        
+        let dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+
         let path = dir.path().join(name);
 
         let mut file = TokioFile::create(&path)
             .await
             .expect("Failed to create file");
-        
+
         file.write_all(content.as_bytes())
             .await
             .expect("Failed to write");
-        
-        file
-            .flush()
-            .await
-            .expect("Failed to flush");
-        
+
+        file.flush().await.expect("Failed to flush");
+
         drop(file);
 
         Self { dir, path }
@@ -154,25 +149,18 @@ impl TempFile {
     /// # }
     /// ```
     pub async fn from_bytes(name: &str, bytes: &[u8]) -> Self {
-        let dir = tempfile::TempDir::new()
-            .expect("Failed to create temp dir");
-        
+        let dir = tempfile::TempDir::new().expect("Failed to create temp dir");
+
         let path = dir.path().join(name);
 
         let mut file = TokioFile::create(&path)
             .await
             .expect("Failed to create file");
-        
-        file
-            .write_all(bytes)
-            .await
-            .expect("Failed to write");
-        
-        file
-            .flush()
-            .await
-            .expect("Failed to flush");
-        
+
+        file.write_all(bytes).await.expect("Failed to write");
+
+        file.flush().await.expect("Failed to flush");
+
         drop(file);
 
         Self { dir, path }
@@ -185,7 +173,8 @@ impl TempFile {
     /// Panics if the file name is not valid UTF-8. This should not happen
     /// for files created by `TempFile`.
     pub fn file_name(&self) -> &str {
-        self.path.file_name()
+        self.path
+            .file_name()
             .and_then(|n| n.to_str())
             .expect("Invalid file name")
     }

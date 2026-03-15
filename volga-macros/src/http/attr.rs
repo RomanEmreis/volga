@@ -1,8 +1,8 @@
 //! Attribute macro helpers
 
 use syn::{
-    parse::{Parse, ParseStream},
     Ident, LitStr, Result,
+    parse::{Parse, ParseStream},
 };
 
 /// Represents the input to the `#[http_header(...)]` macro.
@@ -92,4 +92,3 @@ mod tests {
         assert!(parsed.is_err());
     }
 }
-

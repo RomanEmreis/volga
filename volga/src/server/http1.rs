@@ -1,14 +1,11 @@
-﻿use super::Server;
+use super::Server;
 use crate::Limit;
 use crate::app::{AppEnv, scope::Scope};
-use std::sync::Arc;
 use hyper::rt::{Read, Write};
+use std::sync::Arc;
 
 #[cfg(feature = "ws")]
-use hyper_util::{
-    rt::TokioExecutor, 
-    server::conn::auto::Builder
-};
+use hyper_util::{rt::TokioExecutor, server::conn::auto::Builder};
 
 #[cfg(not(feature = "ws"))]
 use hyper::server::conn::http1::Builder;
@@ -25,10 +22,10 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             if let Limit::Limited(max_header_count) = env.max_header_count {
                 connection_builder.http1().max_headers(max_header_count);
             }
-            
+
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
             let connection = env.graceful_shutdown.watch(connection);
-            
+
             drop(env);
 
             if let Err(_err) = connection.await {
@@ -46,9 +43,9 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
 
             let connection = connection_builder.serve_connection(self.io, scope);
             let connection = env.graceful_shutdown.watch(connection);
-            
+
             drop(env);
-            
+
             if let Err(_err) = connection.await {
                 #[cfg(feature = "tracing")]
                 tracing::error!("error serving connection: {_err:#}");

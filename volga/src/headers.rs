@@ -1,65 +1,49 @@
-﻿//! Tools for HTTP headers
+//! Tools for HTTP headers
 
 use crate::error::Error;
 
 // Re-exporting HeaderMap, HeaderValue and some headers from hyper
 pub use hyper::{
+    HeaderMap,
     header::{
-        InvalidHeaderName,
-        InvalidHeaderValue,
-        MaxSizeReached,
-        ToStrError,
-        ACCEPT_ENCODING, ACCEPT_RANGES,
-        ACCESS_CONTROL_ALLOW_CREDENTIALS, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-        ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE,
-        ACCESS_CONTROL_REQUEST_HEADERS, ACCESS_CONTROL_REQUEST_METHOD,
-        AUTHORIZATION,
-        CACHE_CONTROL,
-        CONTENT_DISPOSITION, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE,
-        ETAG, FORWARDED, HOST,
-        IF_NONE_MATCH, IF_MODIFIED_SINCE,
-        LAST_MODIFIED,
-        LOCATION,
-        ORIGIN,
-        SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION,
-        SERVER,
-        STRICT_TRANSPORT_SECURITY,
-        TRANSFER_ENCODING,
-        VARY,
-        UPGRADE,
-        CONNECTION,
-        COOKIE, SET_COOKIE,
-        WWW_AUTHENTICATE
+        ACCEPT_ENCODING, ACCEPT_RANGES, ACCESS_CONTROL_ALLOW_CREDENTIALS,
+        ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
+        ACCESS_CONTROL_EXPOSE_HEADERS, ACCESS_CONTROL_MAX_AGE, ACCESS_CONTROL_REQUEST_HEADERS,
+        ACCESS_CONTROL_REQUEST_METHOD, AUTHORIZATION, CACHE_CONTROL, CONNECTION,
+        CONTENT_DISPOSITION, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, COOKIE,
+        ETAG, FORWARDED, HOST, IF_MODIFIED_SINCE, IF_NONE_MATCH, InvalidHeaderName,
+        InvalidHeaderValue, LAST_MODIFIED, LOCATION, MaxSizeReached, ORIGIN, SEC_WEBSOCKET_ACCEPT,
+        SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL, SEC_WEBSOCKET_VERSION, SERVER, SET_COOKIE,
+        STRICT_TRANSPORT_SECURITY, TRANSFER_ENCODING, ToStrError, UPGRADE, VARY, WWW_AUTHENTICATE,
     },
     http::{HeaderName, HeaderValue},
-    HeaderMap
 };
 
 pub(crate) use self::etag::ETagRef;
 
 pub use self::{
     super::http::StatusCode,
-    etag::ETag,
     cache_control::{CacheControl, ResponseCaching},
     encoding::Encoding,
+    etag::ETag,
     extract::*,
     header::{Header, HttpHeaders, TryIntoHeaderPair},
+    macros::headers,
     quality::Quality,
-    macros::headers
 };
 
 #[cfg(feature = "macros")]
 pub use volga_macros::http_header;
 
-mod known_headers;
-pub(crate) mod helpers;
-pub mod extract;
+pub mod cache_control;
 pub mod encoding;
+pub mod etag;
+pub mod extract;
 pub mod header;
+pub(crate) mod helpers;
+mod known_headers;
 pub mod macros;
 pub mod quality;
-pub mod etag;
-pub mod cache_control;
 
 /// Identifying the originating IP address of a client connecting to a web server through a proxy server.
 pub const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
@@ -71,7 +55,7 @@ pub const X_ACCEL_BUFFERING: HeaderName = HeaderName::from_static("x-accel-buffe
 pub trait FromHeaders: Clone {
     /// Returns current [`HeaderName`]
     const NAME: HeaderName;
-    
+
     /// Reads a [`HeaderValue`] from [`HeaderMap`]
     fn from_headers(headers: &HeaderMap) -> Option<&HeaderValue>;
 }
@@ -88,7 +72,7 @@ impl HeaderError {
         Error::from_parts(
             StatusCode::NOT_FOUND,
             None,
-            format!("Header: `{header}` not found")
+            format!("Header: `{header}` not found"),
         )
     }
 
@@ -212,5 +196,4 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("Header:"));
     }
-
 }
