@@ -280,14 +280,12 @@ impl RouteNode {
 
     /// Traverses the route tree and collects all available routes
     /// Returns a vector of tuples containing (HTTP method, route path)
-    #[cfg(debug_assertions)]
     pub(super) fn collect(&self) -> super::meta::RoutesInfo {
         let mut routes = Vec::new();
         self.traverse_routes(&mut routes, String::new());
         super::meta::RoutesInfo(routes)
     }
 
-    #[cfg(debug_assertions)]
     fn traverse_routes(&self, routes: &mut Vec<super::meta::RouteInfo>, current_path: String) {
         // Traverse static routes
         for route in self.static_routes.iter() {

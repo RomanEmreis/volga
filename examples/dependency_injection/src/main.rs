@@ -19,7 +19,7 @@ use volga::{
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let mut app = App::new();
+    let mut app = App::new().with_greeter();
 
     app.map_err(error_handler);
 
