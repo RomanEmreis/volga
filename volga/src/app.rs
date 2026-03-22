@@ -680,12 +680,10 @@ impl App {
             eprintln!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
         }
 
-        #[cfg(any(feature = "tls", feature = "tracing"))]
         let socket = tcp_listener.local_addr()?;
-
         let no_delay = self.no_delay;
 
-        self.print_welcome();
+        self.print_welcome(socket);
 
         #[cfg(feature = "tracing")]
         {
