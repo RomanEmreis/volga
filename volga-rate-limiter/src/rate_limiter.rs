@@ -32,10 +32,10 @@
 
 use std::time::Instant;
 
-pub use fixed_window::FixedWindowRateLimiter;
-pub use gcra::GcraRateLimiter;
-pub use sliding_window::SlidingWindowRateLimiter;
-pub use token_bucket::TokenBucketRateLimiter;
+pub use fixed_window::{FixedWindowRateLimiter, InMemoryFixedWindowStore};
+pub use gcra::{GcraRateLimiter, InMemoryGcraStore};
+pub use sliding_window::{InMemorySlidingWindowStore, SlidingWindowRateLimiter};
+pub use token_bucket::{InMemoryTokenBucketStore, TokenBucketRateLimiter};
 
 mod fixed_window;
 mod gcra;
