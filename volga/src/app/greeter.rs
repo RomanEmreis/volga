@@ -47,7 +47,12 @@ impl App {
         };
 
         let routes = self.pipeline.endpoints().collect();
-        Some(format!("{header}{routes}\n"))
+        let routes_str = if no_color {
+            routes.to_plain_string()
+        } else {
+            routes.to_string()
+        };
+        Some(format!("{header}{routes_str}"))
     }
 }
 
@@ -83,16 +88,27 @@ mod tests {
 
     #[test]
     fn it_contains_ansi_codes_when_color_enabled() {
-        let app = App::new().with_greeter();
+        let mut app = App::new().with_greeter();
+        app.map_get("/health", || async {});
         let output = app.build_welcome(false).unwrap();
         assert!(output.contains("\x1b[1;34m"));
         assert!(output.contains("\x1b[0m"));
     }
 
     #[test]
-    fn it_omits_ansi_codes_when_no_color() {
+    fn it_omits_ansi_codes_in_box_when_no_color() {
         let app = App::new().with_greeter();
         let output = app.build_welcome(true).unwrap();
         assert!(!output.contains('\x1b'));
+    }
+
+    #[test]
+    fn it_omits_ansi_codes_in_routes_when_no_color() {
+        let mut app = App::new().with_greeter();
+        app.map_get("/health", || async {});
+        let output = app.build_welcome(true).unwrap();
+        assert!(!output.contains('\x1b'));
+        assert!(output.contains("GET"));
+        assert!(output.contains("/health"));
     }
 }

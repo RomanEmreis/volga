@@ -82,6 +82,21 @@ impl PartialEq<RouteInfo> for (Method, String) {
     }
 }
 
+impl RoutesInfo {
+    /// Formats the routes list without ANSI color codes.
+    pub(crate) fn to_plain_string(&self) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        writeln!(out).unwrap();
+        writeln!(out, "Available routes:").unwrap();
+        writeln!(out).unwrap();
+        for route in &self.0 {
+            writeln!(out, "{}", route.to_plain_string()).unwrap();
+        }
+        out
+    }
+}
+
 impl RouteInfo {
     /// Creates a new route metadata
     pub(crate) fn new(method: Method, path: &str) -> Self {
@@ -89,6 +104,11 @@ impl RouteInfo {
             method,
             path: path.into(),
         }
+    }
+
+    /// Formats the route without ANSI color codes.
+    pub(super) fn to_plain_string(&self) -> String {
+        format!("  {:<8}  {}", self.method, self.path)
     }
 }
 
@@ -185,5 +205,32 @@ mod tests {
         let output = routes.to_string();
 
         assert!(output.contains("Available routes:"));
+    }
+
+    #[test]
+    fn it_can_format_route_info_plain_without_ansi() {
+        let route = RouteInfo::new(Method::GET, "/health");
+
+        let output = route.to_plain_string();
+
+        assert!(output.contains("GET"));
+        assert!(output.contains("/health"));
+        assert!(!output.contains('\x1b'));
+    }
+
+    #[test]
+    fn it_can_format_routes_info_plain_without_ansi() {
+        let routes = RoutesInfo(vec![
+            RouteInfo::new(Method::GET, "/"),
+            RouteInfo::new(Method::POST, "/users"),
+        ]);
+
+        let output = routes.to_plain_string();
+
+        assert!(output.contains("Available routes:"));
+        assert!(output.contains("GET"));
+        assert!(output.contains("POST"));
+        assert!(output.contains("/users"));
+        assert!(!output.contains('\x1b'));
     }
 }
