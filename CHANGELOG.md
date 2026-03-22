@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Added
 * Added `to_map()` method in `HttpHeader` struct (#169)
 * Added rustfmt formatting check to CI (#170)
+* Exposed greeter for release builds (requires explicit enabling) (#171)
+* Added traits for custom storage implementations for rate limiters (#171)
 
 ## Fixed
 * Fixed formatting across the project (#170)
