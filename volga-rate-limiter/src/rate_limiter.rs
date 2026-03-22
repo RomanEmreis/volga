@@ -44,10 +44,8 @@ mod store;
 mod token_bucket;
 
 pub use store::{
-    FixedWindowParams, FixedWindowStore,
-    GcraParams, GcraStore,
-    SlidingWindowParams, SlidingWindowStore,
-    TokenBucketParams, TokenBucketStore,
+    FixedWindowParams, FixedWindowStore, GcraParams, GcraStore, SlidingWindowParams,
+    SlidingWindowStore, TokenBucketParams, TokenBucketStore,
 };
 
 const MICROS_PER_SEC: u64 = 1_000_000;

@@ -42,7 +42,9 @@ pub struct InMemoryTokenBucketStore {
 impl InMemoryTokenBucketStore {
     /// Creates a new empty in-memory token-bucket store.
     pub fn new() -> Self {
-        Self { storage: Arc::new(DashMap::new()) }
+        Self {
+            storage: Arc::new(DashMap::new()),
+        }
     }
 }
 
@@ -82,18 +84,18 @@ impl TokenBucketStore for InMemoryTokenBucketStore {
         // Touch last_seen (best-effort).
         entry.last_seen_us.store(now_us, Release);
 
-        Self::refill(entry.value(), now_us, refill_rate_scaled_per_sec, capacity_scaled);
+        Self::refill(
+            entry.value(),
+            now_us,
+            refill_rate_scaled_per_sec,
+            capacity_scaled,
+        );
         Self::consume(entry.value(), scale)
     }
 }
 
 impl InMemoryTokenBucketStore {
-    fn refill(
-        entry: &Entry,
-        now_us: u64,
-        refill_rate_scaled_per_sec: u64,
-        capacity_scaled: u64,
-    ) {
+    fn refill(entry: &Entry, now_us: u64, refill_rate_scaled_per_sec: u64, capacity_scaled: u64) {
         if refill_rate_scaled_per_sec == 0 {
             return;
         }
@@ -105,7 +107,10 @@ impl InMemoryTokenBucketStore {
                 return;
             }
 
-            match entry.last_refill_us.compare_exchange(last, now_us, AcqRel, Acquire) {
+            match entry
+                .last_refill_us
+                .compare_exchange(last, now_us, AcqRel, Acquire)
+            {
                 Ok(_) => break,
                 Err(next) => last = next,
             }
@@ -124,7 +129,10 @@ impl InMemoryTokenBucketStore {
         let mut current = entry.available_tokens.load(Relaxed);
         loop {
             let updated = current.saturating_add(add).min(capacity_scaled);
-            match entry.available_tokens.compare_exchange(current, updated, AcqRel, Relaxed) {
+            match entry
+                .available_tokens
+                .compare_exchange(current, updated, AcqRel, Relaxed)
+            {
                 Ok(_) => return,
                 Err(next) => current = next,
             }
@@ -138,7 +146,10 @@ impl InMemoryTokenBucketStore {
                 return false;
             }
             let updated = current - scale;
-            match entry.available_tokens.compare_exchange(current, updated, AcqRel, Relaxed) {
+            match entry
+                .available_tokens
+                .compare_exchange(current, updated, AcqRel, Relaxed)
+            {
                 Ok(_) => return true,
                 Err(next) => current = next,
             }
@@ -296,8 +307,9 @@ impl<T: TimeSource, S: TokenBucketStore> TokenBucketRateLimiter<T, S> {
 
         let refill_rate_scaled_per_sec = scaled_f.round() as u64;
 
-        let capacity_scaled =
-            capacity.checked_mul(scale).expect("capacity * scale overflow");
+        let capacity_scaled = capacity
+            .checked_mul(scale)
+            .expect("capacity * scale overflow");
 
         Self {
             store,

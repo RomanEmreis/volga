@@ -40,7 +40,9 @@ pub struct InMemoryGcraStore {
 impl InMemoryGcraStore {
     /// Creates a new empty in-memory GCRA store.
     pub fn new() -> Self {
-        Self { storage: Arc::new(DashMap::new()) }
+        Self {
+            storage: Arc::new(DashMap::new()),
+        }
     }
 }
 
@@ -53,8 +55,13 @@ impl Default for InMemoryGcraStore {
 impl GcraStore for InMemoryGcraStore {
     #[inline]
     fn check_and_advance(&self, params: GcraParams) -> bool {
-        let GcraParams { key, now_us, emission_interval_us, burst_allowance_us, eviction_grace_us } =
-            params;
+        let GcraParams {
+            key,
+            now_us,
+            emission_interval_us,
+            burst_allowance_us,
+            eviction_grace_us,
+        } = params;
 
         // Lazy eviction based on last_seen, not TAT.
         if let Some(entry) = self.storage.get(&key) {
@@ -85,7 +92,10 @@ impl GcraStore for InMemoryGcraStore {
             let base = now_us.max(current_tat);
             let next_tat = base.saturating_add(emission_interval_us);
 
-            match entry.tat_us.compare_exchange(current_tat, next_tat, AcqRel, Relaxed) {
+            match entry
+                .tat_us
+                .compare_exchange(current_tat, next_tat, AcqRel, Relaxed)
+            {
                 Ok(_) => return true,
                 Err(next) => current_tat = next,
             }
@@ -139,10 +149,7 @@ impl GcraStore for InMemoryGcraStore {
 /// - burst tolerance should be explicit,
 /// - an O(1) per-request algorithm is needed.
 #[derive(Debug)]
-pub struct GcraRateLimiter<
-    T: TimeSource = SystemTimeSource,
-    S: GcraStore = InMemoryGcraStore,
-> {
+pub struct GcraRateLimiter<T: TimeSource = SystemTimeSource, S: GcraStore = InMemoryGcraStore> {
     store: S,
     emission_interval_us: u64,
     burst_allowance_us: u64,
@@ -234,7 +241,10 @@ impl<T: TimeSource, S: GcraStore> GcraRateLimiter<T, S> {
         time_source: T,
         store: S,
     ) -> Self {
-        assert!(rate_per_second.is_finite(), "rate_per_second must be finite");
+        assert!(
+            rate_per_second.is_finite(),
+            "rate_per_second must be finite"
+        );
         assert!(rate_per_second > 0.0, "rate_per_second must be > 0");
         assert!(burst >= 1, "burst must be >= 1");
 

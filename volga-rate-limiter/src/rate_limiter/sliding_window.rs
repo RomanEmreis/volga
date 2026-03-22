@@ -44,7 +44,9 @@ pub struct InMemorySlidingWindowStore {
 impl InMemorySlidingWindowStore {
     /// Creates a new empty in-memory sliding-window store.
     pub fn new() -> Self {
-        Self { storage: Arc::new(DashMap::new()) }
+        Self {
+            storage: Arc::new(DashMap::new()),
+        }
     }
 }
 
@@ -58,8 +60,14 @@ impl SlidingWindowStore for InMemorySlidingWindowStore {
     #[inline]
     fn check_and_count(&self, params: SlidingWindowParams) -> bool {
         // Destructuring works here (same crate). External implementors must use params.key etc.
-        let SlidingWindowParams { key, window, window_size_secs, max_requests, now, grace_secs } =
-            params;
+        let SlidingWindowParams {
+            key,
+            window,
+            window_size_secs,
+            max_requests,
+            now,
+            grace_secs,
+        } = params;
 
         // Lazy eviction
         if let Some(entry) = self.storage.get(&key) {
@@ -259,7 +267,10 @@ impl<T: TimeSource, S: SlidingWindowStore> SlidingWindowRateLimiter<T, S> {
         store: S,
     ) -> Self {
         let window_size_secs = window_size.as_secs();
-        assert!(window_size_secs > 0, "window_size must be at least 1 second");
+        assert!(
+            window_size_secs > 0,
+            "window_size must be at least 1 second"
+        );
         Self {
             store,
             max_requests,

@@ -67,8 +67,6 @@ pub trait FixedWindowStore: Send + Sync {
     fn check_and_count(&self, params: FixedWindowParams) -> bool;
 }
 
-// ---------------------------------------------------------------------------
-
 /// Parameters for a single [`SlidingWindowStore`] operation.
 ///
 /// [`SlidingWindowRateLimiter`]: super::SlidingWindowRateLimiter
@@ -114,8 +112,6 @@ pub trait SlidingWindowStore: Send + Sync {
     fn check_and_count(&self, params: SlidingWindowParams) -> bool;
 }
 
-// ---------------------------------------------------------------------------
-
 /// Parameters for a single [`TokenBucketStore`] operation.
 ///
 /// All token values use a fixed-point representation:
@@ -157,8 +153,6 @@ pub trait TokenBucketStore: Send + Sync {
     /// Atomically refills and tries to consume one token.
     fn try_consume(&self, params: TokenBucketParams) -> bool;
 }
-
-// ---------------------------------------------------------------------------
 
 /// Parameters for a single [`GcraStore`] operation.
 ///
