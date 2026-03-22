@@ -1,6 +1,9 @@
 //! Tools and data structures for a GCRA (Generic Cell Rate Algorithm) limiter.
 
-use super::{MICROS_PER_SEC, RateLimiter, SystemTimeSource, TimeSource};
+use super::{
+    MICROS_PER_SEC, RateLimiter, SystemTimeSource, TimeSource,
+    store::{GcraParams, GcraStore},
+};
 use dashmap::DashMap;
 use std::{
     sync::{
@@ -23,6 +26,71 @@ struct Entry {
 
     /// Last access time in microseconds (for eviction)
     last_seen_us: AtomicU64,
+}
+
+/// In-memory [`GcraStore`] backed by a concurrent hash map.
+///
+/// This is the default store used by [`GcraRateLimiter`].
+/// It holds per-key TAT state in a `DashMap` and performs lazy eviction.
+#[derive(Debug, Clone)]
+pub struct InMemoryGcraStore {
+    storage: Arc<DashMap<u64, Entry>>,
+}
+
+impl InMemoryGcraStore {
+    /// Creates a new empty in-memory GCRA store.
+    pub fn new() -> Self {
+        Self { storage: Arc::new(DashMap::new()) }
+    }
+}
+
+impl Default for InMemoryGcraStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GcraStore for InMemoryGcraStore {
+    #[inline]
+    fn check_and_advance(&self, params: GcraParams) -> bool {
+        let GcraParams { key, now_us, emission_interval_us, burst_allowance_us, eviction_grace_us } =
+            params;
+
+        // Lazy eviction based on last_seen, not TAT.
+        if let Some(entry) = self.storage.get(&key) {
+            let last_seen = entry.last_seen_us.load(Acquire);
+            if now_us.saturating_sub(last_seen) > eviction_grace_us {
+                drop(entry);
+                self.storage.remove(&key);
+            }
+        }
+
+        let entry = self.storage.entry(key).or_insert_with(|| Entry {
+            tat_us: AtomicU64::new(now_us),
+            last_seen_us: AtomicU64::new(now_us),
+        });
+
+        // Touch last_seen (best-effort; eviction is approximate anyway).
+        entry.last_seen_us.store(now_us, Release);
+
+        let mut current_tat = entry.tat_us.load(Relaxed);
+        loop {
+            // limit boundary: allow if now >= tat - allowance
+            let limit = current_tat.saturating_sub(burst_allowance_us);
+            if now_us < limit {
+                return false;
+            }
+
+            // next tat: max(now, tat) + tau
+            let base = now_us.max(current_tat);
+            let next_tat = base.saturating_add(emission_interval_us);
+
+            match entry.tat_us.compare_exchange(current_tat, next_tat, AcqRel, Relaxed) {
+                Ok(_) => return true,
+                Err(next) => current_tat = next,
+            }
+        }
+    }
 }
 
 /// A GCRA (Generic Cell Rate Algorithm) rate limiter.
@@ -71,77 +139,38 @@ struct Entry {
 /// - burst tolerance should be explicit,
 /// - an O(1) per-request algorithm is needed.
 #[derive(Debug)]
-pub struct GcraRateLimiter<T: TimeSource = SystemTimeSource> {
-    /// Per-key rate limiting state.
-    storage: Arc<DashMap<u64, Entry>>,
-
-    /// Emission interval in fixed-point microseconds.
+pub struct GcraRateLimiter<
+    T: TimeSource = SystemTimeSource,
+    S: GcraStore = InMemoryGcraStore,
+> {
+    store: S,
     emission_interval_us: u64,
-
-    /// Burst allowance in fixed-point microseconds.
     burst_allowance_us: u64,
-
-    /// Configured burst size.
     burst: u32,
-
-    /// Time after which inactive entries are eligible for eviction.
     eviction_grace_us: u64,
-
-    /// Time source used to determine the current time.
     time_source: T,
 }
 
-impl<T: TimeSource> RateLimiter for GcraRateLimiter<T> {
+impl<T: TimeSource, S: GcraStore> RateLimiter for GcraRateLimiter<T, S> {
     /// Checks whether the rate limit has been exceeded for the given `key`.
     ///
     /// Returns `true` if the request is allowed, or `false` if the rate
     /// limit has been reached.
     #[inline]
     fn check(&self, key: u64) -> bool {
-        let now_us = self.time_source.now_micros();
-
-        // Lazy eviction based on last_seen, not TAT.
-        if let Some(entry) = self.storage.get(&key) {
-            let last_seen = entry.last_seen_us.load(Acquire);
-            if now_us.saturating_sub(last_seen) > self.eviction_grace_us {
-                drop(entry);
-                self.storage.remove(&key);
-            }
-        }
-
-        let entry = self.storage.entry(key).or_insert_with(|| Entry {
-            tat_us: AtomicU64::new(now_us),
-            last_seen_us: AtomicU64::new(now_us),
-        });
-
-        // Touch last_seen (best-effort; eviction is approximate anyway).
-        entry.last_seen_us.store(now_us, Release);
-
-        let mut current_tat = entry.tat_us.load(Relaxed);
-        loop {
-            // limit boundary: allow if now >= tat - allowance
-            let limit = current_tat.saturating_sub(self.burst_allowance_us);
-            if now_us < limit {
-                return false;
-            }
-
-            // next tat: max(now, tat) + tau
-            let base = now_us.max(current_tat);
-            let next_tat = base.saturating_add(self.emission_interval_us);
-
-            match entry
-                .tat_us
-                .compare_exchange(current_tat, next_tat, AcqRel, Relaxed)
-            {
-                Ok(_) => return true,
-                Err(next) => current_tat = next,
-            }
-        }
+        self.store.check_and_advance(GcraParams {
+            key,
+            now_us: self.time_source.now_micros(),
+            emission_interval_us: self.emission_interval_us,
+            burst_allowance_us: self.burst_allowance_us,
+            eviction_grace_us: self.eviction_grace_us,
+        })
     }
 }
 
 impl GcraRateLimiter {
-    /// Creates a new GCRA rate limiter using the system clock.
+    /// Creates a new GCRA rate limiter using the system clock
+    /// and the default in-memory store.
     ///
     /// # Parameters
     ///
@@ -168,18 +197,44 @@ impl<T: TimeSource> GcraRateLimiter<T> {
     ///
     /// # Panics
     ///
-    /// Panics if:
-    ///
-    /// - `rate_per_second` is not finite (`NaN` or ±∞).
-    /// - `rate_per_second` is not positive (`<= 0.0`).
-    /// - `burst` is `0` (must be at least `1`).
+    /// See [`GcraRateLimiter::new`] for the full list of panic conditions.
     #[inline]
     pub fn with_time_source(rate_per_second: f64, burst: u32, time_source: T) -> Self {
-        // Parameter validation
-        assert!(
-            rate_per_second.is_finite(),
-            "rate_per_second must be finite"
-        );
+        Self::with_time_source_and_store(
+            rate_per_second,
+            burst,
+            time_source,
+            InMemoryGcraStore::new(),
+        )
+    }
+}
+
+impl<S: GcraStore> GcraRateLimiter<SystemTimeSource, S> {
+    /// Creates a [`GcraRateLimiter`] with a custom [`GcraStore`].
+    ///
+    /// # Panics
+    ///
+    /// See [`GcraRateLimiter::new`] for the full list of panic conditions.
+    #[inline]
+    pub fn with_store(rate_per_second: f64, burst: u32, store: S) -> Self {
+        Self::with_time_source_and_store(rate_per_second, burst, SystemTimeSource, store)
+    }
+}
+
+impl<T: TimeSource, S: GcraStore> GcraRateLimiter<T, S> {
+    /// Creates a [`GcraRateLimiter`] with a custom [`TimeSource`] and [`GcraStore`].
+    ///
+    /// # Panics
+    ///
+    /// See [`GcraRateLimiter::new`] for the full list of panic conditions.
+    #[inline]
+    pub fn with_time_source_and_store(
+        rate_per_second: f64,
+        burst: u32,
+        time_source: T,
+        store: S,
+    ) -> Self {
+        assert!(rate_per_second.is_finite(), "rate_per_second must be finite");
         assert!(rate_per_second > 0.0, "rate_per_second must be > 0");
         assert!(burst >= 1, "burst must be >= 1");
 
@@ -190,11 +245,11 @@ impl<T: TimeSource> GcraRateLimiter<T> {
         let burst_allowance_us = emission_interval_us.saturating_mul((burst - 1) as u64);
 
         Self {
-            storage: Arc::new(DashMap::new()),
+            store,
             emission_interval_us,
             burst_allowance_us,
             burst,
-            eviction_grace_us: DEFAULT_EVICTION, // 60s by default
+            eviction_grace_us: DEFAULT_EVICTION,
             time_source,
         }
     }
@@ -267,6 +322,34 @@ mod tests {
     }
 
     #[test]
+    fn gcra_with_custom_store_delegates_to_store() {
+        use crate::rate_limiter::store::{GcraParams, GcraStore};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+
+        struct CountingStore {
+            inner: InMemoryGcraStore,
+            calls: Arc<AtomicU32>,
+        }
+        impl GcraStore for CountingStore {
+            fn check_and_advance(&self, params: GcraParams) -> bool {
+                self.calls.fetch_add(1, Relaxed);
+                self.inner.check_and_advance(params)
+            }
+        }
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let store = CountingStore {
+            inner: InMemoryGcraStore::new(),
+            calls: calls.clone(),
+        };
+        let limiter = GcraRateLimiter::with_store(1.0, 3, store);
+
+        assert!(limiter.check(10));
+        assert_eq!(calls.load(Relaxed), 1);
+    }
+
+    #[test]
     #[should_panic(expected = "rate_per_second must be finite")]
     fn panics_when_rate_is_nan() {
         let _ = GcraRateLimiter::with_time_source(f64::NAN, 1, SystemTimeSource);
@@ -294,5 +377,17 @@ mod tests {
     #[should_panic(expected = "burst must be >= 1")]
     fn panics_when_burst_is_zero() {
         let _ = GcraRateLimiter::with_time_source(1.0, 0, SystemTimeSource);
+    }
+
+    #[test]
+    #[should_panic(expected = "rate_per_second must be > 0")]
+    fn gcra_with_store_panics_on_zero_rate() {
+        let _ = GcraRateLimiter::with_store(0.0, 1, InMemoryGcraStore::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "burst must be >= 1")]
+    fn gcra_with_store_panics_on_zero_burst() {
+        let _ = GcraRateLimiter::with_store(1.0, 0, InMemoryGcraStore::new());
     }
 }
