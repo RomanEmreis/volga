@@ -1,6 +1,9 @@
 //! Tools and data structures for a sliding-window rate limiter.
 
-use super::{RateLimiter, SystemTimeSource, TimeSource};
+use super::{
+    RateLimiter, SystemTimeSource, TimeSource,
+    store::{SlidingWindowParams, SlidingWindowStore},
+};
 use dashmap::DashMap;
 use std::sync::{
     Arc,
@@ -28,6 +31,85 @@ struct Entry {
 
     /// A start timestamp (seconds since UNIX_EPOCH) of the current window.
     window_start: AtomicU64,
+}
+
+/// In-memory [`SlidingWindowStore`] backed by a concurrent hash map.
+///
+/// This is the default store used by [`SlidingWindowRateLimiter`].
+#[derive(Debug, Clone)]
+pub struct InMemorySlidingWindowStore {
+    storage: Arc<DashMap<u64, Entry>>,
+}
+
+impl InMemorySlidingWindowStore {
+    /// Creates a new empty in-memory sliding-window store.
+    pub fn new() -> Self {
+        Self { storage: Arc::new(DashMap::new()) }
+    }
+}
+
+impl Default for InMemorySlidingWindowStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SlidingWindowStore for InMemorySlidingWindowStore {
+    #[inline]
+    fn check_and_count(&self, params: SlidingWindowParams) -> bool {
+        // Destructuring works here (same crate). External implementors must use params.key etc.
+        let SlidingWindowParams { key, window, window_size_secs, max_requests, now, grace_secs } =
+            params;
+
+        // Lazy eviction
+        if let Some(entry) = self.storage.get(&key) {
+            let window_start = entry.window_start.load(Acquire);
+            if now.saturating_sub(window_start) > grace_secs {
+                drop(entry);
+                self.storage.remove(&key);
+            }
+        }
+
+        let entry = self.storage.entry(key).or_insert_with(|| {
+            let window_start = now / window_size_secs * window_size_secs;
+            Entry {
+                previous_count: AtomicU32::new(0),
+                current_count: AtomicU32::new(0),
+                window_start: AtomicU64::new(window_start),
+            }
+        });
+
+        let window_start = entry.window_start.load(Acquire);
+
+        if window > window_start {
+            let windows_passed = (window - window_start) / window_size_secs;
+
+            if windows_passed >= 2 {
+                entry.previous_count.store(0, Release);
+                entry.current_count.store(0, Release);
+                entry.window_start.store(window, Release);
+            } else {
+                let old_current = entry.current_count.swap(0, AcqRel);
+                entry.previous_count.store(old_current, Release);
+                entry.window_start.store(window, Release);
+            }
+        }
+
+        let previous = entry.previous_count.load(Acquire);
+        let current = entry.current_count.load(Acquire);
+
+        let elapsed_in_window = now - entry.window_start.load(Acquire);
+        let progress = (elapsed_in_window as f64 / window_size_secs as f64).min(1.0);
+        let previous_weight = 1.0 - progress;
+        let effective = previous as f64 * previous_weight + current as f64;
+
+        if effective >= f64::from(max_requests) {
+            return false;
+        }
+
+        entry.current_count.fetch_add(1, Release);
+        true
+    }
 }
 
 /// A sliding-window rate limiter.
@@ -78,24 +160,18 @@ struct Entry {
 ///
 /// For maximum throughput and simplicity, consider a fixed window limiter.
 #[derive(Debug)]
-pub struct SlidingWindowRateLimiter<T: TimeSource = SystemTimeSource> {
-    /// Per-key rate limiting state.
-    storage: Arc<DashMap<u64, Entry>>,
-
-    /// Maximum allowed number of requests per window.
+pub struct SlidingWindowRateLimiter<
+    T: TimeSource = SystemTimeSource,
+    S: SlidingWindowStore = InMemorySlidingWindowStore,
+> {
+    store: S,
     max_requests: u32,
-
-    /// Size of the logical window in seconds.
     window_size_secs: u64,
-
-    /// Time after which inactive entries are eligible for eviction.
     eviction_grace_secs: u64,
-
-    /// Time source used to determine the current time.
     time_source: T,
 }
 
-impl<T: TimeSource> RateLimiter for SlidingWindowRateLimiter<T> {
+impl<T: TimeSource, S: SlidingWindowStore> RateLimiter for SlidingWindowRateLimiter<T, S> {
     /// Checks whether the rate limit has been exceeded for the given `key`.
     ///
     /// Returns `true` if the request is allowed, or `false` if the rate
@@ -105,96 +181,90 @@ impl<T: TimeSource> RateLimiter for SlidingWindowRateLimiter<T> {
     #[inline]
     fn check(&self, key: u64) -> bool {
         let now = self.time_source.now_secs();
-
-        // Lazy eviction
-        if let Some(entry) = self.storage.get(&key) {
-            let window_start = entry.window_start.load(Acquire);
-            if now.saturating_sub(window_start) > self.eviction_grace_secs {
-                drop(entry); // release read lock
-                self.storage.remove(&key);
-            }
-        }
-
-        let entry = self.storage.entry(key).or_insert_with(|| {
-            let window_start = now / self.window_size_secs * self.window_size_secs;
-            Entry {
-                previous_count: AtomicU32::new(0),
-                current_count: AtomicU32::new(0),
-                window_start: AtomicU64::new(window_start),
-            }
-        });
-
-        let window_start = entry.window_start.load(Acquire);
-        let current_window = now / self.window_size_secs * self.window_size_secs;
-
-        // If a new window has started, then need to move the counters
-        if current_window > window_start {
-            let windows_passed = (current_window - window_start) / self.window_size_secs;
-
-            if windows_passed >= 2 {
-                // 2+ windows have passed - full reset
-                entry.previous_count.store(0, Release);
-                entry.current_count.store(0, Release);
-                entry.window_start.store(current_window, Release);
-            } else {
-                // Exactly 1 window has passed - current becomes previous
-                let old_current = entry.current_count.swap(0, AcqRel);
-                entry.previous_count.store(old_current, Release);
-                entry.window_start.store(current_window, Release);
-            }
-        }
-
-        // Atomic reading of counters to calculate the effective number
-        let previous = entry.previous_count.load(Acquire);
-        let current = entry.current_count.load(Acquire);
-
-        // Calculate the position in the current window (0.0 = start, 1.0 = end)
-        let elapsed_in_window = now - entry.window_start.load(Acquire);
-        let progress = (elapsed_in_window as f64 / self.window_size_secs as f64).min(1.0);
-
-        // The weight of the previous window decreases linearly from 1.0 to 0.0
-        let previous_weight = 1.0 - progress;
-
-        let effective = previous as f64 * previous_weight + current as f64;
-
-        // Check the limit
-        if effective >= self.max_requests as f64 {
-            return false;
-        }
-
-        // Increment the current counter
-        entry.current_count.fetch_add(1, Release);
-
-        true
+        let window = now / self.window_size_secs * self.window_size_secs;
+        self.store.check_and_count(SlidingWindowParams {
+            key,
+            window,
+            window_size_secs: self.window_size_secs,
+            max_requests: self.max_requests,
+            now,
+            grace_secs: self.eviction_grace_secs,
+        })
     }
 }
 
 impl SlidingWindowRateLimiter {
-    /// Creates a new sliding window rate limiter using the system clock.
+    /// Creates a new sliding window rate limiter using the system clock
+    /// and the default in-memory store.
     ///
     /// # Parameters
     ///
     /// - `max_requests`: maximum number of requests allowed per window.
     /// - `window_size`: logical duration of the sliding window.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `window_size` is less than 1 second.
     #[inline]
     pub fn new(max_requests: u32, window_size: Duration) -> Self {
         Self::with_time_source(max_requests, window_size, SystemTimeSource)
     }
 }
 
-impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
+impl<T: TimeSource> SlidingWindowRateLimiter<T> {
     /// Creates a [`SlidingWindowRateLimiter`] with a custom [`TimeSource`].
     ///
     /// This is primarily useful for testing and deterministic scenarios.
+    ///
+    /// Note: the previous `T: Clone` bound has been dropped — it was never required
+    /// by the algorithm and was an unnecessary constraint.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `window_size` is less than 1 second.
     #[inline]
     pub fn with_time_source(max_requests: u32, window_size: Duration, time_source: T) -> Self {
-        let window_size_secs = window_size.as_secs();
+        Self::with_time_source_and_store(
+            max_requests,
+            window_size,
+            time_source,
+            InMemorySlidingWindowStore::new(),
+        )
+    }
+}
 
+impl<S: SlidingWindowStore> SlidingWindowRateLimiter<SystemTimeSource, S> {
+    /// Creates a [`SlidingWindowRateLimiter`] with a custom [`SlidingWindowStore`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `window_size` is less than 1 second.
+    #[inline]
+    pub fn with_store(max_requests: u32, window_size: Duration, store: S) -> Self {
+        Self::with_time_source_and_store(max_requests, window_size, SystemTimeSource, store)
+    }
+}
+
+impl<T: TimeSource, S: SlidingWindowStore> SlidingWindowRateLimiter<T, S> {
+    /// Creates a [`SlidingWindowRateLimiter`] with a custom [`TimeSource`] and [`SlidingWindowStore`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `window_size` is less than 1 second.
+    #[inline]
+    pub fn with_time_source_and_store(
+        max_requests: u32,
+        window_size: Duration,
+        time_source: T,
+        store: S,
+    ) -> Self {
+        let window_size_secs = window_size.as_secs();
+        assert!(window_size_secs > 0, "window_size must be at least 1 second");
         Self {
-            storage: Arc::new(DashMap::new()),
+            store,
             max_requests,
             window_size_secs,
-            eviction_grace_secs: window_size_secs * 2,
+            eviction_grace_secs: window_size_secs.saturating_mul(2),
             time_source,
         }
     }
@@ -214,7 +284,7 @@ impl<T: TimeSource + Clone> SlidingWindowRateLimiter<T> {
         self.max_requests
     }
 
-    /// Size of the fixed window in seconds.
+    /// Size of the sliding window in seconds.
     #[inline(always)]
     pub fn window_size_secs(&self) -> u64 {
         self.window_size_secs
@@ -342,6 +412,40 @@ mod tests {
         assert!(!limiter.check(1));
 
         assert!(limiter.check(2));
+    }
+
+    #[test]
+    fn sliding_window_with_custom_store_delegates_to_store() {
+        use crate::rate_limiter::store::{SlidingWindowParams, SlidingWindowStore};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+
+        struct CountingStore {
+            inner: InMemorySlidingWindowStore,
+            calls: Arc<AtomicU32>,
+        }
+        impl SlidingWindowStore for CountingStore {
+            fn check_and_count(&self, params: SlidingWindowParams) -> bool {
+                self.calls.fetch_add(1, Relaxed);
+                self.inner.check_and_count(params)
+            }
+        }
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let store = CountingStore {
+            inner: InMemorySlidingWindowStore::new(),
+            calls: calls.clone(),
+        };
+        let limiter = SlidingWindowRateLimiter::with_store(3, Duration::from_secs(10), store);
+
+        assert!(limiter.check(1));
+        assert_eq!(calls.load(Relaxed), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "window_size must be at least 1 second")]
+    fn sliding_window_panics_on_zero_window_size() {
+        let _ = SlidingWindowRateLimiter::new(10, Duration::ZERO);
     }
 
     #[test]
