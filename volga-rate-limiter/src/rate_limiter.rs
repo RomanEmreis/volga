@@ -40,7 +40,15 @@ pub use token_bucket::TokenBucketRateLimiter;
 mod fixed_window;
 mod gcra;
 mod sliding_window;
+mod store;
 mod token_bucket;
+
+pub use store::{
+    FixedWindowParams, FixedWindowStore,
+    GcraParams, GcraStore,
+    SlidingWindowParams, SlidingWindowStore,
+    TokenBucketParams, TokenBucketStore,
+};
 
 const MICROS_PER_SEC: u64 = 1_000_000;
 
