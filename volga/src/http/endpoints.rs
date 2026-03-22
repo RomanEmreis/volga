@@ -16,7 +16,6 @@ use {
 
 pub mod args;
 pub(crate) mod handlers;
-#[cfg(debug_assertions)]
 pub(crate) mod meta;
 pub(crate) mod route;
 
@@ -183,7 +182,6 @@ impl Endpoints {
 
     /// Traverses the route tree and collects all available routes.
     /// Returns a vector of tuples containing (HTTP method, route path)
-    #[cfg(debug_assertions)]
     pub(crate) fn collect(&self) -> meta::RoutesInfo {
         self.routes.collect()
     }

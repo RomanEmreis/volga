@@ -5,14 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.7
 
 ## Added
 * Added `to_map()` method in `HttpHeader` struct (#169)
 * Added rustfmt formatting check to CI (#170)
+* Exposed greeter for release builds (requires explicit enabling) (#171)
+* Added traits for custom storage implementations for rate limiters (#171)
 
 ## Fixed
 * Fixed formatting across the project (#170)
+* Greeter now respects `NO_COLOR` env var (#171)
 
 ## 0.8.6
 

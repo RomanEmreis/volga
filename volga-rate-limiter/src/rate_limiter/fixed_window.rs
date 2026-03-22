@@ -1,6 +1,9 @@
 //! Tools and data structures for a fixed-window rate limiter.
 
-use super::{RateLimiter, SystemTimeSource, TimeSource};
+use super::{
+    RateLimiter, SystemTimeSource, TimeSource,
+    store::{FixedWindowParams, FixedWindowStore},
+};
 use dashmap::DashMap;
 use std::sync::{
     Arc,
@@ -8,7 +11,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-/// Internal per-key state for the fixed window algorithm.
+/// Internal per-key state for the in-memory fixed window store.
 ///
 /// Each entry tracks:
 /// - the start timestamp of the current window (in seconds),
@@ -22,6 +25,69 @@ struct Entry {
 
     /// A start timestamp (seconds since UNIX_EPOCH) of the current window.
     window_start: AtomicU64,
+}
+
+/// In-memory [`FixedWindowStore`] backed by a concurrent hash map.
+///
+/// This is the default store used by [`FixedWindowRateLimiter`].
+/// It holds per-key counters in a `DashMap` and performs lazy eviction.
+#[derive(Debug, Clone)]
+pub struct InMemoryFixedWindowStore {
+    storage: Arc<DashMap<u64, Entry>>,
+}
+
+impl InMemoryFixedWindowStore {
+    /// Creates a new empty in-memory fixed-window store.
+    pub fn new() -> Self {
+        Self {
+            storage: Arc::new(DashMap::new()),
+        }
+    }
+}
+
+impl Default for InMemoryFixedWindowStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FixedWindowStore for InMemoryFixedWindowStore {
+    #[inline]
+    fn check_and_count(&self, params: FixedWindowParams) -> bool {
+        // Destructuring works here (same crate). External implementors must use params.key etc.
+        let FixedWindowParams {
+            key,
+            window,
+            max_requests,
+            now,
+            grace_secs,
+        } = params;
+
+        // Lazy eviction
+        if let Some(entry) = self.storage.get(&key) {
+            let prev_window = entry.window_start.load(Relaxed);
+            if now.saturating_sub(prev_window) > grace_secs {
+                drop(entry);
+                self.storage.remove(&key);
+            }
+        }
+
+        let entry = self.storage.entry(key).or_insert_with(|| Entry {
+            window_start: AtomicU64::new(window),
+            count: AtomicU32::new(0),
+        });
+
+        let prev_window = entry.window_start.load(Relaxed);
+
+        // New window -> reset counter
+        if prev_window != window {
+            entry.window_start.store(window, Relaxed);
+            entry.count.store(0, Relaxed);
+        }
+
+        let prev = entry.count.fetch_add(1, Relaxed);
+        prev < max_requests
+    }
 }
 
 /// A fixed-window rate limiter.
@@ -64,73 +130,48 @@ struct Entry {
 ///
 /// For stricter enforcement, consider a sliding window implementation.
 #[derive(Debug)]
-pub struct FixedWindowRateLimiter<T: TimeSource = SystemTimeSource> {
-    /// Per-key rate limiting state.
-    storage: Arc<DashMap<u64, Entry>>,
-
-    /// Maximum number of allowed requests per window.
+pub struct FixedWindowRateLimiter<
+    T: TimeSource = SystemTimeSource,
+    S: FixedWindowStore = InMemoryFixedWindowStore,
+> {
+    store: S,
     max_requests: u32,
-
-    /// Size of the fixed window in seconds.
     window_size_secs: u64,
-
-    /// Time after which inactive entries are eligible for eviction.
-    ///
-    /// This value is independent of `window_size_secs` and is used
-    /// solely to limit memory growth.
     eviction_grace_secs: u64,
-
-    /// Time source used to determine the current window.
     time_source: T,
 }
 
-impl<T: TimeSource> RateLimiter for FixedWindowRateLimiter<T> {
+impl<T: TimeSource, S: FixedWindowStore> RateLimiter for FixedWindowRateLimiter<T, S> {
     /// Checks whether the rate limit has been exceeded for the given `key`.
     ///
     /// Returns `true` if the request is allowed, or `false` if the rate
     /// limit has been reached.
-    ///
-    /// This operation is lock-free on the hot path and safe for concurrent use.
     #[inline]
     fn check(&self, key: u64) -> bool {
         let now = self.time_source.now_secs();
         let window = self.current_window(now);
-
-        // Lazy eviction
-        if let Some(entry) = self.storage.get(&key) {
-            let prev_window = entry.window_start.load(Relaxed);
-            if now.saturating_sub(prev_window) > self.eviction_grace_secs {
-                drop(entry); // release read lock
-                self.storage.remove(&key);
-            }
-        }
-
-        let entry = self.storage.entry(key).or_insert_with(|| Entry {
-            window_start: AtomicU64::new(window),
-            count: AtomicU32::new(0),
-        });
-
-        let prev_window = entry.window_start.load(Relaxed);
-
-        // New window -> reset counter
-        if prev_window != window {
-            entry.window_start.store(window, Relaxed);
-            entry.count.store(0, Relaxed);
-        }
-
-        let prev = entry.count.fetch_add(1, Relaxed);
-
-        prev < self.max_requests
+        self.store.check_and_count(FixedWindowParams {
+            key,
+            window,
+            max_requests: self.max_requests,
+            now,
+            grace_secs: self.eviction_grace_secs,
+        })
     }
 }
 
 impl FixedWindowRateLimiter {
-    /// Creates a new fixed window rate limiter using the system clock.
+    /// Creates a new fixed window rate limiter using the system clock
+    /// and the default in-memory store.
     ///
     /// # Parameters
     ///
     /// - `max_requests`: maximum number of requests allowed per window.
     /// - `window_size`: duration of a single fixed window.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `window_size` is less than 1 second.
     #[inline]
     pub fn new(max_requests: u32, window_size: Duration) -> Self {
         Self::with_time_source(max_requests, window_size, SystemTimeSource)
@@ -141,15 +182,56 @@ impl<T: TimeSource> FixedWindowRateLimiter<T> {
     /// Creates a [`FixedWindowRateLimiter`] with a custom [`TimeSource`].
     ///
     /// This is primarily useful for testing or deterministic simulations.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `window_size` is less than 1 second.
     #[inline]
     pub fn with_time_source(max_requests: u32, window_size: Duration, time_source: T) -> Self {
-        let window_size_secs = window_size.as_secs();
+        Self::with_time_source_and_store(
+            max_requests,
+            window_size,
+            time_source,
+            InMemoryFixedWindowStore::new(),
+        )
+    }
+}
 
+impl<S: FixedWindowStore> FixedWindowRateLimiter<SystemTimeSource, S> {
+    /// Creates a [`FixedWindowRateLimiter`] with a custom [`FixedWindowStore`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `window_size` is less than 1 second.
+    #[inline]
+    pub fn with_store(max_requests: u32, window_size: Duration, store: S) -> Self {
+        Self::with_time_source_and_store(max_requests, window_size, SystemTimeSource, store)
+    }
+}
+
+impl<T: TimeSource, S: FixedWindowStore> FixedWindowRateLimiter<T, S> {
+    /// Creates a [`FixedWindowRateLimiter`] with a custom [`TimeSource`] and [`FixedWindowStore`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if `window_size` is less than 1 second.
+    #[inline]
+    pub fn with_time_source_and_store(
+        max_requests: u32,
+        window_size: Duration,
+        time_source: T,
+        store: S,
+    ) -> Self {
+        let window_size_secs = window_size.as_secs();
+        assert!(
+            window_size_secs > 0,
+            "window_size must be at least 1 second"
+        );
         Self {
-            storage: Arc::new(DashMap::new()),
+            store,
             max_requests,
             window_size_secs,
-            eviction_grace_secs: window_size_secs * 2,
+            eviction_grace_secs: window_size_secs.saturating_mul(2),
             time_source,
         }
     }
@@ -185,7 +267,6 @@ impl<T: TimeSource> FixedWindowRateLimiter<T> {
         self.eviction_grace_secs
     }
 
-    /// Computes the start timestamp of the current window.
     #[inline]
     fn current_window(&self, now: u64) -> u64 {
         (now / self.window_size_secs) * self.window_size_secs
@@ -234,6 +315,43 @@ mod tests {
         assert!(!limiter.check(1));
 
         assert!(limiter.check(2)); // independent
+    }
+
+    #[test]
+    fn fixed_window_with_custom_store_allows_within_limit() {
+        use crate::rate_limiter::store::{FixedWindowParams, FixedWindowStore};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
+
+        struct CountingStore {
+            inner: InMemoryFixedWindowStore,
+            calls: Arc<AtomicU32>,
+        }
+        impl FixedWindowStore for CountingStore {
+            fn check_and_count(&self, params: FixedWindowParams) -> bool {
+                self.calls.fetch_add(1, Relaxed);
+                self.inner.check_and_count(params)
+            }
+        }
+
+        let calls = Arc::new(AtomicU32::new(0));
+        let store = CountingStore {
+            inner: InMemoryFixedWindowStore::new(),
+            calls: calls.clone(),
+        };
+        let limiter = FixedWindowRateLimiter::with_store(3, Duration::from_secs(10), store);
+
+        assert!(limiter.check(1));
+        assert!(limiter.check(1));
+        assert!(limiter.check(1));
+        assert!(!limiter.check(1));
+        assert_eq!(calls.load(Relaxed), 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "window_size must be at least 1 second")]
+    fn fixed_window_panics_on_zero_window_size() {
+        let _ = FixedWindowRateLimiter::new(10, Duration::ZERO);
     }
 
     #[test]

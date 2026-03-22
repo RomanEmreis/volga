@@ -81,6 +81,9 @@
 mod rate_limiter;
 
 pub use rate_limiter::{
-    FixedWindowRateLimiter, GcraRateLimiter, RateLimiter, SlidingWindowRateLimiter,
-    SystemTimeSource, TimeSource, TokenBucketRateLimiter,
+    FixedWindowParams, FixedWindowRateLimiter, FixedWindowStore, GcraParams, GcraRateLimiter,
+    GcraStore, InMemoryFixedWindowStore, InMemoryGcraStore, InMemorySlidingWindowStore,
+    InMemoryTokenBucketStore, RateLimiter, SlidingWindowParams, SlidingWindowRateLimiter,
+    SlidingWindowStore, SystemTimeSource, TimeSource, TokenBucketParams, TokenBucketRateLimiter,
+    TokenBucketStore,
 };

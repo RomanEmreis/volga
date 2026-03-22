@@ -32,15 +32,21 @@
 
 use std::time::Instant;
 
-pub use fixed_window::FixedWindowRateLimiter;
-pub use gcra::GcraRateLimiter;
-pub use sliding_window::SlidingWindowRateLimiter;
-pub use token_bucket::TokenBucketRateLimiter;
+pub use fixed_window::{FixedWindowRateLimiter, InMemoryFixedWindowStore};
+pub use gcra::{GcraRateLimiter, InMemoryGcraStore};
+pub use sliding_window::{InMemorySlidingWindowStore, SlidingWindowRateLimiter};
+pub use token_bucket::{InMemoryTokenBucketStore, TokenBucketRateLimiter};
 
 mod fixed_window;
 mod gcra;
 mod sliding_window;
+mod store;
 mod token_bucket;
+
+pub use store::{
+    FixedWindowParams, FixedWindowStore, GcraParams, GcraStore, SlidingWindowParams,
+    SlidingWindowStore, TokenBucketParams, TokenBucketStore,
+};
 
 const MICROS_PER_SEC: u64 = 1_000_000;
 
