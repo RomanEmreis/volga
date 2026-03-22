@@ -92,7 +92,6 @@ impl PipelineBuilder {
         &mut self.endpoints
     }
 
-    #[cfg(debug_assertions)]
     pub(crate) fn endpoints(&self) -> &Endpoints {
         &self.endpoints
     }
