@@ -65,7 +65,6 @@ pub(crate) use app_env::AppEnv;
 
 mod app_env;
 mod connection;
-#[cfg(debug_assertions)]
 mod greeter;
 #[cfg(feature = "static-files")]
 mod host_env;
@@ -686,7 +685,6 @@ impl App {
 
         let no_delay = self.no_delay;
 
-        #[cfg(debug_assertions)]
         self.print_welcome();
 
         #[cfg(feature = "tracing")]
