@@ -65,6 +65,8 @@ pub(crate) use app_env::AppEnv;
 
 mod app_env;
 mod connection;
+#[cfg(debug_assertions)]
+mod greeter;
 #[cfg(feature = "static-files")]
 mod host_env;
 pub(crate) mod pipeline;
@@ -234,6 +236,7 @@ impl App {
             max_header_size: Limit::Default,
             max_connections: Limit::Default,
             cache_control: None,
+            show_greeter: cfg!(debug_assertions),
             #[cfg(feature = "http2")]
             http2_limits: Default::default(),
             #[cfg(any(
@@ -245,10 +248,6 @@ impl App {
             decompression_limits: Default::default(),
             #[cfg(feature = "openapi")]
             openapi: Default::default(),
-            #[cfg(debug_assertions)]
-            show_greeter: true,
-            #[cfg(not(debug_assertions))]
-            show_greeter: false,
         }
     }
 
@@ -299,9 +298,21 @@ impl App {
 
     /// Disables a welcome message on start
     ///
-    /// Default: *enabled*
+    /// Default (debug): *enabled*
+    ///
+    /// Default (release): *disabled*
     pub fn without_greeter(mut self) -> Self {
         self.show_greeter = false;
+        self
+    }
+
+    /// Enables a welcome message on start
+    ///
+    /// Default (debug): *enabled*
+    ///
+    /// Default (release): *disabled*
+    pub fn with_greeter(mut self) -> Self {
+        self.show_greeter = true;
         self
     }
 
@@ -811,34 +822,6 @@ impl App {
             let io = TokioIo::new(stream);
             Server::new(io, peer_addr).serve(app_instance).await;
         };
-    }
-
-    #[cfg(debug_assertions)]
-    fn print_welcome(&self) {
-        if !self.show_greeter {
-            return;
-        }
-
-        let version = env!("CARGO_PKG_VERSION");
-        let addr = self.connection.socket;
-
-        #[cfg(not(feature = "tls"))]
-        let url = format!("http://{addr}");
-        #[cfg(feature = "tls")]
-        let url = if self.tls_config.is_some() {
-            format!("https://{addr}")
-        } else {
-            format!("http://{addr}")
-        };
-
-        println!();
-        println!("\x1b[1;34m╭───────────────────────────────────────────────╮");
-        println!("│                >> Volga v{version:<5}                │");
-        println!("│     Listening on: {url:<28}│");
-        println!("╰───────────────────────────────────────────────╯\x1b[0m");
-
-        let routes = self.pipeline.endpoints().collect();
-        println!("{routes}");
     }
 }
 
