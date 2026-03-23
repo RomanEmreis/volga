@@ -27,10 +27,9 @@ pub use sliding_window::SlidingWindow;
 pub use token_bucket::TokenBucket;
 
 pub use volga_rate_limiter::{
-    FixedWindowRateLimiter, GcraRateLimiter, RateLimiter, SlidingWindowRateLimiter,
-    FixedWindowStore, SlidingWindowStore, TokenBucketStore, GcraStore,
-    FixedWindowParams, SlidingWindowParams, TokenBucketParams, GcraParams,
-    TokenBucketRateLimiter,
+    FixedWindowParams, FixedWindowRateLimiter, FixedWindowStore, GcraParams, GcraRateLimiter,
+    GcraStore, RateLimiter, SlidingWindowParams, SlidingWindowRateLimiter, SlidingWindowStore,
+    TokenBucketParams, TokenBucketRateLimiter, TokenBucketStore,
 };
 
 pub mod by;
