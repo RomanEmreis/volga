@@ -28,6 +28,8 @@ pub use token_bucket::TokenBucket;
 
 pub use volga_rate_limiter::{
     FixedWindowRateLimiter, GcraRateLimiter, RateLimiter, SlidingWindowRateLimiter,
+    FixedWindowStore, SlidingWindowStore, TokenBucketStore, GcraStore,
+    FixedWindowParams, SlidingWindowParams, TokenBucketParams, GcraParams,
     TokenBucketRateLimiter,
 };
 

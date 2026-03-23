@@ -66,13 +66,6 @@
 //! Internal state is optimized for frequent reads and updates under
 //! high contention.
 //!
-//! ## Scope and Limitations
-//!
-//! - This crate implements **in-memory** rate limiting only
-//! - It does **not** provide distributed coordination
-//! - For multi-node systems, rate limiting should be combined with
-//!   external storage or coordination mechanisms (e.g. Redis, gateways)
-//!
 //! ## Usage
 //!
 //! The rate limiters are intended to be embedded into higher-level
