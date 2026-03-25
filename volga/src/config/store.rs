@@ -35,7 +35,10 @@ struct SectionStore<T: Send + Sync + 'static> {
 
 impl<T: DeserializeOwned + Send + Sync + 'static> ErasedSection for SectionStore<T> {
     fn reload(&self, full_value: &Value) {
-        match full_value.get(&self.key).map(|v| serde_json::from_value::<T>(v.clone())) {
+        match full_value
+            .get(&self.key)
+            .map(|v| serde_json::from_value::<T>(v.clone()))
+        {
             Some(Ok(new_val)) => {
                 self.swap.store(Arc::new(Some(Arc::new(new_val))));
             }
@@ -105,11 +108,19 @@ impl ConfigStore {
     ///
     /// Returns `Err` if the section is `Required` but absent or malformed.
     /// For `Optional`, a missing section is stored as `None` without error.
-    pub fn register<T>(&mut self, key: &str, kind: SectionKind, full_value: &Value) -> Result<(), String>
+    pub fn register<T>(
+        &mut self,
+        key: &str,
+        kind: SectionKind,
+        full_value: &Value,
+    ) -> Result<(), String>
     where
         T: DeserializeOwned + Send + Sync + 'static,
     {
-        let initial: Option<Arc<T>> = match full_value.get(key).map(|v| serde_json::from_value::<T>(v.clone())) {
+        let initial: Option<Arc<T>> = match full_value
+            .get(key)
+            .map(|v| serde_json::from_value::<T>(v.clone()))
+        {
             Some(Ok(v)) => Some(Arc::new(v)),
             Some(Err(e)) => return Err(format!("config: section '{key}' failed to parse: {e}")),
             None if kind == SectionKind::Required => {
@@ -125,7 +136,8 @@ impl ConfigStore {
             swap: Arc::clone(&swap),
         };
         self.sections.insert(TypeId::of::<T>(), Box::new(entry));
-        self.values.insert(TypeId::of::<T>(), swap as Arc<dyn Any + Send + Sync>);
+        self.values
+            .insert(TypeId::of::<T>(), swap as Arc<dyn Any + Send + Sync>);
         Ok(())
     }
 
@@ -162,7 +174,9 @@ mod tests {
     fn required_section_present_returns_arc() {
         let mut store = ConfigStore::new();
         let json = serde_json::json!({ "my": { "value": 42 } });
-        store.register::<MyConfig>("my", SectionKind::Required, &json).unwrap();
+        store
+            .register::<MyConfig>("my", SectionKind::Required, &json)
+            .unwrap();
 
         let arc = store.get::<MyConfig>().unwrap();
         assert_eq!(arc.value, 42);
@@ -172,7 +186,9 @@ mod tests {
     fn optional_section_absent_returns_none() {
         let mut store = ConfigStore::new();
         let json = serde_json::json!({});
-        store.register::<MyConfig>("my", SectionKind::Optional, &json).unwrap();
+        store
+            .register::<MyConfig>("my", SectionKind::Optional, &json)
+            .unwrap();
 
         assert!(store.get::<MyConfig>().is_none());
     }
@@ -189,7 +205,9 @@ mod tests {
     fn reload_updates_value() {
         let mut store = ConfigStore::new();
         let json = serde_json::json!({ "my": { "value": 1 } });
-        store.register::<MyConfig>("my", SectionKind::Required, &json).unwrap();
+        store
+            .register::<MyConfig>("my", SectionKind::Required, &json)
+            .unwrap();
 
         let new_json = serde_json::json!({ "my": { "value": 99 } });
         store.reload(&new_json);
@@ -202,7 +220,9 @@ mod tests {
     fn reload_keeps_old_on_parse_error() {
         let mut store = ConfigStore::new();
         let json = serde_json::json!({ "my": { "value": 7 } });
-        store.register::<MyConfig>("my", SectionKind::Required, &json).unwrap();
+        store
+            .register::<MyConfig>("my", SectionKind::Required, &json)
+            .unwrap();
 
         let bad_json = serde_json::json!({ "my": { "value": "not_a_number" } });
         store.reload(&bad_json);
@@ -215,7 +235,9 @@ mod tests {
     fn reload_optional_section_disappears() {
         let mut store = ConfigStore::new();
         let json = serde_json::json!({ "my": { "value": 5 } });
-        store.register::<MyConfig>("my", SectionKind::Optional, &json).unwrap();
+        store
+            .register::<MyConfig>("my", SectionKind::Optional, &json)
+            .unwrap();
 
         let new_json = serde_json::json!({});
         store.reload(&new_json);
@@ -227,7 +249,9 @@ mod tests {
     fn reload_optional_section_appears() {
         let mut store = ConfigStore::new();
         let json = serde_json::json!({});
-        store.register::<MyConfig>("my", SectionKind::Optional, &json).unwrap();
+        store
+            .register::<MyConfig>("my", SectionKind::Optional, &json)
+            .unwrap();
         assert!(store.get::<MyConfig>().is_none());
 
         let new_json = serde_json::json!({ "my": { "value": 3 } });

@@ -54,7 +54,11 @@ use crate::openapi::OpenApiState;
 
 /// Reload info returned by `process_config`: `(store, interval, file_path)`.
 #[cfg(feature = "config")]
-type ReloadInfo = (std::sync::Arc<crate::config::ConfigStore>, std::time::Duration, String);
+type ReloadInfo = (
+    std::sync::Arc<crate::config::ConfigStore>,
+    std::time::Duration,
+    String,
+);
 
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
@@ -791,12 +795,14 @@ impl App {
         ) -> Result<Option<T>, io::Error> {
             match full_value.get(key) {
                 None => Ok(None),
-                Some(v) => serde_json::from_value::<T>(v.clone()).map(Some).map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("config: [{key}] section is invalid: {e}"),
-                    )
-                }),
+                Some(v) => serde_json::from_value::<T>(v.clone())
+                    .map(Some)
+                    .map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("config: [{key}] section is invalid: {e}"),
+                        )
+                    }),
             }
         }
 
@@ -831,8 +837,7 @@ impl App {
 
         // Apply [tls] section.
         #[cfg(feature = "tls")]
-        if let Some(tls) =
-            parse_section::<crate::config::sections::TlsSection>(&full_value, "tls")?
+        if let Some(tls) = parse_section::<crate::config::sections::TlsSection>(&full_value, "tls")?
         {
             use crate::tls::TlsConfig;
             let mut tls_cfg = TlsConfig::from_pem_files(&tls.cert, &tls.key);

@@ -1,7 +1,5 @@
 //! File-based application configuration.
 //!
-//! Enable the `config` feature (on by default) to use this module.
-//!
 //! # Quick start
 //! ```no_run
 //! use volga::{App, Config};

@@ -1,10 +1,10 @@
 //! `Config<T>` extractor — provides read access to a pre-deserialized config section.
 
 use crate::{
+    HttpRequest,
     config::store::ConfigStore,
     error::Error,
     http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
-    HttpRequest,
 };
 use futures_util::future::{Ready, ready};
 use hyper::http::request::Parts;
@@ -43,8 +43,6 @@ impl<T: Send + Sync> Deref for Config<T> {
     }
 }
 
-// Note: no DeserializeOwned bound needed here — deserialization happens only at bind time
-// (in ConfigBuilder::bind_section). The extractor only clones an Arc<T>.
 impl<T: Send + Sync + 'static> Config<T> {
     fn from_extensions(ext: &hyper::http::Extensions) -> Result<Self, Error> {
         let store = ext
@@ -77,7 +75,9 @@ impl<T: Send + Sync + 'static> FromPayload for Config<T> {
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else { unreachable!() };
+        let Payload::Parts(parts) = payload else {
+            unreachable!()
+        };
         ready(Self::from_parts(parts))
     }
 }

@@ -119,7 +119,10 @@ impl ConfigBuilder {
     /// (e.g. from built-in section processing). Avoids double I/O.
     ///
     /// Returns `(ConfigStore, Option<reload_interval>)`.
-    pub fn build_from_value(self, value: &Value) -> Result<(ConfigStore, Option<Duration>), String> {
+    pub fn build_from_value(
+        self,
+        value: &Value,
+    ) -> Result<(ConfigStore, Option<Duration>), String> {
         let mut store = ConfigStore::new();
         for register in self.bindings {
             register(&mut store, value)?;

@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use std::io::Write;
 use volga::test::TestServer;
-use volga::{ok, App, Config};
+use volga::{App, Config, ok};
 
 #[derive(Debug, Deserialize)]
 struct Database {
@@ -37,9 +37,10 @@ async fn config_extractor_reads_toml_section() {
             app.with_config(|cfg| cfg.from_file(&path).bind_section::<Database>("database"))
         })
         .setup(|app| {
-            app.map_get("/db", |db: Config<Database>| async move {
-                ok!("{}", db.url)
-            });
+            app.map_get(
+                "/db",
+                |db: Config<Database>| async move { ok!("{}", db.url) },
+            );
         })
         .build()
         .await;
@@ -62,19 +63,15 @@ async fn config_extractor_reads_json_section() {
             app.with_config(|cfg| cfg.from_file(&path).bind_section::<Database>("database"))
         })
         .setup(|app| {
-            app.map_get("/db", |db: Config<Database>| async move {
-                ok!("{}", db.url)
-            });
+            app.map_get(
+                "/db",
+                |db: Config<Database>| async move { ok!("{}", db.url) },
+            );
         })
         .build()
         .await;
 
-    let res = server
-        .client()
-        .get(server.url("/db"))
-        .send()
-        .await
-        .unwrap();
+    let res = server.client().get(server.url("/db")).send().await.unwrap();
     assert_eq!(res.status(), 200);
     assert_eq!(res.text().await.unwrap(), "mysql://localhost/test");
 
@@ -160,6 +157,9 @@ async fn invalid_server_section_causes_startup_error() {
         .run()
         .await;
 
-    assert!(result.is_err(), "expected startup error for invalid [server] section");
+    assert!(
+        result.is_err(),
+        "expected startup error for invalid [server] section"
+    );
     drop(file);
 }
