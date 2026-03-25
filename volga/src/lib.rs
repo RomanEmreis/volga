@@ -34,6 +34,9 @@ mod server;
 pub mod app;
 #[cfg(any(feature = "basic-auth", feature = "jwt-auth"))]
 pub mod auth;
+#[cfg(feature = "config")]
+pub mod config;
+
 #[cfg(feature = "di")]
 pub mod di;
 pub mod error;
