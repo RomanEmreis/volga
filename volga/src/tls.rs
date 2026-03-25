@@ -62,6 +62,8 @@ const DEFAULT_MAX_AGE: u64 = 30 * 24 * 60 * 60; // 30 days = 2,592,000 seconds
 
 /// Represents TLS (Transport Layer Security) configuration options
 #[derive(Debug)]
+#[cfg_attr(feature = "config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "config", serde(default))]
 pub struct TlsConfig {
     /// Path to a certificate
     pub cert: PathBuf,
@@ -81,6 +83,8 @@ pub struct TlsConfig {
 
 /// Represents HTTPS redirection configuration options
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "config", serde(default))]
 pub struct RedirectionConfig {
     /// Specifies whether HTTPS redirection is enabled
     ///
@@ -95,6 +99,8 @@ pub struct RedirectionConfig {
 
 /// Represents HSTS (HTTP Strict Transport Security Protocol) configuration options
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "config", serde(default))]
 pub struct HstsConfig {
     /// Specifies whether include a `preload` to HSTS header
     ///
@@ -106,9 +112,10 @@ pub struct HstsConfig {
     /// Default: `true`
     include_sub_domains: bool,
 
-    /// Max age for HSTS header
+    /// Max age for HSTS header in seconds.
     ///
-    /// Default: 30 days (2,592,000 seconds)
+    /// Default: 2592000 (30 days)
+    #[cfg_attr(feature = "config", serde(deserialize_with = "deser_duration_secs"))]
     max_age: Duration,
 
     /// A list of hosts names that will not add the HSTS header.
@@ -131,6 +138,41 @@ enum ClientAuth {
     None,
     Optional(PathBuf),
     Required(PathBuf),
+}
+
+#[cfg(feature = "config")]
+impl<'de> serde::Deserialize<'de> for ClientAuth {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(serde::Deserialize)]
+        struct Helper {
+            r#type: String,
+            path: Option<PathBuf>,
+        }
+        let h = Helper::deserialize(d)?;
+        match h.r#type.as_str() {
+            "None" => Ok(ClientAuth::None),
+            "Optional" => h
+                .path
+                .map(ClientAuth::Optional)
+                .ok_or_else(|| serde::de::Error::missing_field("path")),
+            "Required" => h
+                .path
+                .map(ClientAuth::Required)
+                .ok_or_else(|| serde::de::Error::missing_field("path")),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["None", "Optional", "Required"],
+            )),
+        }
+    }
+}
+
+/// Deserializes a `Duration` from a `u64` number of seconds.
+#[cfg(feature = "config")]
+fn deser_duration_secs<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+    use serde::Deserialize;
+    let secs = u64::deserialize(d)?;
+    Ok(Duration::from_secs(secs))
 }
 
 impl Default for RedirectionConfig {

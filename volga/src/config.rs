@@ -18,7 +18,7 @@
 
 pub(crate) mod builder;
 pub(crate) mod extractor;
-pub(crate) mod sections;
+pub(crate) mod processing;
 pub(crate) mod store;
 
 pub use builder::ConfigBuilder;

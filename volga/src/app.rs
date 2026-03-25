@@ -52,14 +52,6 @@ use crate::tls::TlsConfig;
 #[cfg(feature = "openapi")]
 use crate::openapi::OpenApiState;
 
-/// Reload info returned by `process_config`: `(store, interval, file_path)`.
-#[cfg(feature = "config")]
-type ReloadInfo = (
-    std::sync::Arc<crate::config::ConfigStore>,
-    std::time::Duration,
-    String,
-);
-
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
 
@@ -201,15 +193,15 @@ pub struct App {
 
     /// File-based configuration builder (pre-startup, consumed by `process_config`)
     #[cfg(feature = "config")]
-    pub(super) config_builder: Option<crate::config::ConfigBuilder>,
+    pub(crate) config_builder: Option<crate::config::ConfigBuilder>,
 
     /// Pre-built config store (populated by `process_config`, passed to `AppEnv`)
     #[cfg(feature = "config")]
-    pub(super) config_store: Option<std::sync::Arc<crate::config::ConfigStore>>,
+    pub(crate) config_store: Option<std::sync::Arc<crate::config::ConfigStore>>,
 
     /// Set by `with_default_config()`; `process_config` searches for the default file
     #[cfg(feature = "config")]
-    pub(super) use_default_config: bool,
+    pub(crate) use_default_config: bool,
 }
 
 impl Default for App {
@@ -274,6 +266,12 @@ impl App {
             #[cfg(feature = "config")]
             use_default_config: false,
         }
+    }
+
+    /// Returns the current bound socket address.
+    #[cfg(feature = "config")]
+    pub(crate) fn socket_addr(&self) -> std::net::SocketAddr {
+        self.connection.socket
     }
 
     /// Binds the `App` to the specified `socket` address.
@@ -737,184 +735,6 @@ impl App {
     /// Returns `(self, Option<(Arc<ConfigStore>, reload_interval, file_path)>)`.
     ///
     /// **Startup semantics:**
-    /// - Built-in section missing from file → ok, no change to App fields.
-    /// - Built-in section present and valid → applied (overrides prior builder calls).
-    /// - Built-in section present but invalid → **startup error**.
-    ///
-    /// **File config always overrides prior builder calls.**
-    #[cfg(feature = "config")]
-    pub(super) fn process_config(mut self) -> Result<(Self, Option<ReloadInfo>), io::Error> {
-        use crate::config::builder::parse_config_file;
-        use std::sync::Arc;
-
-        // Resolve file path.
-        let builder = if self.use_default_config && self.config_builder.is_none() {
-            use std::path::Path;
-            let path = if Path::new("app_config.toml").exists() {
-                "app_config.toml"
-            } else if Path::new("app_config.json").exists() {
-                "app_config.json"
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "config: with_default_config() found neither app_config.toml nor app_config.json",
-                ));
-            };
-            crate::config::ConfigBuilder::new().from_file(path)
-        } else {
-            let Some(b) = self.config_builder.take() else {
-                return Ok((self, None));
-            };
-            b
-        };
-
-        // Validate: reload_on_change requires a file path.
-        if builder.reload_interval.is_some() && builder.file_path.is_none() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "config: reload_on_change() requires from_file() to be called",
-            ));
-        }
-
-        let file_path = builder.file_path.clone().unwrap_or_default();
-        let reload_interval = builder.reload_interval;
-
-        // Parse file once — used for both built-in sections and user ConfigStore.
-        let full_value = if file_path.is_empty() {
-            serde_json::Value::Object(Default::default())
-        } else {
-            parse_config_file(&file_path)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
-        };
-
-        // Helper: parse a built-in section. Returns Ok(None) if missing,
-        // Ok(Some(T)) if present and valid, Err if present but invalid.
-        fn parse_section<T: serde::de::DeserializeOwned>(
-            full_value: &serde_json::Value,
-            key: &str,
-        ) -> Result<Option<T>, io::Error> {
-            match full_value.get(key) {
-                None => Ok(None),
-                Some(v) => serde_json::from_value::<T>(v.clone())
-                    .map(Some)
-                    .map_err(|e| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            format!("config: [{key}] section is invalid: {e}"),
-                        )
-                    }),
-            }
-        }
-
-        // Apply [server] section.
-        if let Some(server) =
-            parse_section::<crate::config::sections::ServerSection>(&full_value, "server")?
-        {
-            if let (Some(host), Some(port)) = (&server.host, server.port) {
-                self = self.bind(format!("{host}:{port}").as_str());
-            } else if let Some(port) = server.port {
-                let ip = self.connection.socket.ip();
-                self = self.bind(format!("{ip}:{port}").as_str());
-            }
-            if let Some(bytes) = server.body_limit_bytes {
-                self = if bytes == 0 {
-                    self.without_body_limit()
-                } else {
-                    self.with_body_limit(crate::Limit::Limited(bytes))
-                };
-            }
-            if let Some(n) = server.max_header_count {
-                self = self.with_max_header_count(crate::Limit::Limited(n));
-            }
-            if let Some(n) = server.max_connections {
-                self = self.with_max_connections(if n == 0 {
-                    crate::Limit::Unlimited
-                } else {
-                    crate::Limit::Limited(n)
-                });
-            }
-        }
-
-        // Apply [tls] section.
-        #[cfg(feature = "tls")]
-        if let Some(tls) = parse_section::<crate::config::sections::TlsSection>(&full_value, "tls")?
-        {
-            use crate::tls::TlsConfig;
-            let mut tls_cfg = TlsConfig::from_pem_files(&tls.cert, &tls.key);
-            if tls.https_redirection.unwrap_or(false) {
-                tls_cfg = tls_cfg.with_https_redirection();
-            }
-            if let Some(port) = tls.http_port {
-                tls_cfg = tls_cfg.with_http_port(port);
-            }
-            self = self.set_tls(tls_cfg);
-        }
-
-        // Apply [tracing] section.
-        #[cfg(feature = "tracing")]
-        if let Some(tr) =
-            parse_section::<crate::config::sections::TracingSection>(&full_value, "tracing")?
-        {
-            use crate::tracing::TracingConfig;
-            let mut cfg = TracingConfig::new();
-            if tr.include_header {
-                cfg = cfg.with_header();
-            }
-            self = self.set_tracing(cfg);
-        }
-
-        // Apply [openapi] section.
-        #[cfg(feature = "openapi")]
-        if let Some(oa) =
-            parse_section::<crate::config::sections::OpenApiSection>(&full_value, "openapi")?
-        {
-            self = self.with_open_api(|mut cfg| {
-                if let Some(t) = oa.title {
-                    cfg = cfg.with_title(t);
-                }
-                if let Some(v) = oa.version {
-                    cfg = cfg.with_version(v);
-                }
-                if let Some(d) = oa.description {
-                    cfg = cfg.with_description(d);
-                }
-                cfg
-            });
-        }
-
-        // Apply [cors] section.
-        #[cfg(feature = "middleware")]
-        if let Some(cors) =
-            parse_section::<crate::config::sections::CorsSection>(&full_value, "cors")?
-        {
-            use crate::http::cors::CorsConfig;
-            let mut cfg = CorsConfig::default();
-            if let Some(origins) = cors.allowed_origins {
-                cfg = cfg.with_origins(origins);
-            }
-            if let Some(methods) = cors.allowed_methods {
-                cfg = cfg.with_methods(methods.iter().map(String::as_str));
-            }
-            if let Some(headers) = cors.allowed_headers {
-                cfg = cfg.with_headers(headers);
-            }
-            if let Some(allow) = cors.allow_credentials {
-                cfg = cfg.with_credentials(allow);
-            }
-            self = self.set_cors(cfg);
-        }
-
-        // Build ConfigStore from user bindings using the already-parsed Value.
-        let (store, _) = builder
-            .build_from_value(&full_value)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let store = Arc::new(store);
-        self.config_store = Some(Arc::clone(&store));
-
-        let reload = reload_interval.map(|interval| (store, interval, file_path));
-        Ok((self, reload))
-    }
-
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
         #[cfg(all(debug_assertions, feature = "openapi"))]

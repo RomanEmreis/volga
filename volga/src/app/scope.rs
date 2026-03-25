@@ -313,7 +313,10 @@ fn apply_tracing_headers(
     let value = span_id.map_or(0, |id| id.into_u64()).to_string();
 
     resp.headers_mut().insert(
-        tracing.span_header_name,
+        tracing
+            .span_header_name
+            .parse::<hyper::header::HeaderName>()
+            .expect("valid span header name"),
         value.parse().expect("valid span id"),
     );
 }

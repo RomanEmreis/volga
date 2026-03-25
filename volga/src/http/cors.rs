@@ -38,16 +38,94 @@ const DEFAULT_PREFLIGHT_HEADERS: [HeaderName; 3] = [
 
 /// Represents the CORS (Cross-Origin Resource Sharing) Middleware configuration options
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "config", serde(default))]
 pub struct CorsConfig {
     name: Option<String>,
+    #[cfg_attr(
+        feature = "config",
+        serde(deserialize_with = "deser_opt_header_values")
+    )]
     allow_origins: Option<HashSet<HeaderValue>>,
+    #[cfg_attr(feature = "config", serde(deserialize_with = "deser_opt_header_names"))]
     allow_headers: Option<HashSet<HeaderName>>,
+    #[cfg_attr(feature = "config", serde(deserialize_with = "deser_opt_methods"))]
     allow_methods: Option<HashSet<Method>>,
+    #[cfg_attr(feature = "config", serde(deserialize_with = "deser_opt_header_names"))]
     expose_headers: Option<HashSet<HeaderName>>,
     expose_any: bool,
+    #[cfg_attr(
+        feature = "config",
+        serde(deserialize_with = "deser_opt_duration_secs")
+    )]
     max_age: Option<Duration>,
     allow_credentials: bool,
     include_vary: bool,
+}
+
+/// Deserializes `Option<HashSet<HeaderValue>>` from an optional array of strings.
+#[cfg(feature = "config")]
+fn deser_opt_header_values<'de, D>(d: D) -> Result<Option<HashSet<HeaderValue>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v: Option<Vec<String>> = Option::deserialize(d)?;
+    match v {
+        None => Ok(None),
+        Some(strs) => strs
+            .into_iter()
+            .map(|s| HeaderValue::from_str(&s).map_err(serde::de::Error::custom))
+            .collect::<Result<HashSet<_>, _>>()
+            .map(Some),
+    }
+}
+
+/// Deserializes `Option<HashSet<HeaderName>>` from an optional array of strings.
+#[cfg(feature = "config")]
+fn deser_opt_header_names<'de, D>(d: D) -> Result<Option<HashSet<HeaderName>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v: Option<Vec<String>> = Option::deserialize(d)?;
+    match v {
+        None => Ok(None),
+        Some(strs) => strs
+            .into_iter()
+            .map(|s| HeaderName::from_str(&s).map_err(serde::de::Error::custom))
+            .collect::<Result<HashSet<_>, _>>()
+            .map(Some),
+    }
+}
+
+/// Deserializes `Option<HashSet<Method>>` from an optional array of strings.
+#[cfg(feature = "config")]
+fn deser_opt_methods<'de, D>(d: D) -> Result<Option<HashSet<Method>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v: Option<Vec<String>> = Option::deserialize(d)?;
+    match v {
+        None => Ok(None),
+        Some(strs) => strs
+            .into_iter()
+            .map(|s| Method::from_str(&s).map_err(serde::de::Error::custom))
+            .collect::<Result<HashSet<_>, _>>()
+            .map(Some),
+    }
+}
+
+/// Deserializes `Option<Duration>` from an optional `u64` number of seconds.
+#[cfg(feature = "config")]
+fn deser_opt_duration_secs<'de, D>(d: D) -> Result<Option<Duration>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let secs: Option<u64> = Option::deserialize(d)?;
+    Ok(secs.map(Duration::from_secs))
 }
 
 /// represents pre-computed CORS headers

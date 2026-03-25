@@ -5,7 +5,9 @@ use crate::App;
 const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
 
 /// Represents a tracing configuration
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "config", serde(default))]
 pub struct TracingConfig {
     /// Specifies whether to include a span id HTTP header
     ///
@@ -15,7 +17,7 @@ pub struct TracingConfig {
     /// Specifies a span id HTTP header name
     ///
     /// Default: `request-id`
-    pub(super) span_header_name: &'static str,
+    pub(super) span_header_name: String,
 }
 
 impl Default for TracingConfig {
@@ -23,7 +25,7 @@ impl Default for TracingConfig {
     fn default() -> Self {
         Self {
             include_header: false,
-            span_header_name: DEFAULT_SPAN_HEADER_NAME,
+            span_header_name: DEFAULT_SPAN_HEADER_NAME.to_string(),
         }
     }
 }
@@ -49,8 +51,8 @@ impl TracingConfig {
     /// Configures tracing to use a specific HTTP header name if the `include_header` is set to `true`
     ///
     /// Default: `request-id`
-    pub fn with_header_name(mut self, name: &'static str) -> Self {
-        self.span_header_name = name;
+    pub fn with_header_name(mut self, name: impl Into<String>) -> Self {
+        self.span_header_name = name.into();
         self
     }
 }

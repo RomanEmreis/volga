@@ -5,9 +5,13 @@ const DEFAULT_SPEC_NAME: &str = "v1";
 const DEFAULT_UI_PATH: &str = "/openapi";
 
 /// OpenAPI runtime configuration.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
 pub struct OpenApiConfig {
     /// Returns `true` if the OpenAPI have been exposed.
+    ///
+    /// This is a runtime flag set by [`App::use_open_api`] and is not configurable from a file.
+    #[serde(skip)]
     pub exposed: bool,
 
     pub(super) title: String,
@@ -19,7 +23,7 @@ pub struct OpenApiConfig {
 }
 
 /// OpenAPI spec
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct OpenApiSpec {
     /// Spec name. Used to distinguish between multiple OpenAPI specs.
     pub name: String,

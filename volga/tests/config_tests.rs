@@ -1,4 +1,5 @@
-//! Integration tests for the `config` feature.
+#![allow(missing_docs)]
+#![cfg(all(feature = "test", feature = "config"))]
 
 use serde::Deserialize;
 use std::io::Write;
