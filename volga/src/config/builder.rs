@@ -7,7 +7,7 @@ use std::time::Duration;
 
 const DEFAULT_RELOAD_INTERVAL: Duration = Duration::from_secs(5);
 
-type RegisterFn = Box<dyn FnOnce(&mut ConfigStore, &Value) -> Result<(), String>>;
+type RegisterFn = Box<dyn FnOnce(&mut ConfigStore, &Value) -> Result<(), String> + Send>;
 
 /// Builds and validates the file-based configuration.
 ///
