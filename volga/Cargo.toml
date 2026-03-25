@@ -32,6 +32,8 @@ serde_urlencoded = "0.7.1"
 smallvec = "1.15.1"
 
 # optional
+arc-swap = { version = "1.7.1", optional = true }
+toml     = { version = "0.8",   optional = true }
 async-compression = { version = "0.4.41", features = ["tokio"], optional = true }
 base64 = { version = "0.22.1", optional = true }
 cookie = { version = "0.18.1", features = ["percent-encode"], optional = true }
@@ -69,13 +71,14 @@ tempfile = "3.26.0"
 
 [features]
 # Default HTTP/1 only server
-default = ["http1"]
+default = ["http1", "config"]
 # HTTP/1 and HTTP/2 server
 full = [
-    "http1", 
+    "http1",
     "http2",
     "auth",
-    "middleware", 
+    "config",
+    "middleware",
     "di",
     "tls",
     "cookie-full",
@@ -85,10 +88,12 @@ full = [
     "problem-details",
     "rate-limiting",
     "static-files",
-    "compression-full", 
+    "compression-full",
     "decompression-full",
     "ws"
 ]
+
+config = ["dep:arc-swap", "dep:toml", "serde/derive"]
 
 http1 = ["dep:hyper", "hyper?/http1", "dep:hyper-util", "hyper-util?/http1", "dep:httpdate"]
 http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2", "dep:httpdate"]
