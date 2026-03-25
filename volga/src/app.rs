@@ -425,41 +425,6 @@ impl App {
         self
     }
 
-    /// Loads configuration from the default file (`app_config.toml` or `app_config.json`).
-    ///
-    /// Searches the current working directory in order: `app_config.toml`, then `app_config.json`.
-    ///
-    /// **Strict:** produces a startup error if neither file exists. If you want optional
-    /// file-based config (file may or may not exist), use [`App::with_config`] directly.
-    #[cfg(feature = "config")]
-    pub fn with_default_config(mut self) -> Self {
-        self.use_default_config = true;
-        self
-    }
-
-    /// Configures file-based configuration via a builder closure.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    /// use serde::Deserialize;
-    /// #[derive(Deserialize)] struct Database { url: String }
-    ///
-    /// App::new().with_config(|cfg| {
-    ///     cfg.from_file("config/prod.toml")
-    ///        .bind_section::<Database>("database")
-    ///        .reload_on_change()
-    /// });
-    /// ```
-    #[cfg(feature = "config")]
-    pub fn with_config<F>(mut self, f: F) -> Self
-    where
-        F: FnOnce(crate::config::ConfigBuilder) -> crate::config::ConfigBuilder,
-    {
-        self.config_builder = Some(f(crate::config::ConfigBuilder::new()));
-        self
-    }
-
     /// Starts the [`App`] with its own Tokio runtime.
     ///
     /// This method is intended for simple use cases where you don't already have a Tokio runtime setup.
