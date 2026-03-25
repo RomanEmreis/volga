@@ -127,7 +127,7 @@ mod tests {
     fn config_unregistered_type_returns_err() {
         #[derive(Debug, Deserialize)]
         struct Other {
-            x: u32,
+            _x: u32,
         }
         let ext = make_extensions();
         let mut req = hyper::Request::get("/").body(()).unwrap();

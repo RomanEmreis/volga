@@ -222,6 +222,11 @@ async fn handle_impl(
                         extensions.insert(TrustedProxies(trusted_proxies.clone()));
                     }
                 }
+
+                #[cfg(feature = "config")]
+                if let Some(config) = &env.config {
+                    extensions.insert(Arc::clone(config));
+                }
             }
 
             // Pre-extract error handler args from parts before consuming them.

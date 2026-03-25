@@ -37,6 +37,9 @@ pub mod auth;
 #[cfg(feature = "config")]
 pub mod config;
 
+#[cfg(feature = "config")]
+pub use config::{Config, ConfigBuilder};
+
 #[cfg(feature = "di")]
 pub mod di;
 pub mod error;

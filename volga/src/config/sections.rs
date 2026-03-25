@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 /// `[server]` section — controls TCP binding and request limits.
 #[derive(Debug, Deserialize)]
-pub struct ServerSection {
+pub(crate) struct ServerSection {
     /// Bind address (e.g. `"0.0.0.0"`)
     pub host: Option<String>,
     /// Bind port (e.g. `8080`)
@@ -24,7 +24,7 @@ pub struct ServerSection {
 /// `[tls]` section — TLS certificate paths and HTTPS redirection options.
 #[cfg(feature = "tls")]
 #[derive(Debug, Deserialize)]
-pub struct TlsSection {
+pub(crate) struct TlsSection {
     /// Path to the PEM certificate file.
     pub cert: String,
     /// Path to the PEM private key file.
@@ -38,7 +38,7 @@ pub struct TlsSection {
 /// `[tracing]` section — request tracing options.
 #[cfg(feature = "tracing")]
 #[derive(Debug, Deserialize)]
-pub struct TracingSection {
+pub(crate) struct TracingSection {
     /// Whether to include a span-id header in responses.
     ///
     /// Note: `header_name` cannot be set via config file because it requires a `'static` str.
@@ -50,7 +50,7 @@ pub struct TracingSection {
 /// `[openapi]` section — OpenAPI document metadata.
 #[cfg(feature = "openapi")]
 #[derive(Debug, Deserialize)]
-pub struct OpenApiSection {
+pub(crate) struct OpenApiSection {
     /// OpenAPI document title.
     pub title: Option<String>,
     /// OpenAPI document version string.
@@ -65,7 +65,7 @@ pub struct OpenApiSection {
 /// Only active when the `middleware` feature is enabled.
 #[cfg(feature = "middleware")]
 #[derive(Debug, Deserialize)]
-pub struct CorsSection {
+pub(crate) struct CorsSection {
     /// Allowed origin patterns (e.g. `["https://example.com"]`).
     pub allowed_origins: Option<Vec<String>>,
     /// Allowed HTTP methods (e.g. `["GET", "POST"]`).
