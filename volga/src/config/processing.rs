@@ -207,3 +207,69 @@ fn parse_section<T: serde::de::DeserializeOwned>(
             }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::App;
+    use std::io::Write;
+
+    fn write_toml(content: &str) -> tempfile::NamedTempFile {
+        let mut f = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        f
+    }
+
+    #[test]
+    fn host_only_section_preserves_port() {
+        let file = write_toml("[server]\nhost = \"0.0.0.0\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new()
+            .bind("127.0.0.1:7878")
+            .with_config(|cfg| cfg.from_file(&path));
+
+        let addr = app.socket_addr();
+        assert_eq!(
+            addr.port(),
+            7878,
+            "port must be preserved when only host is set"
+        );
+        assert_eq!(
+            addr.ip().to_string(),
+            "0.0.0.0",
+            "host must be updated from config"
+        );
+    }
+
+    #[test]
+    fn port_only_section_preserves_host() {
+        let file = write_toml("[server]\nport = 9090\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new()
+            .bind("127.0.0.1:7878")
+            .with_config(|cfg| cfg.from_file(&path));
+
+        let addr = app.socket_addr();
+        assert_eq!(addr.port(), 9090, "port must be updated from config");
+        assert_eq!(
+            addr.ip().to_string(),
+            "127.0.0.1",
+            "host must be preserved when only port is set"
+        );
+    }
+
+    #[test]
+    fn host_and_port_section_overrides_both() {
+        let file = write_toml("[server]\nhost = \"0.0.0.0\"\nport = 9090\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new()
+            .bind("127.0.0.1:7878")
+            .with_config(|cfg| cfg.from_file(&path));
+
+        let addr = app.socket_addr();
+        assert_eq!(addr.port(), 9090);
+        assert_eq!(addr.ip().to_string(), "0.0.0.0");
+    }
+}
