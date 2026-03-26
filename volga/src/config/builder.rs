@@ -118,16 +118,17 @@ impl ConfigBuilder {
     /// Preferred over re-reading the file when the caller already has the parsed value
     /// (e.g. from built-in section processing). Avoids double I/O.
     ///
-    /// Returns `(ConfigStore, Option<reload_interval>)`.
-    pub fn build_from_value(
-        self,
-        value: &Value,
-    ) -> Result<(ConfigStore, Option<Duration>), String> {
+    /// The reload scheduling info is baked into `store.reload` so callers don't need
+    /// to track the interval separately.
+    pub fn build_from_value(self, value: &Value) -> Result<ConfigStore, String> {
         let mut store = ConfigStore::new();
         for register in self.bindings {
             register(&mut store, value)?;
         }
-        Ok((store, self.reload_interval))
+        store.reload = self
+            .reload_interval
+            .map(|i| (i, self.file_path.clone().unwrap_or_default()));
+        Ok(store)
     }
 }
 
@@ -178,7 +179,7 @@ mod tests {
             .from_file(file.path().to_str().unwrap())
             .bind_section::<Db>("db");
         let json = builder.load_file().unwrap();
-        let (store, _) = builder.build_from_value(&json).unwrap();
+        let store = builder.build_from_value(&json).unwrap();
         let arc = store.get::<Db>().unwrap();
         assert_eq!(arc.url, "postgres://localhost/test");
     }
@@ -192,7 +193,7 @@ mod tests {
             .from_file(f.path().to_str().unwrap())
             .bind_section::<Db>("db");
         let json = builder.load_file().unwrap();
-        let (store, _) = builder.build_from_value(&json).unwrap();
+        let store = builder.build_from_value(&json).unwrap();
         assert_eq!(store.get::<Db>().unwrap().url, "mysql://localhost/test");
     }
 
@@ -203,7 +204,7 @@ mod tests {
             .from_file(file.path().to_str().unwrap())
             .bind_section_optional::<Db>("db");
         let json = builder.load_file().unwrap();
-        let (store, _) = builder.build_from_value(&json).unwrap();
+        let store = builder.build_from_value(&json).unwrap();
         assert!(store.get::<Db>().is_none());
     }
 
@@ -225,8 +226,8 @@ mod tests {
             .from_file(file.path().to_str().unwrap())
             .reload_on_change();
         let json = builder.load_file().unwrap();
-        let (_, interval) = builder.build_from_value(&json).unwrap();
-        assert!(interval.is_some());
+        let store = builder.build_from_value(&json).unwrap();
+        assert!(store.reload.is_some());
     }
 
     #[test]

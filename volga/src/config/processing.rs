@@ -6,10 +6,7 @@ use crate::{
     config::{ConfigBuilder, ConfigStore, builder::parse_config_file},
 };
 use serde_json::Value;
-use std::{io, sync::Arc, time::Duration};
-
-/// Reload info returned by [`App::process_config`]: `(store, interval, file_path)`.
-pub(crate) type ReloadInfo = (Arc<ConfigStore>, Duration, String);
+use std::{io, sync::Arc};
 
 impl App {
     /// Resolves file-based configuration at startup.
@@ -22,11 +19,7 @@ impl App {
     /// - Built-in section missing from file → no change to `App` fields.
     /// - Built-in section present and valid → applied (**overrides** prior builder calls).
     /// - Built-in section present but invalid → startup error.
-    pub(crate) fn process_config(mut self) -> Result<(Self, Option<ReloadInfo>), io::Error> {
-        let Some(builder) = self.resolve_config_builder()? else {
-            return Ok((self, None));
-        };
-
+    pub(crate) fn process_config(mut self, builder: ConfigBuilder) -> Result<Self, io::Error> {
         if builder.reload_interval.is_some() && builder.file_path.is_none() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -35,7 +28,6 @@ impl App {
         }
 
         let file_path = builder.file_path.clone().unwrap_or_default();
-        let reload_interval = builder.reload_interval;
 
         let full_value = load_value(&file_path)?;
 
@@ -57,36 +49,12 @@ impl App {
             self = self.apply_cors_section(&full_value)?;
         }
 
-        let (store, _) = builder
+        let store = builder
             .build_from_value(&full_value)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        let store = Arc::new(store);
-        self.config_store = Some(Arc::clone(&store));
+        self.config_store = Some(Arc::new(store));
 
-        let reload = reload_interval.map(|interval| (store, interval, file_path));
-        Ok((self, reload))
-    }
-
-    /// Resolves the [`ConfigBuilder`] from the app state.
-    ///
-    /// Returns `None` when neither `with_config` nor `with_default_config` was called.
-    fn resolve_config_builder(&mut self) -> Result<Option<ConfigBuilder>, io::Error> {
-        if self.use_default_config && self.config_builder.is_none() {
-            use std::path::Path;
-            let path = if Path::new("app_config.toml").exists() {
-                "app_config.toml"
-            } else if Path::new("app_config.json").exists() {
-                "app_config.json"
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "config: with_default_config() found neither app_config.toml nor app_config.json",
-                ));
-            };
-            Ok(Some(ConfigBuilder::new().from_file(path)))
-        } else {
-            Ok(self.config_builder.take())
-        }
+        Ok(self)
     }
 
     /// Applies the `[server]` section from the parsed config value.
@@ -171,6 +139,35 @@ impl App {
         }
         Ok(self)
     }
+}
+
+/// Spawns a background task that periodically reloads config from file.
+///
+/// Reads `store.reload` to determine whether hot-reload is configured.
+/// If `store.reload` is `None`, it returns immediately without spawning anything.
+pub(crate) fn spawn_reload(
+    store: &Arc<ConfigStore>,
+    shutdown: Arc<tokio::sync::watch::Sender<()>>,
+) {
+    let Some((interval, file_path)) = store.reload.as_ref().cloned() else {
+        return;
+    };
+    let store = Arc::clone(store);
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(interval) => {}
+                _ = shutdown.closed() => break,
+            }
+            match parse_config_file(&file_path) {
+                Ok(value) => store.reload_sections(&value),
+                #[cfg(feature = "tracing")]
+                Err(_e) => tracing::error!("config reload: cannot read file: {_e:#}"),
+                #[cfg(not(feature = "tracing"))]
+                Err(_) => {}
+            }
+        }
+    });
 }
 
 /// Parses a config file into a `serde_json::Value`, or returns an empty object

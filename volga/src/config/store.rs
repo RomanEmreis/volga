@@ -7,6 +7,7 @@ use std::{
     any::{Any, TypeId},
     collections::HashMap,
     sync::Arc,
+    time::Duration,
 };
 
 /// Controls how a missing section is treated at startup and at reload time.
@@ -71,7 +72,7 @@ impl<T: DeserializeOwned + Send + Sync + 'static> ErasedSection for SectionStore
 /// Stored as `Arc<ConfigStore>` in `AppEnv` and cloned into request extensions.
 /// `Config<T>` reads from it via `get::<T>()` — one atomic load + `Arc::clone` per request.
 pub struct ConfigStore {
-    /// Keyed by TypeId — used by `reload()` to update all sections.
+    /// Keyed by TypeId — used by `reload_sections()` to update all sections.
     sections: HashMap<TypeId, Box<dyn ErasedSection>>,
     /// Parallel map for type-safe downcast in `get<T>()` via `Any`.
     ///
@@ -79,6 +80,10 @@ pub struct ConfigStore {
     /// must insert into both maps with the same `TypeId` key. Never insert into one without
     /// the other.
     values: HashMap<TypeId, Arc<dyn Any + Send + Sync>>,
+    /// Hot-reload scheduling info: `(interval, file_path)`.
+    ///
+    /// `None` means no hot-reload is configured. Set by [`ConfigBuilder::build_from_value`].
+    pub(crate) reload: Option<(Duration, String)>,
 }
 
 impl std::fmt::Debug for ConfigStore {
@@ -101,12 +106,14 @@ impl ConfigStore {
         Self {
             sections: HashMap::new(),
             values: HashMap::new(),
+            reload: None,
         }
     }
 
     /// Parses and registers a section for type `T`.
     ///
-    /// Returns `Err` if the section is `Required` but absent or malformed.
+    /// Returns `Err` if the section is `Required` but absent or malformed,
+    /// or if `T` has already been registered (duplicate binding).
     /// For `Optional`, a missing section is stored as `None` without error.
     pub fn register<T>(
         &mut self,
@@ -117,6 +124,13 @@ impl ConfigStore {
     where
         T: DeserializeOwned + Send + Sync + 'static,
     {
+        if self.sections.contains_key(&TypeId::of::<T>()) {
+            return Err(format!(
+                "config: type '{}' is already registered",
+                std::any::type_name::<T>()
+            ));
+        }
+
         let initial: Option<Arc<T>> = match full_value
             .get(key)
             .map(|v| serde_json::from_value::<T>(v.clone()))
@@ -153,7 +167,7 @@ impl ConfigStore {
     ///
     /// Per-section errors are logged (if `tracing` feature is on) and the previous
     /// value is retained. This never panics.
-    pub fn reload(&self, full_value: &Value) {
+    pub fn reload_sections(&self, full_value: &Value) {
         for section in self.sections.values() {
             section.reload(full_value);
         }
@@ -210,7 +224,7 @@ mod tests {
             .unwrap();
 
         let new_json = serde_json::json!({ "my": { "value": 99 } });
-        store.reload(&new_json);
+        store.reload_sections(&new_json);
 
         let arc = store.get::<MyConfig>().unwrap();
         assert_eq!(arc.value, 99);
@@ -225,7 +239,7 @@ mod tests {
             .unwrap();
 
         let bad_json = serde_json::json!({ "my": { "value": "not_a_number" } });
-        store.reload(&bad_json);
+        store.reload_sections(&bad_json);
 
         let arc = store.get::<MyConfig>().unwrap();
         assert_eq!(arc.value, 7);
@@ -240,9 +254,22 @@ mod tests {
             .unwrap();
 
         let new_json = serde_json::json!({});
-        store.reload(&new_json);
+        store.reload_sections(&new_json);
 
         assert!(store.get::<MyConfig>().is_none());
+    }
+
+    #[test]
+    fn duplicate_registration_returns_err() {
+        let mut store = ConfigStore::new();
+        let json = serde_json::json!({ "my": { "value": 1 } });
+        store
+            .register::<MyConfig>("my", SectionKind::Required, &json)
+            .unwrap();
+
+        let result = store.register::<MyConfig>("my", SectionKind::Optional, &json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already registered"));
     }
 
     #[test]
@@ -255,7 +282,7 @@ mod tests {
         assert!(store.get::<MyConfig>().is_none());
 
         let new_json = serde_json::json!({ "my": { "value": 3 } });
-        store.reload(&new_json);
+        store.reload_sections(&new_json);
 
         let arc = store.get::<MyConfig>().unwrap();
         assert_eq!(arc.value, 3);

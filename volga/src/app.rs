@@ -8,10 +8,7 @@ use crate::{
 use connection::Connection;
 use hyper_util::rt::TokioIo;
 
-use std::{
-    future::Future,
-    sync::{Arc, Weak},
-};
+use std::{future::Future, sync::{Arc, Weak}};
 
 use tokio::{
     io,
@@ -191,17 +188,9 @@ pub struct App {
     /// Maximum number of simultaneous TCP connections.
     max_connections: Limit<usize>,
 
-    /// File-based configuration builder (pre-startup, consumed by `process_config`)
+    /// Pre-built config store (populated by `with_config`/`with_default_config`, passed to `AppEnv`)
     #[cfg(feature = "config")]
-    pub(crate) config_builder: Option<crate::config::ConfigBuilder>,
-
-    /// Pre-built config store (populated by `process_config`, passed to `AppEnv`)
-    #[cfg(feature = "config")]
-    pub(crate) config_store: Option<std::sync::Arc<crate::config::ConfigStore>>,
-
-    /// Set by `with_default_config()`; `process_config` searches for the default file
-    #[cfg(feature = "config")]
-    pub(crate) use_default_config: bool,
+    pub(crate) config_store: Option<Arc<crate::config::ConfigStore>>,
 }
 
 impl Default for App {
@@ -260,11 +249,7 @@ impl App {
             #[cfg(feature = "openapi")]
             openapi: Default::default(),
             #[cfg(feature = "config")]
-            config_builder: None,
-            #[cfg(feature = "config")]
             config_store: None,
-            #[cfg(feature = "config")]
-            use_default_config: false,
         }
     }
 
@@ -577,7 +562,7 @@ impl App {
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(feature = "middleware")]
-    pub fn run_with_listener(
+    pub async fn run_with_listener(
         mut self,
         tcp_listener: TcpListener,
     ) -> impl Future<Output = io::Result<()>> {
@@ -613,7 +598,7 @@ impl App {
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(not(feature = "middleware"))]
-    pub fn run_with_listener(
+    pub async fn run_with_listener(
         self,
         tcp_listener: TcpListener,
     ) -> impl Future<Output = io::Result<()>> {
@@ -694,12 +679,6 @@ impl App {
         self.run_internal(tcp_listener).await
     }
 
-    /// Parses the config file, applies built-in sections to `App` fields,
-    /// and initializes the `ConfigStore`. Called once from `run_internal`.
-    ///
-    /// Returns `(self, Option<(Arc<ConfigStore>, reload_interval, file_path)>)`.
-    ///
-    /// **Startup semantics:**
     #[inline]
     async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
         #[cfg(all(debug_assertions, feature = "openapi"))]
@@ -712,20 +691,14 @@ impl App {
 
         let socket = tcp_listener.local_addr()?;
 
-        // process_config moves `self` → `app`; all subsequent access uses `app`.
-        #[cfg(feature = "config")]
-        let (app, reload_info) = self.process_config()?;
-        #[cfg(not(feature = "config"))]
-        let app = self;
+        let no_delay = self.no_delay;
 
-        let no_delay = app.no_delay;
-
-        app.print_welcome(socket);
+        self.print_welcome(socket);
 
         #[cfg(feature = "tracing")]
         {
             #[cfg(feature = "tls")]
-            if app.tls_config.is_some() {
+            if self.tls_config.is_some() {
                 tracing::info!("listening on: https://{socket}")
             } else {
                 tracing::info!("listening on: http://{socket}")
@@ -739,7 +712,7 @@ impl App {
         Self::shutdown_signal(shutdown_rx);
 
         #[cfg(feature = "tls")]
-        let redirection_config = app
+        let redirection_config = self
             .tls_config
             .as_ref()
             .map(|config| config.https_redirection_config);
@@ -755,30 +728,14 @@ impl App {
             );
         }
 
-        let active_connections = app.active_connections();
-        let app_instance: Arc<AppEnv> = Arc::new(app.try_into()?);
+        let active_connections = self.active_connections();
+        let app_instance: Arc<AppEnv> = Arc::new(self.try_into()?);
 
         // Spawn hot-reload background task if requested.
         // The task selects on shutdown_tx.closed() so it terminates cleanly.
         #[cfg(feature = "config")]
-        if let Some((store, interval, file_path)) = reload_info {
-            use crate::config::builder::parse_config_file;
-            let reload_shutdown = Arc::clone(&shutdown_tx);
-            tokio::spawn(async move {
-                loop {
-                    tokio::select! {
-                        _ = tokio::time::sleep(interval) => {}
-                        _ = reload_shutdown.closed() => break,
-                    }
-                    match parse_config_file(&file_path) {
-                        Ok(value) => store.reload(&value),
-                        #[cfg(feature = "tracing")]
-                        Err(_e) => tracing::error!("config reload: cannot read file: {_e:#}"),
-                        #[cfg(not(feature = "tracing"))]
-                        Err(_) => {}
-                    }
-                }
-            });
+        if let Some(config) = &app_instance.config {
+            crate::config::processing::spawn_reload(config, Arc::clone(&shutdown_tx));
         }
 
         loop {

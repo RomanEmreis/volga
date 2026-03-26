@@ -145,22 +145,17 @@ async fn optional_config_present_section_returns_some() {
     drop(file);
 }
 
-#[tokio::test]
-async fn invalid_server_section_causes_startup_error() {
+#[test]
+#[should_panic(expected = "config:")]
+fn invalid_server_section_panics_at_startup() {
     let file = write_temp_toml("[server]\nport = \"not_a_number\"\n");
     let path = file.path().to_str().unwrap().to_owned();
 
-    // `run()` calls `process_config()` internally; an invalid built-in section must
-    // return an Err instead of silently using defaults.
-    let result = App::new()
+    // `with_config()` processes config eagerly; an invalid built-in section must
+    // panic before the server starts.
+    App::new()
         .bind("127.0.0.1:0")
-        .with_config(|cfg| cfg.from_file(&path))
-        .run()
-        .await;
+        .with_config(|cfg| cfg.from_file(&path));
 
-    assert!(
-        result.is_err(),
-        "expected startup error for invalid [server] section"
-    );
     drop(file);
 }

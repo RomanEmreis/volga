@@ -25,8 +25,8 @@ use std::{ops::Deref, sync::Arc};
 ///
 /// #[tokio::main]
 /// async fn main() -> std::io::Result<()> {
-///     let app = App::new()
-///         .with_config(|cfg| cfg.from_file("app_config.toml").bind_section::<Database>("database"));
+///     let mut app = App::new()
+///         .with_config(|cfg| cfg.from_file("app_config.toml").bind_section::<Database>("database"))?;
 ///     // app.map_get("/db", |db: Config<Database>| async move { ok!(db.url.as_str()) });
 ///     app.run().await
 /// }
