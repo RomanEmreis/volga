@@ -45,7 +45,9 @@ impl App {
         } else if Path::new("app_config.json").exists() {
             "app_config.json"
         } else {
-            panic!("config: with_default_config() found neither app_config.toml nor app_config.json");
+            panic!(
+                "config: with_default_config() found neither app_config.toml nor app_config.json"
+            );
         };
         self.process_config(ConfigBuilder::new().from_file(path))
             .unwrap_or_else(|e| panic!("config: {e}"))

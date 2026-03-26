@@ -8,7 +8,10 @@ use crate::{
 use connection::Connection;
 use hyper_util::rt::TokioIo;
 
-use std::{future::Future, sync::{Arc, Weak}};
+use std::{
+    future::Future,
+    sync::{Arc, Weak},
+};
 
 use tokio::{
     io,
@@ -562,7 +565,7 @@ impl App {
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(feature = "middleware")]
-    pub async fn run_with_listener(
+    pub fn run_with_listener(
         mut self,
         tcp_listener: TcpListener,
     ) -> impl Future<Output = io::Result<()>> {
@@ -598,7 +601,7 @@ impl App {
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(not(feature = "middleware"))]
-    pub async fn run_with_listener(
+    pub fn run_with_listener(
         self,
         tcp_listener: TcpListener,
     ) -> impl Future<Output = io::Result<()>> {

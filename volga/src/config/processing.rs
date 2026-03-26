@@ -72,11 +72,19 @@ impl App {
             return Ok(self);
         };
 
-        if let (Some(host), Some(port)) = (&s.host, s.port) {
-            self = self.bind(format!("{host}:{port}").as_str());
-        } else if let Some(port) = s.port {
-            let ip = self.socket_addr().ip();
-            self = self.bind(format!("{ip}:{port}").as_str());
+        match (&s.host, s.port) {
+            (Some(host), Some(port)) => {
+                self = self.bind(format!("{host}:{port}").as_str());
+            }
+            (Some(host), None) => {
+                let port = self.socket_addr().port();
+                self = self.bind(format!("{host}:{port}").as_str());
+            }
+            (None, Some(port)) => {
+                let ip = self.socket_addr().ip();
+                self = self.bind(format!("{ip}:{port}").as_str());
+            }
+            (None, None) => {}
         }
         if let Some(bytes) = s.body_limit_bytes {
             self = if bytes == 0 {

@@ -66,8 +66,8 @@ impl TracingConfig {
     ///
     /// Panics if `name` is not a valid HTTP header name.
     pub fn with_header_name(mut self, name: impl AsRef<str>) -> Self {
-        self.span_header_name = HeaderName::try_from(name.as_ref())
-            .expect("invalid HTTP header name");
+        self.span_header_name =
+            HeaderName::try_from(name.as_ref()).expect("invalid HTTP header name");
         self
     }
 }
@@ -173,7 +173,10 @@ mod tests {
         let tracing_config = app.tracing_config.unwrap();
 
         assert!(!tracing_config.include_header);
-        assert_eq!(tracing_config.span_header_name, HeaderName::from_static(DEFAULT_SPAN_HEADER_NAME))
+        assert_eq!(
+            tracing_config.span_header_name,
+            HeaderName::from_static(DEFAULT_SPAN_HEADER_NAME)
+        )
     }
 
     #[test]
@@ -183,7 +186,10 @@ mod tests {
         let tracing_config = app.tracing_config.unwrap();
 
         assert!(tracing_config.include_header);
-        assert_eq!(tracing_config.span_header_name, HeaderName::from_static(DEFAULT_SPAN_HEADER_NAME))
+        assert_eq!(
+            tracing_config.span_header_name,
+            HeaderName::from_static(DEFAULT_SPAN_HEADER_NAME)
+        )
     }
 
     #[test]
