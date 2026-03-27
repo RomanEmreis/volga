@@ -6,7 +6,7 @@ use crate::{
     config::{ConfigBuilder, ConfigStore, builder::parse_config_file},
 };
 use serde_json::Value;
-use std::{io, sync::Arc};
+use std::{io, path::Path, sync::Arc};
 
 impl App {
     /// Resolves file-based configuration at startup.
@@ -195,8 +195,8 @@ fn parse_host(host: &str) -> Result<std::net::IpAddr, io::Error> {
 
 /// Parses a config file into a `serde_json::Value`, or returns an empty object
 /// when the path is empty (no file configured).
-fn load_value(file_path: &str) -> Result<Value, io::Error> {
-    if file_path.is_empty() {
+fn load_value(file_path: &Path) -> Result<Value, io::Error> {
+    if file_path.as_os_str().is_empty() {
         return Ok(Value::Object(Default::default()));
     }
     parse_config_file(file_path).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))

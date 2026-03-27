@@ -3,8 +3,11 @@
 use crate::config::store::{ConfigStore, SectionKind};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+pub(super) const TOML_DEFAULT_FILE_NAME: &str = "app_config.toml";
+pub(super) const JSON_DEFAULT_FILE_NAME: &str = "app_config.json";
 const DEFAULT_RELOAD_INTERVAL: Duration = Duration::from_secs(5);
 
 type RegisterFn = Box<dyn FnOnce(&mut ConfigStore, &Value) -> Result<(), String> + Send>;
@@ -27,7 +30,7 @@ type RegisterFn = Box<dyn FnOnce(&mut ConfigStore, &Value) -> Result<(), String>
 /// ```
 pub struct ConfigBuilder {
     /// Path to the config file (`None` until `from_file` is called).
-    pub(crate) file_path: Option<String>,
+    pub(crate) file_path: Option<PathBuf>,
     /// Interval for hot-reload polling (`None` means no hot-reload).
     pub(crate) reload_interval: Option<Duration>,
     bindings: Vec<RegisterFn>,
@@ -44,8 +47,13 @@ impl std::fmt::Debug for ConfigBuilder {
 }
 
 impl Default for ConfigBuilder {
+    #[inline]
     fn default() -> Self {
-        Self::new()
+        Self {
+            file_path: get_default_file().map(|p| p.to_path_buf()),
+            bindings: Vec::new(),
+            reload_interval: None,
+        }
     }
 }
 
@@ -62,15 +70,15 @@ impl ConfigBuilder {
     /// Creates the config builder from a file path.
     ///
     /// Supported formats: `.toml`, `.json` (detected by file extension).
-    pub fn from_file(path: impl Into<String>) -> Self {
+    pub fn from_file(path: impl AsRef<Path>) -> Self {
         Self::new().with_file(path)
     }
 
     /// Sets the config file path.
     ///
     /// Supported formats: `.toml`, `.json` (detected by file extension).
-    pub fn with_file(mut self, path: impl Into<String>) -> Self {
-        self.file_path = Some(path.into());
+    pub fn with_file(mut self, path: impl AsRef<Path>) -> Self {
+        self.file_path = Some(path.as_ref().into());
         self
     }
 
@@ -146,24 +154,33 @@ impl ConfigBuilder {
 /// Reads and parses a config file into `serde_json::Value`.
 ///
 /// Supports `.toml` and `.json` by file extension.
-pub(crate) fn parse_config_file(path: &str) -> Result<Value, String> {
+pub(crate) fn parse_config_file(path: &Path) -> Result<Value, String> {
     let contents = std::fs::read_to_string(path)
-        .map_err(|e| format!("config: cannot read file '{path}': {e}"))?;
+        .map_err(|e| format!("config: cannot read file '{}': {e}", path.display()))?;
 
-    if path.ends_with(".toml") {
+    if path.extension().is_some_and(|ext| ext == "toml") {
         let table: toml::Value = contents
             .parse()
-            .map_err(|e| format!("config: TOML parse error in '{path}': {e}"))?;
+            .map_err(|e| format!("config: TOML parse error in '{}': {e}", path.display()))?;
         serde_json::to_value(table)
             .map_err(|e| format!("config: TOML → JSON conversion error: {e}"))
-    } else if path.ends_with(".json") {
+    } else if path.extension().is_some_and(|ext| ext == "json") {
         serde_json::from_str(&contents)
-            .map_err(|e| format!("config: JSON parse error in '{path}': {e}"))
+            .map_err(|e| format!("config: JSON parse error in '{}': {e}", path.display()))
     } else {
         Err(format!(
-            "config: unsupported file format for '{path}' (use .toml or .json)"
+            "config: unsupported file format for '{}' (use .toml or .json)",
+            path.display()
         ))
     }
+}
+
+#[inline]
+pub(super) fn get_default_file() -> Option<&'static Path> {
+    [TOML_DEFAULT_FILE_NAME, JSON_DEFAULT_FILE_NAME]
+        .into_iter()
+        .map(Path::new)
+        .find(|p| p.exists())
 }
 
 #[cfg(test)]
@@ -275,7 +292,7 @@ mod tests {
     fn unsupported_file_format_returns_err() {
         let mut f = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
         f.write_all(b"key: val").unwrap();
-        let result = parse_config_file(f.path().to_str().unwrap());
+        let result = parse_config_file(f.path());
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unsupported file format"));
     }

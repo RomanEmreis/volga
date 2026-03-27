@@ -39,16 +39,11 @@ impl App {
     ///
     /// Panics if no default config file is found or if the config fails to load or parse.
     pub fn with_default_config(self) -> Self {
-        use std::path::Path;
-        let path = if Path::new("app_config.toml").exists() {
-            "app_config.toml"
-        } else if Path::new("app_config.json").exists() {
-            "app_config.json"
-        } else {
+        let path = builder::get_default_file().unwrap_or_else(|| {
             panic!(
                 "config: with_default_config() found neither app_config.toml nor app_config.json"
-            );
-        };
+            )
+        });
         self.process_config(ConfigBuilder::from_file(path))
             .unwrap_or_else(|e| panic!("config: {e}"))
     }

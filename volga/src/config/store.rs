@@ -6,6 +6,7 @@ use serde_json::Value;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    path::PathBuf,
     sync::Arc,
     time::Duration,
 };
@@ -83,7 +84,7 @@ pub struct ConfigStore {
     /// Hot-reload scheduling info: `(interval, file_path)`.
     ///
     /// `None` means no hot-reload is configured. Set by [`ConfigBuilder::build_from_value`].
-    pub(crate) reload: Option<(Duration, String)>,
+    pub(crate) reload: Option<(Duration, PathBuf)>,
 }
 
 impl std::fmt::Debug for ConfigStore {
