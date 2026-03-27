@@ -1,0 +1,299 @@
+//! Builder for the file-based configuration system.
+
+use crate::config::store::{ConfigStore, SectionKind};
+use serde::de::DeserializeOwned;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+pub(super) const TOML_DEFAULT_FILE_NAME: &str = "app_config.toml";
+pub(super) const JSON_DEFAULT_FILE_NAME: &str = "app_config.json";
+const DEFAULT_RELOAD_INTERVAL: Duration = Duration::from_secs(5);
+
+type RegisterFn = Box<dyn FnOnce(&mut ConfigStore, &Value) -> Result<(), String> + Send>;
+
+/// Builds and validates the file-based configuration.
+///
+/// Created via [`App::with_config`] or [`App::with_default_config`].
+///
+/// # Example
+/// ```no_run
+/// use volga::App;
+/// use serde::Deserialize;
+/// #[derive(Deserialize)] struct Database { url: String }
+///
+/// App::new().with_config(|cfg| {
+///     cfg.with_file("app_config.toml")
+///        .bind_section::<Database>("database")
+///        .reload_on_change()
+/// });
+/// ```
+pub struct ConfigBuilder {
+    /// Path to the config file (`None` until `from_file` is called).
+    pub(crate) file_path: Option<PathBuf>,
+    /// Interval for hot-reload polling (`None` means no hot-reload).
+    pub(crate) reload_interval: Option<Duration>,
+    bindings: Vec<RegisterFn>,
+}
+
+impl std::fmt::Debug for ConfigBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigBuilder")
+            .field("file_path", &self.file_path)
+            .field("binding_count", &self.bindings.len())
+            .field("reload_interval", &self.reload_interval)
+            .finish()
+    }
+}
+
+impl Default for ConfigBuilder {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            file_path: get_default_file().map(|p| p.to_path_buf()),
+            bindings: Vec::new(),
+            reload_interval: None,
+        }
+    }
+}
+
+impl ConfigBuilder {
+    /// Creates an empty builder.
+    pub fn new() -> Self {
+        Self {
+            file_path: None,
+            bindings: Vec::new(),
+            reload_interval: None,
+        }
+    }
+
+    /// Creates the config builder from a file path.
+    ///
+    /// Supported formats: `.toml`, `.json` (detected by file extension).
+    pub fn from_file(path: impl AsRef<Path>) -> Self {
+        Self::new().with_file(path)
+    }
+
+    /// Sets the config file path.
+    ///
+    /// Supported formats: `.toml`, `.json` (detected by file extension).
+    pub fn with_file(mut self, path: impl AsRef<Path>) -> Self {
+        self.file_path = Some(path.as_ref().into());
+        self
+    }
+
+    /// Binds a config section to type `T`.
+    ///
+    /// Produces a startup error if the section is absent or malformed.
+    pub fn bind_section<T>(mut self, key: impl Into<String>) -> Self
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+    {
+        let key = key.into();
+        self.bindings.push(Box::new(move |store, value| {
+            store.register::<T>(&key, SectionKind::Required, value)
+        }));
+        self
+    }
+
+    /// Binds an optional config section to type `T`.
+    ///
+    /// If the section is absent, `Option<Config<T>>` extracts as `None`.
+    pub fn bind_section_optional<T>(mut self, key: impl Into<String>) -> Self
+    where
+        T: DeserializeOwned + Send + Sync + 'static,
+    {
+        let key = key.into();
+        self.bindings.push(Box::new(move |store, value| {
+            store.register::<T>(&key, SectionKind::Optional, value)
+        }));
+        self
+    }
+
+    /// Enables hot-reload with the default 5-second poll interval.
+    ///
+    /// > **Note:** hot reload is intentionally limited to user-bound configuration data.
+    /// > Built-in framework/runtime sections are startup-only because updating them would require
+    /// > partial runtime reconfiguration or server restart semantics, which is outside the scope of this feature.
+    ///
+    /// Requires `with_file()` to also be called; produces a startup error otherwise.
+    pub fn reload_on_change(mut self) -> Self {
+        self.reload_interval = Some(DEFAULT_RELOAD_INTERVAL);
+        self
+    }
+
+    /// Reads and parses the configured file, returning its contents as `serde_json::Value`.
+    ///
+    /// Returns `Err` if no file path was configured, the file cannot be read, or parsing fails.
+    pub fn load_file(&self) -> Result<Value, String> {
+        let path = self.file_path.as_deref().ok_or_else(|| {
+            "config: no file path configured; call from_file() before reload_on_change()".to_owned()
+        })?;
+        parse_config_file(path)
+    }
+
+    /// Builds a `ConfigStore` from an already-parsed `Value`.
+    ///
+    /// Preferred over re-reading the file when the caller already has the parsed value
+    /// (e.g. from built-in section processing). Avoids double I/O.
+    ///
+    /// The reload scheduling info is baked into `store.reload` so callers don't need
+    /// to track the interval separately.
+    pub fn build_from_value(self, value: &Value) -> Result<ConfigStore, String> {
+        let mut store = ConfigStore::new();
+        for register in self.bindings {
+            register(&mut store, value)?;
+        }
+        store.reload = self
+            .reload_interval
+            .map(|i| (i, self.file_path.clone().unwrap_or_default()));
+        Ok(store)
+    }
+}
+
+/// Reads and parses a config file into `serde_json::Value`.
+///
+/// Supports `.toml` and `.json` by file extension.
+pub(crate) fn parse_config_file(path: &Path) -> Result<Value, String> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| format!("config: cannot read file '{}': {e}", path.display()))?;
+
+    if path.extension().is_some_and(|ext| ext == "toml") {
+        let table: toml::Value = contents
+            .parse()
+            .map_err(|e| format!("config: TOML parse error in '{}': {e}", path.display()))?;
+        serde_json::to_value(table)
+            .map_err(|e| format!("config: TOML → JSON conversion error: {e}"))
+    } else if path.extension().is_some_and(|ext| ext == "json") {
+        serde_json::from_str(&contents)
+            .map_err(|e| format!("config: JSON parse error in '{}': {e}", path.display()))
+    } else {
+        Err(format!(
+            "config: unsupported file format for '{}' (use .toml or .json)",
+            path.display()
+        ))
+    }
+}
+
+#[inline]
+pub(super) fn get_default_file() -> Option<&'static Path> {
+    [TOML_DEFAULT_FILE_NAME, JSON_DEFAULT_FILE_NAME]
+        .into_iter()
+        .map(Path::new)
+        .find(|p| p.exists())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Deserialize;
+    use std::io::Write;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Db {
+        url: String,
+    }
+
+    fn write_toml(content: &str) -> tempfile::NamedTempFile {
+        let mut f = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        f
+    }
+
+    #[test]
+    fn it_creates_builder_from_file() {
+        let file = write_toml("[db]\nurl = \"postgres://localhost/test\"");
+        let builder =
+            ConfigBuilder::from_file(file.path().to_str().unwrap()).bind_section::<Db>("db");
+        let json = builder.load_file().unwrap();
+        let store = builder.build_from_value(&json).unwrap();
+        let arc = store.get::<Db>().unwrap();
+        assert_eq!(arc.url, "postgres://localhost/test");
+    }
+
+    #[test]
+    fn builder_from_toml_required_section() {
+        let file = write_toml("[db]\nurl = \"postgres://localhost/test\"");
+        let builder = ConfigBuilder::new()
+            .with_file(file.path().to_str().unwrap())
+            .bind_section::<Db>("db");
+        let json = builder.load_file().unwrap();
+        let store = builder.build_from_value(&json).unwrap();
+        let arc = store.get::<Db>().unwrap();
+        assert_eq!(arc.url, "postgres://localhost/test");
+    }
+
+    #[test]
+    fn builder_from_json_required_section() {
+        let mut f = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+        f.write_all(br#"{"db": {"url": "mysql://localhost/test"}}"#)
+            .unwrap();
+        let builder = ConfigBuilder::new()
+            .with_file(f.path().to_str().unwrap())
+            .bind_section::<Db>("db");
+        let json = builder.load_file().unwrap();
+        let store = builder.build_from_value(&json).unwrap();
+        assert_eq!(store.get::<Db>().unwrap().url, "mysql://localhost/test");
+    }
+
+    #[test]
+    fn builder_optional_section_missing_is_ok() {
+        let file = write_toml("");
+        let builder = ConfigBuilder::new()
+            .with_file(file.path().to_str().unwrap())
+            .bind_section_optional::<Db>("db");
+        let json = builder.load_file().unwrap();
+        let store = builder.build_from_value(&json).unwrap();
+        assert!(store.get::<Db>().is_none());
+    }
+
+    #[test]
+    fn builder_required_section_missing_errors() {
+        let file = write_toml("");
+        let builder = ConfigBuilder::new()
+            .with_file(file.path().to_str().unwrap())
+            .bind_section::<Db>("db");
+        let json = builder.load_file().unwrap();
+        let result = builder.build_from_value(&json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reload_on_change_sets_interval() {
+        let file = write_toml("");
+        let builder = ConfigBuilder::new()
+            .with_file(file.path().to_str().unwrap())
+            .reload_on_change();
+        let json = builder.load_file().unwrap();
+        let store = builder.build_from_value(&json).unwrap();
+        assert!(store.reload.is_some());
+    }
+
+    #[test]
+    fn reload_without_file_is_error() {
+        let builder = ConfigBuilder::new().reload_on_change();
+        assert!(builder.load_file().is_err());
+    }
+
+    #[test]
+    fn debug_impl_is_non_empty() {
+        let builder = ConfigBuilder::new();
+        assert!(!format!("{builder:?}").is_empty());
+    }
+
+    #[test]
+    fn default_impl_matches_new() {
+        let builder = ConfigBuilder::default();
+        assert!(builder.file_path.is_none());
+        assert!(builder.reload_interval.is_none());
+    }
+
+    #[test]
+    fn unsupported_file_format_returns_err() {
+        let mut f = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
+        f.write_all(b"key: val").unwrap();
+        let result = parse_config_file(f.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unsupported file format"));
+    }
+}

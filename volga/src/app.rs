@@ -190,6 +190,10 @@ pub struct App {
 
     /// Maximum number of simultaneous TCP connections.
     max_connections: Limit<usize>,
+
+    /// Pre-built config store (populated by `with_config`/`with_default_config`, passed to `AppEnv`)
+    #[cfg(feature = "config")]
+    pub(crate) config_store: Option<Arc<crate::config::ConfigStore>>,
 }
 
 impl Default for App {
@@ -247,7 +251,15 @@ impl App {
             decompression_limits: Default::default(),
             #[cfg(feature = "openapi")]
             openapi: Default::default(),
+            #[cfg(feature = "config")]
+            config_store: None,
         }
+    }
+
+    /// Returns the current bound socket address.
+    #[cfg(feature = "config")]
+    pub(crate) fn socket_addr(&self) -> std::net::SocketAddr {
+        self.connection.socket
     }
 
     /// Binds the `App` to the specified `socket` address.
@@ -681,6 +693,7 @@ impl App {
         }
 
         let socket = tcp_listener.local_addr()?;
+
         let no_delay = self.no_delay;
 
         self.print_welcome(socket);
@@ -720,6 +733,13 @@ impl App {
 
         let active_connections = self.active_connections();
         let app_instance: Arc<AppEnv> = Arc::new(self.try_into()?);
+
+        // Spawn hot-reload background task if requested.
+        // The task selects on shutdown_tx.closed() so it terminates cleanly.
+        #[cfg(feature = "config")]
+        if let Some(config) = &app_instance.config {
+            crate::config::processing::spawn_reload(config, Arc::clone(&shutdown_tx));
+        }
 
         loop {
             let (stream, _) = tokio::select! {

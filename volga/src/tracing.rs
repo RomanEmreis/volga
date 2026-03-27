@@ -1,11 +1,15 @@
 //! Tools for tracing, logging and observability
 
+use hyper::header::HeaderName;
+
 use crate::App;
 
 const DEFAULT_SPAN_HEADER_NAME: &str = "request-id";
 
 /// Represents a tracing configuration
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "config", serde(default))]
 pub struct TracingConfig {
     /// Specifies whether to include a span id HTTP header
     ///
@@ -15,7 +19,8 @@ pub struct TracingConfig {
     /// Specifies a span id HTTP header name
     ///
     /// Default: `request-id`
-    pub(super) span_header_name: &'static str,
+    #[cfg_attr(feature = "config", serde(deserialize_with = "deser_header_name"))]
+    pub(super) span_header_name: HeaderName,
 }
 
 impl Default for TracingConfig {
@@ -23,9 +28,16 @@ impl Default for TracingConfig {
     fn default() -> Self {
         Self {
             include_header: false,
-            span_header_name: DEFAULT_SPAN_HEADER_NAME,
+            span_header_name: HeaderName::from_static(DEFAULT_SPAN_HEADER_NAME),
         }
     }
+}
+
+#[cfg(feature = "config")]
+fn deser_header_name<'de, D: serde::Deserializer<'de>>(d: D) -> Result<HeaderName, D::Error> {
+    use serde::Deserialize;
+    let s = String::deserialize(d)?;
+    HeaderName::try_from(s.as_str()).map_err(serde::de::Error::custom)
 }
 
 impl TracingConfig {
@@ -49,8 +61,13 @@ impl TracingConfig {
     /// Configures tracing to use a specific HTTP header name if the `include_header` is set to `true`
     ///
     /// Default: `request-id`
-    pub fn with_header_name(mut self, name: &'static str) -> Self {
-        self.span_header_name = name;
+    ///
+    /// # Panics
+    ///
+    /// Panics if `name` is not a valid HTTP header name.
+    pub fn with_header_name(mut self, name: impl AsRef<str>) -> Self {
+        self.span_header_name =
+            HeaderName::try_from(name.as_ref()).expect("invalid HTTP header name");
         self
     }
 }
@@ -111,6 +128,8 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use hyper::header::HeaderName;
+
     use super::{DEFAULT_SPAN_HEADER_NAME, TracingConfig};
     use crate::App;
 
@@ -154,7 +173,10 @@ mod tests {
         let tracing_config = app.tracing_config.unwrap();
 
         assert!(!tracing_config.include_header);
-        assert_eq!(tracing_config.span_header_name, DEFAULT_SPAN_HEADER_NAME)
+        assert_eq!(
+            tracing_config.span_header_name,
+            HeaderName::from_static(DEFAULT_SPAN_HEADER_NAME)
+        )
     }
 
     #[test]
@@ -164,7 +186,10 @@ mod tests {
         let tracing_config = app.tracing_config.unwrap();
 
         assert!(tracing_config.include_header);
-        assert_eq!(tracing_config.span_header_name, DEFAULT_SPAN_HEADER_NAME)
+        assert_eq!(
+            tracing_config.span_header_name,
+            HeaderName::from_static(DEFAULT_SPAN_HEADER_NAME)
+        )
     }
 
     #[test]

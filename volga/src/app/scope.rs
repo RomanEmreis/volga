@@ -222,6 +222,11 @@ async fn handle_impl(
                         extensions.insert(TrustedProxies(trusted_proxies.clone()));
                     }
                 }
+
+                #[cfg(feature = "config")]
+                if let Some(config) = &env.config {
+                    extensions.insert(Arc::clone(config));
+                }
             }
 
             // Pre-extract error handler args from parts before consuming them.
@@ -308,7 +313,7 @@ fn apply_tracing_headers(
     let value = span_id.map_or(0, |id| id.into_u64()).to_string();
 
     resp.headers_mut().insert(
-        tracing.span_header_name,
+        tracing.span_header_name.clone(),
         value.parse().expect("valid span id"),
     );
 }

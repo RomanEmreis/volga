@@ -6,8 +6,11 @@ use crate::{Limit, headers::HeaderValue, http::request::request_body_limit::Requ
 use hyper_util::server::graceful::GracefulShutdown;
 use std::io::Error;
 
-#[cfg(any(feature = "tls", feature = "rate-limiting"))]
+#[cfg(any(feature = "tls", feature = "rate-limiting", feature = "config"))]
 use std::sync::Arc;
+
+#[cfg(feature = "config")]
+use crate::config::ConfigStore;
 
 #[cfg(feature = "di")]
 use crate::di::Container;
@@ -119,6 +122,10 @@ pub(crate) struct AppEnv {
     /// Dependency Injection container
     #[cfg(feature = "di")]
     pub(super) container: Container,
+
+    /// Pre-deserialized user config sections
+    #[cfg(feature = "config")]
+    pub(super) config: Option<Arc<ConfigStore>>,
 }
 
 impl TryFrom<App> for AppEnv {
@@ -176,6 +183,8 @@ impl TryFrom<App> for AppEnv {
             acceptor,
             #[cfg(feature = "tls")]
             hsts,
+            #[cfg(feature = "config")]
+            config: app.config_store,
         };
         Ok(app_instance)
     }
