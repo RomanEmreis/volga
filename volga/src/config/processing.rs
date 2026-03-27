@@ -74,15 +74,15 @@ impl App {
 
         match (&s.host, s.port) {
             (Some(host), Some(port)) => {
-                self = self.bind(format!("{host}:{port}").as_str());
+                self = self.bind((parse_host(host)?, port));
             }
             (Some(host), None) => {
                 let port = self.socket_addr().port();
-                self = self.bind(format!("{host}:{port}").as_str());
+                self = self.bind((parse_host(host)?, port));
             }
             (None, Some(port)) => {
                 let ip = self.socket_addr().ip();
-                self = self.bind(format!("{ip}:{port}").as_str());
+                self = self.bind((ip, port));
             }
             (None, None) => {}
         }
@@ -178,6 +178,17 @@ pub(crate) fn spawn_reload(
     });
 }
 
+/// Parses a host string as a [`std::net::IpAddr`], returning a descriptive startup error
+/// if the value is not a valid IP address (hostname, unbracketed IPv6, etc.).
+fn parse_host(host: &str) -> Result<std::net::IpAddr, io::Error> {
+    host.parse().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("config: [server] invalid host address '{host}' (must be a valid IP address)"),
+        )
+    })
+}
+
 /// Parses a config file into a `serde_json::Value`, or returns an empty object
 /// when the path is empty (no file configured).
 fn load_value(file_path: &str) -> Result<Value, io::Error> {
@@ -226,7 +237,7 @@ mod tests {
 
         let app = App::new()
             .bind("127.0.0.1:7878")
-            .with_config(|cfg| cfg.from_file(&path));
+            .with_config(|cfg| cfg.with_file(&path));
 
         let addr = app.socket_addr();
         assert_eq!(
@@ -248,7 +259,7 @@ mod tests {
 
         let app = App::new()
             .bind("127.0.0.1:7878")
-            .with_config(|cfg| cfg.from_file(&path));
+            .with_config(|cfg| cfg.with_file(&path));
 
         let addr = app.socket_addr();
         assert_eq!(addr.port(), 9090, "port must be updated from config");
@@ -266,10 +277,104 @@ mod tests {
 
         let app = App::new()
             .bind("127.0.0.1:7878")
-            .with_config(|cfg| cfg.from_file(&path));
+            .with_config(|cfg| cfg.with_file(&path));
 
         let addr = app.socket_addr();
         assert_eq!(addr.port(), 9090);
         assert_eq!(addr.ip().to_string(), "0.0.0.0");
+    }
+
+    #[test]
+    #[should_panic(expected = "config:")]
+    fn invalid_host_panics_at_startup() {
+        let file = write_toml("[server]\nhost = \"localhost\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[test]
+    #[should_panic(expected = "config:")]
+    fn invalid_host_with_port_panics_at_startup() {
+        let file = write_toml("[server]\nhost = \"not-an-ip\"\nport = 8080\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[test]
+    fn server_section_body_limit_zero_removes_limit() {
+        let file = write_toml("[server]\nbody_limit_bytes = 0\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        // should not panic — body_limit = 0 → Unlimited
+        App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[test]
+    fn server_section_all_fields() {
+        let file = write_toml(
+            "[server]\nhost = \"127.0.0.1\"\nport = 8181\nbody_limit_bytes = 1024\nmax_header_count = 50\nmax_connections = 100\n",
+        );
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        let addr = app.socket_addr();
+        assert_eq!(addr.port(), 8181);
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+    }
+
+    #[test]
+    #[should_panic(expected = "config:")]
+    fn reload_on_change_without_file_panics() {
+        // ConfigBuilder with reload but no file path must fail at process_config time.
+        App::new().with_config(|cfg| cfg.reload_on_change());
+    }
+
+    #[test]
+    fn server_section_max_connections_zero_is_unlimited() {
+        let file = write_toml("[server]\nmax_connections = 0\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        // max_connections = 0 → Unlimited; must not panic.
+        App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[test]
+    fn no_file_configured_uses_empty_config() {
+        // with_config without from_file: no file → empty object → no panic.
+        App::new().with_config(|cfg| cfg);
+    }
+
+    #[cfg(feature = "tracing")]
+    #[test]
+    fn tracing_section_applied_from_config() {
+        let file = write_toml("[tracing]\ninclude_header = true\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+        assert!(app.tracing_config.is_some());
+    }
+
+    #[cfg(feature = "tracing")]
+    #[test]
+    #[should_panic(expected = "config:")]
+    fn invalid_tracing_section_panics_at_startup() {
+        // include_header must be bool, not a string → parse_section must return Err
+        let file = write_toml("[tracing]\ninclude_header = \"yes\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[cfg(feature = "openapi")]
+    #[test]
+    fn openapi_section_applied_from_config() {
+        let file = write_toml("[openapi]\ntitle = \"My API\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[cfg(feature = "middleware")]
+    #[test]
+    fn cors_section_applied_from_config() {
+        let file = write_toml("[cors]\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        App::new().with_config(|cfg| cfg.with_file(&path));
     }
 }

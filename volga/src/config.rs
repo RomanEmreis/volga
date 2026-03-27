@@ -11,7 +11,7 @@
 //! #[tokio::main]
 //! async fn main() -> std::io::Result<()> {
 //!     let app = App::new()
-//!         .with_config(|cfg| cfg.from_file("app_config.toml").bind_section::<Database>("database"));
+//!         .with_config(|cfg| cfg.with_file("app_config.toml").bind_section::<Database>("database"));
 //!     app.run().await
 //! }
 //! ```
@@ -49,7 +49,7 @@ impl App {
                 "config: with_default_config() found neither app_config.toml nor app_config.json"
             );
         };
-        self.process_config(ConfigBuilder::new().from_file(path))
+        self.process_config(ConfigBuilder::from_file(path))
             .unwrap_or_else(|e| panic!("config: {e}"))
     }
 
@@ -64,7 +64,7 @@ impl App {
     /// #[tokio::main]
     /// async fn main() -> std::io::Result<()> {
     ///     let app = App::new().with_config(|cfg| {
-    ///         cfg.from_file("config/prod.toml")
+    ///         cfg.with_file("config/prod.toml")
     ///            .bind_section::<Database>("database")
     ///            .reload_on_change()
     ///     });
@@ -81,5 +81,41 @@ impl App {
     {
         self.process_config(f(ConfigBuilder::new()))
             .unwrap_or_else(|e| panic!("config: {e}"))
+    }
+
+    /// Sets the file-based configuration
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, ConfigBuilder};
+    /// use serde::Deserialize;
+    /// #[derive(Deserialize)] struct Database { url: String }
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let config = ConfigBuilder::from_file("config/prod.toml")
+    ///         .bind_section::<Database>("database")
+    ///         .reload_on_change();
+    ///
+    ///     let app = App::new().set_config(config);
+    ///     app.run().await
+    /// }
+    /// ```
+    pub fn set_config(self, config: ConfigBuilder) -> Self {
+        self.process_config(config)
+            .unwrap_or_else(|e| panic!("config: {e}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::App;
+
+    #[test]
+    #[should_panic(expected = "config:")]
+    fn with_default_config_panics_when_no_default_file() {
+        // This test relies on neither app_config.toml nor app_config.json
+        // existing in the current working directory during test runs.
+        App::new().with_default_config();
     }
 }

@@ -9,7 +9,7 @@ use volga::{App, Config, ok};
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut app = App::new().with_config(|cfg| {
-        cfg.from_file("examples/config/app_config.toml")
+        cfg.with_file("examples/config/app_config.toml")
             .bind_section::<HandlerConfig>("handler")
     });
 

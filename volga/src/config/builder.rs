@@ -20,7 +20,7 @@ type RegisterFn = Box<dyn FnOnce(&mut ConfigStore, &Value) -> Result<(), String>
 /// #[derive(Deserialize)] struct Database { url: String }
 ///
 /// App::new().with_config(|cfg| {
-///     cfg.from_file("app_config.toml")
+///     cfg.with_file("app_config.toml")
 ///        .bind_section::<Database>("database")
 ///        .reload_on_change()
 /// });
@@ -59,10 +59,17 @@ impl ConfigBuilder {
         }
     }
 
+    /// Creates the config builder from a file path.
+    ///
+    /// Supported formats: `.toml`, `.json` (detected by file extension).
+    pub fn from_file(path: impl Into<String>) -> Self {
+        Self::new().with_file(path)
+    }
+
     /// Sets the config file path.
     ///
     /// Supported formats: `.toml`, `.json` (detected by file extension).
-    pub fn from_file(mut self, path: impl Into<String>) -> Self {
+    pub fn with_file(mut self, path: impl Into<String>) -> Self {
         self.file_path = Some(path.into());
         self
     }
@@ -173,10 +180,21 @@ mod tests {
     }
 
     #[test]
+    fn it_creates_builder_from_file() {
+        let file = write_toml("[db]\nurl = \"postgres://localhost/test\"");
+        let builder =
+            ConfigBuilder::from_file(file.path().to_str().unwrap()).bind_section::<Db>("db");
+        let json = builder.load_file().unwrap();
+        let store = builder.build_from_value(&json).unwrap();
+        let arc = store.get::<Db>().unwrap();
+        assert_eq!(arc.url, "postgres://localhost/test");
+    }
+
+    #[test]
     fn builder_from_toml_required_section() {
         let file = write_toml("[db]\nurl = \"postgres://localhost/test\"");
         let builder = ConfigBuilder::new()
-            .from_file(file.path().to_str().unwrap())
+            .with_file(file.path().to_str().unwrap())
             .bind_section::<Db>("db");
         let json = builder.load_file().unwrap();
         let store = builder.build_from_value(&json).unwrap();
@@ -190,7 +208,7 @@ mod tests {
         f.write_all(br#"{"db": {"url": "mysql://localhost/test"}}"#)
             .unwrap();
         let builder = ConfigBuilder::new()
-            .from_file(f.path().to_str().unwrap())
+            .with_file(f.path().to_str().unwrap())
             .bind_section::<Db>("db");
         let json = builder.load_file().unwrap();
         let store = builder.build_from_value(&json).unwrap();
@@ -201,7 +219,7 @@ mod tests {
     fn builder_optional_section_missing_is_ok() {
         let file = write_toml("");
         let builder = ConfigBuilder::new()
-            .from_file(file.path().to_str().unwrap())
+            .with_file(file.path().to_str().unwrap())
             .bind_section_optional::<Db>("db");
         let json = builder.load_file().unwrap();
         let store = builder.build_from_value(&json).unwrap();
@@ -212,7 +230,7 @@ mod tests {
     fn builder_required_section_missing_errors() {
         let file = write_toml("");
         let builder = ConfigBuilder::new()
-            .from_file(file.path().to_str().unwrap())
+            .with_file(file.path().to_str().unwrap())
             .bind_section::<Db>("db");
         let json = builder.load_file().unwrap();
         let result = builder.build_from_value(&json);
@@ -223,7 +241,7 @@ mod tests {
     fn reload_on_change_sets_interval() {
         let file = write_toml("");
         let builder = ConfigBuilder::new()
-            .from_file(file.path().to_str().unwrap())
+            .with_file(file.path().to_str().unwrap())
             .reload_on_change();
         let json = builder.load_file().unwrap();
         let store = builder.build_from_value(&json).unwrap();
@@ -234,5 +252,27 @@ mod tests {
     fn reload_without_file_is_error() {
         let builder = ConfigBuilder::new().reload_on_change();
         assert!(builder.load_file().is_err());
+    }
+
+    #[test]
+    fn debug_impl_is_non_empty() {
+        let builder = ConfigBuilder::new();
+        assert!(!format!("{builder:?}").is_empty());
+    }
+
+    #[test]
+    fn default_impl_matches_new() {
+        let builder = ConfigBuilder::default();
+        assert!(builder.file_path.is_none());
+        assert!(builder.reload_interval.is_none());
+    }
+
+    #[test]
+    fn unsupported_file_format_returns_err() {
+        let mut f = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
+        f.write_all(b"key: val").unwrap();
+        let result = parse_config_file(f.path().to_str().unwrap());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unsupported file format"));
     }
 }

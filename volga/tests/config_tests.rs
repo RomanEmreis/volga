@@ -35,7 +35,7 @@ async fn config_extractor_reads_toml_section() {
 
     let server = TestServer::builder()
         .configure(move |app: App| {
-            app.with_config(|cfg| cfg.from_file(&path).bind_section::<Database>("database"))
+            app.with_config(|cfg| cfg.with_file(&path).bind_section::<Database>("database"))
         })
         .setup(|app| {
             app.map_get(
@@ -61,7 +61,7 @@ async fn config_extractor_reads_json_section() {
 
     let server = TestServer::builder()
         .configure(move |app: App| {
-            app.with_config(|cfg| cfg.from_file(&path).bind_section::<Database>("database"))
+            app.with_config(|cfg| cfg.with_file(&path).bind_section::<Database>("database"))
         })
         .setup(|app| {
             app.map_get(
@@ -87,7 +87,7 @@ async fn optional_config_absent_section_returns_none() {
 
     let server = TestServer::builder()
         .configure(move |app: App| {
-            app.with_config(|cfg| cfg.from_file(&path).bind_section_optional::<Cache>("cache"))
+            app.with_config(|cfg| cfg.with_file(&path).bind_section_optional::<Cache>("cache"))
         })
         .setup(|app| {
             app.map_get("/cache", |cache: Option<Config<Cache>>| async move {
@@ -120,7 +120,7 @@ async fn optional_config_present_section_returns_some() {
 
     let server = TestServer::builder()
         .configure(move |app: App| {
-            app.with_config(|cfg| cfg.from_file(&path).bind_section_optional::<Cache>("cache"))
+            app.with_config(|cfg| cfg.with_file(&path).bind_section_optional::<Cache>("cache"))
         })
         .setup(|app| {
             app.map_get("/cache", |cache: Option<Config<Cache>>| async move {
@@ -155,7 +155,7 @@ fn invalid_server_section_panics_at_startup() {
     // panic before the server starts.
     App::new()
         .bind("127.0.0.1:0")
-        .with_config(|cfg| cfg.from_file(&path));
+        .with_config(|cfg| cfg.with_file(&path));
 
     drop(file);
 }

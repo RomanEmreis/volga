@@ -287,4 +287,41 @@ mod tests {
         let arc = store.get::<MyConfig>().unwrap();
         assert_eq!(arc.value, 3);
     }
+
+    #[test]
+    fn reload_required_section_disappears_keeps_value() {
+        let mut store = ConfigStore::new();
+        let json = serde_json::json!({ "my": { "value": 10 } });
+        store
+            .register::<MyConfig>("my", SectionKind::Required, &json)
+            .unwrap();
+
+        // Reload with no section — required section disappears; old value kept.
+        store.reload_sections(&serde_json::json!({}));
+
+        let arc = store.get::<MyConfig>().unwrap();
+        assert_eq!(arc.value, 10);
+    }
+
+    #[test]
+    fn malformed_section_returns_err() {
+        let mut store = ConfigStore::new();
+        // "value" must be u32 but is a string — register must return Err.
+        let json = serde_json::json!({ "my": { "value": "bad" } });
+        let result = store.register::<MyConfig>("my", SectionKind::Required, &json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to parse"));
+    }
+
+    #[test]
+    fn debug_impl_is_non_empty() {
+        let store = ConfigStore::new();
+        assert!(!format!("{store:?}").is_empty());
+    }
+
+    #[test]
+    fn default_impl_creates_empty_store() {
+        let store = ConfigStore::default();
+        assert!(store.get::<MyConfig>().is_none());
+    }
 }
