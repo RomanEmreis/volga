@@ -28,9 +28,9 @@ type RegisterFn = Box<dyn FnOnce(&mut ConfigStore, &Value) -> Result<(), String>
 pub struct ConfigBuilder {
     /// Path to the config file (`None` until `from_file` is called).
     pub(crate) file_path: Option<String>,
-    bindings: Vec<RegisterFn>,
     /// Interval for hot-reload polling (`None` means no hot-reload).
     pub(crate) reload_interval: Option<Duration>,
+    bindings: Vec<RegisterFn>,
 }
 
 impl std::fmt::Debug for ConfigBuilder {
@@ -104,7 +104,11 @@ impl ConfigBuilder {
 
     /// Enables hot-reload with the default 5-second poll interval.
     ///
-    /// Requires `from_file()` to also be called; produces a startup error otherwise.
+    /// > **Note:** hot reload is intentionally limited to user-bound configuration data.
+    /// > Built-in framework/runtime sections are startup-only because updating them would require
+    /// > partial runtime reconfiguration or server restart semantics, which is outside the scope of this feature.
+    ///
+    /// Requires `with_file()` to also be called; produces a startup error otherwise.
     pub fn reload_on_change(mut self) -> Self {
         self.reload_interval = Some(DEFAULT_RELOAD_INTERVAL);
         self

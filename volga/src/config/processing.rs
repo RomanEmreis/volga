@@ -133,7 +133,11 @@ impl App {
                 // File config wins, but preserve the runtime-only `exposed` flag.
                 let mut new = oa_cfg;
                 new.exposed = existing.exposed;
-                new
+                if new.specs().is_empty() {
+                    new.with_specs(existing.specs().to_vec())
+                } else {
+                    new
+                }
             });
         }
         Ok(self)
