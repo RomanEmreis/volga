@@ -5,6 +5,8 @@ use crate::error::Error;
 use std::{borrow::Cow, fmt::Display, ops::Deref};
 
 #[cfg(feature = "static-files")]
+use crate::utils::lower_hex;
+#[cfg(feature = "static-files")]
 use sha1::{Digest, Sha1};
 #[cfg(feature = "static-files")]
 use std::fs::Metadata;
@@ -51,7 +53,7 @@ impl TryFrom<&Metadata> for ETag {
 
         hasher.update(duration.as_secs().to_string());
 
-        let tag = format!("{:x}", hasher.finalize());
+        let tag = lower_hex(&hasher.finalize());
         ETag::try_weak(tag)
     }
 }

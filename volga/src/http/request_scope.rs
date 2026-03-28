@@ -10,7 +10,11 @@ use crate::{
     http::{endpoints::route::PathArgs, request::request_body_limit::RequestBodyLimit},
 };
 
-#[cfg(any(feature = "rate-limiting", feature = "config"))]
+#[cfg(any(
+    feature = "rate-limiting",
+    feature = "config",
+    all(test, feature = "ws")
+))]
 use std::sync::Arc;
 
 #[cfg(feature = "ws")]
