@@ -16,13 +16,16 @@ use crate::{
     HttpResult,
     error::{
         Error,
-        handler::{ErasedErrorArgs, WeakErrorHandler, extract_error_args},
+        handler::{ErasedErrorArgs, extract_error_args},
     },
     headers::{
         CONNECTION, HeaderValue, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL,
         SEC_WEBSOCKET_VERSION, UPGRADE,
     },
-    http::endpoints::args::{FromPayload, Payload, Source},
+    http::{
+        endpoints::args::{FromPayload, Payload, Source},
+        request_scope::HttpRequestScope,
+    },
     ok, status,
 };
 
@@ -287,13 +290,13 @@ impl TryFrom<&Parts> for WebSocketConnection {
             .ok_or(WebSocketError::not_upgradable_connection())?
             .clone();
 
-        let error_handler =
-            parts
-                .extensions
-                .get::<WeakErrorHandler>()
-                .ok_or(Error::server_error(
-                    "Server error: error handler is missing",
-                ))?;
+        let error_handler = parts
+            .extensions
+            .get::<HttpRequestScope>()
+            .map(|s| &s.error_handler)
+            .ok_or(Error::server_error(
+                "Server error: error handler is missing",
+            ))?;
 
         let error_args = extract_error_args(error_handler, parts);
 
@@ -330,7 +333,10 @@ mod tests {
     use crate::error::ErrorFunc;
     use crate::error::handler::PipelineErrorHandler;
     use crate::headers::SEC_WEBSOCKET_PROTOCOL;
-    use crate::http::endpoints::args::{FromPayload, Payload};
+    use crate::http::{
+        endpoints::args::{FromPayload, Payload},
+        request_scope::HttpRequestScope,
+    };
     use hyper::http::HeaderValue;
     use hyper::{Request, Version};
     use std::sync::Arc;
@@ -350,7 +356,10 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+        req.extensions_mut().insert(HttpRequestScope {
+            error_handler: Arc::downgrade(&error_handler),
+            ..HttpRequestScope::default()
+        });
 
         let (parts, _) = req.into_parts();
 
@@ -377,7 +386,10 @@ mod tests {
             .unwrap();
 
         let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
-        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+        req.extensions_mut().insert(HttpRequestScope {
+            error_handler: Arc::downgrade(&error_handler),
+            ..HttpRequestScope::default()
+        });
 
         let (parts, _) = req.into_parts();
 
@@ -421,7 +433,10 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+        req.extensions_mut().insert(HttpRequestScope {
+            error_handler: Arc::downgrade(&error_handler),
+            ..HttpRequestScope::default()
+        });
 
         let (parts, _) = req.into_parts();
 
@@ -444,7 +459,10 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+        req.extensions_mut().insert(HttpRequestScope {
+            error_handler: Arc::downgrade(&error_handler),
+            ..HttpRequestScope::default()
+        });
 
         let (parts, _) = req.into_parts();
 
@@ -467,7 +485,10 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+        req.extensions_mut().insert(HttpRequestScope {
+            error_handler: Arc::downgrade(&error_handler),
+            ..HttpRequestScope::default()
+        });
 
         let (parts, _) = req.into_parts();
 
@@ -490,7 +511,10 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+        req.extensions_mut().insert(HttpRequestScope {
+            error_handler: Arc::downgrade(&error_handler),
+            ..HttpRequestScope::default()
+        });
 
         let (parts, _) = req.into_parts();
 
@@ -513,7 +537,10 @@ mod tests {
         req.extensions_mut().insert(u);
         req.extensions_mut()
             .insert(hyper::ext::Protocol::from_static("websocket"));
-        req.extensions_mut().insert(Arc::downgrade(&error_handler));
+        req.extensions_mut().insert(HttpRequestScope {
+            error_handler: Arc::downgrade(&error_handler),
+            ..HttpRequestScope::default()
+        });
 
         let (parts, _) = req.into_parts();
 

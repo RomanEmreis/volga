@@ -16,6 +16,9 @@ use crate::di::Container;
 #[cfg(feature = "rate-limiting")]
 use crate::rate_limiting::{GlobalRateLimiter, RateLimiter};
 
+#[cfg(feature = "rate-limiting")]
+use crate::http::request_scope::HttpRequestScope;
+
 /// Describes current HTTP context which consists of the current HTTP request data
 /// and the reference to the method handler for this request
 pub struct HttpContext {
@@ -116,6 +119,16 @@ impl HttpContext {
         self.container()?.resolve_shared::<T>().map_err(Into::into)
     }
 
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    fn rate_limiter(&self) -> Option<&Arc<GlobalRateLimiter>> {
+        self.request
+            .extensions()
+            .get::<HttpRequestScope>()?
+            .rate_limiter
+            .as_ref()
+    }
+
     /// Returns a reference to a Fixed Window Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
@@ -123,10 +136,7 @@ impl HttpContext {
         &self,
         policy: Option<&str>,
     ) -> Option<&impl RateLimiter> {
-        self.request
-            .extensions()
-            .get::<Arc<GlobalRateLimiter>>()?
-            .fixed_window(policy)
+        self.rate_limiter()?.fixed_window(policy)
     }
 
     /// Returns a reference to a Sliding Window Rate Limiter
@@ -136,10 +146,7 @@ impl HttpContext {
         &self,
         policy: Option<&str>,
     ) -> Option<&impl RateLimiter> {
-        self.request
-            .extensions()
-            .get::<Arc<GlobalRateLimiter>>()?
-            .sliding_window(policy)
+        self.rate_limiter()?.sliding_window(policy)
     }
 
     /// Returns a reference to a Token Bucket Rate Limiter
@@ -149,20 +156,14 @@ impl HttpContext {
         &self,
         policy: Option<&str>,
     ) -> Option<&impl RateLimiter> {
-        self.request
-            .extensions()
-            .get::<Arc<GlobalRateLimiter>>()?
-            .token_bucket(policy)
+        self.rate_limiter()?.token_bucket(policy)
     }
 
     /// Returns a reference to a GCRA Rate Limiter
     #[inline]
     #[cfg(feature = "rate-limiting")]
     pub(crate) fn gcra_rate_limiter(&self, policy: Option<&str>) -> Option<&impl RateLimiter> {
-        self.request
-            .extensions()
-            .get::<Arc<GlobalRateLimiter>>()?
-            .gcra(policy)
+        self.rate_limiter()?.gcra(policy)
     }
 
     /// Returns a read-only view of the request.

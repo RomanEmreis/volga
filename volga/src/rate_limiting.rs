@@ -4,7 +4,7 @@ use crate::{
     App, ClientIp, HttpRequest, HttpResult,
     error::Error,
     headers::{FORWARDED, X_FORWARDED_FOR},
-    http::StatusCode,
+    http::{StatusCode, request_scope::HttpRequestScope},
     middleware::{HttpContext, NextFn},
     routing::{Route, RouteGroup},
     status,
@@ -15,7 +15,6 @@ use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
     net::{IpAddr, SocketAddr},
-    sync::Arc,
 };
 use twox_hash::XxHash64;
 
@@ -44,10 +43,6 @@ const MAX_FORWARDED_HEADER_LEN: usize = 2 * 1024;
 const DEFAULT_POLICIES_COUNT: usize = 4;
 const DEFAULT_IPS_COUNT: usize = 4;
 const RATE_LIMIT_ERROR_MSG: &str = "Rate limit exceeded. Try again later.";
-
-/// Represents trusted proxies for rate limiting IP extraction
-#[derive(Clone, Debug)]
-pub(crate) struct TrustedProxies(pub(crate) Arc<HashSet<IpAddr>>);
 
 /// A tuple representing a named policy entry: `(policy_name, limiter)`.
 ///
@@ -1205,12 +1200,16 @@ fn stable_hash<T: Hash + ?Sized>(value: &T) -> u64 {
 fn extract_client_ip(req: &HttpRequest, remote_addr: SocketAddr) -> IpAddr {
     let peer = remote_addr.ip();
 
-    let Some(trusted) = req.extensions().get::<TrustedProxies>() else {
+    let Some(trusted) = req
+        .extensions()
+        .get::<HttpRequestScope>()
+        .and_then(|s| s.trusted_proxies.as_ref())
+    else {
         return peer;
     };
 
     // Don't trust headers unless the direct peer is trusted
-    if !trusted.0.contains(&peer) {
+    if !trusted.contains(&peer) {
         return peer;
     }
 
@@ -1225,7 +1224,7 @@ fn extract_client_ip(req: &HttpRequest, remote_addr: SocketAddr) -> IpAddr {
     }
 
     for ip in chain.iter() {
-        if !trusted.0.contains(ip) {
+        if !trusted.contains(ip) {
             return *ip;
         }
     }
@@ -1327,11 +1326,17 @@ mod tests {
     use std::time::Duration;
 
     fn create_request() -> HttpRequest {
-        let (parts, body) = Request::get("/")
-            .extension(ClientIp(SocketAddr::new(IpAddr::V4(127_u32.into()), 8080)))
+        use crate::http::request_scope::HttpRequestScope;
+
+        let (mut parts, body) = Request::get("/")
             .body(HttpBody::empty())
             .unwrap()
             .into_parts();
+
+        parts.extensions.insert(HttpRequestScope {
+            client_ip: ClientIp(SocketAddr::new(IpAddr::V4(127_u32.into()), 8080)),
+            ..HttpRequestScope::default()
+        });
 
         HttpRequest::from_parts(parts, body)
     }
@@ -1347,14 +1352,19 @@ mod tests {
         peer: IpAddr,
         trusted_proxies: impl IntoIterator<Item = IpAddr>,
     ) -> HttpRequest {
+        use crate::http::request_scope::HttpRequestScope;
+
         let (mut parts, body) = Request::get("/")
-            .extension(ClientIp(SocketAddr::new(peer, 8080)))
             .body(HttpBody::empty())
             .unwrap()
             .into_parts();
 
-        let trusted = trusted_proxies.into_iter().collect();
-        parts.extensions.insert(TrustedProxies(Arc::new(trusted)));
+        let trusted: HashSet<IpAddr> = trusted_proxies.into_iter().collect();
+        parts.extensions.insert(HttpRequestScope {
+            client_ip: ClientIp(SocketAddr::new(peer, 8080)),
+            trusted_proxies: Some(Arc::new(trusted)),
+            ..HttpRequestScope::default()
+        });
 
         HttpRequest::from_parts(parts, body)
     }

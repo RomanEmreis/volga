@@ -6,6 +6,7 @@ use crate::{
     http::{
         FromRequestParts, FromRequestRef,
         endpoints::args::{FromPayload, Payload, Source},
+        request_scope::HttpRequestScope,
     },
 };
 use futures_util::future::{Ready, ready};
@@ -56,8 +57,8 @@ impl TryFrom<&Extensions> for ClientIp {
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
         extensions
-            .get::<ClientIp>()
-            .cloned()
+            .get::<HttpRequestScope>()
+            .map(|s| s.client_ip)
             .ok_or_else(|| Error::server_error("Client IP: missing"))
     }
 }
@@ -106,13 +107,24 @@ impl FromPayload for ClientIp {
 mod tests {
     use super::*;
     use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
+    use crate::http::request_scope::HttpRequestScope;
     use crate::{HttpBody, HttpRequest};
     use hyper::{Request, http::Extensions};
+
+    fn make_scope(ip: ClientIp) -> HttpRequestScope {
+        HttpRequestScope {
+            client_ip: ip,
+            ..HttpRequestScope::default()
+        }
+    }
 
     #[tokio::test]
     async fn it_reads_from_payload() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
-        let req = Request::get("/").extension(ip).body(()).unwrap();
+        let req = Request::get("/")
+            .extension(make_scope(ip))
+            .body(())
+            .unwrap();
 
         let (parts, _) = req.into_parts();
         let client_ip = ClientIp::from_payload(Payload::Parts(&parts))
@@ -126,7 +138,7 @@ mod tests {
     fn it_gets_from_extensions() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
         let mut extensions = Extensions::new();
-        extensions.insert(ip);
+        extensions.insert(make_scope(ip));
 
         let client_ip = ClientIp::try_from(&extensions).unwrap();
 
@@ -145,7 +157,10 @@ mod tests {
     #[test]
     fn it_gets_from_request_parts() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
-        let req = Request::get("/").extension(ip).body(()).unwrap();
+        let req = Request::get("/")
+            .extension(make_scope(ip))
+            .body(())
+            .unwrap();
 
         let (parts, _) = req.into_parts();
         let client_ip = ClientIp::from_parts(&parts).unwrap();
@@ -157,7 +172,7 @@ mod tests {
     fn it_gets_from_request_ref() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
         let req = Request::get("/")
-            .extension(ip)
+            .extension(make_scope(ip))
             .body(HttpBody::empty())
             .unwrap();
 

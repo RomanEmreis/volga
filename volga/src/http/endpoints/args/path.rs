@@ -1,6 +1,6 @@
 //! Extractors for route/path segments
 
-use crate::{HttpRequest, error::Error};
+use crate::{HttpRequest, error::Error, http::request_scope::HttpRequestScope};
 use futures_util::future::{Ready, ok, ready};
 use hyper::http::{Extensions, request::Parts};
 use serde::de::DeserializeOwned;
@@ -156,15 +156,21 @@ impl<T: DeserializeOwned> NamedPath<T> {
     }
 }
 
+/// Returns a reference to the `PathArgs` stored in the `HttpRequestScope` extension.
+#[inline]
+fn path_args_from_extensions(extensions: &Extensions) -> Result<&PathArgs, Error> {
+    extensions
+        .get::<HttpRequestScope>()
+        .map(|s| &s.params)
+        .ok_or_else(PathError::args_missing)
+}
+
 impl<T: FromPathArgs + Send> TryFrom<&Extensions> for Path<T> {
     type Error = Error;
 
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Error> {
-        extensions
-            .get::<PathArgs>()
-            .ok_or_else(PathError::args_missing)
-            .and_then(Self::from_slice)
+        path_args_from_extensions(extensions).and_then(Self::from_slice)
     }
 }
 
@@ -173,10 +179,7 @@ impl<T: DeserializeOwned + Send> TryFrom<&Extensions> for NamedPath<T> {
 
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Error> {
-        extensions
-            .get::<PathArgs>()
-            .ok_or_else(PathError::args_missing)
-            .and_then(Self::from_slice)
+        path_args_from_extensions(extensions).and_then(Self::from_slice)
     }
 }
 
@@ -217,22 +220,14 @@ impl<T: DeserializeOwned + Send> FromRequestParts for NamedPath<T> {
 impl<T: FromPathArgs + Send> FromRequestRef for Path<T> {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        let args = req
-            .extensions()
-            .get::<PathArgs>()
-            .ok_or_else(PathError::args_missing)?;
-        Self::from_slice(args)
+        path_args_from_extensions(req.extensions()).and_then(Self::from_slice)
     }
 }
 
 impl<T: DeserializeOwned + Send> FromRequestRef for NamedPath<T> {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        let args = req
-            .extensions()
-            .get::<PathArgs>()
-            .ok_or_else(PathError::args_missing)?;
-        Self::from_slice(args)
+        path_args_from_extensions(req.extensions()).and_then(Self::from_slice)
     }
 }
 
@@ -452,6 +447,7 @@ mod tests {
         FromPathArg, FromPayload, FromRequestParts, FromRequestRef, Payload,
     };
     use crate::http::endpoints::route::{PathArg, PathArgs};
+    use crate::http::request_scope::HttpRequestScope;
     use crate::{HttpBody, HttpRequest, NamedPath, Path};
     use hyper::{Request, http::Extensions};
     use serde::Deserialize;
@@ -948,7 +944,10 @@ mod tests {
         let args = create_path_args();
 
         let mut ext = Extensions::new();
-        ext.insert(args);
+        ext.insert(HttpRequestScope {
+            params: args,
+            ..HttpRequestScope::default()
+        });
 
         let path = NamedPath::<Params>::try_from(&ext).unwrap();
 
@@ -961,7 +960,10 @@ mod tests {
         let args = create_path_args();
 
         let mut ext = Extensions::new();
-        ext.insert(args);
+        ext.insert(HttpRequestScope {
+            params: args,
+            ..HttpRequestScope::default()
+        });
 
         let path = Path::<(u32, String)>::try_from(&ext).unwrap().0;
 
@@ -973,7 +975,13 @@ mod tests {
     async fn it_reads_named_path_from_parts() {
         let args = create_path_args();
 
-        let req = Request::get("/").extension(args).body(()).unwrap();
+        let req = Request::get("/")
+            .extension(HttpRequestScope {
+                params: args,
+                ..HttpRequestScope::default()
+            })
+            .body(())
+            .unwrap();
 
         let (parts, _) = req.into_parts();
         let path = NamedPath::<Params>::from_parts(&parts).unwrap();
@@ -986,7 +994,13 @@ mod tests {
     async fn it_reads_path_from_parts() {
         let args = create_path_args();
 
-        let req = Request::get("/").extension(args).body(()).unwrap();
+        let req = Request::get("/")
+            .extension(HttpRequestScope {
+                params: args,
+                ..HttpRequestScope::default()
+            })
+            .body(())
+            .unwrap();
 
         let (parts, _) = req.into_parts();
         let path = Path::<(u32, String)>::from_parts(&parts).unwrap().0;
@@ -1000,7 +1014,10 @@ mod tests {
         let args = create_path_args();
 
         let req = Request::get("/")
-            .extension(args)
+            .extension(HttpRequestScope {
+                params: args,
+                ..HttpRequestScope::default()
+            })
             .body(HttpBody::empty())
             .unwrap();
 
@@ -1017,7 +1034,10 @@ mod tests {
         let args = create_path_args();
 
         let req = Request::get("/")
-            .extension(args)
+            .extension(HttpRequestScope {
+                params: args,
+                ..HttpRequestScope::default()
+            })
             .body(HttpBody::empty())
             .unwrap();
 

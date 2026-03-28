@@ -15,7 +15,7 @@ use crate::{
     app::AppEnv,
     error::{Error, handler::extract_error_args},
     headers::CACHE_CONTROL,
-    http::endpoints::FindResult,
+    http::{endpoints::FindResult, request_scope::HttpRequestScope},
     status,
 };
 
@@ -33,9 +33,6 @@ use {
 
 #[cfg(feature = "middleware")]
 use crate::middleware::HttpContext;
-
-#[cfg(feature = "rate-limiting")]
-use crate::rate_limiting::TrustedProxies;
 
 const REQUEST_HEADERS_TOO_LARGE_MESSAGE: &str = "Request headers too large.";
 
@@ -187,47 +184,29 @@ async fn handle_impl(
             let error_handler = pipeline.error_handler();
             let (mut parts, body) = request.into_parts();
 
-            {
-                let extensions = &mut parts.extensions;
-                extensions.insert(ClientIp(peer_addr));
-                extensions.insert(cancellation_token);
-                extensions.insert(env.body_limit);
-                extensions.insert(params);
-
+            parts.extensions.insert(HttpRequestScope {
+                client_ip: ClientIp(peer_addr),
+                cancellation_token,
+                body_limit: env.body_limit,
+                params,
                 #[cfg(feature = "ws")]
-                extensions.insert(error_handler.clone());
-
+                error_handler: error_handler.clone(),
                 #[cfg(feature = "jwt-auth")]
-                if let Some(bts) = &env.bearer_token_service {
-                    extensions.insert(bts.clone());
-                }
-
+                bearer_token_service: env.bearer_token_service.clone(),
                 #[cfg(any(
                     feature = "decompression-brotli",
                     feature = "decompression-gzip",
                     feature = "decompression-zstd",
                     feature = "decompression-full"
                 ))]
-                {
-                    extensions.insert(env.decompression_limits);
-                }
-
+                decompression_limits: env.decompression_limits,
                 #[cfg(feature = "rate-limiting")]
-                {
-                    if let Some(rate_limiter) = &env.rate_limiter {
-                        extensions.insert(rate_limiter.clone());
-                    }
-
-                    if let Some(trusted_proxies) = &env.trusted_proxies {
-                        extensions.insert(TrustedProxies(trusted_proxies.clone()));
-                    }
-                }
-
+                rate_limiter: env.rate_limiter.clone(),
+                #[cfg(feature = "rate-limiting")]
+                trusted_proxies: env.trusted_proxies.clone(),
                 #[cfg(feature = "config")]
-                if let Some(config) = &env.config {
-                    extensions.insert(Arc::clone(config));
-                }
-            }
+                config: env.config.clone(),
+            });
 
             // Pre-extract error handler args from parts before consuming them.
             let error_args = extract_error_args(&error_handler, &parts);

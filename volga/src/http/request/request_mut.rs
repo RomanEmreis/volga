@@ -473,6 +473,7 @@ mod tests {
 
     #[test]
     fn it_returns_url_path() {
+        use crate::http::request_scope::HttpRequestScope;
         let args: PathArgs = smallvec::smallvec![
             PathArg {
                 name: "id".into(),
@@ -486,7 +487,10 @@ mod tests {
         .into();
 
         let req = Request::get("/")
-            .extension(args)
+            .extension(HttpRequestScope {
+                params: args,
+                ..HttpRequestScope::default()
+            })
             .body(HttpBody::empty())
             .unwrap();
 

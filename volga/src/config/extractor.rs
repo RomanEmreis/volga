@@ -2,9 +2,11 @@
 
 use crate::{
     HttpRequest,
-    config::store::ConfigStore,
     error::Error,
-    http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+    http::{
+        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+        request_scope::HttpRequestScope,
+    },
 };
 use futures_util::future::{Ready, ready};
 use hyper::http::request::Parts;
@@ -46,7 +48,8 @@ impl<T: Send + Sync> Deref for Config<T> {
 impl<T: Send + Sync + 'static> Config<T> {
     fn from_extensions(ext: &hyper::http::Extensions) -> Result<Self, Error> {
         let store = ext
-            .get::<Arc<ConfigStore>>()
+            .get::<HttpRequestScope>()
+            .and_then(|s| s.config.as_ref())
             .ok_or_else(|| Error::server_error("Config store not found in extensions"))?;
         let arc = store
             .get::<T>()
@@ -86,6 +89,7 @@ impl<T: Send + Sync + 'static> FromPayload for Config<T> {
 mod tests {
     use super::*;
     use crate::config::store::{ConfigStore, SectionKind};
+    use crate::http::request_scope::HttpRequestScope;
     use hyper::http::Extensions;
     use serde::Deserialize;
 
@@ -101,7 +105,10 @@ mod tests {
             .register::<Db>("db", SectionKind::Required, &json)
             .unwrap();
         let mut ext = Extensions::new();
-        ext.insert(Arc::new(store));
+        ext.insert(HttpRequestScope {
+            config: Some(Arc::new(store)),
+            ..HttpRequestScope::default()
+        });
         ext
     }
 
