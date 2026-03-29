@@ -218,10 +218,7 @@ pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
 /// Returns [`ErrorArgsSlot::Custom`] for user-configured handlers, pre-extracting
 /// their `Args` from parts while they are still available.
 #[inline]
-pub(crate) fn extract_error_args(
-    handler: &PipelineErrorHandler,
-    parts: &Parts,
-) -> ErrorArgsSlot {
+pub(crate) fn extract_error_args(handler: &PipelineErrorHandler, parts: &Parts) -> ErrorArgsSlot {
     if handler.needs_parts_extraction() {
         ErrorArgsSlot::Custom(handler.extract(parts))
     } else {
