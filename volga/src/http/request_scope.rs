@@ -18,7 +18,7 @@ use crate::{
 use std::sync::Arc;
 
 #[cfg(feature = "ws")]
-use crate::error::handler::WeakErrorHandler;
+use crate::error::handler::PipelineErrorHandler;
 
 #[cfg(feature = "jwt-auth")]
 use crate::auth::bearer::BearerTokenService;
@@ -45,7 +45,7 @@ use crate::config::store::ConfigStore;
 ///
 /// Replaces N separate `Box<dyn Any>` allocations and hashmap inserts with one,
 /// inserted as a single extension entry per matched request.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct HttpRequestScope {
     /// The client's IP address.
     pub(crate) client_ip: ClientIp,
@@ -60,9 +60,9 @@ pub(crate) struct HttpRequestScope {
     /// `std::mem::take` on the mutable extensions reference.
     pub(crate) params: PathArgs,
 
-    /// Weak reference to the error handler, used by WebSocket connections.
+    /// Reference to the error handler, used by WebSocket connections.
     #[cfg(feature = "ws")]
-    pub(crate) error_handler: WeakErrorHandler,
+    pub(crate) error_handler: PipelineErrorHandler,
 
     /// JWT bearer token service, `None` when auth is not configured.
     #[cfg(feature = "jwt-auth")]
@@ -90,6 +90,13 @@ pub(crate) struct HttpRequestScope {
     pub(crate) config: Option<Arc<ConfigStore>>,
 }
 
+impl std::fmt::Debug for HttpRequestScope {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HttpRequestScope(..)")
+    }
+}
+
 #[cfg(test)]
 impl Default for HttpRequestScope {
     fn default() -> Self {
@@ -101,10 +108,8 @@ impl Default for HttpRequestScope {
             params: PathArgs::default(),
             #[cfg(feature = "ws")]
             error_handler: {
-                use crate::error::{ErrorFunc, handler::PipelineErrorHandler};
-                let h =
-                    PipelineErrorHandler::from(ErrorFunc::new(|_: crate::error::Error| async {}));
-                Arc::downgrade(&h)
+                use crate::error::handler::DefaultErrorHandler;
+                Arc::new(DefaultErrorHandler)
             },
             #[cfg(feature = "jwt-auth")]
             bearer_token_service: None,

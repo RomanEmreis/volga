@@ -7,9 +7,10 @@ use crate::{
     status,
 };
 use futures_util::future::BoxFuture;
+use hyper::Uri;
 use hyper::http::request::Parts;
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 /// Trait for types that represent a global error handler.
 ///
@@ -24,6 +25,17 @@ pub trait ErrorHandler: Send + Sync {
     /// Called on every matched request. The returned [`ErasedErrorArgs`] is
     /// dropped if no error occurs, or invoked with the error if one does.
     fn extract(&self, parts: &Parts) -> Box<dyn ErasedErrorArgs + Send>;
+
+    /// Returns whether this handler requires argument extraction from [`Parts`].
+    ///
+    /// When `false`, [`extract_error_args`] skips the `Box<dyn ErasedErrorArgs>`
+    /// allocation entirely and stores only the request URI. Overridden to `false`
+    /// by [`DefaultErrorHandler`] to eliminate a per-request heap allocation on
+    /// the happy path.
+    #[inline]
+    fn needs_parts_extraction(&self) -> bool {
+        true
+    }
 }
 
 /// Type-erased, pre-extracted error handler arguments.
@@ -34,6 +46,58 @@ pub trait ErrorHandler: Send + Sync {
 pub trait ErasedErrorArgs: Send {
     /// Invokes the error handler with the given error.
     fn call(self: Box<Self>, err: Error) -> BoxFuture<'static, HttpResult>;
+}
+
+/// Pre-extracted error handler slot.
+///
+/// Avoids a `Box<dyn ErasedErrorArgs>` allocation on the happy path when the
+/// default (no custom `map_err`) handler is in use. Only the request [`Uri`]
+/// is stored in that case; the full pre-extraction path is taken only when a
+/// user-configured handler is present.
+pub(crate) enum ErrorArgsSlot {
+    /// Default handler: only the request URI is stored — no box allocation.
+    Uri(Uri),
+    /// Custom handler: args were pre-extracted from parts before consumption.
+    Custom(Box<dyn ErasedErrorArgs + Send>),
+}
+
+impl ErrorArgsSlot {
+    /// Invokes the appropriate error handler.
+    #[inline]
+    pub(crate) async fn call(self, err: Error) -> HttpResult {
+        match self {
+            Self::Uri(uri) => {
+                let mut err = err;
+                if err.instance.is_none() {
+                    err.instance = Some(uri.to_string());
+                }
+                default_error_handler(err).await
+            }
+            Self::Custom(args) => args.call(err).await,
+        }
+    }
+}
+
+/// The built-in error handler used when no custom [`crate::App::map_err`] handler is configured.
+///
+/// Sets [`needs_parts_extraction`](ErrorHandler::needs_parts_extraction) to `false`,
+/// which allows [`extract_error_args`] to skip the per-request
+/// `Box<dyn ErasedErrorArgs>` allocation on the happy path.
+#[derive(Debug)]
+pub(crate) struct DefaultErrorHandler;
+
+impl ErrorHandler for DefaultErrorHandler {
+    #[inline]
+    fn extract(&self, parts: &Parts) -> Box<dyn ErasedErrorArgs + Send> {
+        Box::new(DefaultErrorArgs {
+            uri: parts.uri.clone(),
+        })
+    }
+
+    #[inline]
+    fn needs_parts_extraction(&self) -> bool {
+        false
+    }
 }
 
 /// Owns a closure that handles an error
@@ -68,7 +132,7 @@ where
 struct BoundErrorArgs<F, Args> {
     func: F,
     args: Args,
-    uri: String,
+    uri: Uri,
 }
 
 impl<F, Args> ErasedErrorArgs for BoundErrorArgs<F, Args>
@@ -80,7 +144,7 @@ where
     fn call(self: Box<Self>, mut err: Error) -> BoxFuture<'static, HttpResult> {
         Box::pin(async move {
             if err.instance.is_none() {
-                err.instance = Some(self.uri);
+                err.instance = Some(self.uri.to_string());
             }
             match self.func.call(err, self.args).await.into_response() {
                 Ok(resp) => Ok(resp),
@@ -92,14 +156,14 @@ where
 
 /// Fallback used when `Args` extraction fails; delegates to the default handler.
 struct DefaultErrorArgs {
-    uri: String,
+    uri: Uri,
 }
 
 impl ErasedErrorArgs for DefaultErrorArgs {
     fn call(self: Box<Self>, mut err: Error) -> BoxFuture<'static, HttpResult> {
         Box::pin(async move {
             if err.instance.is_none() {
-                err.instance = Some(self.uri);
+                err.instance = Some(self.uri.to_string());
             }
             default_error_handler(err).await
         })
@@ -114,7 +178,7 @@ where
 {
     #[inline]
     fn extract(&self, parts: &Parts) -> Box<dyn ErasedErrorArgs + Send> {
-        let uri = parts.uri.to_string();
+        let uri = parts.uri.clone();
         match Args::from_parts(parts) {
             Ok(args) => Box::new(BoundErrorArgs {
                 func: self.func.clone(),
@@ -138,11 +202,8 @@ where
     }
 }
 
-/// Holds a reference to global error handler
+/// Holds a strong reference to the global error handler.
 pub(crate) type PipelineErrorHandler = Arc<dyn ErrorHandler + Send + Sync>;
-
-/// Weak version of [`crate::error::PipelineErrorHandler`]
-pub(crate) type WeakErrorHandler = Weak<dyn ErrorHandler + Send + Sync>;
 
 /// Default error handler that creates a [`HttpResult`] from error
 #[inline]
@@ -152,21 +213,27 @@ pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
 
 /// Extracts error handler arguments from request parts before they are consumed.
 ///
-/// Returns `None` if the handler `Weak` reference can no longer be upgraded
-/// (i.e. the server is shutting down).
+/// Returns [`ErrorArgsSlot::Uri`] when the pipeline uses [`DefaultErrorHandler`]
+/// (no custom `map_err` configured), avoiding a `Box` allocation on the happy path.
+/// Returns [`ErrorArgsSlot::Custom`] for user-configured handlers, pre-extracting
+/// their `Args` from parts while they are still available.
 #[inline]
 pub(crate) fn extract_error_args(
-    handler: &WeakErrorHandler,
+    handler: &PipelineErrorHandler,
     parts: &Parts,
-) -> Option<Box<dyn ErasedErrorArgs + Send>> {
-    handler.upgrade().map(|h| h.extract(parts))
+) -> ErrorArgsSlot {
+    if handler.needs_parts_extraction() {
+        ErrorArgsSlot::Custom(handler.extract(parts))
+    } else {
+        ErrorArgsSlot::Uri(parts.uri.clone())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        Error, ErrorFunc, PipelineErrorHandler, WeakErrorHandler, default_error_handler,
-        extract_error_args,
+        DefaultErrorHandler, Error, ErrorArgsSlot, ErrorFunc, PipelineErrorHandler,
+        default_error_handler, extract_error_args,
     };
     use crate::{error::ErrorHandler, status};
     use http_body_util::BodyExt;
@@ -221,18 +288,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_call_weak_error_handler() {
+    async fn it_calls_error_handler_via_extract_error_args() {
         let fallback = |_: Error| async { status!(403) };
-        let handler = ErrorFunc::new(fallback);
-        let handler = PipelineErrorHandler::from(handler);
-        let weak_handler: WeakErrorHandler = Arc::downgrade(&handler);
+        let handler = PipelineErrorHandler::from(ErrorFunc::new(fallback));
 
         let error = Error::server_error("Some error");
 
         let req = Request::get("/foo/bar?baz").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        let extracted = extract_error_args(&weak_handler, &parts).expect("handler alive");
-        let response = extracted.call(error).await;
+        let slot = extract_error_args(&handler, &parts);
+        assert!(matches!(slot, ErrorArgsSlot::Custom(_)));
+
+        let response = slot.call(error).await;
         assert!(response.is_ok());
 
         let mut response = response.unwrap();
@@ -240,5 +307,31 @@ mod tests {
 
         assert_eq!(response.status(), 403);
         assert_eq!(body.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn it_returns_uri_slot_for_default_handler() {
+        let handler: PipelineErrorHandler = Arc::new(DefaultErrorHandler);
+
+        let req = Request::get("/foo/bar").body(()).unwrap();
+        let (parts, _) = req.into_parts();
+        let slot = extract_error_args(&handler, &parts);
+
+        assert!(matches!(slot, ErrorArgsSlot::Uri(_)));
+    }
+
+    #[tokio::test]
+    async fn it_calls_default_handler_via_uri_slot() {
+        let handler: PipelineErrorHandler = Arc::new(DefaultErrorHandler);
+
+        let error = Error::server_error("Some error");
+
+        let req = Request::get("/foo/bar").body(()).unwrap();
+        let (parts, _) = req.into_parts();
+        let slot = extract_error_args(&handler, &parts);
+        let response = slot.call(error).await;
+
+        assert!(response.is_ok());
+        assert_eq!(response.unwrap().status(), 500);
     }
 }

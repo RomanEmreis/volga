@@ -190,7 +190,7 @@ async fn handle_impl(
                 body_limit: env.body_limit,
                 params,
                 #[cfg(feature = "ws")]
-                error_handler: error_handler.clone(),
+                error_handler: Arc::clone(error_handler),
                 #[cfg(feature = "jwt-auth")]
                 bearer_token_service: env.bearer_token_service.clone(),
                 #[cfg(any(
@@ -209,7 +209,7 @@ async fn handle_impl(
             });
 
             // Pre-extract error handler args from parts before consuming them.
-            let error_args = extract_error_args(&error_handler, &parts);
+            let error_args = extract_error_args(error_handler, &parts);
 
             let request =
                 HttpRequest::new(Request::from_parts(parts, body)).into_limited(env.body_limit);
@@ -228,12 +228,7 @@ async fn handle_impl(
 
             match response {
                 Ok(response) => Ok(response),
-                Err(err) => match error_args {
-                    Some(args) => args.call(err).await,
-                    None => Err(Error::server_error(
-                        "Server Error: error handler could not be upgraded",
-                    )),
-                },
+                Err(err) => error_args.call(err).await,
             }
         }
     }

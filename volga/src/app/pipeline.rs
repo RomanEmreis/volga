@@ -4,9 +4,9 @@ use std::sync::Arc;
 use crate::{
     HttpResult,
     error::{
-        ErrorFunc, FallbackFunc,
+        FallbackFunc,
         fallback::{PipelineFallbackHandler, default_fallback_handler},
-        handler::{PipelineErrorHandler, WeakErrorHandler, default_error_handler},
+        handler::{DefaultErrorHandler, PipelineErrorHandler},
     },
     http::endpoints::Endpoints,
 };
@@ -43,7 +43,7 @@ impl PipelineBuilder {
         Self {
             middlewares: Middlewares::new(),
             endpoints: Endpoints::new(),
-            error_handler: ErrorFunc::new(default_error_handler).into(),
+            error_handler: Arc::new(DefaultErrorHandler),
             fallback_handler: FallbackFunc::new(default_fallback_handler).into(),
         }
     }
@@ -52,7 +52,7 @@ impl PipelineBuilder {
     pub(super) fn new() -> Self {
         Self {
             endpoints: Endpoints::new(),
-            error_handler: ErrorFunc::new(default_error_handler).into(),
+            error_handler: Arc::new(DefaultErrorHandler),
             fallback_handler: FallbackFunc::new(default_fallback_handler).into(),
         }
     }
@@ -112,8 +112,8 @@ impl Pipeline {
     }
 
     #[inline]
-    pub(super) fn error_handler(&self) -> WeakErrorHandler {
-        Arc::downgrade(&self.error_handler)
+    pub(super) fn error_handler(&self) -> &PipelineErrorHandler {
+        &self.error_handler
     }
 
     #[inline]

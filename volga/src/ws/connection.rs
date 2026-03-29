@@ -16,7 +16,7 @@ use crate::{
     HttpResult,
     error::{
         Error,
-        handler::{ErasedErrorArgs, extract_error_args},
+        handler::{ErrorArgsSlot, extract_error_args},
     },
     headers::{
         CONNECTION, HeaderValue, SEC_WEBSOCKET_ACCEPT, SEC_WEBSOCKET_KEY, SEC_WEBSOCKET_PROTOCOL,
@@ -38,7 +38,7 @@ use tokio_tungstenite::{
 pub struct WebSocketConnection {
     config: WebSocketConfig,
     /// Pre-extracted error handler args, produced before request parts are consumed.
-    error_args: Option<Box<dyn ErasedErrorArgs + Send>>,
+    error_args: ErrorArgsSlot,
     on_upgrade: OnUpgrade,
     protocol: Option<HeaderValue>,
     sec_websocket_key: Option<HeaderValue>,
@@ -154,9 +154,7 @@ impl WebSocketConnection {
             let upgraded = match on_upgrade.await {
                 Ok(upgraded) => TokioIo::new(upgraded),
                 Err(err) => {
-                    if let Some(args) = error_args {
-                        _ = args.call(Error::server_error(err)).await;
-                    }
+                    _ = error_args.call(Error::server_error(err)).await;
                     return;
                 }
             };
@@ -339,7 +337,6 @@ mod tests {
     };
     use hyper::http::HeaderValue;
     use hyper::{Request, Version};
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn it_creates_ws_connection_from_payload() {
@@ -357,7 +354,7 @@ mod tests {
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
         req.extensions_mut().insert(HttpRequestScope {
-            error_handler: Arc::downgrade(&error_handler),
+            error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
         });
 
@@ -387,7 +384,7 @@ mod tests {
 
         let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
         req.extensions_mut().insert(HttpRequestScope {
-            error_handler: Arc::downgrade(&error_handler),
+            error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
         });
 
@@ -434,7 +431,7 @@ mod tests {
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
         req.extensions_mut().insert(HttpRequestScope {
-            error_handler: Arc::downgrade(&error_handler),
+            error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
         });
 
@@ -460,7 +457,7 @@ mod tests {
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
         req.extensions_mut().insert(HttpRequestScope {
-            error_handler: Arc::downgrade(&error_handler),
+            error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
         });
 
@@ -486,7 +483,7 @@ mod tests {
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
         req.extensions_mut().insert(HttpRequestScope {
-            error_handler: Arc::downgrade(&error_handler),
+            error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
         });
 
@@ -512,7 +509,7 @@ mod tests {
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
         req.extensions_mut().insert(HttpRequestScope {
-            error_handler: Arc::downgrade(&error_handler),
+            error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
         });
 
@@ -538,7 +535,7 @@ mod tests {
         req.extensions_mut()
             .insert(hyper::ext::Protocol::from_static("websocket"));
         req.extensions_mut().insert(HttpRequestScope {
-            error_handler: Arc::downgrade(&error_handler),
+            error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
         });
 
