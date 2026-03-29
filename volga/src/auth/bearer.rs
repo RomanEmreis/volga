@@ -7,6 +7,7 @@ use crate::{
     http::{
         Extensions,
         endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+        request_scope::HttpRequestScope,
     },
 };
 use futures_util::future::{Ready, ready};
@@ -367,10 +368,12 @@ impl TryFrom<&Extensions> for BearerTokenService {
 
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
-        let bts = extensions.get::<BearerTokenService>().ok_or_else(|| {
-            Error::server_error("Bearer Token authorization is not properly configured")
-        })?;
-        Ok(bts.clone())
+        extensions
+            .get::<HttpRequestScope>()
+            .and_then(|s| s.bearer_token_service.clone())
+            .ok_or_else(|| {
+                Error::server_error("Bearer Token authorization is not properly configured")
+            })
     }
 }
 
@@ -689,9 +692,13 @@ mod tests {
 
     #[tokio::test]
     async fn it_tests_bearer_token_service_from_extensions_success() {
-        let mut extensions = Extensions::new();
+        use crate::http::request_scope::HttpRequestScope;
         let service = BearerTokenService::from(BearerAuthConfig::default());
-        extensions.insert(service.clone());
+        let mut extensions = Extensions::new();
+        extensions.insert(HttpRequestScope {
+            bearer_token_service: Some(service.clone()),
+            ..HttpRequestScope::default()
+        });
 
         let result = BearerTokenService::try_from(&extensions);
         assert!(result.is_ok());

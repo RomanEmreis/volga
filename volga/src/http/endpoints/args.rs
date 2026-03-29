@@ -6,7 +6,10 @@ use std::future::Future;
 use crate::{
     HttpBody, HttpRequest,
     error::Error,
-    http::endpoints::route::{PathArg, PathArgs},
+    http::{
+        endpoints::route::{PathArg, PathArgs},
+        request_scope::HttpRequestScope,
+    },
 };
 
 #[cfg(feature = "di")]
@@ -206,8 +209,10 @@ macro_rules! define_generic_from_request {
 
                 let (mut parts, body) = req.into_parts();
 
-                let params = parts.extensions
-                    .remove::<PathArgs>()
+                let params = parts
+                    .extensions
+                    .get_mut::<HttpRequestScope>()
+                    .map(|s| std::mem::take(&mut s.params))
                     .unwrap_or_default();
 
                 let (path_args, cached_query) = params.into_parts();

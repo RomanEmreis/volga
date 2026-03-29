@@ -45,4 +45,5 @@ pub mod cookie;
 pub mod cors;
 pub mod endpoints;
 pub mod request;
+pub(crate) mod request_scope;
 pub mod response;

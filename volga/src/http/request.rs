@@ -10,9 +10,8 @@ use query_args::{QueryArgsCache, QueryArgsIter};
 use std::sync::OnceLock;
 
 use crate::http::{
-    Extensions, Method, Parts, Request, Uri, Version,
-    endpoints::{args::FromRequestRef, route::PathArgs},
-    request::request_body_limit::RequestBodyLimit,
+    Extensions, Method, Parts, Request, Uri, Version, endpoints::args::FromRequestRef,
+    request::request_body_limit::RequestBodyLimit, request_scope::HttpRequestScope,
 };
 
 use crate::headers::HeaderMap;
@@ -127,13 +126,15 @@ impl HttpRequest {
 
     /// Returns this [`HttpRequest`] body limit.
     pub fn body_limit(&self) -> Option<usize> {
-        self.inner
+        match self
+            .inner
             .extensions()
-            .get::<RequestBodyLimit>()
-            .and_then(|l| match l {
-                RequestBodyLimit::Enabled(size) => Some(*size),
-                RequestBodyLimit::Disabled => None,
-            })
+            .get::<HttpRequestScope>()?
+            .body_limit
+        {
+            RequestBodyLimit::Enabled(size) => Some(size),
+            RequestBodyLimit::Disabled => None,
+        }
     }
 
     #[inline]
@@ -214,13 +215,13 @@ impl HttpRequest {
     pub fn path_args(&self) -> impl Iterator<Item = (&str, &str)> {
         self.inner
             .extensions()
-            .get::<PathArgs>()
-            .map(|args| {
+            .get::<HttpRequestScope>()
+            .map(|s| &s.params)
+            .into_iter()
+            .flat_map(|args| {
                 args.iter()
                     .map(|arg| (arg.name.as_ref(), arg.value.as_ref()))
             })
-            .into_iter()
-            .flatten()
     }
 
     /// Returns iterator of URL query params
@@ -360,6 +361,8 @@ mod tests {
 
     #[test]
     fn it_returns_url_path() {
+        use crate::http::endpoints::route::{PathArg, PathArgs};
+        use crate::http::request_scope::HttpRequestScope;
         let args: PathArgs = smallvec::smallvec![
             PathArg {
                 name: "id".into(),
@@ -373,12 +376,20 @@ mod tests {
         .into();
 
         let req = Request::get("/")
-            .extension(args)
+            .extension(HttpRequestScope {
+                params: args,
+                ..HttpRequestScope::default()
+            })
             .body(HttpBody::empty())
             .unwrap();
 
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
+
+        let mut args = req.path_args();
+        let mut args_2 = req.path_args();
+
+        assert_eq!(Vec::from_iter(args), Vec::from_iter(args_2));
 
         let mut args = req.path_args();
 
@@ -460,8 +471,13 @@ mod tests {
 
     #[test]
     fn it_gets_body_limit() {
+        use crate::http::request_scope::HttpRequestScope;
+        let scope = HttpRequestScope {
+            body_limit: RequestBodyLimit::Enabled(100),
+            ..HttpRequestScope::default()
+        };
         let (parts, body) = Request::get("/test")
-            .extension(RequestBodyLimit::Enabled(100))
+            .extension(scope)
             .body(HttpBody::full("Hello, World!"))
             .unwrap()
             .into_parts();

@@ -203,12 +203,13 @@ fn create_ui_cache_control() -> Header<CacheControl> {
 }
 
 fn create_etag(bytes: &[u8]) -> ETag {
+    use crate::utils::lower_hex;
     use sha1::{Digest, Sha1};
 
     let mut hasher = Sha1::new();
     hasher.update(bytes);
 
-    let tag = format!("{:x}", hasher.finalize());
+    let tag = lower_hex(&hasher.finalize());
     ETag::weak(tag)
 }
 
