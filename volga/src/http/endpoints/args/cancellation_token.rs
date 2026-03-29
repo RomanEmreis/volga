@@ -79,7 +79,7 @@ impl From<&Extensions> for TokenGuard {
         let token = extensions
             .get::<HttpRequestScope>()
             .map(|s| s.cancellation_token.clone())
-            .unwrap_or_else(TokioCancellationToken::new);
+            .unwrap_or_default();
         Self::new(token)
     }
 }
