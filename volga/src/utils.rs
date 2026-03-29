@@ -17,6 +17,7 @@ pub(crate) fn lower_hex(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
+#[cfg(any(feature = "openapi", feature = "static-files"))]
 mod tests {
     use super::lower_hex;
 

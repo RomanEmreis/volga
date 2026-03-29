@@ -16,7 +16,6 @@ keywords = ["volga", "openapi", "documentation", "rest-api"]
 [dependencies]
 http = "1.4.0"
 mime = "0.3.17"
-sha1 = "0.10.6"
 serde_json = "1.0.149"
 serde_urlencoded = "0.7.1"
 serde = { version = "1.0.228", features = ["derive"] }
