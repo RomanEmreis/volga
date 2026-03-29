@@ -11,12 +11,12 @@ use crate::{
 };
 use futures_util::future::BoxFuture;
 use make_fn::*;
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(feature = "di")]
 use crate::di::FromContainer;
 
-pub use handler::{MapOkHandler, MiddlewareHandler, Next, TapReqHandler};
+pub use handler::{MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler};
 pub use http_context::HttpContext;
 pub(crate) use make_fn::from_handler;
 
@@ -111,13 +111,13 @@ impl App {
     ///
     /// # Examples
     /// ```no_run
-    /// use volga::App;
+    /// use volga::{App, middleware::{HttpContext, NextFn}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     ///
-    /// app.wrap(|ctx, next| async move {
+    /// app.wrap(|ctx: HttpContext, next: NextFn| async move {
     ///     next(ctx).await
     /// });
     ///# app.run().await
@@ -132,13 +132,13 @@ impl App {
     /// request's extensions to avoid holding connections open indefinitely:
     ///
     /// ```no_run
-    /// use volga::{App, CancellationToken, error::Error};
+    /// use volga::{App, CancellationToken, middleware::{HttpContext, NextFn}, error::Error};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     ///
-    /// app.wrap(|ctx, next| async move {
+    /// app.wrap(|ctx: HttpContext, next: NextFn| async move {
     ///     let token = ctx.extract::<CancellationToken>()?;
     ///     tokio::select! {
     ///         res = next(ctx) => res,
@@ -148,10 +148,9 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn wrap<F, Fut>(&mut self, middleware: F) -> &mut Self
+    pub fn wrap<F>(&mut self, middleware: F) -> &mut Self
     where
-        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = HttpResult> + Send + 'static,
+        F: WrapHandler,
     {
         self.pipeline.middlewares_mut().add(make_fn(middleware));
         self
@@ -331,7 +330,7 @@ impl App {
     /// Registers default middleware
     pub(super) fn use_endpoints(&mut self) {
         if self.pipeline.has_middleware_pipeline() {
-            self.wrap(|ctx, _| async move { ctx.execute().await });
+            self.wrap(|ctx: HttpContext, _: NextFn| async move { ctx.execute().await });
         }
     }
 }
@@ -341,7 +340,7 @@ impl<'a> Route<'a> {
     ///
     /// # Examples
     /// ```no_run
-    /// use volga::App;
+    /// use volga::{App, middleware::{HttpContext, NextFn}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -349,17 +348,16 @@ impl<'a> Route<'a> {
     ///
     /// app
     ///     .map_get("/hello", || async { "Hello, World!" })
-    ///     .wrap(|ctx, next| async move {
+    ///     .wrap(|ctx: HttpContext, next: NextFn| async move {
     ///         next(ctx).await
     ///     });
     ///
     ///# app.run().await
     ///# }
     /// ```
-    pub fn wrap<F, Fut>(self, middleware: F) -> Self
+    pub fn wrap<F>(self, middleware: F) -> Self
     where
-        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = HttpResult> + Send + 'static,
+        F: WrapHandler,
     {
         self.map_middleware(make_fn(middleware))
     }
@@ -608,23 +606,22 @@ impl<'a> RouteGroup<'a> {
     ///
     /// # Examples
     /// ```no_run
-    /// use volga::App;
+    /// use volga::{App, middleware::{HttpContext, NextFn}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     ///
     /// app.group("/hello", |api| {
-    ///     api.wrap(|ctx, next| async move { next(ctx).await });
+    ///     api.wrap(|ctx: HttpContext, next: NextFn| async move { next(ctx).await });
     ///     api.map_get("/world", || async { "Hello, World!" });
     /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn wrap<F, Fut>(&mut self, middleware: F) -> &mut Self
+    pub fn wrap<F>(&mut self, middleware: F) -> &mut Self
     where
-        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = HttpResult> + Send + 'static,
+        F: WrapHandler,
     {
         self.middleware.push(make_fn(middleware));
         self

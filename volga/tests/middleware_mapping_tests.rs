@@ -5,6 +5,7 @@
 use hyper::StatusCode;
 use volga::error::Error;
 use volga::headers::{Header, HttpHeaders, headers};
+use volga::middleware::{HttpContext, NextFn};
 use volga::test::TestServer;
 use volga::{HttpRequestMut, HttpResponse, ok};
 
@@ -15,7 +16,7 @@ headers! {
 #[tokio::test]
 async fn it_adds_middleware_request() {
     let server = TestServer::spawn(|app| {
-        app.wrap(|context, next| async move { next(context).await });
+        app.wrap(|ctx: HttpContext, next: NextFn| async move { next(ctx).await });
         app.wrap(|_, _| async move { ok!("Pass!") });
         app.map_get("/test", || async { ok!("Unreachable!") });
     })
@@ -345,7 +346,7 @@ async fn it_adds_valid_filter_middleware_for_group() {
 #[tokio::test]
 async fn it_adds_with_middleware() {
     let server = TestServer::spawn(|app| {
-        app.wrap(|ctx, next| async move { next(ctx).await })
+        app.wrap(|ctx: HttpContext, next: NextFn| async move { next(ctx).await })
             .with(|next| next)
             .map_get("/test", || async { "Pass!" });
     })
@@ -367,7 +368,7 @@ async fn it_adds_with_middleware() {
 #[tokio::test]
 async fn it_adds_shortcut_with_middleware() {
     let server = TestServer::spawn(|app| {
-        app.wrap(async |ctx, next| next(ctx).await)
+        app.wrap(async |ctx: HttpContext, next: NextFn| next(ctx).await)
             .with(async |_| volga::bad_request!("Error!"))
             .with(|next| next)
             .map_get("/test", async || "Pass!");
@@ -391,7 +392,7 @@ async fn it_adds_shortcut_with_middleware() {
 async fn it_adds_with_middleware_for_route() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", async || "Pass!")
-            .wrap(async |ctx, next| next(ctx).await)
+            .wrap(async |ctx: HttpContext, next: NextFn| next(ctx).await)
             .with(|next| next);
     })
     .await;
@@ -413,7 +414,7 @@ async fn it_adds_with_middleware_for_route() {
 async fn it_adds_shortcut_with_middleware_for_route() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", async || "Pass!")
-            .wrap(|ctx, next| async move { next(ctx).await })
+            .wrap(|ctx: HttpContext, next: NextFn| async move { next(ctx).await })
             .with(|_| async move { volga::bad_request!("Error!") })
             .with(|next| next);
     })
@@ -436,7 +437,7 @@ async fn it_adds_shortcut_with_middleware_for_route() {
 async fn it_adds_with_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
-            api.wrap(async |ctx, next| next(ctx).await)
+            api.wrap(async |ctx: HttpContext, next: NextFn| next(ctx).await)
                 .with(|next| next);
 
             api.map_get("/test", || async { "Pass!" });
@@ -461,7 +462,7 @@ async fn it_adds_with_middleware_for_group() {
 async fn it_adds_shortcut_with_middleware_for_group() {
     let server = TestServer::spawn(|app| {
         app.group("/tests", |api| {
-            api.wrap(|ctx, next| async move { next(ctx).await })
+            api.wrap(|ctx: HttpContext, next: NextFn| async move { next(ctx).await })
                 .with(|_| async move { volga::bad_request!("Error!") })
                 .with(|next| next);
 

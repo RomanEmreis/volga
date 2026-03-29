@@ -2,16 +2,13 @@
 
 use super::{
     HttpContext, MiddlewareFn, NextFn,
-    handler::{MapOkHandler, MiddlewareHandler, Next, TapReqHandler},
+    handler::{MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler},
 };
-use crate::{
-    HttpResult,
-    http::{
-        FilterResult, FromRequestRef, GenericHandler, IntoResponse, MapErrHandler,
-        endpoints::handlers::RouteHandler, request::IntoTapResult,
-    },
+use crate::http::{
+    FilterResult, FromRequestRef, GenericHandler, IntoResponse, MapErrHandler,
+    endpoints::handlers::RouteHandler, request::IntoTapResult,
 };
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(feature = "di")]
 use crate::di::FromContainer;
@@ -27,12 +24,11 @@ pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
 
 /// Wraps a closure into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_fn<F, Fut>(middleware: F) -> MiddlewareFn
+pub(super) fn make_fn<F>(middleware: F) -> MiddlewareFn
 where
-    F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = HttpResult> + Send + 'static,
+    F: WrapHandler,
 {
-    Arc::new(move |ctx: HttpContext, next: NextFn| Box::pin(middleware(ctx, next)))
+    Arc::new(move |ctx: HttpContext, next: NextFn| Box::pin(middleware.call(ctx, next)))
 }
 
 /// Wraps a closure for the route filter into [`MiddlewareFn`]

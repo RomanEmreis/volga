@@ -76,11 +76,9 @@ pub trait GenericHandler<Args>: Clone + Send + Sync + 'static {
 pub trait MapErrHandler<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// Error handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls an error handler
-    fn call(&self, err: Error, args: Args) -> Self::Future;
+    fn call(&self, err: Error, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
 macro_rules! define_generic_handler ({ $($param:ident)* } => {
@@ -104,11 +102,10 @@ macro_rules! define_generic_handler ({ $($param:ident)* } => {
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, err: Error, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn call(&self, err: Error, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
             (self)(err, $($param,)*)
         }
     }

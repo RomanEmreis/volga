@@ -7,6 +7,7 @@
 use volga::{
     App,
     headers::{Header, headers, http_header},
+    middleware::{HttpContext, NextFn},
     ok,
 };
 
@@ -28,7 +29,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     // Setting up the "x-correlation-id" header if it's not provided
-    app.wrap(|mut ctx, next| async move {
+    app.wrap(|mut ctx: HttpContext, next: NextFn| async move {
         let req = ctx.request_mut();
 
         req.insert_header(CorrelationId::from_static("123-321-456"));

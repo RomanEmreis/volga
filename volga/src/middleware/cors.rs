@@ -6,6 +6,7 @@ use crate::{
     App, HttpResponse,
     headers::{ACCESS_CONTROL_REQUEST_METHOD, ORIGIN},
     http::{HttpBody, Method, StatusCode},
+    middleware::{HttpContext, NextFn},
 };
 use hyper::Response;
 
@@ -38,7 +39,7 @@ impl App {
 
         let default_cors = self.cors.get_default().cloned();
 
-        self.wrap(move |ctx, next| {
+        self.wrap(move |ctx: HttpContext, next: NextFn| {
             let default_cors = default_cors.clone();
             async move {
                 // Resolve effective policy (Route > Group > Default)

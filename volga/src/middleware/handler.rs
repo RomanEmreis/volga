@@ -86,37 +86,56 @@ impl Next {
     }
 }
 
+/// Describes a generic middleware handler that could take [`HttpContext`] parameters and [`NextFn`] middleware
+pub trait WrapHandler: Clone + Send + Sync + 'static {
+    /// Calls the middleware handler
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static;
+}
+
 /// Describes a generic middleware handler that could take 0 or N parameters and [`Next`] middleware
 pub trait MiddlewareHandler<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// Middleware handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls the middleware handler
-    fn call(&self, args: Args, next: Next) -> Self::Future;
+    fn call(&self, args: Args, next: Next) -> impl Future<Output = Self::Output> + Send;
 }
 
 /// Describes a generic [`tap_req`] middleware handler that could take 0 or N parameters and [`HttpRequestMut`]
 pub trait TapReqHandler<Args = ()>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// Tap handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls the [`tap_req`] handler
-    fn call(&self, req: HttpRequestMut, args: Args) -> Self::Future;
+    fn call(&self, req: HttpRequestMut, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
 /// Describes a generic [`map_ok`] middleware handler that could take 0 or N parameters and [`HttpResponse`]
 pub trait MapOkHandler<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// MapOk handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls the [`map_ok`] handler
-    fn call(&self, resp: HttpResponse, args: Args) -> Self::Future;
+    fn call(&self, resp: HttpResponse, args: Args) -> impl Future<Output = Self::Output> + Send;
+}
+
+impl<Func, Fut: Send> WrapHandler for Func
+where
+    Func: Fn(HttpContext, NextFn) -> Fut + Send + Sync + Clone + 'static,
+    Fut: Future<Output = HttpResult> + Send + 'static,
+{
+    #[inline]
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static {
+        self(ctx, next)
+    }
 }
 
 #[cfg(not(feature = "di"))]
@@ -126,10 +145,9 @@ where
     Fut: Future,
 {
     type Output = Fut::Output;
-    type Future = Fut;
 
     #[inline]
-    fn call(&self, req: HttpRequestMut, _args: ()) -> Self::Future {
+    fn call(&self, req: HttpRequestMut, _args: ()) -> impl Future<Output = Self::Output> + Send {
         self(req)
     }
 }
@@ -141,11 +159,10 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, ($($param,)*): ($($param,)*), next: Next) -> Self::Future {
+        fn call(&self, ($($param,)*): ($($param,)*), next: Next) -> impl Future<Output = Self::Output> {
             (self)($($param,)* next)
         }
     }
@@ -156,11 +173,10 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, req: HttpRequestMut, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn call(&self, req: HttpRequestMut, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
             (self)(req, $($param,)*)
         }
     }
@@ -170,11 +186,10 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, resp: HttpResponse, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn call(&self, resp: HttpResponse, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
             (self)(resp, $($param,)*)
         }
     }
