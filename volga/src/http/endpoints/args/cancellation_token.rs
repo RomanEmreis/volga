@@ -171,7 +171,7 @@ mod tests {
 
         assert!(token.is_cancelled());
     }
-    
+
     #[test]
     fn it_gets_from_request_parts() {
         let token = TokioCancellationToken::new();
