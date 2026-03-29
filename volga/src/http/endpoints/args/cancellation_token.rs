@@ -9,6 +9,7 @@ use crate::{
     HttpRequest,
     error::Error,
     http::{
+        Extensions,
         endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
         request_scope::HttpRequestScope,
     },
@@ -72,15 +73,22 @@ impl Clone for TokenGuard {
     }
 }
 
+impl From<&Extensions> for TokenGuard {
+    #[inline]
+    fn from(extensions: &Extensions) -> Self {
+        let token = extensions
+            .get::<HttpRequestScope>()
+            .map(|s| s.cancellation_token.clone())
+            .unwrap_or_else(TokioCancellationToken::new);
+        Self::new(token)
+    }
+}
+
 /// Extracts `CancellationToken` from request parts
 impl FromRequestParts for TokenGuard {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts
-            .extensions
-            .get::<HttpRequestScope>()
-            .map(|s| Self::new(s.cancellation_token.clone()))
-            .ok_or_else(|| Error::server_error("CancellationToken: missing"))
+        Ok(Self::from(&parts.extensions))
     }
 }
 
@@ -88,10 +96,7 @@ impl FromRequestParts for TokenGuard {
 impl FromRequestRef for TokenGuard {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        req.extensions()
-            .get::<HttpRequestScope>()
-            .map(|s| Self::new(s.cancellation_token.clone()))
-            .ok_or_else(|| Error::server_error("CancellationToken: missing"))
+        Ok(Self::from(req.extensions()))
     }
 }
 
@@ -145,12 +150,28 @@ mod tests {
     }
 
     #[test]
-    fn it_gets_err_from_parts_if_scope_missing() {
+    fn it_gets_new_token_from_parts_if_scope_missing() {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        assert!(TokenGuard::from_parts(&parts).is_err());
+        assert!(TokenGuard::from_parts(&parts).is_ok());
     }
 
+    #[test]
+    fn it_gets_from_extensions() {
+        let token = TokioCancellationToken::new();
+        token.cancel();
+
+        let req = Request::get("/")
+            .extension(make_scope_with_token(token))
+            .body(())
+            .unwrap();
+
+        let (parts, _) = req.into_parts();
+        let token = TokenGuard::from(&parts.extensions);
+
+        assert!(token.is_cancelled());
+    }
+    
     #[test]
     fn it_gets_from_request_parts() {
         let token = TokioCancellationToken::new();
