@@ -134,7 +134,7 @@ pub trait MapOkHandler<Args>: Clone + Send + Sync + 'static {
 
 impl<Func, Fut: Send> WrapHandler for Func
 where
-    Func: Fn(HttpContext, NextFn) -> Fut + Send + Sync + Clone + 'static,
+    Func: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = HttpResult> + Send + 'static,
 {
     #[inline]
