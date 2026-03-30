@@ -44,7 +44,6 @@ async fn main() -> std::io::Result<()> {
     app.run().await
 }
 
-#[derive(Clone)]
 struct Timeout {
     duration: Duration,
 }

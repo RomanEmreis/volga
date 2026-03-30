@@ -87,7 +87,7 @@ impl Next {
 }
 
 /// Describes a generic middleware handler that could take [`HttpContext`] parameters and [`NextFn`] middleware
-pub trait WrapHandler: Clone + Send + Sync + 'static {
+pub trait WrapHandler: Send + Sync + 'static {
     /// Calls the middleware handler
     fn call(
         &self,
