@@ -65,11 +65,9 @@ where
 pub trait GenericHandler<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// Generic handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls a generic handler
-    fn call(&self, args: Args) -> Self::Future;
+    fn call(&self, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
 /// Describes a generic [`map_err`] middleware handler that could take 0 or N parameters and [`Error`]
@@ -88,11 +86,10 @@ macro_rules! define_generic_handler ({ $($param:ident)* } => {
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn call(&self, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> + Send {
             (self)($($param,)*)
         }
     }
