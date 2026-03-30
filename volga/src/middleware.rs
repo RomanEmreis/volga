@@ -3,7 +3,7 @@
 use crate::{
     App, HttpResult,
     http::{
-        FilterResult, FromRequestRef, GenericHandler, IntoResponse, MapErrHandler,
+        FromRequestRef, IntoResponse, MapErrHandler,
         request::IntoTapResult,
     },
     not_found,
@@ -16,7 +16,7 @@ use std::sync::Arc;
 #[cfg(feature = "di")]
 use crate::di::FromContainer;
 
-pub use handler::{MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler};
+pub use handler::{FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler};
 pub use http_context::HttpContext;
 pub(crate) use make_fn::from_handler;
 
@@ -381,10 +381,9 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn filter<F, R, Args>(self, filter: F) -> Self
+    pub fn filter<F, Args>(self, filter: F) -> Self
     where
-        F: GenericHandler<Args, Output = R>,
-        R: Into<FilterResult> + 'static,
+        F: FilterHandler<Args>,
         Args: FromRequestRef + Send + 'static,
     {
         let filter_fn = make_filter_fn(filter);
@@ -648,10 +647,9 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn filter<F, R, Args>(&mut self, filter: F) -> &mut Self
+    pub fn filter<F, Args>(&mut self, filter: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = R>,
-        R: Into<FilterResult> + 'static,
+        F: FilterHandler<Args>,
         Args: FromRequestRef + Send + 'static,
     {
         let filter_fn = make_filter_fn(filter);

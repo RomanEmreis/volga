@@ -2,10 +2,10 @@
 
 use super::{
     HttpContext, MiddlewareFn, NextFn,
-    handler::{MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler},
+    handler::{FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler},
 };
 use crate::http::{
-    FilterResult, FromRequestRef, GenericHandler, IntoResponse, MapErrHandler,
+    FromRequestRef, IntoResponse, MapErrHandler,
     endpoints::handlers::RouteHandler, request::IntoTapResult,
 };
 use std::sync::Arc;
@@ -33,10 +33,9 @@ where
 
 /// Wraps a closure for the route filter into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_filter_fn<F, R, Args>(filter: F) -> MiddlewareFn
+pub(super) fn make_filter_fn<F, Args>(filter: F) -> MiddlewareFn
 where
-    F: GenericHandler<Args, Output = R>,
-    R: Into<FilterResult> + 'static,
+    F: FilterHandler<Args>,
     Args: FromRequestRef + Send + 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {

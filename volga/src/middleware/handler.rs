@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 
 use super::{HttpContext, NextFn};
 use crate::error::Error;
-use crate::{HttpRequestMut, HttpResponse, HttpResult};
+use crate::{HttpRequestMut, HttpResponse, HttpResult, http::FilterResult};
 
 /// Internal state machine for [`Next`]
 ///
@@ -105,6 +105,15 @@ pub trait MiddlewareHandler<Args>: Clone + Send + Sync + 'static {
     fn call(&self, args: Args, next: Next) -> impl Future<Output = Self::Output> + Send;
 }
 
+/// Describes a filter middleware handler that could take 0 or N parameters and return [`FilterResult`]
+pub trait FilterHandler<Args>: Clone + Send + Sync + 'static {
+    /// Return type
+    type Output: Into<FilterResult>;
+
+    /// Calls the filter handler
+    fn call(&self, args: Args) -> impl Future<Output = Self::Output> + Send;
+}
+
 /// Describes a generic [`tap_req`] middleware handler that could take 0 or N parameters and [`HttpRequestMut`]
 pub trait TapReqHandler<Args = ()>: Clone + Send + Sync + 'static {
     /// Return type
@@ -164,6 +173,20 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
         #[allow(non_snake_case)]
         fn call(&self, ($($param,)*): ($($param,)*), next: Next) -> impl Future<Output = Self::Output> {
             (self)($($param,)* next)
+        }
+    }
+    impl<Func, Fut: Send, $($param,)*> FilterHandler<($($param,)*)> for Func
+    where
+        Func: Fn($($param,)*) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future,
+        Fut::Output: Into<FilterResult>,
+    {
+        type Output = Fut::Output;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn call(&self, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
+            (self)($($param,)*)
         }
     }
     #[cfg(feature = "di")]
