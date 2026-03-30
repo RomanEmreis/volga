@@ -2,7 +2,7 @@
 
 use super::{
     HttpContext, MiddlewareFn, NextFn,
-    handler::{FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler},
+    handler::{AttachHandler, FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler},
 };
 use crate::http::{
     FromRequestRef, IntoResponse, MapErrHandler, endpoints::handlers::RouteHandler,
@@ -26,7 +26,7 @@ pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
 #[inline]
 pub(super) fn make_fn<F>(middleware: F) -> MiddlewareFn
 where
-    F: WrapHandler,
+    F: AttachHandler,
 {
     Arc::new(move |ctx: HttpContext, next: NextFn| Box::pin(middleware.call(ctx, next)))
 }

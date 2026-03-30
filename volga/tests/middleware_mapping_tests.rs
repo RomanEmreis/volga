@@ -16,7 +16,7 @@ headers! {
 #[tokio::test]
 async fn it_adds_middleware_request() {
     let server = TestServer::spawn(|app| {
-        app.wrap(|ctx: HttpContext, next: NextFn| async move { next(ctx).await });
+        app.attach(|ctx: HttpContext, next: NextFn| async move { next(ctx).await });
         app.wrap(|_, _| async move { ok!("Pass!") });
         app.map_get("/test", || async { ok!("Unreachable!") });
     })

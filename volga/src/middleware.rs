@@ -14,7 +14,7 @@ use std::sync::Arc;
 use crate::di::FromContainer;
 
 pub use handler::{
-    FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler,
+    AttachHandler, FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler,
 };
 pub use http_context::HttpContext;
 pub(crate) use make_fn::from_handler;
@@ -106,17 +106,20 @@ impl Middlewares {
 
 /// Middleware specific impl
 impl App {
-    /// Adds a middleware handler to the application request pipeline
+    /// Wraps the application request pipeline with an inline middleware closure.
+    ///
+    /// `wrap` is ideal for simple inline middleware.
+    /// For reusable or parameterized middleware types, use [`attach`](Self::attach).
     ///
     /// # Examples
     /// ```no_run
-    /// use volga::{App, middleware::{HttpContext, NextFn}};
+    /// use volga::App;
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     ///
-    /// app.wrap(|ctx: HttpContext, next: NextFn| async move {
+    /// app.wrap(|ctx, next| async move {
     ///     next(ctx).await
     /// });
     ///# app.run().await
@@ -131,13 +134,13 @@ impl App {
     /// request's extensions to avoid holding connections open indefinitely:
     ///
     /// ```no_run
-    /// use volga::{App, CancellationToken, middleware::{HttpContext, NextFn}, error::Error};
+    /// use volga::{App, CancellationToken, error::Error};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     ///
-    /// app.wrap(|ctx: HttpContext, next: NextFn| async move {
+    /// app.wrap(|ctx, next| async move {
     ///     let token = ctx.extract::<CancellationToken>()?;
     ///     tokio::select! {
     ///         res = next(ctx) => res,
@@ -147,9 +150,75 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn wrap<F>(&mut self, middleware: F) -> &mut Self
+    pub fn wrap<F, Fut>(&mut self, middleware: F) -> &mut Self
     where
-        F: WrapHandler,
+        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = HttpResult> + Send + 'static,
+    {
+        self.pipeline.middlewares_mut().add(make_fn(middleware));
+        self
+    }
+
+    /// Attaches a middleware to the application request pipeline.
+    ///
+    /// Unlike [`wrap`](Self::wrap), which is optimized for inline closures,
+    /// `attach` is intended for reusable and parameterized middleware types.
+    ///
+    /// This allows defining middleware as structs with configuration and state,
+    /// similar to middleware patterns found in other ecosystems.
+    ///
+    /// # Parameterized middleware
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{App, middleware::{HttpContext, NextFn, AttachHandler}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.attach(Timeout {
+    ///     duration: Duration::from_secs(1),
+    /// });
+    ///# app.run().await
+    ///# }
+    ///
+    /// struct Timeout {
+    ///     duration: Duration,
+    /// }
+    ///
+    /// impl AttachHandler for Timeout {
+    ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
+    ///         let duration = self.duration;
+    ///         async move {
+    ///             tokio::time::sleep(duration).await;
+    ///             next(ctx).await
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Closure middleware
+    /// `attach` also accepts closures, but type annotations are required:
+    ///
+    /// ```no_run
+    /// use volga::{App, middleware::{HttpContext, NextFn}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.attach(|ctx: HttpContext, next: NextFn| async move {
+    ///     next(ctx).await
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    ///
+    /// For simpler inline middleware without type annotations,
+    /// prefer [`wrap`](Self::wrap).
+    pub fn attach<F>(&mut self, middleware: F) -> &mut Self
+    where
+        F: AttachHandler,
     {
         self.pipeline.middlewares_mut().add(make_fn(middleware));
         self
@@ -339,6 +408,73 @@ impl<'a> Route<'a> {
     ///
     /// # Examples
     /// ```no_run
+    /// use volga::App;
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app
+    ///     .map_get("/hello", || async { "Hello, World!" })
+    ///     .wrap(|ctx, next| async move {
+    ///         next(ctx).await
+    ///     });
+    ///
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn wrap<F, Fut>(self, middleware: F) -> Self
+    where
+        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = HttpResult> + Send + 'static,
+    {
+        self.map_middleware(make_fn(middleware))
+    }
+
+    /// Attaches a middleware to this route request pipeline.
+    ///
+    /// Unlike [`wrap`](Self::wrap), which is optimized for inline closures,
+    /// `attach` is intended for reusable and parameterized middleware types.
+    ///
+    /// This allows defining middleware as structs with configuration and state,
+    /// similar to middleware patterns found in other ecosystems.
+    ///
+    /// # Parameterized middleware
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{App, middleware::{HttpContext, NextFn, AttachHandler}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app
+    ///     .map_get("/hello", || async { "Hello, World!" })
+    ///     .attach(Timeout {
+    ///         duration: Duration::from_secs(1),
+    ///     });
+    ///# app.run().await
+    ///# }
+    ///
+    /// struct Timeout {
+    ///     duration: Duration,
+    /// }
+    ///
+    /// impl AttachHandler for Timeout {
+    ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
+    ///         let duration = self.duration;
+    ///         async move {
+    ///             tokio::time::sleep(duration).await;
+    ///             next(ctx).await
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Closure middleware
+    /// `attach` also accepts closures, but type annotations are required:
+    ///
+    /// ```no_run
     /// use volga::{App, middleware::{HttpContext, NextFn}};
     ///
     ///# #[tokio::main]
@@ -347,16 +483,18 @@ impl<'a> Route<'a> {
     ///
     /// app
     ///     .map_get("/hello", || async { "Hello, World!" })
-    ///     .wrap(|ctx: HttpContext, next: NextFn| async move {
+    ///     .attach(|ctx: HttpContext, next: NextFn| async move {
     ///         next(ctx).await
     ///     });
-    ///
     ///# app.run().await
     ///# }
     /// ```
-    pub fn wrap<F>(self, middleware: F) -> Self
+    ///
+    /// For simpler inline middleware without type annotations,
+    /// prefer [`wrap`](Self::wrap).
+    pub fn attach<F>(self, middleware: F) -> Self
     where
-        F: WrapHandler,
+        F: AttachHandler,
     {
         self.map_middleware(make_fn(middleware))
     }
@@ -604,6 +742,73 @@ impl<'a> RouteGroup<'a> {
     ///
     /// # Examples
     /// ```no_run
+    /// use volga::App;
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.group("/hello", |api| {
+    ///     api.wrap(|ctx, next| async move { next(ctx).await });
+    ///     api.map_get("/world", || async { "Hello, World!" });
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn wrap<F, Fut>(&mut self, middleware: F) -> &mut Self
+    where
+        F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = HttpResult> + Send + 'static,
+    {
+        self.middleware.push(make_fn(middleware));
+        self
+    }
+
+    /// Attaches a middleware to this route group request pipeline.
+    ///
+    /// Unlike [`wrap`](Self::wrap), which is optimized for inline closures,
+    /// `attach` is intended for reusable and parameterized middleware types.
+    ///
+    /// This allows defining middleware as structs with configuration and state,
+    /// similar to middleware patterns found in other ecosystems.
+    ///
+    /// # Parameterized middleware
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{App, middleware::{HttpContext, NextFn, AttachHandler}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.group("/hello", |api| {
+    ///     api.attach(Timeout {
+    ///         duration: Duration::from_secs(1),
+    ///     });
+    ///     api.map_get("/world", || async { "Hello, World!" });
+    /// });
+    ///# app.run().await
+    ///# }
+    ///
+    /// struct Timeout {
+    ///     duration: Duration,
+    /// }
+    ///
+    /// impl AttachHandler for Timeout {
+    ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
+    ///         let duration = self.duration;
+    ///         async move {
+    ///             tokio::time::sleep(duration).await;
+    ///             next(ctx).await
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Closure middleware
+    /// `attach` also accepts closures, but type annotations are required:
+    ///
+    /// ```no_run
     /// use volga::{App, middleware::{HttpContext, NextFn}};
     ///
     ///# #[tokio::main]
@@ -611,15 +816,20 @@ impl<'a> RouteGroup<'a> {
     /// let mut app = App::new();
     ///
     /// app.group("/hello", |api| {
-    ///     api.wrap(|ctx: HttpContext, next: NextFn| async move { next(ctx).await });
+    ///     .attach(|ctx: HttpContext, next: NextFn| async move {
+    ///         next(ctx).await
+    ///     });
     ///     api.map_get("/world", || async { "Hello, World!" });
     /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn wrap<F>(&mut self, middleware: F) -> &mut Self
+    ///
+    /// For simpler inline middleware without type annotations,
+    /// prefer [`wrap`](Self::wrap).
+    pub fn attach<F>(&mut self, middleware: F) -> &mut Self
     where
-        F: WrapHandler,
+        F: AttachHandler,
     {
         self.middleware.push(make_fn(middleware));
         self

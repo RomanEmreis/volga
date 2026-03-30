@@ -31,7 +31,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     // Middleware will be in the request span scope
-    app.wrap(|ctx: HttpContext, next: NextFn| async move {
+    app.attach(|ctx: HttpContext, next: NextFn| async move {
         trace!("trace middleware");
         next(ctx).await
     });

@@ -87,7 +87,7 @@ impl Next {
 }
 
 /// Describes a generic middleware handler that could take [`HttpContext`] parameters and [`NextFn`] middleware
-pub trait WrapHandler: Send + Sync + 'static {
+pub trait AttachHandler: Send + Sync + 'static {
     /// Calls the middleware handler
     fn call(
         &self,
@@ -132,7 +132,7 @@ pub trait MapOkHandler<Args>: Clone + Send + Sync + 'static {
     fn call(&self, resp: HttpResponse, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
-impl<Func, Fut: Send> WrapHandler for Func
+impl<Func, Fut: Send> AttachHandler for Func
 where
     Func: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = HttpResult> + Send + 'static,
@@ -224,6 +224,11 @@ define_generic_mw_handler! { T1 T2 }
 define_generic_mw_handler! { T1 T2 T3 }
 define_generic_mw_handler! { T1 T2 T3 T4 }
 define_generic_mw_handler! { T1 T2 T3 T4 T5 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 T8 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 T8 T9 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 T8 T9 T10 }
 
 #[cfg(test)]
 mod tests {

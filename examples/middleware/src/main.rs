@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 use volga::headers::{Accept, Header};
-use volga::middleware::{HttpContext, NextFn, WrapHandler};
+use volga::middleware::{AttachHandler, HttpContext, NextFn};
 use volga::{App, CancellationToken, HttpResult, ok, status};
 
 #[tokio::main]
@@ -16,14 +16,14 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     // Example of middleware
-    app.wrap(|ctx: HttpContext, next: NextFn| async move {
+    app.wrap(|ctx, next| async move {
         // do something with the request
         let resp = next(ctx).await;
         // do something with response
         resp
     });
 
-    app.wrap(Timeout {
+    app.attach(Timeout {
         duration: Duration::from_secs(1),
     });
 
@@ -48,7 +48,7 @@ struct Timeout {
     duration: Duration,
 }
 
-impl WrapHandler for Timeout {
+impl AttachHandler for Timeout {
     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
         let duration = self.duration;
         async move {
