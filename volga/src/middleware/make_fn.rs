@@ -5,8 +5,8 @@ use super::{
     handler::{FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler},
 };
 use crate::http::{
-    FromRequestRef, IntoResponse, MapErrHandler,
-    endpoints::handlers::RouteHandler, request::IntoTapResult,
+    FromRequestRef, IntoResponse, MapErrHandler, endpoints::handlers::RouteHandler,
+    request::IntoTapResult,
 };
 use std::sync::Arc;
 

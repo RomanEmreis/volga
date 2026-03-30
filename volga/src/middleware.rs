@@ -2,10 +2,7 @@
 
 use crate::{
     App, HttpResult,
-    http::{
-        FromRequestRef, IntoResponse, MapErrHandler,
-        request::IntoTapResult,
-    },
+    http::{FromRequestRef, IntoResponse, MapErrHandler, request::IntoTapResult},
     not_found,
     routing::{Route, RouteGroup},
 };
@@ -16,7 +13,9 @@ use std::sync::Arc;
 #[cfg(feature = "di")]
 use crate::di::FromContainer;
 
-pub use handler::{FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler};
+pub use handler::{
+    FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler, WrapHandler,
+};
 pub use http_context::HttpContext;
 pub(crate) use make_fn::from_handler;
 
