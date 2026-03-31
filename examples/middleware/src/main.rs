@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 use volga::headers::{Accept, Header};
-use volga::middleware::{AttachHandler, HttpContext, NextFn};
+use volga::middleware::{HttpContext, Middleware, NextFn};
 use volga::{App, CancellationToken, HttpResult, ok, status};
 
 #[tokio::main]
@@ -48,7 +48,7 @@ struct Timeout {
     duration: Duration,
 }
 
-impl AttachHandler for Timeout {
+impl Middleware for Timeout {
     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
         let duration = self.duration;
         async move {

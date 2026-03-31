@@ -2,7 +2,7 @@
 
 use crate::{
     App, HttpResult,
-    http::{FromRequestRef, IntoResponse, MapErrHandler, request::IntoTapResult},
+    http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult},
     not_found,
     routing::{Route, RouteGroup},
 };
@@ -13,9 +13,7 @@ use std::sync::Arc;
 #[cfg(feature = "di")]
 use crate::di::FromContainer;
 
-pub use handler::{
-    AttachHandler, FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler,
-};
+pub use handler::{Filter, MapOk, Middleware, Next, TapReq, With};
 pub use http_context::HttpContext;
 pub(crate) use make_fn::from_handler;
 
@@ -170,7 +168,7 @@ impl App {
     /// # Parameterized middleware
     /// ```no_run
     /// use std::time::Duration;
-    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, AttachHandler}};
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, Middleware}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -186,7 +184,7 @@ impl App {
     ///     duration: Duration,
     /// }
     ///
-    /// impl AttachHandler for Timeout {
+    /// impl Middleware for Timeout {
     ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
     ///         let duration = self.duration;
     ///         async move {
@@ -218,9 +216,44 @@ impl App {
     /// prefer [`wrap`](Self::wrap).
     pub fn attach<F>(&mut self, middleware: F) -> &mut Self
     where
-        F: AttachHandler,
+        F: Middleware,
     {
         self.pipeline.middlewares_mut().add(make_fn(middleware));
+        self
+    }
+
+    /// Adds a filter middleware handler for a request pipeline that would return
+    /// either `bool`, [`Result`] or [`FilterResult`]
+    /// and breaks the middleware chain if it's a `false` or [`Err`] values
+    ///
+    /// > **Note:** [`Path`] and [`NamedPath`] extractors are not meaningful in a global
+    /// > filter context since they depend on route-specific parameters. Use
+    /// > them only when registering a filter for a specific route.
+    /// > Attempting to extract route parameters globally will result in an
+    /// > extraction error for routes that don't define those parameters.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, headers::HttpHeaders};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.filter(|headers: HttpHeaders| async move {
+    ///     headers.get_raw("x-api-key").is_some()
+    /// });
+    ///
+    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn filter<F, Args>(&mut self, filter: F) -> &mut Self
+    where
+        F: Filter<Args>,
+        Args: FromRequestRef + Send + 'static,
+    {
+        self.pipeline.middlewares_mut().add(make_filter_fn(filter));
         self
     }
 
@@ -250,7 +283,7 @@ impl App {
     /// ```
     pub fn map_ok<F, R, Args>(&mut self, map: F) -> &mut Self
     where
-        F: MapOkHandler<Args, Output = R>,
+        F: MapOk<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -302,7 +335,7 @@ impl App {
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Args, Output = R>,
+        F: TapReq<Args, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
     {
@@ -354,7 +387,7 @@ impl App {
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Output = R>,
+        F: TapReq<Output = R>,
         R: IntoTapResult,
     {
         self.pipeline.middlewares_mut().add(make_tap_req_fn(map));
@@ -385,7 +418,7 @@ impl App {
     /// ```
     pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
     where
-        F: MiddlewareHandler<Args, Output = R>,
+        F: With<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -442,7 +475,7 @@ impl<'a> Route<'a> {
     /// # Parameterized middleware
     /// ```no_run
     /// use std::time::Duration;
-    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, AttachHandler}};
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, Middleware}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -460,7 +493,7 @@ impl<'a> Route<'a> {
     ///     duration: Duration,
     /// }
     ///
-    /// impl AttachHandler for Timeout {
+    /// impl Middleware for Timeout {
     ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
     ///         let duration = self.duration;
     ///         async move {
@@ -494,7 +527,7 @@ impl<'a> Route<'a> {
     /// prefer [`wrap`](Self::wrap).
     pub fn attach<F>(self, middleware: F) -> Self
     where
-        F: AttachHandler,
+        F: Middleware,
     {
         self.map_middleware(make_fn(middleware))
     }
@@ -520,7 +553,7 @@ impl<'a> Route<'a> {
     /// ```
     pub fn filter<F, Args>(self, filter: F) -> Self
     where
-        F: FilterHandler<Args>,
+        F: Filter<Args>,
         Args: FromRequestRef + Send + 'static,
     {
         let filter_fn = make_filter_fn(filter);
@@ -553,7 +586,7 @@ impl<'a> Route<'a> {
     /// ```
     pub fn map_ok<F, R, Args>(self, map: F) -> Self
     where
-        F: MapOkHandler<Args, Output = R>,
+        F: MapOk<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -583,7 +616,7 @@ impl<'a> Route<'a> {
     /// ```
     pub fn map_err<F, R, Args>(self, map: F) -> Self
     where
-        F: MapErrHandler<Args, Output = R>,
+        F: MapErr<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -635,7 +668,7 @@ impl<'a> Route<'a> {
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(self, map: F) -> Self
     where
-        F: TapReqHandler<Args, Output = R>,
+        F: TapReq<Args, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
     {
@@ -687,7 +720,7 @@ impl<'a> Route<'a> {
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(self, map: F) -> Self
     where
-        F: TapReqHandler<Output = R>,
+        F: TapReq<Output = R>,
         R: IntoTapResult,
     {
         let map_err_fn = make_tap_req_fn(map);
@@ -718,7 +751,7 @@ impl<'a> Route<'a> {
     /// ```
     pub fn with<F, R, Args>(self, middleware: F) -> Self
     where
-        F: MiddlewareHandler<Args, Output = R>,
+        F: With<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -775,7 +808,7 @@ impl<'a> RouteGroup<'a> {
     /// # Parameterized middleware
     /// ```no_run
     /// use std::time::Duration;
-    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, AttachHandler}};
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, Middleware}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -794,7 +827,7 @@ impl<'a> RouteGroup<'a> {
     ///     duration: Duration,
     /// }
     ///
-    /// impl AttachHandler for Timeout {
+    /// impl Middleware for Timeout {
     ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
     ///         let duration = self.duration;
     ///         async move {
@@ -829,7 +862,7 @@ impl<'a> RouteGroup<'a> {
     /// prefer [`wrap`](Self::wrap).
     pub fn attach<F>(&mut self, middleware: F) -> &mut Self
     where
-        F: AttachHandler,
+        F: Middleware,
     {
         self.middleware.push(make_fn(middleware));
         self
@@ -839,16 +872,24 @@ impl<'a> RouteGroup<'a> {
     /// either `bool`, [`Result`] or [`FilterResult`]
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
+    /// > **Note:** [`Path`] and [`NamedPath`] extractors are not meaningful in a
+    /// > route group filter context since they depend on route-specific parameters. Use
+    /// > them only when registering a filter for a specific route.
+    /// > Attempting to extract route parameters globally will result in an
+    /// > extraction error for routes that don't define those parameters.
+    ///
     /// # Example
     /// ```no_run
-    /// use volga::{App, Path};
+    /// use volga::{App, headers::HttpHeaders};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     ///
     /// app.group("/positive", |api| {
-    ///     api.filter(|Path((x, y)): Path<(i32, i32)>| async move { x > 0 && y > 0 });
+    ///     api.filter(|headers: HttpHeaders| async move {
+    ///         headers.get_raw("x-api-key").is_some()
+    ///     });
     ///
     ///     api.map_get("/sum", |x: i32, y: i32| async move { x + y });
     ///     api.map_get("/mul", |x: i32, y: i32| async move { x * y });
@@ -858,7 +899,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     pub fn filter<F, Args>(&mut self, filter: F) -> &mut Self
     where
-        F: FilterHandler<Args>,
+        F: Filter<Args>,
         Args: FromRequestRef + Send + 'static,
     {
         let filter_fn = make_filter_fn(filter);
@@ -894,7 +935,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     pub fn map_ok<F, R, Args>(&mut self, map: F) -> &mut Self
     where
-        F: MapOkHandler<Args, Output = R>,
+        F: MapOk<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -927,7 +968,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     pub fn map_err<F, R, Args>(&mut self, map: F) -> &mut Self
     where
-        F: MapErrHandler<Args, Output = R>,
+        F: MapErr<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -982,7 +1023,7 @@ impl<'a> RouteGroup<'a> {
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Args, Output = R>,
+        F: TapReq<Args, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
     {
@@ -1037,7 +1078,7 @@ impl<'a> RouteGroup<'a> {
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Output = R>,
+        F: TapReq<Output = R>,
         R: IntoTapResult,
     {
         let tap_req_fn = make_tap_req_fn(map);
@@ -1073,7 +1114,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
     where
-        F: MiddlewareHandler<Args, Output = R>,
+        F: With<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {

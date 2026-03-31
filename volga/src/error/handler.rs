@@ -3,7 +3,7 @@
 use super::Error;
 use crate::{
     HttpResult,
-    http::{FromRequestParts, IntoResponse, MapErrHandler},
+    http::{FromRequestParts, IntoResponse, MapErr},
     status,
 };
 use futures_util::future::BoxFuture;
@@ -104,7 +104,7 @@ impl ErrorHandler for DefaultErrorHandler {
 #[derive(Debug)]
 pub struct ErrorFunc<F, R, Args>
 where
-    F: MapErrHandler<Args, Output = R>,
+    F: MapErr<Args, Output = R>,
     R: IntoResponse,
     Args: FromRequestParts + Send,
 {
@@ -114,7 +114,7 @@ where
 
 impl<F, R, Args> ErrorFunc<F, R, Args>
 where
-    F: MapErrHandler<Args, Output = R>,
+    F: MapErr<Args, Output = R>,
     R: IntoResponse,
     Args: FromRequestParts + Send,
 {
@@ -137,7 +137,7 @@ struct BoundErrorArgs<F, Args> {
 
 impl<F, Args> ErasedErrorArgs for BoundErrorArgs<F, Args>
 where
-    F: MapErrHandler<Args> + Send + 'static,
+    F: MapErr<Args> + Send + 'static,
     F::Output: IntoResponse + 'static,
     Args: Send + 'static,
 {
@@ -146,7 +146,7 @@ where
             if err.instance.is_none() {
                 err.instance = Some(self.uri.to_string());
             }
-            match self.func.call(err, self.args).await.into_response() {
+            match self.func.map_err(err, self.args).await.into_response() {
                 Ok(resp) => Ok(resp),
                 Err(err) => default_error_handler(err).await,
             }
@@ -172,7 +172,7 @@ impl ErasedErrorArgs for DefaultErrorArgs {
 
 impl<F, R, Args> ErrorHandler for ErrorFunc<F, R, Args>
 where
-    F: MapErrHandler<Args, Output = R> + Clone + 'static,
+    F: MapErr<Args, Output = R> + Clone + 'static,
     R: IntoResponse + 'static,
     Args: FromRequestParts + Send + 'static,
 {
@@ -192,7 +192,7 @@ where
 
 impl<F, R, Args> From<ErrorFunc<F, R, Args>> for PipelineErrorHandler
 where
-    F: MapErrHandler<Args, Output = R>,
+    F: MapErr<Args, Output = R>,
     R: IntoResponse + 'static,
     Args: FromRequestParts + Send + 'static,
 {

@@ -2,11 +2,10 @@
 
 use super::{
     HttpContext, MiddlewareFn, NextFn,
-    handler::{AttachHandler, FilterHandler, MapOkHandler, MiddlewareHandler, Next, TapReqHandler},
+    handler::{Filter, MapOk, Middleware, Next, TapReq, With},
 };
 use crate::http::{
-    FromRequestRef, IntoResponse, MapErrHandler, endpoints::handlers::RouteHandler,
-    request::IntoTapResult,
+    FromRequestRef, IntoResponse, MapErr, endpoints::handlers::RouteHandler, request::IntoTapResult,
 };
 use std::sync::Arc;
 
@@ -26,7 +25,7 @@ pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
 #[inline]
 pub(super) fn make_fn<F>(middleware: F) -> MiddlewareFn
 where
-    F: AttachHandler,
+    F: Middleware,
 {
     Arc::new(move |ctx: HttpContext, next: NextFn| Box::pin(middleware.call(ctx, next)))
 }
@@ -35,14 +34,14 @@ where
 #[inline]
 pub(super) fn make_filter_fn<F, Args>(filter: F) -> MiddlewareFn
 where
-    F: FilterHandler<Args>,
+    F: Filter<Args>,
     Args: FromRequestRef + Send + 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let filter = filter.clone();
         async move {
             let args = Args::from_request(ctx.request())?;
-            let result = filter.call(args).await.into();
+            let result = filter.filter(args).await.into();
 
             match result.into_inner() {
                 Ok(_) => next(ctx).await,
@@ -57,7 +56,7 @@ where
 #[inline]
 pub(super) fn make_map_ok_fn<F, R, Args>(map: F) -> MiddlewareFn
 where
-    F: MapOkHandler<Args, Output = R>,
+    F: MapOk<Args, Output = R>,
     R: IntoResponse + 'static,
     Args: FromRequestRef + Send + 'static,
 {
@@ -67,7 +66,7 @@ where
             match Args::from_request(ctx.request()) {
                 Err(err) => err.into_response(),
                 Ok(args) => match next(ctx).await {
-                    Ok(resp) => map.call(resp, args).await.into_response(),
+                    Ok(resp) => map.map_ok(resp, args).await.into_response(),
                     Err(err) => err.into_response(),
                 },
             }
@@ -80,7 +79,7 @@ where
 #[inline]
 pub(super) fn make_map_err_fn<F, R, Args>(map: F) -> MiddlewareFn
 where
-    F: MapErrHandler<Args, Output = R>,
+    F: MapErr<Args, Output = R>,
     R: IntoResponse + 'static,
     Args: FromRequestRef + Send + 'static,
 {
@@ -90,7 +89,7 @@ where
             match Args::from_request(ctx.request()) {
                 Err(err) => err.into_response(),
                 Ok(args) => match next(ctx).await {
-                    Err(err) => map.call(err, args).await.into_response(),
+                    Err(err) => map.map_err(err, args).await.into_response(),
                     Ok(resp) => Ok(resp),
                 },
             }
@@ -104,7 +103,7 @@ where
 #[cfg(feature = "di")]
 pub(super) fn make_tap_req_fn<F, Args, R>(map: F) -> MiddlewareFn
 where
-    F: TapReqHandler<Args, Output = R>,
+    F: TapReq<Args, Output = R>,
     R: IntoTapResult,
     Args: FromContainer + Send + 'static,
 {
@@ -115,7 +114,7 @@ where
                 Err(err) => err.into_response(),
                 Ok(args) => {
                     let (req, pipeline, cors) = ctx.into_parts();
-                    let req = map.call(req, args).await.into_result()?;
+                    let req = map.tap_req(req, args).await.into_result()?;
                     let ctx = HttpContext::from_parts(req, pipeline, cors);
                     next(ctx).await
                 }
@@ -130,14 +129,14 @@ where
 #[cfg(not(feature = "di"))]
 pub(super) fn make_tap_req_fn<F, R>(map: F) -> MiddlewareFn
 where
-    F: TapReqHandler<Output = R>,
+    F: TapReq<Output = R>,
     R: IntoTapResult,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
             let (req, pipeline, cors) = ctx.into_parts();
-            let req = map.call(req, ()).await.into_result()?;
+            let req = map.tap_req(req, ()).await.into_result()?;
             let ctx = HttpContext::from_parts(req, pipeline, cors);
             next(ctx).await
         }
@@ -149,7 +148,7 @@ where
 #[inline]
 pub(super) fn make_with_fn<F, R, Args>(middleware: F) -> MiddlewareFn
 where
-    F: MiddlewareHandler<Args, Output = R>,
+    F: With<Args, Output = R>,
     R: IntoResponse + 'static,
     Args: FromRequestRef + Send + 'static,
 {
@@ -160,7 +159,7 @@ where
                 Err(err) => err.into_response(),
                 Ok(args) => {
                     let next = Next::new(ctx, next);
-                    middleware.call(args, next).await.into_response()
+                    middleware.with(args, next).await.into_response()
                 }
             }
         }

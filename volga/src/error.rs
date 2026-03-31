@@ -11,9 +11,7 @@ use std::{
 
 use super::{
     App,
-    http::{
-        FromRawRequest, FromRequestParts, GenericHandler, IntoResponse, MapErrHandler, StatusCode,
-    },
+    http::{FromRawRequest, FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
 };
 
 pub use self::{
@@ -264,7 +262,7 @@ impl App {
     /// ```
     pub fn map_err<F, R, Args>(&mut self, handler: F) -> &mut Self
     where
-        F: MapErrHandler<Args, Output = R>,
+        F: MapErr<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestParts + Send + 'static,
     {
