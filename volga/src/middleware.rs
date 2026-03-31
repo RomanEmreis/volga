@@ -170,7 +170,7 @@ impl App {
     /// # Parameterized middleware
     /// ```no_run
     /// use std::time::Duration;
-    /// use volga::{App, middleware::{HttpContext, NextFn, AttachHandler}};
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, AttachHandler}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -442,7 +442,7 @@ impl<'a> Route<'a> {
     /// # Parameterized middleware
     /// ```no_run
     /// use std::time::Duration;
-    /// use volga::{App, middleware::{HttpContext, NextFn, AttachHandler}};
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, AttachHandler}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -775,7 +775,7 @@ impl<'a> RouteGroup<'a> {
     /// # Parameterized middleware
     /// ```no_run
     /// use std::time::Duration;
-    /// use volga::{App, middleware::{HttpContext, NextFn, AttachHandler}};
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, AttachHandler}};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -816,7 +816,7 @@ impl<'a> RouteGroup<'a> {
     /// let mut app = App::new();
     ///
     /// app.group("/hello", |api| {
-    ///     .attach(|ctx: HttpContext, next: NextFn| async move {
+    ///     api.attach(|ctx: HttpContext, next: NextFn| async move {
     ///         next(ctx).await
     ///     });
     ///     api.map_get("/world", || async { "Hello, World!" });
