@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# Unreleased
+
+## Added
+* New `attach()` method for parameterized generic middleware registration (#175)
+* New `Filter` trait for parameterized filter middleware (#175)
+
+## Changed
+* All middleware registration methods (e.g., `filter()`, `map_ok`, etc) are now allowed to register a parameterized middleware (#175)
+* `filter()` middleware now can be registered globally (#175)
+* CORS, JWT auth and rate limiting refactored as parameterized middleware (#175)
+
+## Breaking Changes
+* Refactored `MiddlewareHandler` trait: removed `type Future`; renamed to `With`; `call()` renamed to `with()` (#175)
+* Refactored `TapReqHandler` trait: removed `type Future`; renamed to `TapReq`; `call()` renamed to `tap_req()` (#175)
+* Refactored `MapOkHandler` trait: removed `type Future`; renamed to `MapOk`; `call()` renamed to `map_ok()` (#175)
+* Refactored `MapErrHandler` trait: removed `type Future`; renamed to `MapErr`; `call()` renamed to `map_err()` (#175)
+
 # 0.8.8
 
 ## Added

@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 
 use super::{HttpContext, NextFn};
 use crate::error::Error;
-use crate::{HttpRequestMut, HttpResponse, HttpResult};
+use crate::{HttpRequestMut, HttpResponse, HttpResult, http::FilterResult};
 
 /// Internal state machine for [`Next`]
 ///
@@ -86,95 +86,134 @@ impl Next {
     }
 }
 
+/// Describes a generic middleware handler that could take [`HttpContext`] parameters and [`NextFn`] middleware
+pub trait Middleware: Send + Sync + 'static {
+    /// Calls the middleware handler
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static;
+}
+
 /// Describes a generic middleware handler that could take 0 or N parameters and [`Next`] middleware
-pub trait MiddlewareHandler<Args>: Clone + Send + Sync + 'static {
+pub trait With<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// Middleware handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls the middleware handler
-    fn call(&self, args: Args, next: Next) -> Self::Future;
+    fn with(&self, args: Args, next: Next) -> impl Future<Output = Self::Output> + Send;
+}
+
+/// Describes a filter middleware handler that could take 0 or N parameters and return [`FilterResult`]
+pub trait Filter<Args>: Clone + Send + Sync + 'static {
+    /// Return type
+    type Output: Into<FilterResult>;
+
+    /// Calls the filter handler
+    fn filter(&self, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
 /// Describes a generic [`tap_req`] middleware handler that could take 0 or N parameters and [`HttpRequestMut`]
-pub trait TapReqHandler<Args = ()>: Clone + Send + Sync + 'static {
+pub trait TapReq<Args = ()>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// Tap handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls the [`tap_req`] handler
-    fn call(&self, req: HttpRequestMut, args: Args) -> Self::Future;
+    fn tap_req(&self, req: HttpRequestMut, args: Args)
+    -> impl Future<Output = Self::Output> + Send;
 }
 
 /// Describes a generic [`map_ok`] middleware handler that could take 0 or N parameters and [`HttpResponse`]
-pub trait MapOkHandler<Args>: Clone + Send + Sync + 'static {
+pub trait MapOk<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// MapOk handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls the [`map_ok`] handler
-    fn call(&self, resp: HttpResponse, args: Args) -> Self::Future;
+    fn map_ok(&self, resp: HttpResponse, args: Args) -> impl Future<Output = Self::Output> + Send;
+}
+
+impl<Func, Fut: Send> Middleware for Func
+where
+    Func: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = HttpResult> + Send + 'static,
+{
+    #[inline]
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static {
+        self(ctx, next)
+    }
 }
 
 #[cfg(not(feature = "di"))]
-impl<Func, Fut: Send> TapReqHandler for Func
+impl<Func, Fut: Send> TapReq for Func
 where
     Func: Fn(HttpRequestMut) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future,
 {
     type Output = Fut::Output;
-    type Future = Fut;
 
     #[inline]
-    fn call(&self, req: HttpRequestMut, _args: ()) -> Self::Future {
+    fn tap_req(&self, req: HttpRequestMut, _args: ()) -> impl Future<Output = Self::Output> + Send {
         self(req)
     }
 }
 
 macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
-    impl<Func, Fut: Send, $($param,)*> MiddlewareHandler<($($param,)*)> for Func
+    impl<Func, Fut: Send, $($param,)*> With<($($param,)*)> for Func
     where
         Func: Fn($($param,)* Next) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, ($($param,)*): ($($param,)*), next: Next) -> Self::Future {
+        fn with(&self, ($($param,)*): ($($param,)*), next: Next) -> impl Future<Output = Self::Output> {
             (self)($($param,)* next)
         }
     }
+    impl<Func, Fut: Send, $($param,)*> Filter<($($param,)*)> for Func
+    where
+        Func: Fn($($param,)*) -> Fut + Send + Sync + Clone + 'static,
+        Fut: Future,
+        Fut::Output: Into<FilterResult>,
+    {
+        type Output = Fut::Output;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn filter(&self, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
+            (self)($($param,)*)
+        }
+    }
     #[cfg(feature = "di")]
-    impl<Func, Fut: Send, $($param,)*> TapReqHandler<($($param,)*)> for Func
+    impl<Func, Fut: Send, $($param,)*> TapReq<($($param,)*)> for Func
     where
         Func: Fn(HttpRequestMut,$($param,)*) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, req: HttpRequestMut, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn tap_req(&self, req: HttpRequestMut, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
             (self)(req, $($param,)*)
         }
     }
-    impl<Func, Fut: Send, $($param,)*> MapOkHandler<($($param,)*)> for Func
+    impl<Func, Fut: Send, $($param,)*> MapOk<($($param,)*)> for Func
     where
         Func: Fn(HttpResponse,$($param,)*) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, resp: HttpResponse, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn map_ok(&self, resp: HttpResponse, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
             (self)(resp, $($param,)*)
         }
     }
@@ -186,10 +225,15 @@ define_generic_mw_handler! { T1 T2 }
 define_generic_mw_handler! { T1 T2 T3 }
 define_generic_mw_handler! { T1 T2 T3 T4 }
 define_generic_mw_handler! { T1 T2 T3 T4 T5 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 T8 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 T8 T9 }
+define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 T8 T9 T10 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MapOkHandler, MiddlewareHandler, Next, NextState};
+    use super::{MapOk, Next, NextState, With};
     use crate::error::Error;
     use crate::{HttpBody, HttpResponse, status};
     use futures_util::task::noop_waker_ref;
@@ -230,7 +274,7 @@ mod tests {
             next.await
         };
 
-        let response = MiddlewareHandler::call(&handler, (7,), next).await.unwrap();
+        let response = With::with(&handler, (7,), next).await.unwrap();
         assert_eq!(response.status(), 204);
     }
 
@@ -247,7 +291,7 @@ mod tests {
             .body(HttpBody::from("ok"))
             .unwrap();
 
-        let result = MapOkHandler::call(&handler, response, ("ok",)).await;
+        let result = MapOk::map_ok(&handler, response, ("ok",)).await;
         assert!(result.is_ok());
     }
 }

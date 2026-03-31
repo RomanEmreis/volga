@@ -5,7 +5,7 @@ use crate::{
     error::Error,
     headers::{FORWARDED, X_FORWARDED_FOR},
     http::{StatusCode, request_scope::HttpRequestScope},
-    middleware::{HttpContext, NextFn},
+    middleware::{HttpContext, Middleware, NextFn},
     routing::{Route, RouteGroup},
     status,
 };
@@ -528,8 +528,7 @@ impl App {
     /// - [`App::with_fixed_window`] — registering fixed-window policies
     /// - [`RateLimitKeyExt`] — binding partition keys to policies
     pub fn use_fixed_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_fixed_window(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<FixedWindow>::new(source))
     }
 
     /// Enables sliding-window rate limiting for incoming requests.
@@ -606,8 +605,7 @@ impl App {
     /// - [`App::with_sliding_window`] — registering sliding-window policies
     /// - [`RateLimitKeyExt`] — binding partition keys to policies
     pub fn use_sliding_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<SlidingWindow>::new(source))
     }
 
     /// Enables token bucket rate limiting for incoming requests.
@@ -684,8 +682,7 @@ impl App {
     /// - [`App::with_token_bucket`] — registering token bucket policies
     /// - [`RateLimitKeyExt`] — binding partition keys to policies
     pub fn use_token_bucket<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_token_bucket(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<TokenBucket>::new(source))
     }
 
     /// Enables GCRA rate limiting for incoming requests.
@@ -762,8 +759,7 @@ impl App {
     /// - [`App::with_gcra`] — registering GCRA policies
     /// - [`RateLimitKeyExt`] — binding partition keys to policies
     pub fn use_gcra<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_gcra(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<Gcra>::new(source))
     }
 }
 
@@ -809,8 +805,7 @@ impl<'a> Route<'a> {
     /// - Multiple rate-limiting middlewares may be attached to the same route.
     /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
     pub fn fixed_window<K: RateLimitKeyExt>(self, source: K) -> Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_fixed_window(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<FixedWindow>::new(source))
     }
 
     /// Enables sliding-window rate limiting for this route.
@@ -854,8 +849,7 @@ impl<'a> Route<'a> {
     /// - Multiple rate-limiting middlewares may be attached to the same route.
     /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
     pub fn sliding_window<K: RateLimitKeyExt>(self, source: K) -> Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<SlidingWindow>::new(source))
     }
 
     /// Enables token bucket rate limiting for this route.
@@ -899,8 +893,7 @@ impl<'a> Route<'a> {
     /// - Multiple rate-limiting middlewares may be attached to the same route.
     /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
     pub fn token_bucket<K: RateLimitKeyExt>(self, source: K) -> Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_token_bucket(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<TokenBucket>::new(source))
     }
 
     /// Enables GCRA rate limiting for this route.
@@ -944,8 +937,7 @@ impl<'a> Route<'a> {
     /// - Multiple rate-limiting middlewares may be attached to the same route.
     /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
     pub fn gcra<K: RateLimitKeyExt>(self, source: K) -> Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_gcra(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<Gcra>::new(source))
     }
 }
 
@@ -984,8 +976,7 @@ impl<'a> RouteGroup<'a> {
     /// });
     /// ```
     pub fn fixed_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_fixed_window(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<FixedWindow>::new(source))
     }
 
     /// Enables sliding-window rate limiting for all routes in this group.
@@ -1022,8 +1013,7 @@ impl<'a> RouteGroup<'a> {
     /// });
     /// ```
     pub fn sliding_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_sliding_window(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<SlidingWindow>::new(source))
     }
 
     /// Enables token bucket rate limiting for all routes in this group.
@@ -1060,8 +1050,7 @@ impl<'a> RouteGroup<'a> {
     /// });
     /// ```
     pub fn token_bucket<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_token_bucket(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<TokenBucket>::new(source))
     }
 
     /// Enables GCRA rate limiting for all routes in this group.
@@ -1098,8 +1087,66 @@ impl<'a> RouteGroup<'a> {
     /// });
     /// ```
     pub fn gcra<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        let binding = source.bind();
-        self.wrap(move |ctx, next| check_gcra(ctx, binding.clone(), next))
+        self.attach(RateLimiting::<Gcra>::new(source))
+    }
+}
+
+struct RateLimiting<T> {
+    binding: RateLimitBinding,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T> RateLimiting<T> {
+    #[inline]
+    fn new<K: RateLimitKeyExt>(source: K) -> Self {
+        Self {
+            binding: source.bind(),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Middleware for RateLimiting<FixedWindow> {
+    #[inline]
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static {
+        check_fixed_window(ctx, self.binding.clone(), next)
+    }
+}
+
+impl Middleware for RateLimiting<SlidingWindow> {
+    #[inline]
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static {
+        check_sliding_window(ctx, self.binding.clone(), next)
+    }
+}
+
+impl Middleware for RateLimiting<TokenBucket> {
+    #[inline]
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static {
+        check_token_bucket(ctx, self.binding.clone(), next)
+    }
+}
+
+impl Middleware for RateLimiting<Gcra> {
+    #[inline]
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static {
+        check_gcra(ctx, self.binding.clone(), next)
     }
 }
 

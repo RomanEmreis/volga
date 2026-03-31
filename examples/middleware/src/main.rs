@@ -4,8 +4,10 @@
 //! cargo run -p middleware
 //! ```
 
+use std::time::Duration;
 use volga::headers::{Accept, Header};
-use volga::{App, CancellationToken, ok, status};
+use volga::middleware::{HttpContext, Middleware, NextFn};
+use volga::{App, CancellationToken, HttpResult, ok, status};
 
 #[tokio::main]
 #[allow(clippy::all)]
@@ -19,6 +21,10 @@ async fn main() -> std::io::Result<()> {
         let resp = next(ctx).await;
         // do something with response
         resp
+    });
+
+    app.attach(Timeout {
+        duration: Duration::from_secs(1),
     });
 
     // Example of middleware
@@ -36,4 +42,18 @@ async fn main() -> std::io::Result<()> {
     app.map_get("/hello", || async { ok!("Hello World!") });
 
     app.run().await
+}
+
+struct Timeout {
+    duration: Duration,
+}
+
+impl Middleware for Timeout {
+    fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
+        let duration = self.duration;
+        async move {
+            tokio::time::sleep(duration).await;
+            next(ctx).await
+        }
+    }
 }

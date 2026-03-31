@@ -65,22 +65,18 @@ where
 pub trait GenericHandler<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// Generic handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls a generic handler
-    fn call(&self, args: Args) -> Self::Future;
+    fn call(&self, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
 /// Describes a generic [`map_err`] middleware handler that could take 0 or N parameters and [`Error`]
-pub trait MapErrHandler<Args>: Clone + Send + Sync + 'static {
+pub trait MapErr<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
-    /// Error handler future
-    type Future: Future<Output = Self::Output> + Send;
 
     /// Calls an error handler
-    fn call(&self, err: Error, args: Args) -> Self::Future;
+    fn map_err(&self, err: Error, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
 macro_rules! define_generic_handler ({ $($param:ident)* } => {
@@ -90,25 +86,23 @@ macro_rules! define_generic_handler ({ $($param:ident)* } => {
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn call(&self, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> + Send {
             (self)($($param,)*)
         }
     }
-    impl<Func, Fut: Send, $($param,)*> MapErrHandler<($($param,)*)> for Func
+    impl<Func, Fut: Send, $($param,)*> MapErr<($($param,)*)> for Func
     where
         Func: Fn(Error, $($param,)*) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
     {
         type Output = Fut::Output;
-        type Future = Fut;
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, err: Error, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn map_err(&self, err: Error, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
             (self)(err, $($param,)*)
         }
     }
@@ -128,7 +122,7 @@ define_generic_handler! { T1 T2 T3 T4 T5 T6 T7 T8 T9 T10 }
 
 #[cfg(test)]
 mod tests {
-    use super::{GenericHandler, MapErrHandler};
+    use super::{GenericHandler, MapErr};
     use crate::error::Error;
 
     #[tokio::test]
@@ -144,7 +138,7 @@ mod tests {
         let handler = |err: Error, code: u16| async move { (err.status.as_u16(), code) };
         let err = Error::client_error("bad");
 
-        let result = MapErrHandler::call(&handler, err, (42,)).await;
+        let result = MapErr::map_err(&handler, err, (42,)).await;
         assert_eq!(result, (400, 42));
     }
 }

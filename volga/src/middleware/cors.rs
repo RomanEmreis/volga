@@ -3,11 +3,62 @@
 //! Middleware that applies CORS headers for requests
 
 use crate::{
-    App, HttpResponse,
+    App, HttpResponse, HttpResult,
     headers::{ACCESS_CONTROL_REQUEST_METHOD, ORIGIN},
-    http::{HttpBody, Method, StatusCode},
+    http::{HttpBody, Method, StatusCode, cors::CorsHeaders},
+    middleware::{HttpContext, Middleware, NextFn},
 };
 use hyper::Response;
+use std::sync::Arc;
+
+struct Cors {
+    default_cors: Option<Arc<CorsHeaders>>,
+}
+
+impl Middleware for Cors {
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static {
+        let default_cors = self.default_cors.clone();
+        async move {
+            // Resolve effective policy (Route > Group > Default)
+            let Some(cors) = ctx.resolve_cors(default_cors.as_ref()) else {
+                return next(ctx).await;
+            };
+
+            let request = ctx.request();
+            let method = request.method();
+
+            // Preflight is only possible for OPTIONS
+            if method == Method::OPTIONS {
+                let origin = request.headers().get(&ORIGIN);
+                let acrm = request
+                    .headers()
+                    .get(ACCESS_CONTROL_REQUEST_METHOD)
+                    .and_then(|v| Method::from_bytes(v.as_bytes()).ok());
+
+                if origin.is_some() && acrm.is_some() {
+                    let mut response = Response::new(HttpBody::empty());
+                    *response.status_mut() = StatusCode::NO_CONTENT;
+
+                    cors.apply_preflight_response(response.headers_mut(), origin.cloned());
+
+                    return Ok(HttpResponse::from_inner(response));
+                }
+
+                // Not a valid preflight => fall through to user OPTIONS handler
+            }
+
+            let origin = request.headers().get(&ORIGIN).cloned();
+            let mut response = next(ctx).await?;
+            cors.apply_normal_response(response.headers_mut(), origin);
+
+            Ok(response)
+        }
+    }
+}
 
 impl App {
     /// Adds CORS middleware to your web server's pipeline to allow cross-domain requests.
@@ -38,44 +89,7 @@ impl App {
 
         let default_cors = self.cors.get_default().cloned();
 
-        self.wrap(move |ctx, next| {
-            let default_cors = default_cors.clone();
-            async move {
-                // Resolve effective policy (Route > Group > Default)
-                let Some(cors) = ctx.resolve_cors(default_cors.as_ref()) else {
-                    return next(ctx).await;
-                };
-
-                let request = ctx.request();
-                let method = request.method();
-
-                // Preflight is only possible for OPTIONS
-                if method == Method::OPTIONS {
-                    let origin = request.headers().get(&ORIGIN);
-                    let acrm = request
-                        .headers()
-                        .get(ACCESS_CONTROL_REQUEST_METHOD)
-                        .and_then(|v| Method::from_bytes(v.as_bytes()).ok());
-
-                    if origin.is_some() && acrm.is_some() {
-                        let mut response = Response::new(HttpBody::empty());
-                        *response.status_mut() = StatusCode::NO_CONTENT;
-
-                        cors.apply_preflight_response(response.headers_mut(), origin.cloned());
-
-                        return Ok(HttpResponse::from_inner(response));
-                    }
-
-                    // Not a valid preflight => fall through to user OPTIONS handler
-                }
-
-                let origin = request.headers().get(&ORIGIN).cloned();
-                let mut response = next(ctx).await?;
-                cors.apply_normal_response(response.headers_mut(), origin);
-
-                Ok(response)
-            }
-        });
+        self.attach(Cors { default_cors });
         self
     }
 }

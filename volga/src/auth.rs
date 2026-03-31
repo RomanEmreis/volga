@@ -3,7 +3,7 @@
 #[cfg(feature = "jwt-auth")]
 use {
     crate::headers::{CACHE_CONTROL, HeaderValue, WWW_AUTHENTICATE, cache_control::NO_STORE},
-    crate::middleware::{HttpContext, NextFn},
+    crate::middleware::{HttpContext, Middleware, NextFn},
     crate::{
         App, HttpResult,
         error::Error,
@@ -170,8 +170,7 @@ impl App {
         authorizer: Authorizer<C>,
     ) -> &mut Self {
         self.ensure_bearer_auth_configured();
-        let authorizer = Arc::new(authorizer);
-        self.wrap(move |ctx, next| authorize_impl(authorizer.clone(), ctx, next))
+        self.attach(Authorize::new(authorizer))
     }
 
     fn ensure_bearer_auth_configured(&self) {
@@ -217,8 +216,7 @@ impl<'a> Route<'a> {
         authorizer: Authorizer<C>,
     ) -> Self {
         self.ensure_bearer_auth_configured();
-        let authorizer = Arc::new(authorizer);
-        self.wrap(move |ctx, next| authorize_impl(authorizer.clone(), ctx, next))
+        self.attach(Authorize::new(authorizer))
     }
 }
 
@@ -255,8 +253,42 @@ impl<'a> RouteGroup<'a> {
         authorizer: Authorizer<C>,
     ) -> &mut Self {
         self.app.ensure_bearer_auth_configured();
-        let authorizer = Arc::new(authorizer);
-        self.wrap(move |ctx, next| authorize_impl(authorizer.clone(), ctx, next))
+        self.attach(Authorize::new(authorizer))
+    }
+}
+
+#[cfg(feature = "jwt-auth")]
+struct Authorize<C>
+where
+    C: AuthClaims + Send + Sync + 'static,
+{
+    authorizer: Arc<Authorizer<C>>,
+}
+
+#[cfg(feature = "jwt-auth")]
+impl<C> Authorize<C>
+where
+    C: AuthClaims + Send + Sync + 'static,
+{
+    fn new(a: Authorizer<C>) -> Self {
+        Self {
+            authorizer: Arc::new(a),
+        }
+    }
+}
+
+#[cfg(feature = "jwt-auth")]
+impl<C> Middleware for Authorize<C>
+where
+    C: AuthClaims + Send + Sync + 'static,
+{
+    #[inline]
+    fn call(
+        &self,
+        ctx: HttpContext,
+        next: NextFn,
+    ) -> impl Future<Output = HttpResult> + Send + 'static {
+        authorize_impl(Arc::clone(&self.authorizer), ctx, next)
     }
 }
 

@@ -2,21 +2,18 @@
 
 use crate::{
     App, HttpResult,
-    http::{
-        FilterResult, FromRequestRef, GenericHandler, IntoResponse, MapErrHandler,
-        request::IntoTapResult,
-    },
+    http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult},
     not_found,
     routing::{Route, RouteGroup},
 };
 use futures_util::future::BoxFuture;
 use make_fn::*;
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(feature = "di")]
 use crate::di::FromContainer;
 
-pub use handler::{MapOkHandler, MiddlewareHandler, Next, TapReqHandler};
+pub use handler::{Filter, MapOk, Middleware, Next, TapReq, With};
 pub use http_context::HttpContext;
 pub(crate) use make_fn::from_handler;
 
@@ -107,7 +104,10 @@ impl Middlewares {
 
 /// Middleware specific impl
 impl App {
-    /// Adds a middleware handler to the application request pipeline
+    /// Wraps the application request pipeline with an inline middleware closure.
+    ///
+    /// `wrap` is ideal for simple inline middleware.
+    /// For reusable or parameterized middleware types, use [`attach`](Self::attach).
     ///
     /// # Examples
     /// ```no_run
@@ -157,6 +157,106 @@ impl App {
         self
     }
 
+    /// Attaches a middleware to the application request pipeline.
+    ///
+    /// Unlike [`wrap`](Self::wrap), which is optimized for inline closures,
+    /// `attach` is intended for reusable and parameterized middleware types.
+    ///
+    /// This allows defining middleware as structs with configuration and state,
+    /// similar to middleware patterns found in other ecosystems.
+    ///
+    /// # Parameterized middleware
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, Middleware}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.attach(Timeout {
+    ///     duration: Duration::from_secs(1),
+    /// });
+    ///# app.run().await
+    ///# }
+    ///
+    /// struct Timeout {
+    ///     duration: Duration,
+    /// }
+    ///
+    /// impl Middleware for Timeout {
+    ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
+    ///         let duration = self.duration;
+    ///         async move {
+    ///             tokio::time::sleep(duration).await;
+    ///             next(ctx).await
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Closure middleware
+    /// `attach` also accepts closures, but type annotations are required:
+    ///
+    /// ```no_run
+    /// use volga::{App, middleware::{HttpContext, NextFn}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.attach(|ctx: HttpContext, next: NextFn| async move {
+    ///     next(ctx).await
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    ///
+    /// For simpler inline middleware without type annotations,
+    /// prefer [`wrap`](Self::wrap).
+    pub fn attach<F>(&mut self, middleware: F) -> &mut Self
+    where
+        F: Middleware,
+    {
+        self.pipeline.middlewares_mut().add(make_fn(middleware));
+        self
+    }
+
+    /// Adds a filter middleware handler for a request pipeline that would return
+    /// either `bool`, [`Result`] or [`FilterResult`]
+    /// and breaks the middleware chain if it's a `false` or [`Err`] values
+    ///
+    /// > **Note:** [`Path`] and [`NamedPath`] extractors are not meaningful in a global
+    /// > filter context since they depend on route-specific parameters. Use
+    /// > them only when registering a filter for a specific route.
+    /// > Attempting to extract route parameters globally will result in an
+    /// > extraction error for routes that don't define those parameters.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, headers::HttpHeaders};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.filter(|headers: HttpHeaders| async move {
+    ///     headers.get_raw("x-api-key").is_some()
+    /// });
+    ///
+    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn filter<F, Args>(&mut self, filter: F) -> &mut Self
+    where
+        F: Filter<Args>,
+        Args: FromRequestRef + Send + 'static,
+    {
+        self.pipeline.middlewares_mut().add(make_filter_fn(filter));
+        self
+    }
+
     /// Adds a middleware called when [`HttpResult`] is [`Ok`]
     ///
     /// # Example
@@ -183,7 +283,7 @@ impl App {
     /// ```
     pub fn map_ok<F, R, Args>(&mut self, map: F) -> &mut Self
     where
-        F: MapOkHandler<Args, Output = R>,
+        F: MapOk<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -235,7 +335,7 @@ impl App {
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Args, Output = R>,
+        F: TapReq<Args, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
     {
@@ -287,7 +387,7 @@ impl App {
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Output = R>,
+        F: TapReq<Output = R>,
         R: IntoTapResult,
     {
         self.pipeline.middlewares_mut().add(make_tap_req_fn(map));
@@ -318,7 +418,7 @@ impl App {
     /// ```
     pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
     where
-        F: MiddlewareHandler<Args, Output = R>,
+        F: With<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -331,7 +431,7 @@ impl App {
     /// Registers default middleware
     pub(super) fn use_endpoints(&mut self) {
         if self.pipeline.has_middleware_pipeline() {
-            self.wrap(|ctx, _| async move { ctx.execute().await });
+            self.wrap(|ctx: HttpContext, _: NextFn| async move { ctx.execute().await });
         }
     }
 }
@@ -364,6 +464,74 @@ impl<'a> Route<'a> {
         self.map_middleware(make_fn(middleware))
     }
 
+    /// Attaches a middleware to this route request pipeline.
+    ///
+    /// Unlike [`wrap`](Self::wrap), which is optimized for inline closures,
+    /// `attach` is intended for reusable and parameterized middleware types.
+    ///
+    /// This allows defining middleware as structs with configuration and state,
+    /// similar to middleware patterns found in other ecosystems.
+    ///
+    /// # Parameterized middleware
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, Middleware}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app
+    ///     .map_get("/hello", || async { "Hello, World!" })
+    ///     .attach(Timeout {
+    ///         duration: Duration::from_secs(1),
+    ///     });
+    ///# app.run().await
+    ///# }
+    ///
+    /// struct Timeout {
+    ///     duration: Duration,
+    /// }
+    ///
+    /// impl Middleware for Timeout {
+    ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
+    ///         let duration = self.duration;
+    ///         async move {
+    ///             tokio::time::sleep(duration).await;
+    ///             next(ctx).await
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Closure middleware
+    /// `attach` also accepts closures, but type annotations are required:
+    ///
+    /// ```no_run
+    /// use volga::{App, middleware::{HttpContext, NextFn}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app
+    ///     .map_get("/hello", || async { "Hello, World!" })
+    ///     .attach(|ctx: HttpContext, next: NextFn| async move {
+    ///         next(ctx).await
+    ///     });
+    ///# app.run().await
+    ///# }
+    /// ```
+    ///
+    /// For simpler inline middleware without type annotations,
+    /// prefer [`wrap`](Self::wrap).
+    pub fn attach<F>(self, middleware: F) -> Self
+    where
+        F: Middleware,
+    {
+        self.map_middleware(make_fn(middleware))
+    }
+
     /// Adds a filter middleware handler for this route that would return
     /// either `bool`, [`Result`] or [`FilterResult`]
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
@@ -383,10 +551,9 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn filter<F, R, Args>(self, filter: F) -> Self
+    pub fn filter<F, Args>(self, filter: F) -> Self
     where
-        F: GenericHandler<Args, Output = R>,
-        R: Into<FilterResult> + 'static,
+        F: Filter<Args>,
         Args: FromRequestRef + Send + 'static,
     {
         let filter_fn = make_filter_fn(filter);
@@ -419,7 +586,7 @@ impl<'a> Route<'a> {
     /// ```
     pub fn map_ok<F, R, Args>(self, map: F) -> Self
     where
-        F: MapOkHandler<Args, Output = R>,
+        F: MapOk<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -449,7 +616,7 @@ impl<'a> Route<'a> {
     /// ```
     pub fn map_err<F, R, Args>(self, map: F) -> Self
     where
-        F: MapErrHandler<Args, Output = R>,
+        F: MapErr<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -501,7 +668,7 @@ impl<'a> Route<'a> {
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(self, map: F) -> Self
     where
-        F: TapReqHandler<Args, Output = R>,
+        F: TapReq<Args, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
     {
@@ -553,7 +720,7 @@ impl<'a> Route<'a> {
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(self, map: F) -> Self
     where
-        F: TapReqHandler<Output = R>,
+        F: TapReq<Output = R>,
         R: IntoTapResult,
     {
         let map_err_fn = make_tap_req_fn(map);
@@ -584,7 +751,7 @@ impl<'a> Route<'a> {
     /// ```
     pub fn with<F, R, Args>(self, middleware: F) -> Self
     where
-        F: MiddlewareHandler<Args, Output = R>,
+        F: With<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -630,20 +797,99 @@ impl<'a> RouteGroup<'a> {
         self
     }
 
+    /// Attaches a middleware to this route group request pipeline.
+    ///
+    /// Unlike [`wrap`](Self::wrap), which is optimized for inline closures,
+    /// `attach` is intended for reusable and parameterized middleware types.
+    ///
+    /// This allows defining middleware as structs with configuration and state,
+    /// similar to middleware patterns found in other ecosystems.
+    ///
+    /// # Parameterized middleware
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{App, HttpResult, middleware::{HttpContext, NextFn, Middleware}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.group("/hello", |api| {
+    ///     api.attach(Timeout {
+    ///         duration: Duration::from_secs(1),
+    ///     });
+    ///     api.map_get("/world", || async { "Hello, World!" });
+    /// });
+    ///# app.run().await
+    ///# }
+    ///
+    /// struct Timeout {
+    ///     duration: Duration,
+    /// }
+    ///
+    /// impl Middleware for Timeout {
+    ///     fn call(&self, ctx: HttpContext, next: NextFn) -> impl Future<Output = HttpResult> + 'static {
+    ///         let duration = self.duration;
+    ///         async move {
+    ///             tokio::time::sleep(duration).await;
+    ///             next(ctx).await
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Closure middleware
+    /// `attach` also accepts closures, but type annotations are required:
+    ///
+    /// ```no_run
+    /// use volga::{App, middleware::{HttpContext, NextFn}};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.group("/hello", |api| {
+    ///     api.attach(|ctx: HttpContext, next: NextFn| async move {
+    ///         next(ctx).await
+    ///     });
+    ///     api.map_get("/world", || async { "Hello, World!" });
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    ///
+    /// For simpler inline middleware without type annotations,
+    /// prefer [`wrap`](Self::wrap).
+    pub fn attach<F>(&mut self, middleware: F) -> &mut Self
+    where
+        F: Middleware,
+    {
+        self.middleware.push(make_fn(middleware));
+        self
+    }
+
     /// Adds a filter middleware handler for a group of routes that would return
     /// either `bool`, [`Result`] or [`FilterResult`]
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
+    /// > **Note:** [`Path`] and [`NamedPath`] extractors are not meaningful in a
+    /// > route group filter context since they depend on route-specific parameters. Use
+    /// > them only when registering a filter for a specific route.
+    /// > Attempting to extract route parameters globally will result in an
+    /// > extraction error for routes that don't define those parameters.
+    ///
     /// # Example
     /// ```no_run
-    /// use volga::{App, Path};
+    /// use volga::{App, headers::HttpHeaders};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     ///
     /// app.group("/positive", |api| {
-    ///     api.filter(|Path((x, y)): Path<(i32, i32)>| async move { x > 0 && y > 0 });
+    ///     api.filter(|headers: HttpHeaders| async move {
+    ///         headers.get_raw("x-api-key").is_some()
+    ///     });
     ///
     ///     api.map_get("/sum", |x: i32, y: i32| async move { x + y });
     ///     api.map_get("/mul", |x: i32, y: i32| async move { x * y });
@@ -651,10 +897,9 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn filter<F, R, Args>(&mut self, filter: F) -> &mut Self
+    pub fn filter<F, Args>(&mut self, filter: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = R>,
-        R: Into<FilterResult> + 'static,
+        F: Filter<Args>,
         Args: FromRequestRef + Send + 'static,
     {
         let filter_fn = make_filter_fn(filter);
@@ -690,7 +935,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     pub fn map_ok<F, R, Args>(&mut self, map: F) -> &mut Self
     where
-        F: MapOkHandler<Args, Output = R>,
+        F: MapOk<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -723,7 +968,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     pub fn map_err<F, R, Args>(&mut self, map: F) -> &mut Self
     where
-        F: MapErrHandler<Args, Output = R>,
+        F: MapErr<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
@@ -778,7 +1023,7 @@ impl<'a> RouteGroup<'a> {
     #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Args, Output = R>,
+        F: TapReq<Args, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
     {
@@ -833,7 +1078,7 @@ impl<'a> RouteGroup<'a> {
     #[cfg(not(feature = "di"))]
     pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
     where
-        F: TapReqHandler<Output = R>,
+        F: TapReq<Output = R>,
         R: IntoTapResult,
     {
         let tap_req_fn = make_tap_req_fn(map);
@@ -869,7 +1114,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
     where
-        F: MiddlewareHandler<Args, Output = R>,
+        F: With<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {

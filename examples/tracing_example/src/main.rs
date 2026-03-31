@@ -6,7 +6,12 @@
 
 use tracing::{error, info, trace};
 use tracing_subscriber::prelude::*;
-use volga::{App, error::Error, status};
+use volga::{
+    App,
+    error::Error,
+    middleware::{HttpContext, NextFn},
+    status,
+};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -26,7 +31,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     // Middleware will be in the request span scope
-    app.wrap(|ctx, next| async move {
+    app.attach(|ctx: HttpContext, next: NextFn| async move {
         trace!("trace middleware");
         next(ctx).await
     });

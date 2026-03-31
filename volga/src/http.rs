@@ -17,7 +17,7 @@ pub use endpoints::{
         FromRawRequest, FromRequest, FromRequestParts, FromRequestRef, byte_stream::IntoByteResult,
         sse,
     },
-    handlers::{GenericHandler, MapErrHandler},
+    handlers::{GenericHandler, MapErr},
 };
 pub use request::HttpRequest;
 
