@@ -20,6 +20,11 @@ use tokio::{
     sync::{Semaphore, watch},
 };
 
+#[cfg(unix)]
+use tokio::signal::unix::{SignalKind, signal as unix_signal};
+#[cfg(windows)]
+use tokio::signal::windows;
+
 #[cfg(feature = "rate-limiting")]
 use {
     crate::rate_limiting::GlobalRateLimiter,
@@ -793,7 +798,7 @@ impl App {
     #[inline]
     fn shutdown_signal(shutdown_rx: watch::Receiver<()>) {
         tokio::spawn(async move {
-            match signal::ctrl_c().await {
+            match Self::wait_for_shutdown_signal().await {
                 Ok(_) => (),
                 #[cfg(feature = "tracing")]
                 Err(err) => tracing::error!("unable to listen for shutdown signal: {err:#}"),
@@ -804,6 +809,41 @@ impl App {
             tracing::trace!("shutdown signal received, not accepting new requests");
             drop(shutdown_rx);
         });
+    }
+
+    #[inline]
+    async fn wait_for_shutdown_signal() -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            let mut terminate = unix_signal(SignalKind::terminate())?;
+
+            tokio::select! {
+                result = signal::ctrl_c() => result,
+                _ = terminate.recv() => Ok(()),
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            #[cfg(windows)]
+            {
+                let mut ctrl_break = windows::ctrl_break()?;
+                let mut ctrl_close = windows::ctrl_close()?;
+                let mut ctrl_shutdown = windows::ctrl_shutdown()?;
+
+                tokio::select! {
+                    result = signal::ctrl_c() => result,
+                    _ = ctrl_break.recv() => Ok(()),
+                    _ = ctrl_close.recv() => Ok(()),
+                    _ = ctrl_shutdown.recv() => Ok(()),
+                }
+            }
+
+            #[cfg(not(windows))]
+            {
+                signal::ctrl_c().await
+            }
+        }
     }
 
     #[inline]
