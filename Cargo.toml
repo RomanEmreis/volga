@@ -5,7 +5,7 @@ exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.8"
+version = "0.8.9"
 license = "MIT"
 edition = "2024"
 rust-version = "1.90.0"
@@ -21,11 +21,11 @@ categories = [
 ]
 
 [workspace.dependencies]
-volga-dev-cert    = { path = "volga-dev-cert",    version = "0.8.8" }
-volga-di          = { path = "volga-di",          version = "0.8.8" }
-volga-macros      = { path = "volga-macros",      version = "0.8.8" }
-volga-open-api    = { path = "volga-open-api",    version = "0.8.8" }
-volga-rate-limiter = { path = "volga-rate-limiter", version = "0.8.8" }
+volga-dev-cert    = { path = "volga-dev-cert",    version = "0.8.9" }
+volga-di          = { path = "volga-di",          version = "0.8.9" }
+volga-macros      = { path = "volga-macros",      version = "0.8.9" }
+volga-open-api    = { path = "volga-open-api",    version = "0.8.9" }
+volga-rate-limiter = { path = "volga-rate-limiter", version = "0.8.9" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
