@@ -48,7 +48,7 @@ async fn main() -> std::io::Result<()> {
                 match msg {
                     WsEvent::Data(msg) => tracing::info!("received: {msg}; msg #{value}"),
                     WsEvent::Close(frame) => tracing::info!("close: {frame:?}"),
-                    _ => ()
+                    _ => (),
                 }
             }
         });

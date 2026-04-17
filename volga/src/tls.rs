@@ -1086,10 +1086,7 @@ mod tests {
         let hsts_header = HstsHeader::new(hsts_config);
 
         assert_eq!(hsts_header.exclude_hosts, &["www.example.com"]);
-        assert_eq!(
-            hsts_header.inner,
-            "max-age=2592000"
-        );
+        assert_eq!(hsts_header.inner, "max-age=2592000");
     }
 
     #[test]
