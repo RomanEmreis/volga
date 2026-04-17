@@ -100,9 +100,12 @@ http1 = ["dep:hyper", "hyper?/http1", "dep:hyper-util", "hyper-util?/http1", "de
 http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2", "dep:httpdate"]
 
 auth = ["basic-auth", "jwt-auth"]
+auth-full = ["auth", "jwt-derive"]
 basic-auth = ["dep:base64", "dep:subtle", "middleware"]
+jwt-auth-full = ["jwt-auth", "jwt-derive"]
 jwt-auth = ["dep:jsonwebtoken", "middleware"]
-jwt-auth-full = ["jwt-auth", "dep:volga-macros", "volga-macros?/jwt-auth-derive"]
+jwt-derive = ["dep:volga-macros", "volga-macros?/jwt-auth-derive"]
+
 dev-cert = ["dep:volga-dev-cert"]
 di = ["dep:volga-di"]
 macros = ["dep:volga-macros"]
@@ -116,8 +119,9 @@ tls = ["dep:tokio-rustls", "tokio-rustls?/tls12", "tokio-rustls?/aws-lc-rs"]
 tracing = ["dep:tracing"]
 ws = ["dep:sha1", "dep:base64", "dep:tokio-tungstenite"]
 
-cookie-full = ["cookie", "private-cookie", "signed-cookie"]
+cookie-full = ["cookie", "cookie-secure"]
 cookie = ["dep:cookie"]
+cookie-secure = ["private-cookie", "signed-cookie"]
 private-cookie = ["di", "dep:cookie", "cookie?/private"]
 signed-cookie = ["di", "dep:cookie", "cookie?/signed"]
 

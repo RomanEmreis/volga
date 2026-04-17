@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 * Updated stale MSRV in lib.rs
 * Updated crate description for `volga-rate-limiter`
 
+## Breaking Changes
+* Header mutation methods now return `&mut Self` (was `Header<T>`/`()`).
+* `append_header()` is now infallible and no longer returns Result.
+* Changed visibility of `RESPONSE_ERROR` and `SERVER_NAME` constants.
+* Changed visibility of `Error::status` and `Error::instance` fields, now these data can be fetched by methods: `Error::status()`, `Error::instance()`
+
 # 0.8.9
 
 ## Added

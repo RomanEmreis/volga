@@ -147,14 +147,14 @@ impl HttpResponse {
     ///
     /// This method always overwrites previous values.
     #[inline]
-    pub fn insert_header<T>(&mut self, header: Header<T>) -> Header<T>
+    pub fn insert_header<T>(&mut self, header: Header<T>) -> &mut Self
     where
         T: FromHeaders,
     {
         self.inner
             .headers_mut()
             .insert(header.name(), header.value().clone());
-        header
+        self
     }
 
     /// Attempts to insert the header into the response, replacing any existing
@@ -165,7 +165,7 @@ impl HttpResponse {
     pub fn try_insert_header<T>(
         &mut self,
         header: impl TryInto<Header<T>, Error = Error>,
-    ) -> Result<Header<T>, Error>
+    ) -> Result<&mut Self, Error>
     where
         T: FromHeaders,
     {
@@ -176,19 +176,19 @@ impl HttpResponse {
     /// Inserts the raw header into the response, replacing any existing values
     /// with the same header name.
     #[inline]
-    pub fn insert_raw_header(&mut self, name: HeaderName, value: HeaderValue) {
+    pub fn insert_raw_header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
         self.inner.headers_mut().insert(name, value);
+        self
     }
 
     /// Attempts to insert the raw header into the response, replacing any existing values
     /// with the same header name.
     #[inline]
-    pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
+    pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<&mut Self, Error> {
         let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
         let value = HeaderValue::from_str(value).map_err(Error::from)?;
 
-        self.insert_raw_header(name, value);
-        Ok(())
+        Ok(self.insert_raw_header(name, value))
     }
 
     /// Appends a new value for the given header name.
@@ -196,14 +196,14 @@ impl HttpResponse {
     /// Existing values with the same name are preserved.
     /// Multiple values for the same header may be present.
     #[inline]
-    pub fn append_header<T>(&mut self, header: Header<T>) -> Result<Header<T>, Error>
+    pub fn append_header<T>(&mut self, header: Header<T>) -> &mut Self
     where
         T: FromHeaders,
     {
         self.inner
             .headers_mut()
             .append(header.name(), header.value().clone());
-        Ok(header)
+        self
     }
 
     /// Attempts to append a new value for the given header name.
@@ -213,28 +213,28 @@ impl HttpResponse {
     pub fn try_append_header<T>(
         &mut self,
         header: impl TryInto<Header<T>, Error = Error>,
-    ) -> Result<Header<T>, Error>
+    ) -> Result<&mut Self, Error>
     where
         T: FromHeaders,
     {
         let header = header.try_into()?;
-        self.append_header(header)
+        Ok(self.append_header(header))
     }
 
     /// Appends a new raw value for the given raw header name.
     #[inline]
-    pub fn append_raw_header(&mut self, name: HeaderName, value: HeaderValue) {
+    pub fn append_raw_header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
         self.inner.headers_mut().append(name, value);
+        self
     }
 
     /// Attempts to append a new raw value for the given header name.
     #[inline]
-    pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
+    pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<&mut Self, Error> {
         let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
         let value = HeaderValue::from_str(value).map_err(Error::from)?;
 
-        self.append_raw_header(name, value);
-        Ok(())
+        Ok(self.append_raw_header(name, value))
     }
 
     /// Removes all values for the given header name.

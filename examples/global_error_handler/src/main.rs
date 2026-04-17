@@ -24,7 +24,7 @@ async fn main() -> std::io::Result<()> {
     // Enabling global error handler
     app.map_err(|error: volga::error::Error| async move {
         tracing::error!("{:?}", error);
-        status!(error.status.as_u16(), "{error}")
+        status!(error.status().as_u16(), "{error}")
     });
 
     app.run().await
