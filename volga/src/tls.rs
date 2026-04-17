@@ -44,8 +44,8 @@ use hyper_util::rt::TokioExecutor;
 use hyper::server::conn::http1;
 
 /// Represents local development certificates mode
-#[cfg(feature = "dev-cert")]
 #[derive(Debug)]
+#[cfg(feature = "dev-cert")]
 pub enum DevCertMode {
     /// Always creates self-signed certificates if they're missing
     Auto,

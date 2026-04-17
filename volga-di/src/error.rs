@@ -3,6 +3,7 @@
 use std::fmt::{Display, Formatter};
 
 /// Describes dependency injection error
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub enum Error {
     /// Indicates that the DI container is missing or not configured

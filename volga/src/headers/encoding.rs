@@ -5,6 +5,7 @@ use super::{Error, HeaderValue, quality::Ranked};
 use std::{fmt, str::FromStr};
 
 /// Represents encoding formats
+#[non_exhaustive]
 #[derive(Hash, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Encoding {
     /// Wildcard (`*`) encoding

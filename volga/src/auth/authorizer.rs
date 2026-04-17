@@ -90,6 +90,7 @@ pub type ClaimsValidator<C> = dyn Fn(&C) -> bool + Send + Sync + 'static;
 /// assert!(access.validate(&MyClaims { role: "editor".to_string() }));
 /// assert!(access.validate(&MyClaims { role: "contributor".to_string() }));
 /// ```
+#[non_exhaustive]
 pub enum Authorizer<C: AuthClaims> {
     /// Allows access if the user's role or roles match any of the required roles.
     ///
