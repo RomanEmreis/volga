@@ -68,12 +68,13 @@ impl HttpResponse {
     ///
     /// # Example
     /// ```no_run
-    /// use volga::{App, HttpRequest};
+    /// use volga::{App, HttpResponse};
     ///
     /// let mut app = App::new();
     ///
-    /// app.map_get("/", |req: HttpRequest| async move {
-    ///     assert!(req.headers().is_empty());
+    /// app.map_ok(|resp: HttpResponse| async move {
+    ///     assert!(resp.headers().is_empty());
+    ///     resp
     /// });
     /// ```
     #[inline]
@@ -81,25 +82,14 @@ impl HttpResponse {
         self.inner.headers()
     }
 
-    /// Returns a mutable reference to the associated extensions.
+    /// Returns a mutable reference to the associated HTTP header map.
     #[inline]
     #[allow(unused)]
     pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
         self.inner.headers_mut()
     }
 
-    /// Returns a reference to the associated HTTP method.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::{App, HttpRequest, http::Method};
-    ///
-    /// let mut app = App::new();
-    ///
-    /// app.map_get("/", |req: HttpRequest| async move {
-    ///     assert_eq!(*req.method(), Method::GET);
-    /// });
-    /// ```
+    /// Returns HTTP status code.
     #[inline]
     pub fn status(&self) -> StatusCode {
         self.inner.status()
@@ -190,7 +180,7 @@ impl HttpResponse {
         self.inner.headers_mut().insert(name, value);
     }
 
-    /// Attempts to inserts the raw header into the response, replacing any existing values
+    /// Attempts to insert the raw header into the response, replacing any existing values
     /// with the same header name.
     #[inline]
     pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
@@ -237,7 +227,7 @@ impl HttpResponse {
         self.inner.headers_mut().append(name, value);
     }
 
-    /// Attempts to append a new raww value for the given header name.
+    /// Attempts to append a new raw value for the given header name.
     #[inline]
     pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
         let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
@@ -327,7 +317,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_text_response_with_custom_headers() {
+    async fn it_creates_text_response_with_custom_headers() {
         let mut response = HttpResponse::builder()
             .status(400)
             .header_raw("x-api-key", "some api key")
@@ -347,7 +337,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_str_text_response_with_custom_headers() {
+    async fn it_creates_str_text_response_with_custom_headers() {
         let mut response = HttpResponse::builder()
             .status(200)
             .header_raw("x-api-key", "some api key")
@@ -367,7 +357,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_json_response_with_custom_headers() {
+    async fn it_creates_json_response_with_custom_headers() {
         let content = TestPayload {
             name: "test".into(),
         };

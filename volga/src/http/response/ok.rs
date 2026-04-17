@@ -637,7 +637,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_text_response_with_custom_headers() {
+    async fn it_creates_text_response_with_custom_headers() {
         let response = ok!("ok"; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),
@@ -659,7 +659,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_text_response_with_empty_custom_headers() {
+    async fn it_creates_text_response_with_empty_custom_headers() {
         #[allow(unused_mut)]
         let response = ok!("ok"; []);
 
@@ -678,7 +678,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_json_response_with_custom_headers() {
+    async fn it_creates_json_response_with_custom_headers() {
         let payload = TestPayload {
             name: "test".into(),
         };
@@ -703,7 +703,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_anonymous_json_response_with_custom_headers() {
+    async fn it_creates_anonymous_json_response_with_custom_headers() {
         let response = ok!({ "name": "test" }; [
             ("x-api-key", "some api key"),
             ("x-req-id", "some req id"),

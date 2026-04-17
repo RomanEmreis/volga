@@ -86,7 +86,7 @@ impl HttpRequestMut {
         self.inner.headers()
     }
 
-    /// Returns a mutable reference to the associated extensions.
+    /// Returns a mutable reference to the associated HTTP header map.
     #[inline]
     #[allow(unused)]
     pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
@@ -178,7 +178,7 @@ impl HttpRequestMut {
         self.inner.headers_mut().insert(name, value);
     }
 
-    /// Attempts to inserts the raw header into the request, replacing any existing values
+    /// Attempts to insert the raw header into the request, replacing any existing values
     /// with the same header name.
     #[inline]
     pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
@@ -225,7 +225,7 @@ impl HttpRequestMut {
         self.inner.headers_mut().append(name, value);
     }
 
-    /// Attempts to append a new raww value for the given header name.
+    /// Attempts to append a new raw value for the given header name.
     #[inline]
     pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
         let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;

@@ -332,7 +332,7 @@ impl CorsConfig {
     /// use volga::http::CorsConfig;
     ///
     /// let config = CorsConfig::default()
-    ///     .with_any_method();
+    ///     .without_max_age();
     /// ```
     pub fn without_max_age(mut self) -> Self {
         self.max_age = None;
