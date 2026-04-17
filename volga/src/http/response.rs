@@ -65,41 +65,19 @@ impl HttpResponse {
     }
 
     /// Returns a reference to the associated HTTP header map.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::{App, HttpRequest};
-    ///
-    /// let mut app = App::new();
-    ///
-    /// app.map_get("/", |req: HttpRequest| async move {
-    ///     assert!(req.headers().is_empty());
-    /// });
-    /// ```
     #[inline]
     pub fn headers(&self) -> &HeaderMap {
         self.inner.headers()
     }
 
-    /// Returns a mutable reference to the associated extensions.
+    /// Returns a mutable reference to the associated HTTP header map.
     #[inline]
     #[allow(unused)]
     pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
         self.inner.headers_mut()
     }
 
-    /// Returns a reference to the associated HTTP method.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::{App, HttpRequest, http::Method};
-    ///
-    /// let mut app = App::new();
-    ///
-    /// app.map_get("/", |req: HttpRequest| async move {
-    ///     assert_eq!(*req.method(), Method::GET);
-    /// });
-    /// ```
+    /// Returns HTTP status code.
     #[inline]
     pub fn status(&self) -> StatusCode {
         self.inner.status()
@@ -157,14 +135,14 @@ impl HttpResponse {
     ///
     /// This method always overwrites previous values.
     #[inline]
-    pub fn insert_header<T>(&mut self, header: Header<T>) -> Header<T>
+    pub fn insert_header<T>(&mut self, header: Header<T>) -> &mut Self
     where
         T: FromHeaders,
     {
         self.inner
             .headers_mut()
             .insert(header.name(), header.value().clone());
-        header
+        self
     }
 
     /// Attempts to insert the header into the response, replacing any existing
@@ -175,7 +153,7 @@ impl HttpResponse {
     pub fn try_insert_header<T>(
         &mut self,
         header: impl TryInto<Header<T>, Error = Error>,
-    ) -> Result<Header<T>, Error>
+    ) -> Result<&mut Self, Error>
     where
         T: FromHeaders,
     {
@@ -186,19 +164,19 @@ impl HttpResponse {
     /// Inserts the raw header into the response, replacing any existing values
     /// with the same header name.
     #[inline]
-    pub fn insert_raw_header(&mut self, name: HeaderName, value: HeaderValue) {
+    pub fn insert_raw_header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
         self.inner.headers_mut().insert(name, value);
+        self
     }
 
-    /// Attempts to inserts the raw header into the response, replacing any existing values
+    /// Attempts to insert the raw header into the response, replacing any existing values
     /// with the same header name.
     #[inline]
-    pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
+    pub fn try_insert_raw_header(&mut self, name: &str, value: &str) -> Result<&mut Self, Error> {
         let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
         let value = HeaderValue::from_str(value).map_err(Error::from)?;
 
-        self.insert_raw_header(name, value);
-        Ok(())
+        Ok(self.insert_raw_header(name, value))
     }
 
     /// Appends a new value for the given header name.
@@ -206,14 +184,14 @@ impl HttpResponse {
     /// Existing values with the same name are preserved.
     /// Multiple values for the same header may be present.
     #[inline]
-    pub fn append_header<T>(&mut self, header: Header<T>) -> Result<Header<T>, Error>
+    pub fn append_header<T>(&mut self, header: Header<T>) -> &mut Self
     where
         T: FromHeaders,
     {
         self.inner
             .headers_mut()
             .append(header.name(), header.value().clone());
-        Ok(header)
+        self
     }
 
     /// Attempts to append a new value for the given header name.
@@ -223,28 +201,28 @@ impl HttpResponse {
     pub fn try_append_header<T>(
         &mut self,
         header: impl TryInto<Header<T>, Error = Error>,
-    ) -> Result<Header<T>, Error>
+    ) -> Result<&mut Self, Error>
     where
         T: FromHeaders,
     {
         let header = header.try_into()?;
-        self.append_header(header)
+        Ok(self.append_header(header))
     }
 
     /// Appends a new raw value for the given raw header name.
     #[inline]
-    pub fn append_raw_header(&mut self, name: HeaderName, value: HeaderValue) {
+    pub fn append_raw_header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
         self.inner.headers_mut().append(name, value);
+        self
     }
 
-    /// Attempts to append a new raww value for the given header name.
+    /// Attempts to append a new raw value for the given header name.
     #[inline]
-    pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<(), Error> {
+    pub fn try_append_raw_header(&mut self, name: &str, value: &str) -> Result<&mut Self, Error> {
         let name = HeaderName::from_bytes(name.as_bytes()).map_err(Error::from)?;
         let value = HeaderValue::from_str(value).map_err(Error::from)?;
 
-        self.append_raw_header(name, value);
-        Ok(())
+        Ok(self.append_raw_header(name, value))
     }
 
     /// Removes all values for the given header name.
@@ -327,7 +305,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_text_response_with_custom_headers() {
+    async fn it_creates_text_response_with_custom_headers() {
         let mut response = HttpResponse::builder()
             .status(400)
             .header_raw("x-api-key", "some api key")
@@ -347,7 +325,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_str_text_response_with_custom_headers() {
+    async fn it_creates_str_text_response_with_custom_headers() {
         let mut response = HttpResponse::builder()
             .status(200)
             .header_raw("x-api-key", "some api key")
@@ -367,7 +345,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_creates_json_response_with_custom_headers() {
+    async fn it_creates_json_response_with_custom_headers() {
         let content = TestPayload {
             name: "test".into(),
         };

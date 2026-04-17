@@ -332,7 +332,7 @@ impl CorsConfig {
     /// use volga::http::CorsConfig;
     ///
     /// let config = CorsConfig::default()
-    ///     .with_any_method();
+    ///     .without_max_age();
     /// ```
     pub fn without_max_age(mut self) -> Self {
         self.max_age = None;
@@ -721,6 +721,7 @@ impl App {
     /// let app = App::new()
     ///     .set_cors(CorsConfig::default().with_any_origin())
     ///     .with_cors(|cors| cors
+    ///         .with_name("policy")
     ///         .with_any_method()
     ///         .with_any_header());
     /// ```
@@ -729,6 +730,30 @@ impl App {
         T: FnOnce(CorsConfig) -> CorsConfig,
     {
         self.set_cors(config(CorsConfig::default()))
+    }
+
+    /// Configures a web server with default CORS configuration
+    ///
+    /// Default: `None`
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// let app = App::new().with_default_cors();
+    /// ```
+    ///
+    /// If default (unnamed) CORS was already preconfigured, it does overwrite it
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::http::CorsConfig;
+    ///
+    /// let app = App::new()
+    ///     .set_cors(CorsConfig::default().with_any_origin())
+    ///     .with_default_cors();
+    /// ```
+    pub fn with_default_cors(self) -> Self {
+        self.set_cors(CorsConfig::default())
     }
 
     /// Configures a web server with specified CORS configuration
@@ -780,7 +805,7 @@ impl<'a> RouteGroup<'a> {
 
     /// Sets the default CORS policy for this route
     pub fn cors(&mut self) -> &mut Self {
-        self.cors = CorsOverride::Disabled;
+        self.cors = CorsOverride::Inherit;
         self
     }
 

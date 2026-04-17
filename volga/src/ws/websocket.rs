@@ -81,6 +81,7 @@ pub struct WsStream(SplitStream<WebSocketStream<TokioIo<Upgraded>>>);
 /// - [`WsEvent::Close`] indicates that the peer has initiated closing. After this
 ///   event, callers should stop reading and close the corresponding [`WsSink`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum WsEvent<T> {
     /// Application-level message deserialized from an incoming data frame.
     Data(T),

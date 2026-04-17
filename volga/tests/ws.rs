@@ -31,6 +31,7 @@ async fn it_works_with_split() {
                 match msg {
                     WsEvent::Data(msg) => write.send(msg).await.unwrap(),
                     WsEvent::Close(_frame) => write.close().await.unwrap(),
+                    _ => unreachable!(),
                 }
             }
         });
@@ -62,6 +63,7 @@ async fn it_works_with_custom_protocol() {
                             write.send(format!("[{protocol}]: {msg}")).await.unwrap()
                         }
                         WsEvent::Close(_frame) => write.close().await.unwrap(),
+                        _ => unreachable!(),
                     }
                 }
             })

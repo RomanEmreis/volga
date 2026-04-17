@@ -33,10 +33,10 @@ pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 #[derive(Debug)]
 pub struct Error {
     /// HTTP status code
-    pub status: StatusCode,
+    pub(crate) status: StatusCode,
 
     /// An instance where this error happened
-    pub instance: Option<String>,
+    pub(crate) instance: Option<String>,
 
     /// Inner error object
     pub(crate) inner: BoxError,
@@ -191,6 +191,18 @@ impl Error {
         }
     }
 
+    /// Returns HTTP status code of this error
+    #[inline]
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    /// Returns an instance where this error happened
+    #[inline]
+    pub fn instance(&self) -> Option<&str> {
+        self.instance.as_deref()
+    }
+
     /// Unwraps the inner error
     pub fn into_inner(self) -> BoxError {
         self.inner
@@ -309,7 +321,8 @@ mod tests {
         let err = Error::new("/api", "some error");
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.instance().unwrap(), "/api");
     }
 
     #[test]
@@ -318,7 +331,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_client_error());
-        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -327,7 +341,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(err.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -336,7 +351,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(err.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -345,7 +361,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(err.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -354,7 +371,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(err.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -363,7 +381,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(err.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -372,7 +391,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(err.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -381,7 +401,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_client_error());
-        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.status(), StatusCode::CONFLICT);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -390,7 +411,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_client_error());
-        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -399,7 +421,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_client_error());
-        assert_eq!(err.status, StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(err.status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -408,7 +431,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_client_error());
-        assert_eq!(err.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(err.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -417,7 +441,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_client_error());
-        assert_eq!(err.status, StatusCode::FORBIDDEN);
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -426,7 +451,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(err.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -435,7 +461,8 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_server_error());
-        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -473,7 +500,8 @@ mod tests {
         let err = Error::from(fmt_error);
 
         assert!(err.is_client_error());
-        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.instance(), None);
     }
 
     #[test]
@@ -482,6 +510,7 @@ mod tests {
         let err = Error::from(io_error);
 
         assert!(err.is_client_error());
-        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.instance(), None);
     }
 }

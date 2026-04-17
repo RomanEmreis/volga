@@ -1,6 +1,6 @@
 //! # Volga
 //!
-//! > Fast, Easy, and very flexible Web Framework for Rust based on [Tokio](https://tokio.rs/) runtime and [hyper](https://hyper.rs/) for fun and painless microservices crafting.
+//! > Fast, simple, and high-performance web framework for Rust, built on top of [Tokio](https://tokio.rs/) and [hyper](https://hyper.rs/).
 //!
 //! ## Features
 //! * Supports HTTP/1 and HTTP/2
@@ -9,7 +9,7 @@
 //! * Dependency Injection
 //! * WebSockets and WebSocket-over-HTTP/2
 //! * Full [Tokio](https://tokio.rs/) compatibility
-//! * Runs on stable Rust 1.80+
+//! * Runs on stable Rust 1.90+
 //!
 //! ## Example
 //! ```no_run
@@ -36,9 +36,6 @@ pub mod app;
 pub mod auth;
 #[cfg(feature = "config")]
 pub mod config;
-
-#[cfg(feature = "config")]
-pub use config::{Config, ConfigBuilder};
 
 #[cfg(feature = "di")]
 pub mod di;
@@ -80,8 +77,10 @@ pub use crate::http::{
         path::{NamedPath, Path},
         query::Query,
     },
-    response::builder::{RESPONSE_ERROR, SERVER_NAME},
 };
+
+#[cfg(feature = "config")]
+pub use config::{Config, ConfigBuilder};
 
 #[cfg(feature = "middleware")]
 pub use http::HttpRequestMut;

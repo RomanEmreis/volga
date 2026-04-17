@@ -353,8 +353,7 @@ impl App {
     /// - `limit` — a [`Limit<u32>`]:
     ///   - `Limit::Default` — uses the framework default (recommended)
     ///   - `Limit::Limited(n)` — enforces an explicit upper bound
-    ///   - `Limit::Unlimited` — treated as `u32::MAX` in production;
-    ///     in debug builds this will **panic** to catch misconfiguration early.
+    ///   - `Limit::Unlimited` — **panics** to catch misconfiguration early.
     pub fn with_max_header_list_size(mut self, size: Limit<usize>) -> Self {
         self.max_header_size = match size {
             Limit::Limited(size) => {
@@ -363,20 +362,9 @@ impl App {
             }
 
             Limit::Unlimited => {
-                #[cfg(debug_assertions)]
                 panic!(
                     "HTTP/2 max_header_list_size cannot be Unlimited; use Limit::Limited(u32) instead"
                 );
-
-                #[cfg(not(debug_assertions))]
-                {
-                    #[cfg(feature = "tracing")]
-                    tracing::warn!(
-                        "max_header_list_size set to Unlimited; using u32::MAX for production"
-                    );
-
-                    Limit::Limited(u32::MAX as usize)
-                }
             }
 
             Limit::Default => Limit::Default,

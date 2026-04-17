@@ -435,11 +435,46 @@ impl App {
         self
     }
 
-    /// Defines a list of trusted proxies used when extracting client IPs
-    /// for rate limiting. Forwarded headers are honored only if the
-    /// incoming connection is from one of these proxies.
+    /// Configures the list of trusted reverse proxies for client-IP resolution.
     ///
-    /// If an empty list is provided, forwarded headers will be ignored.
+    /// # Security
+    ///
+    /// This setting is **required** for [`by::ip()`] and [`ClientIp`] to honor
+    /// `Forwarded` (RFC 7239) or `X-Forwarded-For` headers. Without it, volga
+    /// uses the direct TCP peer address and ignores forwarded headers entirely —
+    /// this prevents IP-spoofing attacks where an attacker could bypass IP-based
+    /// rate limiting by setting `X-Forwarded-For: <arbitrary>`.
+    ///
+    /// When configured, volga walks the forwarded chain **right-to-left** and
+    /// returns the first hop whose address is **not** in this list. Headers are
+    /// only consulted if the direct peer is itself a trusted proxy — forwarded
+    /// values from untrusted peers are discarded.
+    ///
+    /// # When to set
+    ///
+    /// - Behind a reverse proxy (nginx, Caddy, Cloudflare, ALB) — configure
+    ///   the proxy's internal/egress IPs here.
+    /// - Direct-to-internet deployment — leave unset.
+    ///
+    /// Passing an empty iterator is equivalent to leaving it unset.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use std::net::{IpAddr, Ipv4Addr};
+    /// use volga::App;
+    ///
+    /// let app = App::new()
+    ///     .with_trusted_proxies([
+    ///         IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+    ///         IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+    ///     ]);
+    /// ```
+    ///
+    /// ## See also
+    ///
+    /// - [`by::ip`] — rate-limiting partition by client IP
+    /// - [`ClientIp`] — extractor that uses the same resolution logic
     pub fn with_trusted_proxies<I, T>(mut self, proxies: I) -> Self
     where
         I: IntoIterator<Item = T>,

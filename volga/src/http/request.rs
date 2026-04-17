@@ -81,7 +81,7 @@ impl HttpRequest {
         self.inner.headers()
     }
 
-    /// Returns a mutable reference to the associated extensions.
+    /// Returns a mutable reference to the associated HTTP header map.
     #[inline]
     #[allow(unused)]
     pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {

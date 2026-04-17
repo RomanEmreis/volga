@@ -182,10 +182,14 @@ impl RateLimitKeyExt for RateLimitKeySource {
 
 /// Uses the client IP address as a rate limiting partition key.
 ///
-/// The IP address is resolved in the following order:
-/// 1. The `Forwarded` header (RFC 7239)
-/// 2. The `X-Forwarded-For` header
-/// 3. The peer socket address as a fallback
+/// The IP address is resolved as follows:
+/// - If `App::with_trusted_proxies(...)` is configured and the direct peer
+///   is a trusted proxy, the first untrusted hop in `Forwarded` (RFC 7239)
+///   or `X-Forwarded-For` is used.
+/// - Otherwise, the peer socket address is used.
+///
+/// Forwarded headers are **never** trusted from untrusted peers to prevent
+/// IP-spoofing and rate-limit bypass.
 ///
 /// This is the most common strategy for global or unauthenticated rate limiting.
 ///

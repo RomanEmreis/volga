@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.0
+
+## Added
+* Added `#[non_exhaustive]` for `Authorizer<C>`, `Encoding`, `WsEvent<T>`
+* Added `TracingConfig::without_header()` that disables tracing HTTP header
+
+## Changed
+* `App::with_max_header_list_size(Limit::Unlimited)` now always panics as misconfiguration.
+* Security defaults changed
+
+## Fixed
+* `RouteGroup::cors` now correctly set `CorsOverride::Inherit` instead of disabling it.
+* Updated stale MSRV in lib.rs
+* Updated crate description for `volga-rate-limiter`
+
+## Breaking Changes
+* Header mutation methods now return `&mut Self` (was `Header<T>`/`()`).
+* `append_header()` is now infallible and no longer returns Result.
+* Changed visibility of `RESPONSE_ERROR` and `SERVER_NAME` constants.
+* Changed visibility of `Error::status` and `Error::instance` fields, now these data can be fetched by methods: `Error::status()`, `Error::instance()`
+
 # 0.8.9
 
 ## Added

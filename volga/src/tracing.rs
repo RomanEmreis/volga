@@ -58,6 +58,14 @@ impl TracingConfig {
         self
     }
 
+    /// Configures tracing to exclude the span id as an HTTP header
+    ///
+    /// Default: `false`
+    pub fn without_header(mut self) -> Self {
+        self.include_header = false;
+        self
+    }
+
     /// Configures tracing to use a specific HTTP header name if the `include_header` is set to `true`
     ///
     /// Default: `request-id`
@@ -154,6 +162,14 @@ mod tests {
         let tracing_config = TracingConfig::new().with_header();
 
         assert!(tracing_config.include_header);
+        assert_eq!(tracing_config.span_header_name, DEFAULT_SPAN_HEADER_NAME);
+    }
+
+    #[test]
+    fn it_creates_without_include_header() {
+        let tracing_config = TracingConfig::new().with_header().without_header();
+
+        assert!(!tracing_config.include_header);
         assert_eq!(tracing_config.span_header_name, DEFAULT_SPAN_HEADER_NAME);
     }
 
