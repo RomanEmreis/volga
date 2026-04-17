@@ -109,14 +109,17 @@ impl FromPayload for Basic {
 
 impl Basic {
     /// Validates username and password
+    #[inline]
     pub fn validate(&self, username: &str, password: &str) -> bool {
         let expected = format!("{username}:{password}");
         self.validate_base64(&STANDARD.encode(expected))
     }
 
     /// Validates credentials encoded in Base64
+    #[inline]
     pub fn validate_base64(&self, credentials: &str) -> bool {
-        *credentials == *self.0
+        use subtle::ConstantTimeEq;
+        credentials.as_bytes().ct_eq(self.0.as_bytes()).into()
     }
 }
 

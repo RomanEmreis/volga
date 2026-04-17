@@ -751,7 +751,7 @@ impl App {
     ///     .set_cors(CorsConfig::default().with_any_origin())
     ///     .with_default_cors();
     /// ```
-    pub fn with_default_cors<T>(self) -> Self {
+    pub fn with_default_cors(self) -> Self {
         self.set_cors(CorsConfig::default())
     }
 

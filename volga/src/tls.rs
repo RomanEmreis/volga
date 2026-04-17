@@ -187,8 +187,8 @@ impl Default for RedirectionConfig {
 impl Default for HstsConfig {
     fn default() -> Self {
         Self {
-            preload: true,
-            include_sub_domains: true,
+            preload: false,
+            include_sub_domains: false,
             max_age: Duration::from_secs(DEFAULT_MAX_AGE), // 30 days = 2,592,000 seconds
             exclude_hosts: Vec::new(),
         }
@@ -231,7 +231,7 @@ impl fmt::Display for HstsConfig {
 impl HstsConfig {
     /// Configures whether to set `preload` in HSTS header
     ///
-    /// Default value: `true`
+    /// Default value: `false`
     pub fn with_preload(mut self, preload: bool) -> Self {
         self.preload = preload;
         self
@@ -239,7 +239,7 @@ impl HstsConfig {
 
     /// Configures whether to set `includeSubDomains` in the HSTS header
     ///
-    /// Default: `true`
+    /// Default: `false`
     pub fn with_sub_domains(mut self, include: bool) -> Self {
         self.include_sub_domains = include;
         self
@@ -386,8 +386,8 @@ impl TlsConfig {
     /// If HSTS has already been preconfigured, it does not overwrite it
     ///
     /// Default values:
-    /// - preload: `true`
-    /// - include_sub_domains: `true`
+    /// - preload: `false`
+    /// - include_sub_domains: `false`
     /// - max-age: 30 days (2,592,000 seconds)
     /// - exclude_hosts: empty list
     ///
@@ -550,7 +550,6 @@ impl TlsConfig {
             #[cfg(feature = "http2")]
             b"h2".into(),
             b"http/1.1".into(),
-            b"http/1.0".into(),
         ];
 
         Ok(config)
@@ -654,8 +653,8 @@ impl App {
     /// If HSTS has already been preconfigured, it does not overwrite it
     ///
     /// Default values:
-    /// - preload: `true`
-    /// - include_sub_domains: `true`
+    /// - preload: `false`
+    /// - include_sub_domains: `false`
     /// - max-age: 30 days (2,592,000 seconds)
     /// - exclude_hosts: empty list
     ///
@@ -681,8 +680,8 @@ impl App {
     /// If the [`TlsConfig`] has been specified, it configures HSTS header
     ///
     /// Default values:
-    /// - preload: `true`
-    /// - include_sub_domains: `true`
+    /// - preload: `false`
+    /// - include_sub_domains: `false`
     /// - max-age: 30 days (2,592,000 seconds)
     /// - exclude_hosts: empty list
     ///
@@ -799,8 +798,8 @@ mod tests {
             tls_config.hsts_config.max_age,
             Duration::from_secs(DEFAULT_MAX_AGE)
         );
-        assert!(tls_config.hsts_config.preload);
-        assert!(tls_config.hsts_config.include_sub_domains);
+        assert!(!tls_config.hsts_config.preload);
+        assert!(!tls_config.hsts_config.include_sub_domains);
 
         assert!(!tls_config.https_redirection_config.enabled);
         assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
@@ -821,8 +820,8 @@ mod tests {
             tls_config.hsts_config.max_age,
             Duration::from_secs(DEFAULT_MAX_AGE)
         );
-        assert!(tls_config.hsts_config.preload);
-        assert!(tls_config.hsts_config.include_sub_domains);
+        assert!(!tls_config.hsts_config.preload);
+        assert!(!tls_config.hsts_config.include_sub_domains);
 
         assert!(!tls_config.https_redirection_config.enabled);
         assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
@@ -843,8 +842,8 @@ mod tests {
             tls_config.hsts_config.max_age,
             Duration::from_secs(DEFAULT_MAX_AGE)
         );
-        assert!(tls_config.hsts_config.preload);
-        assert!(tls_config.hsts_config.include_sub_domains);
+        assert!(!tls_config.hsts_config.preload);
+        assert!(!tls_config.hsts_config.include_sub_domains);
 
         assert!(!tls_config.https_redirection_config.enabled);
         assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
@@ -901,29 +900,7 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_preload() {
-        let tls_config = TlsConfig::from_pem("tls").with_hsts_preload(false);
-
-        let path = PathBuf::from("tls");
-
-        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
-        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
-        assert_eq!(tls_config.client_auth, ClientAuth::None);
-
-        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
-        assert_eq!(
-            tls_config.hsts_config.max_age,
-            Duration::from_secs(DEFAULT_MAX_AGE)
-        );
-        assert!(!tls_config.hsts_config.preload);
-        assert!(tls_config.hsts_config.include_sub_domains);
-
-        assert!(!tls_config.https_redirection_config.enabled);
-        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
-    }
-
-    #[test]
-    fn it_creates_tls_config_with_hsts_sub_domains() {
-        let tls_config = TlsConfig::from_pem("tls").with_hsts_sub_domains(false);
+        let tls_config = TlsConfig::from_pem("tls").with_hsts_preload(true);
 
         let path = PathBuf::from("tls");
 
@@ -944,6 +921,28 @@ mod tests {
     }
 
     #[test]
+    fn it_creates_tls_config_with_hsts_sub_domains() {
+        let tls_config = TlsConfig::from_pem("tls").with_hsts_sub_domains(true);
+
+        let path = PathBuf::from("tls");
+
+        assert_eq!(tls_config.key, path.join(KEY_FILE_NAME));
+        assert_eq!(tls_config.cert, path.join(CERT_FILE_NAME));
+        assert_eq!(tls_config.client_auth, ClientAuth::None);
+
+        assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
+        assert_eq!(
+            tls_config.hsts_config.max_age,
+            Duration::from_secs(DEFAULT_MAX_AGE)
+        );
+        assert!(!tls_config.hsts_config.preload);
+        assert!(tls_config.hsts_config.include_sub_domains);
+
+        assert!(!tls_config.https_redirection_config.enabled);
+        assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
+    }
+
+    #[test]
     fn it_creates_tls_config_with_hsts_max_age() {
         let tls_config = TlsConfig::from_pem("tls").with_hsts_max_age(Duration::from_secs(5));
 
@@ -955,8 +954,8 @@ mod tests {
 
         assert_eq!(tls_config.hsts_config.exclude_hosts.len(), 0);
         assert_eq!(tls_config.hsts_config.max_age, Duration::from_secs(5));
-        assert!(tls_config.hsts_config.preload);
-        assert!(tls_config.hsts_config.include_sub_domains);
+        assert!(!tls_config.hsts_config.preload);
+        assert!(!tls_config.hsts_config.include_sub_domains);
 
         assert!(!tls_config.https_redirection_config.enabled);
         assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
@@ -977,8 +976,8 @@ mod tests {
             tls_config.hsts_config.max_age,
             Duration::from_secs(DEFAULT_MAX_AGE)
         );
-        assert!(tls_config.hsts_config.preload);
-        assert!(tls_config.hsts_config.include_sub_domains);
+        assert!(!tls_config.hsts_config.preload);
+        assert!(!tls_config.hsts_config.include_sub_domains);
 
         assert!(!tls_config.https_redirection_config.enabled);
         assert_eq!(tls_config.https_redirection_config.http_port, DEFAULT_PORT);
@@ -990,8 +989,8 @@ mod tests {
 
         assert_eq!(hsts_config.exclude_hosts.len(), 0);
         assert_eq!(hsts_config.max_age, Duration::from_secs(DEFAULT_MAX_AGE));
-        assert!(hsts_config.preload);
-        assert!(hsts_config.include_sub_domains);
+        assert!(!hsts_config.preload);
+        assert!(!hsts_config.include_sub_domains);
     }
 
     #[test]
@@ -1008,7 +1007,7 @@ mod tests {
 
         let hsts_string = hsts_config.to_string();
 
-        assert_eq!(hsts_string, "max-age=2592000; includeSubDomains; preload");
+        assert_eq!(hsts_string, "max-age=2592000");
     }
 
     #[test]
@@ -1089,7 +1088,7 @@ mod tests {
         assert_eq!(hsts_header.exclude_hosts, &["www.example.com"]);
         assert_eq!(
             hsts_header.inner,
-            "max-age=2592000; includeSubDomains; preload"
+            "max-age=2592000"
         );
     }
 
