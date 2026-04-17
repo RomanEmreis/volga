@@ -731,6 +731,30 @@ impl App {
         self.set_cors(config(CorsConfig::default()))
     }
 
+    /// Configures a web server with default CORS configuration
+    ///
+    /// Default: `None`
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// let app = App::new().with_default_cors();
+    /// ```
+    ///
+    /// If CORS was already preconfigured, it does not overwrite it
+    /// ```no_run
+    /// use volga::App;
+    /// use volga::http::CorsConfig;
+    ///
+    /// let app = App::new()
+    ///     .set_cors(CorsConfig::default().with_any_origin())
+    ///     .with_default_cors();
+    /// ```
+    pub fn with_default_cors<T>(self) -> Self {
+        self.set_cors(CorsConfig::default())
+    }
+
     /// Configures a web server with specified CORS configuration
     ///
     /// Default: `None`
@@ -780,7 +804,7 @@ impl<'a> RouteGroup<'a> {
 
     /// Sets the default CORS policy for this route
     pub fn cors(&mut self) -> &mut Self {
-        self.cors = CorsOverride::Disabled;
+        self.cors = CorsOverride::Inherit;
         self
     }
 

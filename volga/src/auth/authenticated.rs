@@ -89,7 +89,7 @@ where
         extensions
             .get()
             .cloned()
-            .ok_or_else(|| Error::server_error("Client IP: missing"))
+            .ok_or_else(|| Error::server_error("Authentication claims: missing"))
     }
 }
 
