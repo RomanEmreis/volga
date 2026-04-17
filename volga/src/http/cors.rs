@@ -721,6 +721,7 @@ impl App {
     /// let app = App::new()
     ///     .set_cors(CorsConfig::default().with_any_origin())
     ///     .with_cors(|cors| cors
+    ///         .with_name("policy")
     ///         .with_any_method()
     ///         .with_any_header());
     /// ```
@@ -742,7 +743,7 @@ impl App {
     /// let app = App::new().with_default_cors();
     /// ```
     ///
-    /// If CORS was already preconfigured, it does not overwrite it
+    /// If default (unnamed) CORS was already preconfigured, it does overwrite it
     /// ```no_run
     /// use volga::App;
     /// use volga::http::CorsConfig;

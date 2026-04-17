@@ -26,7 +26,7 @@ pub use {
     },
 };
 
-#[cfg(feature = "jwt-auth-full")]
+#[cfg(feature = "jwt-derive")]
 pub use volga_macros::Claims;
 
 #[cfg(feature = "basic-auth")]

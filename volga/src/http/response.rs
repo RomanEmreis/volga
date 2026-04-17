@@ -65,18 +65,6 @@ impl HttpResponse {
     }
 
     /// Returns a reference to the associated HTTP header map.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::{App, HttpResponse};
-    ///
-    /// let mut app = App::new();
-    ///
-    /// app.map_ok(|resp: HttpResponse| async move {
-    ///     assert!(resp.headers().is_empty());
-    ///     resp
-    /// });
-    /// ```
     #[inline]
     pub fn headers(&self) -> &HeaderMap {
         self.inner.headers()
