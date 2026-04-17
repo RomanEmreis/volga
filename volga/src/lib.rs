@@ -9,7 +9,7 @@
 //! * Dependency Injection
 //! * WebSockets and WebSocket-over-HTTP/2
 //! * Full [Tokio](https://tokio.rs/) compatibility
-//! * Runs on stable Rust 1.80+
+//! * Runs on stable Rust 1.90+
 //!
 //! ## Example
 //! ```no_run

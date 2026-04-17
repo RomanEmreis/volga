@@ -2,7 +2,7 @@
 name = "volga-rate-limiter"
 version.workspace = true
 readme = "README.md"
-description = "Macros for Volga Web Framework"
+description = "A lightweight and efficient rate-limiting library for Rust."
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
