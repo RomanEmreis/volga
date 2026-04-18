@@ -1263,9 +1263,7 @@ mod tests {
 
     #[test]
     fn it_doesnt_needs_vary_when_any_origin_and_allow_any_credentials_false() {
-        let config = CorsConfig::default()
-            .with_any_origin()
-            .with_vary_header();
+        let config = CorsConfig::default().with_any_origin().with_vary_header();
 
         assert!(!config.needs_vary());
     }
@@ -1308,9 +1306,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn it_panics_due_combining_any_origin_with_allow_credentials() {
-        let config = CorsConfig::default()
-            .with_any_origin()
-            .with_credentials();
+        let config = CorsConfig::default().with_any_origin().with_credentials();
         config.validate();
     }
 
