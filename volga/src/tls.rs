@@ -229,19 +229,35 @@ impl fmt::Display for HstsConfig {
 }
 
 impl HstsConfig {
-    /// Configures whether to set `preload` in HSTS header
+    /// Enables `preload` in the HSTS header.
     ///
-    /// Default value: `false`
-    pub fn with_preload(mut self, preload: bool) -> Self {
-        self.preload = preload;
+    /// Default: disabled.
+    pub fn with_preload(mut self) -> Self {
+        self.preload = true;
         self
     }
 
-    /// Configures whether to set `includeSubDomains` in the HSTS header
+    /// Disables `preload` in the HSTS header.
     ///
-    /// Default: `false`
-    pub fn with_sub_domains(mut self, include: bool) -> Self {
-        self.include_sub_domains = include;
+    /// Default: disabled.
+    pub fn without_preload(mut self) -> Self {
+        self.preload = false;
+        self
+    }
+
+    /// Enables `includeSubDomains` in the HSTS header.
+    ///
+    /// Default: disabled.
+    pub fn with_sub_domains(mut self) -> Self {
+        self.include_sub_domains = true;
+        self
+    }
+
+    /// Disables `includeSubDomains` in the HSTS header.
+    ///
+    /// Default: disabled.
+    pub fn without_sub_domains(mut self) -> Self {
+        self.include_sub_domains = false;
         self
     }
 
@@ -396,7 +412,7 @@ impl TlsConfig {
     /// use volga::tls::TlsConfig;
     ///
     /// let tls = TlsConfig::new()
-    ///     .with_hsts(|hsts| hsts.with_preload(false));
+    ///     .with_hsts(|hsts| hsts.without_preload());
     /// ```
     pub fn with_hsts<T>(mut self, config: T) -> Self
     where
@@ -415,42 +431,6 @@ impl TlsConfig {
     /// - exclude_hosts: empty list
     pub fn set_hsts(mut self, hsts_config: HstsConfig) -> Self {
         self.hsts_config = hsts_config;
-        self
-    }
-
-    /// Configures whether to set `preload` in HSTS header
-    ///
-    /// Default value: `true`
-    pub fn with_hsts_preload(mut self, preload: bool) -> Self {
-        self.hsts_config = self.hsts_config.with_preload(preload);
-        self
-    }
-
-    /// Configures whether to set `includeSubDomains` in the HSTS header
-    ///
-    /// Default: `true`
-    pub fn with_hsts_sub_domains(mut self, include: bool) -> Self {
-        self.hsts_config = self.hsts_config.with_sub_domains(include);
-        self
-    }
-
-    /// Configures `max_age` for HSTS header
-    ///
-    /// Default: 30 days (2,592,000 seconds)
-    pub fn with_hsts_max_age(mut self, max_age: Duration) -> Self {
-        self.hsts_config = self.hsts_config.with_max_age(max_age);
-        self
-    }
-
-    /// Configures a list of host names that will not add the HSTS header.
-    ///
-    /// Default: empty list
-    pub fn with_hsts_exclude_hosts<I, S>(mut self, exclude_hosts: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<str>,
-    {
-        self.hsts_config = self.hsts_config.with_exclude_hosts(exclude_hosts);
         self
     }
 
@@ -661,11 +641,11 @@ impl App {
     /// # Example
     /// ```no_run
     /// use volga::App;
-    /// use volga::tls::{TlsConfig, HstsConfig};
+    /// use volga::tls::TlsConfig;
     ///
     /// let app = App::new()
-    ///     .set_tls(TlsConfig::new().with_hsts_sub_domains(false)) // sets include_sub_domains to true
-    ///     .with_hsts(|hsts| hsts.with_preload(true));             // sets preload to true, include_sub_domains remains true
+    ///     .set_tls(TlsConfig::new())
+    ///     .with_hsts(|hsts| hsts.with_preload().with_sub_domains());
     /// ```
     pub fn with_hsts<T>(mut self, config: T) -> Self
     where
@@ -875,13 +855,12 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts() {
-        let tls_config = TlsConfig::from_pem("tls")
-            .with_hsts_exclude_hosts(["example.com"])
-            .with_hsts(|hsts| {
-                hsts.with_preload(false)
-                    .with_sub_domains(false)
-                    .with_max_age(Duration::from_secs(1))
-            });
+        let tls_config = TlsConfig::from_pem("tls").with_hsts(|hsts| {
+            hsts.with_exclude_hosts(["example.com"])
+                .without_preload()
+                .without_sub_domains()
+                .with_max_age(Duration::from_secs(1))
+        });
 
         let path = PathBuf::from("tls");
 
@@ -900,7 +879,7 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_preload() {
-        let tls_config = TlsConfig::from_pem("tls").with_hsts_preload(true);
+        let tls_config = TlsConfig::from_pem("tls").with_hsts(|h| h.with_preload());
 
         let path = PathBuf::from("tls");
 
@@ -922,7 +901,7 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_sub_domains() {
-        let tls_config = TlsConfig::from_pem("tls").with_hsts_sub_domains(true);
+        let tls_config = TlsConfig::from_pem("tls").with_hsts(|h| h.with_sub_domains());
 
         let path = PathBuf::from("tls");
 
@@ -944,7 +923,8 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_max_age() {
-        let tls_config = TlsConfig::from_pem("tls").with_hsts_max_age(Duration::from_secs(5));
+        let tls_config =
+            TlsConfig::from_pem("tls").with_hsts(|h| h.with_max_age(Duration::from_secs(5)));
 
         let path = PathBuf::from("tls");
 
@@ -963,7 +943,8 @@ mod tests {
 
     #[test]
     fn it_creates_tls_config_with_hsts_exclude_hosts() {
-        let tls_config = TlsConfig::from_pem("tls").with_hsts_exclude_hosts(["example.com"]);
+        let tls_config =
+            TlsConfig::from_pem("tls").with_hsts(|h| h.with_exclude_hosts(["example.com"]));
 
         let path = PathBuf::from("tls");
 
@@ -1016,8 +997,8 @@ mod tests {
             .with_tls(|tls| tls.with_https_redirection())
             .with_hsts(|hsts| {
                 hsts.with_max_age(Duration::from_secs(1))
-                    .with_preload(false)
-                    .with_sub_domains(false)
+                    .without_preload()
+                    .without_sub_domains()
                     .with_exclude_hosts(["example.com"])
             });
 
@@ -1036,8 +1017,8 @@ mod tests {
     fn it_creates_app_with_tls_config_and_sets_hsts_custom_config() {
         let hsts = HstsConfig::default()
             .with_max_age(Duration::from_secs(1))
-            .with_preload(false)
-            .with_sub_domains(false)
+            .without_preload()
+            .without_sub_domains()
             .with_exclude_hosts(["example.com"]);
 
         let app = App::new()

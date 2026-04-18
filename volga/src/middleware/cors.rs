@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn it_validates_cors_config() {
-        let mut app = App::new().with_cors(|cors| cors.with_credentials(false));
+        let mut app = App::new().with_cors(|cors| cors.without_credentials());
         app.use_cors();
     }
 }

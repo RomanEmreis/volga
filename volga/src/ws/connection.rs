@@ -107,11 +107,19 @@ impl WebSocketConnection {
         self
     }
 
-    /// Sets/unsets a web-server to accept unmasked frames
+    /// Accepts unmasked frames from the peer.
     ///
-    /// Default: `false`
-    pub fn with_accept_unmasked_frames(mut self, accept: bool) -> Self {
-        self.config.accept_unmasked_frames = accept;
+    /// Default: rejected.
+    pub fn with_accept_unmasked_frames(mut self) -> Self {
+        self.config.accept_unmasked_frames = true;
+        self
+    }
+
+    /// Rejects unmasked frames from the peer.
+    ///
+    /// Default: rejected.
+    pub fn without_accept_unmasked_frames(mut self) -> Self {
+        self.config.accept_unmasked_frames = false;
         self
     }
 
@@ -545,7 +553,7 @@ mod tests {
 
         let conn = conn
             .with_max_frame_size(1024)
-            .with_accept_unmasked_frames(true)
+            .with_accept_unmasked_frames()
             .with_protocols(["foo-ws"])
             .with_max_message_size(1024)
             .with_read_buffer_size(1024)

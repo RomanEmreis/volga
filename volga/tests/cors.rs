@@ -262,7 +262,7 @@ async fn it_applies_named_cors_for_route() {
             .with_cors(|cors| {
                 cors.with_origins(["http://192.168.1.1"])
                     .with_methods([Method::GET])
-                    .with_vary_header(false)
+                    .without_vary_header()
                     .with_any_header()
             })
         })
@@ -307,7 +307,7 @@ async fn it_applies_named_cors_for_route_group() {
             .with_cors(|cors| {
                 cors.with_origins(["http://192.168.1.1"])
                     .with_methods([Method::GET])
-                    .with_vary_header(false)
+                    .without_vary_header()
                     .with_any_header()
             })
         })
@@ -355,7 +355,7 @@ async fn it_prefers_route_cors_policy_over_the_route_group() {
             .with_cors(|cors| {
                 cors.with_origins(["http://127.0.0.1"])
                     .with_methods([Method::GET])
-                    .with_vary_header(false)
+                    .without_vary_header()
                     .with_any_header()
             })
         })

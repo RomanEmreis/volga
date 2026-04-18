@@ -81,16 +81,6 @@ impl TracingConfig {
 }
 
 impl App {
-    /// Configures web server with the default Tracing configurations
-    ///
-    /// Defaults:
-    /// - include_header: `false`
-    /// - span_header_name: `request-id`
-    pub fn with_default_tracing(mut self) -> Self {
-        self.tracing_config = Some(TracingConfig::default());
-        self
-    }
-
     /// Configures web server with specific Tracing configurations.
     ///
     /// Defaults:
@@ -185,7 +175,7 @@ mod tests {
 
     #[test]
     fn it_creates_app_with_default_tracing() {
-        let app = App::new().with_default_tracing();
+        let app = App::new().set_tracing(TracingConfig::default());
         let tracing_config = app.tracing_config.unwrap();
 
         assert!(!tracing_config.include_header);

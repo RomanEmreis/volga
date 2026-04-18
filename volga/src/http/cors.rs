@@ -348,10 +348,18 @@ impl CorsConfig {
     /// use volga::http::CorsConfig;
     ///
     /// let config = CorsConfig::default()
-    ///     .with_credentials(true);
+    ///     .with_credentials();
     /// ```
-    pub fn with_credentials(mut self, allow: bool) -> Self {
-        self.allow_credentials = allow;
+    pub fn with_credentials(mut self) -> Self {
+        self.allow_credentials = true;
+        self
+    }
+
+    /// Disallows credentials in CORS requests.
+    ///
+    /// Default: disallowed.
+    pub fn without_credentials(mut self) -> Self {
+        self.allow_credentials = false;
         self
     }
 
@@ -364,10 +372,18 @@ impl CorsConfig {
     /// use volga::http::CorsConfig;
     ///
     /// let config = CorsConfig::default()
-    ///     .with_vary_header(false);
+    ///     .without_vary_header();
     /// ```
-    pub fn with_vary_header(mut self, include_vary: bool) -> Self {
-        self.include_vary = include_vary;
+    pub fn with_vary_header(mut self) -> Self {
+        self.include_vary = true;
+        self
+    }
+
+    /// Omits the `Vary` header from CORS responses.
+    ///
+    /// Default: included.
+    pub fn without_vary_header(mut self) -> Self {
+        self.include_vary = false;
         self
     }
 
@@ -732,30 +748,6 @@ impl App {
         self.set_cors(config(CorsConfig::default()))
     }
 
-    /// Configures a web server with default CORS configuration
-    ///
-    /// Default: `None`
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    ///
-    /// let app = App::new().with_default_cors();
-    /// ```
-    ///
-    /// If default (unnamed) CORS was already preconfigured, it does overwrite it
-    /// ```no_run
-    /// use volga::App;
-    /// use volga::http::CorsConfig;
-    ///
-    /// let app = App::new()
-    ///     .set_cors(CorsConfig::default().with_any_origin())
-    ///     .with_default_cors();
-    /// ```
-    pub fn with_default_cors(self) -> Self {
-        self.set_cors(CorsConfig::default())
-    }
-
     /// Configures a web server with specified CORS configuration
     ///
     /// Default: `None`
@@ -930,14 +922,14 @@ mod tests {
 
     #[test]
     fn it_creates_cors_config_without_vary_header() {
-        let config = CorsConfig::default().with_vary_header(false);
+        let config = CorsConfig::default().without_vary_header();
 
         assert!(!config.include_vary);
     }
 
     #[test]
     fn it_creates_cors_config_with_include_credentials() {
-        let config = CorsConfig::default().with_credentials(true);
+        let config = CorsConfig::default().with_credentials();
 
         assert!(config.allow_credentials);
     }
@@ -960,8 +952,8 @@ mod tests {
             cors.with_origins(["https://example.com"])
                 .with_headers(["Content-Type"])
                 .with_methods([Method::GET, Method::POST])
-                .with_credentials(true)
-                .with_vary_header(false)
+                .with_credentials()
+                .without_vary_header()
         });
 
         let config = app.cors.default.unwrap();
@@ -1010,8 +1002,8 @@ mod tests {
             .with_origins(["https://example.com"])
             .with_headers(["Content-Type"])
             .with_methods([Method::GET, Method::POST])
-            .with_credentials(true)
-            .with_vary_header(false);
+            .with_credentials()
+            .without_vary_header();
 
         let app = App::new().set_cors(config);
 
@@ -1085,7 +1077,7 @@ mod tests {
     fn it_does_not_return_access_control_allow_origin_header_with_credentials() {
         let config = CorsConfig::default()
             .with_any_origin()
-            .with_credentials(true)
+            .with_credentials()
             .precompute();
 
         let origin = Some(HeaderValue::from_static("https://example.com"));
@@ -1253,7 +1245,7 @@ mod tests {
 
     #[test]
     fn it_does_not_return_vary_preflight_header() {
-        let config = CorsConfig::default().with_vary_header(false);
+        let config = CorsConfig::default().without_vary_header();
 
         let header = config.vary_preflight();
 
@@ -1262,7 +1254,7 @@ mod tests {
 
     #[test]
     fn it_does_not_return_vary_normal_header() {
-        let config = CorsConfig::default().with_vary_header(false);
+        let config = CorsConfig::default().without_vary_header();
 
         let header = config.vary_normal();
 
@@ -1273,7 +1265,7 @@ mod tests {
     fn it_doesnt_needs_vary_when_any_origin_and_allow_any_credentials_false() {
         let config = CorsConfig::default()
             .with_any_origin()
-            .with_vary_header(true);
+            .with_vary_header();
 
         assert!(!config.needs_vary());
     }
@@ -1281,7 +1273,7 @@ mod tests {
     #[test]
     fn it_needs_vary_with_origin() {
         let config = CorsConfig::default()
-            .with_vary_header(true)
+            .with_vary_header()
             .with_origins(["http://localhost:7878/"]);
 
         assert!(config.needs_vary());
@@ -1298,7 +1290,7 @@ mod tests {
 
     #[test]
     fn it_returns_access_control_allow_credentials_header() {
-        let config = CorsConfig::default().with_credentials(true);
+        let config = CorsConfig::default().with_credentials();
 
         let header = config.allow_credentials();
 
@@ -1318,7 +1310,7 @@ mod tests {
     fn it_panics_due_combining_any_origin_with_allow_credentials() {
         let config = CorsConfig::default()
             .with_any_origin()
-            .with_credentials(true);
+            .with_credentials();
         config.validate();
     }
 
@@ -1328,7 +1320,7 @@ mod tests {
         let config = CorsConfig::default()
             .with_origins(["http://localhost:7878/"])
             .with_any_header()
-            .with_credentials(true);
+            .with_credentials();
         config.validate();
     }
 
@@ -1339,7 +1331,7 @@ mod tests {
             .with_origins(["http://localhost:7878/"])
             .with_headers(["Content-Type"])
             .with_any_method()
-            .with_credentials(true);
+            .with_credentials();
         config.validate();
     }
 
@@ -1351,7 +1343,7 @@ mod tests {
             .with_headers(["Content-Type"])
             .with_methods([Method::GET, Method::POST])
             .with_expose_any_header()
-            .with_credentials(true);
+            .with_credentials();
         config.validate();
     }
 }
