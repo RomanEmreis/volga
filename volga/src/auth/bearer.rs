@@ -31,7 +31,7 @@ pub struct BearerAuthConfig {
 
 impl std::fmt::Debug for BearerAuthConfig {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BearerAuthConfig")
             .field("validation", &"[redacted]")
             .field("encoding", &"[redacted]")
@@ -213,7 +213,7 @@ pub struct BearerTokenService {
 
 impl std::fmt::Debug for BearerTokenService {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BearerTokenService")
             .field("validation", &"[redacted]")
             .field("encoding", &"[redacted]")
@@ -234,7 +234,7 @@ impl From<BearerAuthConfig> for BearerTokenService {
 }
 
 impl BearerTokenService {
-    /// Returns validation rules  for JWT
+    /// Returns validation rules for JWT
     pub fn validation(&self) -> &Validation {
         &self.validation
     }
@@ -278,7 +278,7 @@ pub struct Bearer(Box<str>);
 
 impl std::fmt::Debug for Bearer {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Bearer").field(&"[redacted]").finish()
     }
 }
