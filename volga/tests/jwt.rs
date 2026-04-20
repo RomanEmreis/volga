@@ -1,11 +1,10 @@
 #![allow(missing_docs)]
 #![cfg(all(feature = "test", feature = "middleware", feature = "jwt-auth-full"))]
 
-use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 use std::ops::Add;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use volga::auth::{BearerTokenService, Claims, predicate};
+use volga::auth::{BearerTokenService, Claims, DecodingKey, EncodingKey, predicate};
 use volga::test::TestServer;
 use volga::{
     headers::{CACHE_CONTROL, WWW_AUTHENTICATE},

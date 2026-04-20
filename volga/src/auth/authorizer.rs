@@ -4,7 +4,18 @@ use super::AuthClaims;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub(super) const DEFAULT_ERROR_MSG: &str = "Bearer error=\"insufficient_scope\" error_description=\"User does not have required role or permission\"";
+/// Builds the default `WWW-Authenticate` challenge returned when the presented
+/// token is valid, but the caller is missing the required role or permission.
+///
+/// When `resource_metadata_url` is `Some`, an RFC 9728 `resource_metadata`
+/// parameter is appended to the challenge.
+pub(crate) fn default_error_msg(resource_metadata_url: Option<&str>) -> String {
+    let base = r#"Bearer error="insufficient_scope" error_description="User does not have required role or permission""#;
+    match resource_metadata_url {
+        Some(url) => format!(r#"{base}, resource_metadata="{url}""#),
+        None => base.to_string(),
+    }
+}
 
 /// Creates an [`Authorizer::Role`] authorizer for a single role.
 ///
