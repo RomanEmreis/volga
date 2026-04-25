@@ -16,6 +16,7 @@ use hyper::http::request::Parts;
 use jsonwebtoken::{Header as JwtHeader, Validation};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
+    collections::HashSet,
     fmt::{Display, Formatter},
     sync::Arc,
 };
@@ -252,28 +253,40 @@ impl BearerAuthConfig {
 
     /// Adds a single OAuth 2.0 resource indicator (RFC 8707).
     ///
-    /// The URI is added to the audience set and `aud` is required in tokens.
-    /// This is a semantic alias for [`with_aud`](Self::with_aud) that also
-    /// records the URI as a resource for metadata/diagnostic purposes.
+    /// The URI is appended to the existing audience set (preserving any
+    /// previously configured audiences) and `aud` is required in tokens.
+    /// This is a semantic companion to [`with_aud`](Self::with_aud) that
+    /// also records the URI as a resource for metadata/diagnostic purposes.
     pub fn with_resource<U: Into<String>>(mut self, uri: U) -> Self {
         let uri = uri.into();
         self.resources.push(uri.clone());
-        self.validation.set_audience(&[uri]);
+        self.validation
+            .aud
+            .get_or_insert_with(HashSet::new)
+            .insert(uri);
         self.validation.required_spec_claims.insert("aud".into());
         self
     }
 
     /// Adds multiple OAuth 2.0 resource indicators (RFC 8707).
     ///
-    /// All URIs are added to the audience set and `aud` is required in tokens.
+    /// All URIs are appended to the existing audience set and `aud` is
+    /// required in tokens. An empty iterator is a no-op (no audience
+    /// constraint or claim requirement is applied).
     pub fn with_resources<I, U>(mut self, uris: I) -> Self
     where
         I: IntoIterator<Item = U>,
         U: Into<String>,
     {
         let new: Vec<String> = uris.into_iter().map(Into::into).collect();
+        if new.is_empty() {
+            return self;
+        }
         self.resources.extend(new.iter().cloned());
-        self.validation.set_audience(&new);
+        let aud = self.validation.aud.get_or_insert_with(HashSet::new);
+        for uri in new {
+            aud.insert(uri);
+        }
         self.validation.required_spec_claims.insert("aud".into());
         self
     }
@@ -1027,6 +1040,45 @@ mod tests {
             .with_resources(["https://api.a.example/", "https://api.b.example/"]);
         assert_eq!(config.resources.len(), 2);
         assert!(config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_preserves_existing_audiences_when_adding_resource() {
+        let config = BearerAuthConfig::default()
+            .with_aud(["existing-aud"])
+            .with_resource("https://api.example.com/");
+        let aud = config.validation.aud.expect("aud should be set");
+        assert!(aud.contains("existing-aud"));
+        assert!(aud.contains("https://api.example.com/"));
+    }
+
+    #[tokio::test]
+    async fn it_preserves_existing_audiences_when_adding_resources() {
+        let config = BearerAuthConfig::default()
+            .with_aud(["existing-aud"])
+            .with_resources(["https://api.a.example/", "https://api.b.example/"]);
+        let aud = config.validation.aud.expect("aud should be set");
+        assert!(aud.contains("existing-aud"));
+        assert!(aud.contains("https://api.a.example/"));
+        assert!(aud.contains("https://api.b.example/"));
+    }
+
+    #[tokio::test]
+    async fn it_accumulates_resources_across_calls() {
+        let config = BearerAuthConfig::default()
+            .with_resource("https://api.a.example/")
+            .with_resource("https://api.b.example/");
+        let aud = config.validation.aud.expect("aud should be set");
+        assert!(aud.contains("https://api.a.example/"));
+        assert!(aud.contains("https://api.b.example/"));
+    }
+
+    #[tokio::test]
+    async fn it_treats_empty_resources_iter_as_noop() {
+        let config = BearerAuthConfig::default().with_resources(Vec::<String>::new());
+        assert!(config.resources.is_empty());
+        assert!(config.validation.aud.is_none());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
     }
 
     #[tokio::test]
