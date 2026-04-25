@@ -8,10 +8,9 @@ use reqwest::Client;
 use std::hint::black_box;
 use tokio::{runtime::Runtime, time::Instant};
 
-use jsonwebtoken::{DecodingKey, EncodingKey};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use volga::auth::roles;
+use volga::auth::{DecodingKey, EncodingKey, roles};
 
 const TEST_TOKEN: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJlbWFpbC5jb20iLCJjb21wYW55IjoiQXdlc29tZSBDby4iLCJyb2xlIjoiYWRtaW4iLCJleHAiOjE3NTMwMDEzODl9.5g6aE4KpRobZqsS8WFJndbHYakG6GydPtIpKt3L1X5o";
 

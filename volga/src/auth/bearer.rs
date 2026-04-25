@@ -1,5 +1,6 @@
 //! Tools and utils for Bearer Token Authorization
 
+use crate::auth::{Algorithm, DecodingKey, EncodingKey};
 use crate::{
     HttpRequest,
     error::Error,
@@ -12,9 +13,10 @@ use crate::{
 };
 use futures_util::future::{Ready, ready};
 use hyper::http::request::Parts;
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header as JwtHeader, Validation};
+use jsonwebtoken::{Header as JwtHeader, Validation};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
+    collections::HashSet,
     fmt::{Display, Formatter},
     sync::Arc,
 };
@@ -22,20 +24,44 @@ use std::{
 const SCHEME: &str = "Bearer ";
 
 /// Bearer Token Authentication configuration
-#[derive(Default)]
 pub struct BearerAuthConfig {
     validation: Validation,
     encoding: Option<EncodingKey>,
     decoding: Option<DecodingKey>,
+    strip_token_from_request: bool,
+    strict_aud: Option<bool>,
+    resources: Vec<String>,
+    resource_metadata_url: Option<String>,
+    require_https: bool,
+}
+
+impl Default for BearerAuthConfig {
+    fn default() -> Self {
+        Self {
+            validation: Validation::default(),
+            encoding: None,
+            decoding: None,
+            strip_token_from_request: true,
+            strict_aud: None,
+            resources: Vec::new(),
+            resource_metadata_url: None,
+            require_https: true,
+        }
+    }
 }
 
 impl std::fmt::Debug for BearerAuthConfig {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BearerAuthConfig")
             .field("validation", &"[redacted]")
             .field("encoding", &"[redacted]")
             .field("decoding", &"[redacted]")
+            .field("strip_token_from_request", &self.strip_token_from_request)
+            .field("strict_aud", &self.strict_aud)
+            .field("resources", &self.resources)
+            .field("resource_metadata_url", &self.resource_metadata_url)
+            .field("require_https", &self.require_https)
             .finish()
     }
 }
@@ -47,14 +73,9 @@ impl BearerAuthConfig {
     /// ```no_run
     /// use volga::{App, auth::DecodingKey};
     ///
-    /// let secret = std::env::var("JWT_SECRET")
-    ///     .expect("JWT_SECRET must be set");
-    ///
-    /// let key = DecodingKey::from_secret(secret.as_bytes());
-    ///
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth
-    ///         .set_decoding_key(key));
+    ///         .set_decoding_key(DecodingKey::from_env("JWT_SECRET")));
     /// ```
     pub fn set_decoding_key(mut self, key: DecodingKey) -> Self {
         self.decoding = Some(key);
@@ -67,14 +88,9 @@ impl BearerAuthConfig {
     /// ```no_run
     /// use volga::{App, auth::EncodingKey};
     ///
-    /// let secret = std::env::var("JWT_SECRET")
-    ///     .expect("JWT_SECRET must be set");
-    ///
-    /// let key = EncodingKey::from_secret(secret.as_bytes());
-    ///
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth
-    ///         .set_encoding_key(key));
+    ///         .set_encoding_key(EncodingKey::from_env("JWT_SECRET")));
     /// ```
     pub fn set_encoding_key(mut self, key: EncodingKey) -> Self {
         self.encoding = Some(key);
@@ -94,13 +110,19 @@ impl BearerAuthConfig {
     ///         .with_alg(Algorithm::RS256));
     /// ```
     pub fn with_alg(mut self, alg: Algorithm) -> Self {
-        if !self.validation.algorithms.contains(&alg) {
-            self.validation.algorithms.push(alg);
+        let jwt_alg: jsonwebtoken::Algorithm = alg.into();
+        if !self.validation.algorithms.contains(&jwt_alg) {
+            self.validation.algorithms.push(jwt_alg);
         }
         self
     }
 
     /// Sets one or more acceptable audience members
+    ///
+    /// An empty input is a no-op (no audience constraint or claim
+    /// requirement is applied), so configurations sourced from runtime
+    /// values that resolve to an empty list do not produce an
+    /// unsatisfiable validation setup.
     ///
     /// # Example
     /// ```no_run
@@ -115,7 +137,12 @@ impl BearerAuthConfig {
         T: ToString,
         I: AsRef<[T]>,
     {
-        self.validation.set_audience(aud.as_ref());
+        let aud = aud.as_ref();
+        if aud.is_empty() {
+            return self;
+        }
+        self.validation.set_audience(aud);
+        self.apply_aud_required();
         self
     }
 
@@ -197,9 +224,135 @@ impl BearerAuthConfig {
         self
     }
 
-    /// Retuuns a ecret key to decode a JWT
+    /// Returns a secret key to decode a JWT
     pub fn decoding_key(&self) -> Option<&DecodingKey> {
         self.decoding.as_ref()
+    }
+
+    /// Controls whether the `Authorization` header is removed from the request
+    /// after successful bearer-token authentication.
+    ///
+    /// Defaults to `true`. Disable only if downstream handlers legitimately
+    /// need the raw token (e.g., proxying to an upstream service).
+    pub fn strip_token_from_request(mut self, enabled: bool) -> Self {
+        self.strip_token_from_request = enabled;
+        self
+    }
+
+    /// Requires the JWT to include an `aud` (audience) claim.
+    ///
+    /// When any audience is configured via [`with_aud`](Self::with_aud),
+    /// [`with_resource`](Self::with_resource), or
+    /// [`with_resources`](Self::with_resources), the `aud` claim is
+    /// automatically required.
+    ///
+    /// Calling [`without_strict_aud`](Self::without_strict_aud)
+    /// relaxes this requirement: tokens without an `aud` claim are accepted,
+    /// but if the claim is present, its value is still validated.
+    ///
+    /// If no audience is configured, this setting has no effect - `aud`
+    /// is not validated at all.
+    pub fn with_strict_aud(mut self) -> Self {
+        self.strict_aud = Some(true);
+        self.apply_aud_required();
+        self
+    }
+
+    /// Allows JWTs without an `aud` (audience) claim.
+    ///
+    /// The opt-out persists across builder call order: calling this before
+    /// audiences are configured (e.g. before [`with_aud`](Self::with_aud) or
+    /// [`with_resource`](Self::with_resource)) still suppresses the
+    /// auto-required-`aud` behavior once audiences are added.
+    ///
+    /// See [`with_strict_aud`](Self::with_strict_aud) for details.
+    pub fn without_strict_aud(mut self) -> Self {
+        self.strict_aud = Some(false);
+        self.apply_aud_required();
+        self
+    }
+
+    /// Adds a single OAuth 2.0 resource indicator (RFC 8707).
+    ///
+    /// The URI is appended to the existing audience set (preserving any
+    /// previously configured audiences) and `aud` is required in tokens.
+    /// This is a semantic companion to [`with_aud`](Self::with_aud) that
+    /// also records the URI as a resource for metadata/diagnostic purposes.
+    pub fn with_resource<U: Into<String>>(mut self, uri: U) -> Self {
+        let uri = uri.into();
+        self.resources.push(uri.clone());
+        self.validation
+            .aud
+            .get_or_insert_with(HashSet::new)
+            .insert(uri);
+        self.apply_aud_required();
+        self
+    }
+
+    /// Adds multiple OAuth 2.0 resource indicators (RFC 8707).
+    ///
+    /// All URIs are appended to the existing audience set and `aud` is
+    /// required in tokens. An empty iterator is a no-op (no audience
+    /// constraint or claim requirement is applied).
+    pub fn with_resources<I, U>(mut self, uris: I) -> Self
+    where
+        I: IntoIterator<Item = U>,
+        U: Into<String>,
+    {
+        let new: Vec<String> = uris.into_iter().map(Into::into).collect();
+        if new.is_empty() {
+            return self;
+        }
+        self.resources.extend(new.iter().cloned());
+        let aud = self.validation.aud.get_or_insert_with(HashSet::new);
+        for uri in new {
+            aud.insert(uri);
+        }
+        self.apply_aud_required();
+        self
+    }
+
+    /// Sets the URL advertised as `resource_metadata` in the `WWW-Authenticate`
+    /// challenge per RFC 9728 (OAuth 2.0 Protected Resource Metadata).
+    ///
+    /// volga does **not** serve the metadata document at this URL — that is
+    /// the application's responsibility. This setting only controls the
+    /// challenge-header hint sent to clients.
+    pub fn with_resource_metadata_url<U: Into<String>>(mut self, url: U) -> Self {
+        self.resource_metadata_url = Some(url.into());
+        self
+    }
+
+    /// Requires the request to be received over TLS (HTTPS).
+    ///
+    /// When `true` (default), non-TLS requests are rejected with `400 Bad Request`
+    /// unless the peer address is a loopback address (`127.0.0.0/8` or `::1`).
+    /// Reverse-proxy deployments that terminate TLS upstream must disable this
+    /// check; volga does not inspect `X-Forwarded-Proto`.
+    pub fn require_https(mut self, enabled: bool) -> Self {
+        self.require_https = enabled;
+        self
+    }
+
+    /// Synchronizes the `aud` entry in `required_spec_claims` with the
+    /// configured audience set and the user's `strict_aud` preference.
+    ///
+    /// - When no audiences are configured, `aud` is never required: marking
+    ///   it required without any accepted values yields an unsatisfiable
+    ///   validation (every token would fail).
+    /// - Otherwise, `aud` is required iff `strict_aud` is unset (default-on)
+    ///   or explicitly `Some(true)`.
+    #[inline]
+    fn apply_aud_required(&mut self) {
+        if self.validation.aud.is_none() {
+            self.validation.required_spec_claims.remove("aud");
+            return;
+        }
+        if self.strict_aud.unwrap_or(true) {
+            self.validation.required_spec_claims.insert("aud".into());
+        } else {
+            self.validation.required_spec_claims.remove("aud");
+        }
     }
 }
 
@@ -209,15 +362,23 @@ pub struct BearerTokenService {
     validation: Arc<Validation>,
     encoding: Option<Arc<EncodingKey>>,
     decoding: Option<Arc<DecodingKey>>,
+    pub(crate) strip_token_from_request: bool,
+    pub(crate) resource_metadata_url: Option<Arc<str>>,
+    pub(crate) require_https: bool,
+    pub(crate) tls_enabled: bool,
 }
 
 impl std::fmt::Debug for BearerTokenService {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BearerTokenService")
             .field("validation", &"[redacted]")
             .field("encoding", &"[redacted]")
             .field("decoding", &"[redacted]")
+            .field("strip_token_from_request", &self.strip_token_from_request)
+            .field("resource_metadata_url", &self.resource_metadata_url)
+            .field("require_https", &self.require_https)
+            .field("tls_enabled", &self.tls_enabled)
             .finish()
     }
 }
@@ -225,18 +386,28 @@ impl std::fmt::Debug for BearerTokenService {
 impl From<BearerAuthConfig> for BearerTokenService {
     #[inline]
     fn from(value: BearerAuthConfig) -> Self {
-        Self {
-            validation: Arc::new(value.validation),
-            encoding: value.encoding.map(Arc::new),
-            decoding: value.decoding.map(Arc::new),
-        }
+        Self::from_config(value, false)
     }
 }
 
 impl BearerTokenService {
-    /// Returns validation rules  for JWT
-    pub fn validation(&self) -> &Validation {
-        &self.validation
+    /// Builds a [`BearerTokenService`] from a [`BearerAuthConfig`], recording
+    /// whether the outer server accepts TLS traffic.
+    ///
+    /// `tls_enabled` is consulted together with `require_https` to decide
+    /// whether to reject plaintext requests. Applications should prefer the
+    /// [`From<BearerAuthConfig>`] impl in tests and when TLS status is irrelevant.
+    #[inline]
+    pub(crate) fn from_config(cfg: BearerAuthConfig, tls_enabled: bool) -> Self {
+        Self {
+            validation: Arc::new(cfg.validation),
+            encoding: cfg.encoding.map(Arc::new),
+            decoding: cfg.decoding.map(Arc::new),
+            strip_token_from_request: cfg.strip_token_from_request,
+            resource_metadata_url: cfg.resource_metadata_url.map(Into::into),
+            require_https: cfg.require_https,
+            tls_enabled,
+        }
     }
 
     /// Returns a secret key for decoding JWT
@@ -255,7 +426,7 @@ impl BearerTokenService {
         let Some(encoding_key) = &self.encoding else {
             return Err(Error::server_error("Missing security key"));
         };
-        jsonwebtoken::encode(&JwtHeader::default(), claims, encoding_key)
+        jsonwebtoken::encode(&JwtHeader::default(), claims, &encoding_key.0)
             .map_err(Error::from)
             .map(|s| Bearer(s.into()))
     }
@@ -267,18 +438,19 @@ impl BearerTokenService {
         let Some(decoding_key) = &self.decoding else {
             return Err(Error::server_error("Missing security key"));
         };
-        jsonwebtoken::decode(&*bearer.0, decoding_key, &self.validation)
+        jsonwebtoken::decode(&*bearer.0, &decoding_key.0, &self.validation)
             .map_err(Error::from)
             .map(|t| t.claims)
     }
 }
 
 /// Wraps a bearer token string
-pub struct Bearer(Box<str>);
+#[derive(Clone)]
+pub struct Bearer(Arc<str>);
 
 impl std::fmt::Debug for Bearer {
     #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("Bearer").field(&"[redacted]").finish()
     }
 }
@@ -408,10 +580,10 @@ impl FromPayload for BearerTokenService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::{Algorithm, DecodingKey, EncodingKey};
     use crate::headers::{HeaderMap, HeaderValue};
     use crate::http::Extensions;
     use hyper::Request;
-    use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey};
     use serde::{Deserialize, Serialize};
     use std::collections::HashSet;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -430,7 +602,12 @@ mod tests {
     async fn it_tests_bearer_auth_config_default() {
         let config = BearerAuthConfig::default();
 
-        assert!(config.validation.algorithms.contains(&Algorithm::HS256));
+        assert!(
+            config
+                .validation
+                .algorithms
+                .contains(&jsonwebtoken::Algorithm::HS256)
+        );
         assert!(config.encoding.is_none());
         assert!(config.decoding.is_none());
     }
@@ -458,9 +635,24 @@ mod tests {
             .with_alg(Algorithm::HS512)
             .with_alg(Algorithm::RS256);
 
-        assert!(config.validation.algorithms.contains(&Algorithm::HS256));
-        assert!(config.validation.algorithms.contains(&Algorithm::HS512));
-        assert!(config.validation.algorithms.contains(&Algorithm::RS256));
+        assert!(
+            config
+                .validation
+                .algorithms
+                .contains(&jsonwebtoken::Algorithm::HS256)
+        );
+        assert!(
+            config
+                .validation
+                .algorithms
+                .contains(&jsonwebtoken::Algorithm::HS512)
+        );
+        assert!(
+            config
+                .validation
+                .algorithms
+                .contains(&jsonwebtoken::Algorithm::RS256)
+        );
     }
 
     #[tokio::test]
@@ -518,7 +710,6 @@ mod tests {
 
         assert!(service.encoding_key().is_some());
         assert!(service.decoding_key().is_some());
-        assert!(service.validation().algorithms.contains(&Algorithm::HS256));
     }
 
     #[tokio::test]
@@ -737,18 +928,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_tests_service_validation_getter() {
-        let config = BearerAuthConfig::default()
-            .validate_exp(false)
-            .validate_aud(false);
-        let service: BearerTokenService = config.into();
-
-        let validation = service.validation();
-        assert!(!validation.validate_exp);
-        assert!(!validation.validate_aud);
-    }
-
-    #[tokio::test]
     async fn it_tests_encode_decode_round_trip_with_validation() {
         let encoding_key = EncodingKey::from_secret(SECRET);
         let decoding_key = DecodingKey::from_secret(SECRET);
@@ -805,7 +984,7 @@ mod tests {
 
         assert_eq!(
             format!("{config:?}"),
-            r#"BearerAuthConfig { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]" }"#
+            r#"BearerAuthConfig { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]", strip_token_from_request: true, strict_aud: None, resources: [], resource_metadata_url: None, require_https: true }"#
         );
     }
 
@@ -825,7 +1004,193 @@ mod tests {
 
         assert_eq!(
             format!("{service:?}"),
-            r#"BearerTokenService { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]" }"#
+            r#"BearerTokenService { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]", strip_token_from_request: true, resource_metadata_url: None, require_https: true, tls_enabled: false }"#
         );
+    }
+
+    #[tokio::test]
+    async fn it_defaults_strip_token_true() {
+        let config = BearerAuthConfig::default();
+        assert!(config.strip_token_from_request);
+    }
+
+    #[tokio::test]
+    async fn it_allows_disabling_strip_token() {
+        let config = BearerAuthConfig::default().strip_token_from_request(false);
+        assert!(!config.strip_token_from_request);
+    }
+
+    #[tokio::test]
+    async fn it_propagates_strip_token_to_service() {
+        let service: BearerTokenService = BearerAuthConfig::default()
+            .strip_token_from_request(false)
+            .into();
+        assert!(!service.strip_token_from_request);
+    }
+
+    #[tokio::test]
+    async fn it_does_not_require_aud_by_default() {
+        let config = BearerAuthConfig::default();
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_auto_enables_strict_aud_when_with_aud_called() {
+        let config = BearerAuthConfig::default().with_aud(["test-aud"]);
+        assert!(config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_respects_explicit_strict_aud_disabling() {
+        let config = BearerAuthConfig::default()
+            .with_aud(["test-aud"])
+            .without_strict_aud();
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_strict_aud_noop_without_audiences() {
+        let config = BearerAuthConfig::default().with_strict_aud();
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_stores_single_resource() {
+        let config = BearerAuthConfig::default().with_resource("https://api.example.com/");
+        assert_eq!(
+            config.resources,
+            vec!["https://api.example.com/".to_string()]
+        );
+        assert!(config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_stores_multiple_resources() {
+        let config = BearerAuthConfig::default()
+            .with_resources(["https://api.a.example/", "https://api.b.example/"]);
+        assert_eq!(config.resources.len(), 2);
+        assert!(config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_preserves_existing_audiences_when_adding_resource() {
+        let config = BearerAuthConfig::default()
+            .with_aud(["existing-aud"])
+            .with_resource("https://api.example.com/");
+        let aud = config.validation.aud.expect("aud should be set");
+        assert!(aud.contains("existing-aud"));
+        assert!(aud.contains("https://api.example.com/"));
+    }
+
+    #[tokio::test]
+    async fn it_preserves_existing_audiences_when_adding_resources() {
+        let config = BearerAuthConfig::default()
+            .with_aud(["existing-aud"])
+            .with_resources(["https://api.a.example/", "https://api.b.example/"]);
+        let aud = config.validation.aud.expect("aud should be set");
+        assert!(aud.contains("existing-aud"));
+        assert!(aud.contains("https://api.a.example/"));
+        assert!(aud.contains("https://api.b.example/"));
+    }
+
+    #[tokio::test]
+    async fn it_accumulates_resources_across_calls() {
+        let config = BearerAuthConfig::default()
+            .with_resource("https://api.a.example/")
+            .with_resource("https://api.b.example/");
+        let aud = config.validation.aud.expect("aud should be set");
+        assert!(aud.contains("https://api.a.example/"));
+        assert!(aud.contains("https://api.b.example/"));
+    }
+
+    #[tokio::test]
+    async fn it_treats_empty_resources_iter_as_noop() {
+        let config = BearerAuthConfig::default().with_resources(Vec::<String>::new());
+        assert!(config.resources.is_empty());
+        assert!(config.validation.aud.is_none());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_treats_empty_with_aud_as_noop() {
+        let config = BearerAuthConfig::default().with_aud(Vec::<String>::new());
+        assert!(config.validation.aud.is_none());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_persists_strict_aud_optout_before_with_aud() {
+        let config = BearerAuthConfig::default()
+            .without_strict_aud()
+            .with_aud(["test-aud"]);
+        assert!(config.validation.aud.is_some());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_persists_strict_aud_optout_before_with_resource() {
+        let config = BearerAuthConfig::default()
+            .without_strict_aud()
+            .with_resource("https://api.example.com/");
+        assert!(config.validation.aud.is_some());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_persists_strict_aud_optout_before_with_resources() {
+        let config = BearerAuthConfig::default()
+            .without_strict_aud()
+            .with_resources(["https://api.a.example/", "https://api.b.example/"]);
+        assert!(config.validation.aud.is_some());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_persists_strict_aud_optin_across_calls() {
+        let config = BearerAuthConfig::default()
+            .with_strict_aud()
+            .with_aud(["test-aud"]);
+        assert!(config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_stores_resource_metadata_url() {
+        let config = BearerAuthConfig::default().with_resource_metadata_url(
+            "https://api.example.com/.well-known/oauth-protected-resource",
+        );
+        assert_eq!(
+            config.resource_metadata_url.as_deref(),
+            Some("https://api.example.com/.well-known/oauth-protected-resource")
+        );
+    }
+
+    #[tokio::test]
+    async fn it_defaults_require_https_true() {
+        let config = BearerAuthConfig::default();
+        assert!(config.require_https);
+    }
+
+    #[tokio::test]
+    async fn it_allows_disabling_require_https() {
+        let config = BearerAuthConfig::default().require_https(false);
+        assert!(!config.require_https);
+    }
+
+    #[tokio::test]
+    async fn it_propagates_require_https_to_service() {
+        let service: BearerTokenService = BearerAuthConfig::default().require_https(false).into();
+        assert!(!service.require_https);
+    }
+
+    #[tokio::test]
+    async fn it_from_config_records_tls_enabled() {
+        let service = BearerTokenService::from_config(BearerAuthConfig::default(), true);
+        assert!(service.tls_enabled);
+    }
+
+    #[tokio::test]
+    async fn it_from_impl_defaults_tls_disabled() {
+        let service: BearerTokenService = BearerAuthConfig::default().into();
+        assert!(!service.tls_enabled);
     }
 }

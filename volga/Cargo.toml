@@ -24,7 +24,7 @@ memchr = "2.8.0"
 mime = "0.3.17"
 mime_guess = "2.0.5"
 pin-project-lite = "0.2.17"
-tokio = { version = "1.51.0", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7.18"
 serde = "1.0.228"
 serde_json = "1.0.149"
@@ -155,6 +155,8 @@ test = [
 
 [package.metadata.docs.rs]
 all-features = true
+default-target = "x86_64-unknown-linux-gnu"
+targets = []
 
 [lints]
 workspace = true

@@ -138,6 +138,11 @@ impl TryFrom<App> for AppEnv {
             .as_ref()
             .map(|tls| HstsHeader::new(tls.hsts_config.clone()));
 
+        #[cfg(all(feature = "jwt-auth", feature = "tls"))]
+        let tls_enabled = app.tls_config.is_some();
+        #[cfg(all(feature = "jwt-auth", not(feature = "tls")))]
+        let tls_enabled = false;
+
         #[cfg(feature = "tls")]
         let acceptor = {
             let tls_config = app.tls_config.map(|config| config.build()).transpose()?;
@@ -145,7 +150,9 @@ impl TryFrom<App> for AppEnv {
         };
 
         #[cfg(feature = "jwt-auth")]
-        let bearer_token_service = app.auth_config.map(Into::into);
+        let bearer_token_service = app
+            .auth_config
+            .map(|cfg| crate::auth::BearerTokenService::from_config(cfg, tls_enabled));
 
         let default_cache_control = app.cache_control.map(|c| c.try_into()).transpose()?;
 

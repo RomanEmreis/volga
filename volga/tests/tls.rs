@@ -232,8 +232,8 @@ async fn it_works_with_tls_with_required_auth_authenticated_and_https_redirectio
                     .with_http_port(http_port)
             })
             .with_hsts(|hsts| {
-                hsts.with_preload(false)
-                    .with_sub_domains(true)
+                hsts.without_preload()
+                    .with_sub_domains()
                     .with_max_age(Duration::from_secs(60))
                     .with_exclude_hosts(["example.com", "example.net"])
             })
@@ -287,8 +287,8 @@ async fn it_works_with_tls_with_https_redirection() {
             ))
             .with_tls(|tls| tls.with_https_redirection().with_http_port(http_port))
             .with_hsts(|hsts| {
-                hsts.with_preload(false)
-                    .with_sub_domains(true)
+                hsts.without_preload()
+                    .with_sub_domains()
                     .with_max_age(Duration::from_secs(60))
                     .with_exclude_hosts(["example.com", "example.net"])
             })
@@ -336,8 +336,8 @@ async fn it_returns_404_if_no_host() {
             ))
             .with_tls(|tls| tls.with_https_redirection().with_http_port(http_port))
             .with_hsts(|hsts| {
-                hsts.with_preload(false)
-                    .with_sub_domains(true)
+                hsts.without_preload()
+                    .with_sub_domains()
                     .with_max_age(Duration::from_secs(60))
                     .with_exclude_hosts(["example.com", "example.net"])
             })

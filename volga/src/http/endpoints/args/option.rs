@@ -1,4 +1,4 @@
-//! Extractor for Option<T>
+//! Extractor for `Option<T>`
 
 use crate::{
     HttpRequest,

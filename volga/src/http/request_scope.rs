@@ -21,7 +21,7 @@ use std::sync::Arc;
 use crate::error::handler::PipelineErrorHandler;
 
 #[cfg(feature = "jwt-auth")]
-use crate::auth::bearer::BearerTokenService;
+use crate::auth::bearer::{Bearer, BearerTokenService};
 
 #[cfg(any(
     feature = "decompression-brotli",
@@ -68,6 +68,14 @@ pub(crate) struct HttpRequestScope {
     #[cfg(feature = "jwt-auth")]
     pub(crate) bearer_token_service: Option<BearerTokenService>,
 
+    /// Stashed bearer token captured by the first `authorize` middleware on
+    /// the chain when `strip_token_from_request` is enabled. Allows nested
+    /// `authorize` middlewares (e.g. group-level + route-level) to recover
+    /// the credential after the outer call has removed the `Authorization`
+    /// header from the request.
+    #[cfg(feature = "jwt-auth")]
+    pub(crate) bearer: Option<Bearer>,
+
     /// Resolved limits for the decompression middleware.
     #[cfg(any(
         feature = "decompression-brotli",
@@ -113,6 +121,8 @@ impl Default for HttpRequestScope {
             },
             #[cfg(feature = "jwt-auth")]
             bearer_token_service: None,
+            #[cfg(feature = "jwt-auth")]
+            bearer: None,
             #[cfg(any(
                 feature = "decompression-brotli",
                 feature = "decompression-gzip",

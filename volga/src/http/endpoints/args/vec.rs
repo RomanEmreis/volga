@@ -1,4 +1,4 @@
-//! Extractor for [Vec<T>] that is basically [`Json<Vec<T>>`] and deserialized from JSON array
+//! Extractor for [`Vec<T>`] that is basically [`Json<Vec<T>>`] and deserialized from JSON array
 
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;

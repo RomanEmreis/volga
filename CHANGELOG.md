@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.1
+
+## Added
+* `EncodingKey::{from_env, try_from_env, from_env_base64, try_from_env_base64, from_file, try_from_file, from_pem_file, try_from_pem_file}` and identical siblings on `DecodingKey` — ergonomic startup-time constructors. Panicking variants expect to be called once at startup; `try_*` variants return `Result<_, volga::Error>`.
+* `BearerAuthConfig::with_resource(uri)` / `with_resources(iter)` — OAuth 2.0 resource indicators (RFC 8707).
+* `BearerAuthConfig::with_resource_metadata_url(url)` — advertises the OAuth 2.0 Protected Resource Metadata URL (RFC 9728) in `WWW-Authenticate` challenges.
+* `BearerAuthConfig::with_strict_aud()` / `BearerAuthConfig::without_strict_aud()` — explicit control over whether `aud` is required when audiences are configured.
+* `BearerAuthConfig::strip_token_from_request(bool)` — controls stripping of the `Authorization` header after successful bearer auth.
+* `BearerAuthConfig::require_https(bool)` — controls HTTPS enforcement (with loopback exception).
+* `CorsConfig::without_credentials()` / `without_vary_header()` — explicit "off" builders paired with the existing `with_*` setters.
+* `HstsConfig::without_preload()` / `without_sub_domains()` — explicit "off" builders paired with the existing `with_*` setters.
+* `WebSocketConnection::without_accept_unmasked_frames()` — explicit opt-out paired with `with_accept_unmasked_frames()`.
+
+## Breaking Changes
+* `volga::auth` no longer re-exports `jsonwebtoken::Algorithm`, `DecodingKey`, `EncodingKey`, `JwtError`, or `ErrorKind`. Replaced by volga-owned `Algorithm`, `DecodingKey`, and `EncodingKey` at the same paths. User code that imports these by name continues to compile; code using `ErrorKind` for pattern-matching JWT errors or calling `EncodingKey::from_rsa_der` / `from_ec_der` / `from_ed_der` / `DecodingKey::from_jwk` / `from_rsa_components` will break. Use the dedicated PEM / base64 / secret / env / file constructors instead.
+* `BearerTokenService::validation()` is removed. Configure via `BearerAuthConfig`; no introspection is exposed.
+* `BearerAuthConfig::with_aud` now automatically adds `aud` to required claims. Tokens missing `aud` are rejected when audiences are configured. Call `without_strict_aud()` to opt out.
+* `require_https` is enabled by default. Non-TLS, non-loopback requests are rejected with `400 Bad Request`. Reverse-proxy deployments must call `require_https(false)`.
+* `strip_token_from_request` is enabled by default. The `Authorization` header is removed after successful bearer auth. Disable via `strip_token_from_request(false)` if downstream handlers need it.
+* `CorsConfig::with_credentials(bool)` and `with_vary_header(bool)` no longer take a `bool`. The no-arg forms enable the feature; use the new `without_credentials()` / `without_vary_header()` to disable.
+* `HstsConfig::with_preload(bool)` and `with_sub_domains(bool)` no longer take a `bool`. The no-arg forms enable the feature; use the new `without_preload()` / `without_sub_domains()` to disable.
+* `WebSocketConnection::with_accept_unmasked_frames(bool)` no longer takes a `bool`. Use the no-arg form to enable and `without_accept_unmasked_frames()` to disable.
+* Removed `App::with_default_cors()`. Use `.set_cors(CorsConfig::default())` instead.
+* Removed `App::with_default_tracing()`. Use `.set_tracing(TracingConfig::default())` instead.
+* Removed `TlsConfig::with_hsts_preload`, `with_hsts_sub_domains`, `with_hsts_max_age`, and `with_hsts_exclude_hosts` shortcuts. Configure through the `with_hsts(|h| h. ...)` closure on `TlsConfig` (e.g. `with_hsts(|h| h.with_preload().with_sub_domains())`).
+
 # 0.9.0
 
 ## Added
