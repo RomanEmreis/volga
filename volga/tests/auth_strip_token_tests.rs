@@ -83,6 +83,42 @@ async fn it_strips_authorization_header_after_auth() {
 }
 
 #[tokio::test]
+async fn it_supports_layered_authorize_with_strip_enabled() {
+    // Group-level + route-level authorize must both succeed when
+    // strip_token_from_request is enabled (default). The outer call strips
+    // the header, but the inner call must recover the token from the
+    // request scope rather than failing with "Missing Authorization header".
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_bearer_auth(|auth| {
+                auth.set_decoding_key(DecodingKey::from_secret(SECRET))
+                    .validate_exp(false)
+            })
+        })
+        .setup(|app| {
+            app.group("/api", |api| {
+                api.authorize::<Claims>(roles(["admin"]));
+                api.map_get("/echo", echo_auth_header)
+                    .authorize::<Claims>(roles(["admin"]));
+            });
+        })
+        .build()
+        .await;
+
+    let token = make_token();
+    let res = server
+        .client()
+        .get(server.url("/api/echo"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.text().await.unwrap(), "absent");
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn it_preserves_authorization_header_when_disabled() {
     let server = TestServer::builder()
         .configure(|app| {

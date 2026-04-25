@@ -322,11 +322,12 @@ where
                 (WWW_AUTHENTICATE, r#"Bearer error="invalid_request", error_description="HTTPS required""#)
             ]);
         }
-        let bearer: Bearer = ctx.extract()?;
+        let bearer = resolve_bearer(&ctx)?;
         let bts: BearerTokenService = ctx.extract()?;
-        let resp = match bts.decode(bearer) {
+        let resp = match bts.decode(bearer.clone()) {
             Ok(claims) if authorizer.validate(&claims) => {
                 if bts.strip_token_from_request {
+                    stash_bearer(&mut ctx, bearer);
                     ctx.request_mut()
                         .headers_mut()
                         .remove(crate::headers::AUTHORIZATION);
@@ -360,6 +361,35 @@ where
                 .insert(CACHE_CONTROL, HeaderValue::from_static(NO_STORE));
             resp
         })
+    }
+}
+
+/// Returns the bearer token for this request, preferring the value stashed
+/// by an outer `authorize` middleware (when `strip_token_from_request` removed
+/// the `Authorization` header) over the raw header. This keeps stacked
+/// `authorize` chains (e.g. group-level + route-level) working when the outer
+/// step has already stripped the credential.
+#[cfg(feature = "jwt-auth")]
+fn resolve_bearer(ctx: &HttpContext) -> Result<Bearer, Error> {
+    use crate::http::request_scope::HttpRequestScope;
+    if let Some(scope) = ctx.request().extensions().get::<HttpRequestScope>()
+        && let Some(bearer) = scope.bearer.as_ref()
+    {
+        return Ok(bearer.clone());
+    }
+    ctx.extract::<Bearer>()
+}
+
+/// Stashes the bearer token into the request scope so nested `authorize`
+/// middlewares can recover it after the `Authorization` header is removed.
+/// Idempotent: a token already present in the scope is left untouched.
+#[cfg(feature = "jwt-auth")]
+fn stash_bearer(ctx: &mut HttpContext, bearer: Bearer) {
+    use crate::http::request_scope::HttpRequestScope;
+    if let Some(scope) = ctx.request_mut().extensions_mut().get_mut::<HttpRequestScope>()
+        && scope.bearer.is_none()
+    {
+        scope.bearer = Some(bearer);
     }
 }
 

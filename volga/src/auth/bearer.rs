@@ -445,7 +445,8 @@ impl BearerTokenService {
 }
 
 /// Wraps a bearer token string
-pub struct Bearer(Box<str>);
+#[derive(Clone)]
+pub struct Bearer(Arc<str>);
 
 impl std::fmt::Debug for Bearer {
     #[inline]

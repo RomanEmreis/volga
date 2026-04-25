@@ -193,6 +193,8 @@ async fn handle_impl(
                 error_handler: Arc::clone(error_handler),
                 #[cfg(feature = "jwt-auth")]
                 bearer_token_service: env.bearer_token_service.clone(),
+                #[cfg(feature = "jwt-auth")]
+                bearer: None,
                 #[cfg(any(
                     feature = "decompression-brotli",
                     feature = "decompression-gzip",
