@@ -29,6 +29,7 @@ pub struct BearerAuthConfig {
     encoding: Option<EncodingKey>,
     decoding: Option<DecodingKey>,
     strip_token_from_request: bool,
+    strict_aud: Option<bool>,
     resources: Vec<String>,
     resource_metadata_url: Option<String>,
     require_https: bool,
@@ -41,6 +42,7 @@ impl Default for BearerAuthConfig {
             encoding: None,
             decoding: None,
             strip_token_from_request: true,
+            strict_aud: None,
             resources: Vec::new(),
             resource_metadata_url: None,
             require_https: true,
@@ -56,6 +58,7 @@ impl std::fmt::Debug for BearerAuthConfig {
             .field("encoding", &"[redacted]")
             .field("decoding", &"[redacted]")
             .field("strip_token_from_request", &self.strip_token_from_request)
+            .field("strict_aud", &self.strict_aud)
             .field("resources", &self.resources)
             .field("resource_metadata_url", &self.resource_metadata_url)
             .field("require_https", &self.require_https)
@@ -116,6 +119,11 @@ impl BearerAuthConfig {
 
     /// Sets one or more acceptable audience members
     ///
+    /// An empty input is a no-op (no audience constraint or claim
+    /// requirement is applied), so configurations sourced from runtime
+    /// values that resolve to an empty list do not produce an
+    /// unsatisfiable validation setup.
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
@@ -129,8 +137,12 @@ impl BearerAuthConfig {
         T: ToString,
         I: AsRef<[T]>,
     {
-        self.validation.set_audience(aud.as_ref());
-        self.validation.required_spec_claims.insert("aud".into());
+        let aud = aud.as_ref();
+        if aud.is_empty() {
+            return self;
+        }
+        self.validation.set_audience(aud);
+        self.apply_aud_required();
         self
     }
 
@@ -240,15 +252,24 @@ impl BearerAuthConfig {
     ///
     /// If no audience is configured, this setting has no effect - `aud`
     /// is not validated at all.
-    pub fn with_strict_aud(self) -> Self {
-        self.strict_audience(true)
+    pub fn with_strict_aud(mut self) -> Self {
+        self.strict_aud = Some(true);
+        self.apply_aud_required();
+        self
     }
 
     /// Allows JWTs without an `aud` (audience) claim.
     ///
+    /// The opt-out persists across builder call order: calling this before
+    /// audiences are configured (e.g. before [`with_aud`](Self::with_aud) or
+    /// [`with_resource`](Self::with_resource)) still suppresses the
+    /// auto-required-`aud` behavior once audiences are added.
+    ///
     /// See [`with_strict_aud`](Self::with_strict_aud) for details.
-    pub fn without_strict_aud(self) -> Self {
-        self.strict_audience(false)
+    pub fn without_strict_aud(mut self) -> Self {
+        self.strict_aud = Some(false);
+        self.apply_aud_required();
+        self
     }
 
     /// Adds a single OAuth 2.0 resource indicator (RFC 8707).
@@ -264,7 +285,7 @@ impl BearerAuthConfig {
             .aud
             .get_or_insert_with(HashSet::new)
             .insert(uri);
-        self.validation.required_spec_claims.insert("aud".into());
+        self.apply_aud_required();
         self
     }
 
@@ -287,7 +308,7 @@ impl BearerAuthConfig {
         for uri in new {
             aud.insert(uri);
         }
-        self.validation.required_spec_claims.insert("aud".into());
+        self.apply_aud_required();
         self
     }
 
@@ -313,17 +334,25 @@ impl BearerAuthConfig {
         self
     }
 
+    /// Synchronizes the `aud` entry in `required_spec_claims` with the
+    /// configured audience set and the user's `strict_aud` preference.
+    ///
+    /// - When no audiences are configured, `aud` is never required: marking
+    ///   it required without any accepted values yields an unsatisfiable
+    ///   validation (every token would fail).
+    /// - Otherwise, `aud` is required iff `strict_aud` is unset (default-on)
+    ///   or explicitly `Some(true)`.
     #[inline]
-    fn strict_audience(mut self, required: bool) -> Self {
+    fn apply_aud_required(&mut self) {
         if self.validation.aud.is_none() {
-            return self;
+            self.validation.required_spec_claims.remove("aud");
+            return;
         }
-        if required {
+        if self.strict_aud.unwrap_or(true) {
             self.validation.required_spec_claims.insert("aud".into());
         } else {
             self.validation.required_spec_claims.remove("aud");
         }
-        self
     }
 }
 
@@ -954,7 +983,7 @@ mod tests {
 
         assert_eq!(
             format!("{config:?}"),
-            r#"BearerAuthConfig { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]", strip_token_from_request: true, resources: [], resource_metadata_url: None, require_https: true }"#
+            r#"BearerAuthConfig { validation: "[redacted]", encoding: "[redacted]", decoding: "[redacted]", strip_token_from_request: true, strict_aud: None, resources: [], resource_metadata_url: None, require_https: true }"#
         );
     }
 
@@ -1079,6 +1108,48 @@ mod tests {
         assert!(config.resources.is_empty());
         assert!(config.validation.aud.is_none());
         assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_treats_empty_with_aud_as_noop() {
+        let config = BearerAuthConfig::default().with_aud(Vec::<String>::new());
+        assert!(config.validation.aud.is_none());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_persists_strict_aud_optout_before_with_aud() {
+        let config = BearerAuthConfig::default()
+            .without_strict_aud()
+            .with_aud(["test-aud"]);
+        assert!(config.validation.aud.is_some());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_persists_strict_aud_optout_before_with_resource() {
+        let config = BearerAuthConfig::default()
+            .without_strict_aud()
+            .with_resource("https://api.example.com/");
+        assert!(config.validation.aud.is_some());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_persists_strict_aud_optout_before_with_resources() {
+        let config = BearerAuthConfig::default()
+            .without_strict_aud()
+            .with_resources(["https://api.a.example/", "https://api.b.example/"]);
+        assert!(config.validation.aud.is_some());
+        assert!(!config.validation.required_spec_claims.contains("aud"));
+    }
+
+    #[tokio::test]
+    async fn it_persists_strict_aud_optin_across_calls() {
+        let config = BearerAuthConfig::default()
+            .with_strict_aud()
+            .with_aud(["test-aud"]);
+        assert!(config.validation.required_spec_claims.contains("aud"));
     }
 
     #[tokio::test]
