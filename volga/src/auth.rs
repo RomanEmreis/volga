@@ -386,7 +386,10 @@ fn resolve_bearer(ctx: &HttpContext) -> Result<Bearer, Error> {
 #[cfg(feature = "jwt-auth")]
 fn stash_bearer(ctx: &mut HttpContext, bearer: Bearer) {
     use crate::http::request_scope::HttpRequestScope;
-    if let Some(scope) = ctx.request_mut().extensions_mut().get_mut::<HttpRequestScope>()
+    if let Some(scope) = ctx
+        .request_mut()
+        .extensions_mut()
+        .get_mut::<HttpRequestScope>()
         && scope.bearer.is_none()
     {
         scope.bearer = Some(bearer);
