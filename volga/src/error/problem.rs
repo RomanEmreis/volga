@@ -142,6 +142,7 @@ macro_rules! problem {
 pub type ProblemDetails = Problem<HashMap<String, Value>>;
 
 /// Represents an error response in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E: Serialize",

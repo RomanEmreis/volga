@@ -34,7 +34,7 @@ smallvec = "1.15.1"
 # optional
 arc-swap = { version = "1.9.1", optional = true }
 toml     = { version = "0.8.23",   optional = true }
-async-compression = { version = "0.4.41", features = ["tokio"], optional = true }
+async-compression = { version = "0.4.42", features = ["tokio"], optional = true }
 base64 = { version = "0.22.1", optional = true }
 cookie = { version = "0.18.1", features = ["percent-encode"], optional = true }
 jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"], optional = true }
@@ -50,7 +50,7 @@ tokio-rustls = { version = "0.26.4", default-features = false, features = ["tls1
 tokio-tungstenite = { version = "0.29.0", optional = true }
 tracing = { version = "0.1.44", default-features = false, optional = true }
 twox-hash = { version = "2.1.2", optional = true }
-uuid = { version = "1.23.0", features = ["v4"], optional = true }
+uuid = { version = "1.23.1", features = ["v4"], optional = true }
 
 # volga
 volga-dev-cert     = { workspace = true, optional = true }

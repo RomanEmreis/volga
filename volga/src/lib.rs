@@ -24,7 +24,7 @@
 //!     app.map_get("/hello/{name}", async |name: String| {
 //!          ok!("Hello {name}!")
 //!     });
-//!     
+//!
 //!     app.run().await
 //! }
 //! ```
@@ -46,6 +46,7 @@ pub mod fs;
 pub mod fuzzing;
 pub mod headers;
 pub mod http;
+#[doc(hidden)]
 pub mod json;
 pub mod limits;
 #[cfg(feature = "middleware")]
