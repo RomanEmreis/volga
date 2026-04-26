@@ -1107,7 +1107,7 @@ mod tests {
             &["www.example.com", "www.example.net:80", "www.example.org"]
         );
     }
-    
+
     #[test]
     #[should_panic]
     fn it_panics_on_with_preload_if_max_age_is_less_than_year() {
