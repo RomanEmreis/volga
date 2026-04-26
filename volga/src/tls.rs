@@ -58,10 +58,11 @@ pub(super) mod https_redirect;
 const CERT_FILE_NAME: &str = "cert.pem";
 const KEY_FILE_NAME: &str = "key.pem";
 const DEFAULT_PORT: u16 = 7879;
-const DEFAULT_MAX_AGE: u64 = 30 * 24 * 60 * 60; // 30 days = 2,592,000 seconds
+const DEFAULT_MAX_AGE: u64 = 31_536_000; // seconds = 1 year
 
 /// Represents TLS (Transport Layer Security) configuration options
 #[derive(Debug)]
+#[non_exhaustive]
 #[cfg_attr(feature = "config", derive(serde::Deserialize))]
 #[cfg_attr(feature = "config", serde(default))]
 pub struct TlsConfig {
@@ -83,6 +84,7 @@ pub struct TlsConfig {
 
 /// Represents HTTPS redirection configuration options
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 #[cfg_attr(feature = "config", derive(serde::Deserialize))]
 #[cfg_attr(feature = "config", serde(default))]
 pub struct RedirectionConfig {
@@ -231,8 +233,16 @@ impl fmt::Display for HstsConfig {
 impl HstsConfig {
     /// Enables `preload` in the HSTS header.
     ///
+    /// ## Panics
+    /// if `max_age` is less than 1 year (31,536,000 seconds).
+    ///
     /// Default: disabled.
     pub fn with_preload(mut self) -> Self {
+        assert!(
+            validate_max_age(self.max_age),
+            "HSTS preload requires max_age >= 1 year (got {:?}).",
+            self.max_age
+        );
         self.preload = true;
         self
     }
@@ -263,8 +273,17 @@ impl HstsConfig {
 
     /// Configures `max_age` for HSTS header
     ///
-    /// Default: 30 days (2,592,000 seconds)
+    /// ## Panics
+    ///
+    /// Panics if `max_age` is less than 1 year (31,536,000 seconds) and `preload` is enabled.
+    ///
+    /// Default: 1 year (31,536,000 seconds)
     pub fn with_max_age(mut self, max_age: Duration) -> Self {
+        assert!(
+            !self.preload || validate_max_age(max_age),
+            "HSTS preload is enabled but max_age {:?} < 1 year.",
+            max_age
+        );
         self.max_age = max_age;
         self
     }
@@ -283,6 +302,11 @@ impl HstsConfig {
             .collect();
         self
     }
+}
+
+#[inline(always)]
+fn validate_max_age(max_age: Duration) -> bool {
+    max_age >= Duration::from_secs(DEFAULT_MAX_AGE)
 }
 
 impl HstsHeader {
@@ -988,7 +1012,7 @@ mod tests {
 
         let hsts_string = hsts_config.to_string();
 
-        assert_eq!(hsts_string, "max-age=2592000");
+        assert_eq!(hsts_string, "max-age=31536000");
     }
 
     #[test]
@@ -1067,7 +1091,7 @@ mod tests {
         let hsts_header = HstsHeader::new(hsts_config);
 
         assert_eq!(hsts_header.exclude_hosts, &["www.example.com"]);
-        assert_eq!(hsts_header.inner, "max-age=2592000");
+        assert_eq!(hsts_header.inner, "max-age=31536000");
     }
 
     #[test]
@@ -1082,5 +1106,21 @@ mod tests {
             hsts_config.exclude_hosts,
             &["www.example.com", "www.example.net:80", "www.example.org"]
         );
+    }
+    
+    #[test]
+    #[should_panic]
+    fn it_panics_on_with_preload_if_max_age_is_less_than_year() {
+        let _ = HstsConfig::default()
+            .with_max_age(Duration::from_secs(3600))
+            .with_preload();
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_panics_on_with_max_age_less_than_year_if_preload_enabled() {
+        let _ = HstsConfig::default()
+            .with_max_age(Duration::from_secs(3600))
+            .with_preload();
     }
 }

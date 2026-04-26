@@ -45,6 +45,7 @@ pub mod fs;
 #[doc(hidden)]
 pub mod fuzzing;
 pub mod headers;
+#[doc(hidden)]
 pub mod http;
 pub mod json;
 pub mod limits;
