@@ -76,9 +76,9 @@ pub use server::{TestServer, TestServerBuilder};
 #[cfg(feature = "ws")]
 pub use ws::TestWebSocket;
 
-pub mod fs;
-pub mod server;
+pub(crate) mod fs;
+pub(crate) mod server;
 #[cfg(test)]
 pub(crate) mod utils;
 #[cfg(feature = "ws")]
-pub mod ws;
+pub(crate) mod ws;
