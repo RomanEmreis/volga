@@ -14,7 +14,7 @@ type RegisterFn = Box<dyn FnOnce(&mut ConfigStore, &Value) -> Result<(), String>
 
 /// Builds and validates the file-based configuration.
 ///
-/// Created via [`App::with_config`] or [`App::with_default_config`].
+/// Created via `App::with_config` or `App::with_default_config`.
 ///
 /// # Example
 /// ```no_run

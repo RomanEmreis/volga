@@ -54,9 +54,10 @@ pub mod encoding_key;
 pub(crate) mod pem;
 
 #[cfg(feature = "jwt-auth")]
-impl From<JwtError> for Error {
+impl Error {
+    /// Converts [`jsonwebtoken::errors::Error`] into [`volga::Error`]
     #[inline]
-    fn from(err: JwtError) -> Self {
+    pub(crate) fn from_jwt_error(err: JwtError) -> Self {
         let kind = err.kind();
         let status_code = map_jwt_error_to_status(kind);
         Error::from_parts(status_code, None, err)
@@ -675,7 +676,7 @@ mod tests {
     #[test]
     fn it_converts_jwt_error_to_error_with_expired_signature() {
         let jwt_error = JwtError::from(ErrorKind::ExpiredSignature);
-        let error: Error = jwt_error.into();
+        let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::UNAUTHORIZED);
         assert!(error.instance.is_none());
@@ -684,7 +685,7 @@ mod tests {
     #[test]
     fn it_converts_jwt_error_to_error_with_invalid_token() {
         let jwt_error = JwtError::from(ErrorKind::InvalidToken);
-        let error: Error = jwt_error.into();
+        let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::UNAUTHORIZED);
         assert!(error.instance.is_none());
@@ -693,7 +694,7 @@ mod tests {
     #[test]
     fn it_converts_jwt_error_to_error_with_base64_error() {
         let jwt_error = JwtError::from(ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)));
-        let error: Error = jwt_error.into();
+        let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(error.instance.is_none());
@@ -704,7 +705,7 @@ mod tests {
         let json_result: Result<serde_json::Value, _> = serde_json::from_str("invalid json");
         let json_error = json_result.unwrap_err();
         let jwt_error = JwtError::from(ErrorKind::Json(Arc::from(json_error)));
-        let error: Error = jwt_error.into();
+        let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(error.instance.is_none());
@@ -713,7 +714,7 @@ mod tests {
     #[test]
     fn it_converts_jwt_error_to_error_with_invalid_key_format() {
         let jwt_error = JwtError::from(ErrorKind::InvalidKeyFormat);
-        let error: Error = jwt_error.into();
+        let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(error.instance.is_none());

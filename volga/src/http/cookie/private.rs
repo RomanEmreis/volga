@@ -108,7 +108,7 @@ impl PrivateCookies {
     }
 
     /// Returns a reference to the cookie inside the private jar by `name`
-    /// and authenticates and decrypts the cookie's value, returning a [`Cookie`] with the decrypted value.
+    /// and authenticates and decrypts the cookie's value, returning a [`Cookie`](cookie::Cookie) with the decrypted value.
     /// If the cookie cannot be found, or the cookie fails to authenticate or decrypt, `None` is returned.
     pub fn get(&self, name: &str) -> Option<cookie::Cookie<'static>> {
         self.private().get(name)

@@ -50,7 +50,9 @@ use crate::auth::{AuthClaims, Authenticated};
 ///
 /// This type intentionally hides its internal implementation details.
 /// Users construct `RateLimitKeySource` values via helper functions
-/// provided in the [`by`] module, such as [`by::ip`] or [`by::user`].
+/// provided in the [`by`](crate::rate_limiting::by) module,
+/// such as [`by::ip`](crate::rate_limiting::by::ip)
+/// or [`by::user`](crate::rate_limiting::by::user).
 ///
 /// # Usage
 ///
@@ -92,7 +94,7 @@ use crate::auth::{AuthClaims, Authenticated};
 /// - `RateLimitKeySource` implements [`RateLimitKey`] and can be converted
 ///   into an internal binding via framework-provided extension traits.
 ///
-/// See the [`by`] module for available key source constructors.
+/// See the [`by`](crate::rate_limiting::by) module for available key source constructors.
 #[derive(Debug, Clone)]
 pub struct RateLimitKeySource {
     /// Inner key
@@ -102,7 +104,8 @@ pub struct RateLimitKeySource {
 impl RateLimitKeySource {
     /// Binds this partition key source to a named rate-limiting policy.
     ///
-    /// See [`FixedWindow::with_name`] or [`SlidingWindow::with_name`] for
+    /// See [`FixedWindow::with_name`](crate::rate_limiting::FixedWindow::with_name)
+    /// or [`SlidingWindow::with_name`](crate::rate_limiting::SlidingWindow::with_name) for
     /// policy configuration.
     pub fn using(self, policy: impl Into<PolicyName>) -> RateLimitBinding {
         RateLimitBinding {

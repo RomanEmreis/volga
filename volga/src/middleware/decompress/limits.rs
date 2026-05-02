@@ -96,8 +96,7 @@ impl ExpansionRatio {
 
 /// User-facing decompression limits configuration.
 ///
-/// This type is typically configured once and then "resolved" into concrete numeric limits
-/// (see [`DecompressionLimits::resolved`]).
+/// This type is typically configured once and then "resolved" into concrete numeric limits.
 ///
 /// Each limit uses [`Limit`] semantics:
 /// - `Default` uses a module default,

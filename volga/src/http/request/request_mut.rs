@@ -22,8 +22,8 @@ use crate::{
 /// (headers, extensions, limits), but the request body
 /// **cannot be consumed**.
 ///
-/// To transition into the handler phase, call [`freeze`],
-/// which produces an immutable [`HttpRequest`].
+/// To transition into the handler phase, the framework freezes the request,
+/// producing an immutable [`HttpRequest`].
 ///
 /// ## Design notes
 ///
@@ -365,7 +365,7 @@ impl HttpRequestMut {
     }
 }
 
-/// Conversion trait for values returned from [`tap_req`] middleware.
+/// Conversion trait for values returned from `tap_req` middleware.
 ///
 /// This trait exists solely to make `tap_req` middleware ergonomic:
 /// a middleware may either return the request directly or fail with an error.

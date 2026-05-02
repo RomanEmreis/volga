@@ -110,7 +110,7 @@ impl BearerAuthConfig {
     ///         .with_alg(Algorithm::RS256));
     /// ```
     pub fn with_alg(mut self, alg: Algorithm) -> Self {
-        let jwt_alg: jsonwebtoken::Algorithm = alg.into();
+        let jwt_alg: jsonwebtoken::Algorithm = alg.to_jwt();
         if !self.validation.algorithms.contains(&jwt_alg) {
             self.validation.algorithms.push(jwt_alg);
         }
@@ -427,7 +427,7 @@ impl BearerTokenService {
             return Err(Error::server_error("Missing security key"));
         };
         jsonwebtoken::encode(&JwtHeader::default(), claims, &encoding_key.0)
-            .map_err(Error::from)
+            .map_err(Error::from_jwt_error)
             .map(|s| Bearer(s.into()))
     }
 
@@ -439,7 +439,7 @@ impl BearerTokenService {
             return Err(Error::server_error("Missing security key"));
         };
         jsonwebtoken::decode(&*bearer.0, &decoding_key.0, &self.validation)
-            .map_err(Error::from)
+            .map_err(Error::from_jwt_error)
             .map(|t| t.claims)
     }
 }

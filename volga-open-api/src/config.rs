@@ -10,7 +10,7 @@ const DEFAULT_UI_PATH: &str = "/openapi";
 pub struct OpenApiConfig {
     /// Returns `true` if the OpenAPI have been exposed.
     ///
-    /// This is a runtime flag set by [`App::use_open_api`] and is not configurable from a file.
+    /// This is a runtime flag set by `App::use_open_api` and is not configurable from a file.
     #[serde(skip)]
     pub exposed: bool,
 

@@ -29,7 +29,7 @@ impl DecodingKey {
     pub fn from_base64_secret(secret: &str) -> Result<Self, Error> {
         jsonwebtoken::DecodingKey::from_base64_secret(secret)
             .map(Self)
-            .map_err(Error::from)
+            .map_err(Error::from_jwt_error)
     }
 
     /// Builds an RSA verification key from a PEM-encoded public key.
@@ -37,7 +37,7 @@ impl DecodingKey {
     pub fn from_rsa_pem(pem: &[u8]) -> Result<Self, Error> {
         jsonwebtoken::DecodingKey::from_rsa_pem(pem)
             .map(Self)
-            .map_err(Error::from)
+            .map_err(Error::from_jwt_error)
     }
 
     /// Builds an ECDSA verification key from a PEM-encoded public key.
@@ -45,7 +45,7 @@ impl DecodingKey {
     pub fn from_ec_pem(pem: &[u8]) -> Result<Self, Error> {
         jsonwebtoken::DecodingKey::from_ec_pem(pem)
             .map(Self)
-            .map_err(Error::from)
+            .map_err(Error::from_jwt_error)
     }
 
     /// Builds an EdDSA verification key from a PEM-encoded public key.
@@ -53,7 +53,7 @@ impl DecodingKey {
     pub fn from_ed_pem(pem: &[u8]) -> Result<Self, Error> {
         jsonwebtoken::DecodingKey::from_ed_pem(pem)
             .map(Self)
-            .map_err(Error::from)
+            .map_err(Error::from_jwt_error)
     }
 
     /// Reads the env var `name` and builds an HMAC key from its bytes.

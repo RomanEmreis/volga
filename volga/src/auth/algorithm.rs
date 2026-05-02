@@ -40,42 +40,25 @@ impl Default for Algorithm {
     }
 }
 
-impl From<Algorithm> for jsonwebtoken::Algorithm {
+impl Algorithm {
+    /// Converts this algorithm to the underlying `jsonwebtoken::Algorithm`.
+    ///
+    /// Crate-private to keep `jsonwebtoken` out of volga's public API surface.
     #[inline]
-    fn from(value: Algorithm) -> Self {
-        match value {
-            Algorithm::HS256 => jsonwebtoken::Algorithm::HS256,
-            Algorithm::HS384 => jsonwebtoken::Algorithm::HS384,
-            Algorithm::HS512 => jsonwebtoken::Algorithm::HS512,
-            Algorithm::ES256 => jsonwebtoken::Algorithm::ES256,
-            Algorithm::ES384 => jsonwebtoken::Algorithm::ES384,
-            Algorithm::RS256 => jsonwebtoken::Algorithm::RS256,
-            Algorithm::RS384 => jsonwebtoken::Algorithm::RS384,
-            Algorithm::RS512 => jsonwebtoken::Algorithm::RS512,
-            Algorithm::PS256 => jsonwebtoken::Algorithm::PS256,
-            Algorithm::PS384 => jsonwebtoken::Algorithm::PS384,
-            Algorithm::PS512 => jsonwebtoken::Algorithm::PS512,
-            Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
-        }
-    }
-}
-
-impl From<jsonwebtoken::Algorithm> for Algorithm {
-    #[inline]
-    fn from(value: jsonwebtoken::Algorithm) -> Self {
-        match value {
-            jsonwebtoken::Algorithm::HS256 => Algorithm::HS256,
-            jsonwebtoken::Algorithm::HS384 => Algorithm::HS384,
-            jsonwebtoken::Algorithm::HS512 => Algorithm::HS512,
-            jsonwebtoken::Algorithm::ES256 => Algorithm::ES256,
-            jsonwebtoken::Algorithm::ES384 => Algorithm::ES384,
-            jsonwebtoken::Algorithm::RS256 => Algorithm::RS256,
-            jsonwebtoken::Algorithm::RS384 => Algorithm::RS384,
-            jsonwebtoken::Algorithm::RS512 => Algorithm::RS512,
-            jsonwebtoken::Algorithm::PS256 => Algorithm::PS256,
-            jsonwebtoken::Algorithm::PS384 => Algorithm::PS384,
-            jsonwebtoken::Algorithm::PS512 => Algorithm::PS512,
-            jsonwebtoken::Algorithm::EdDSA => Algorithm::EdDSA,
+    pub(crate) fn to_jwt(self) -> jsonwebtoken::Algorithm {
+        match self {
+            Self::HS256 => jsonwebtoken::Algorithm::HS256,
+            Self::HS384 => jsonwebtoken::Algorithm::HS384,
+            Self::HS512 => jsonwebtoken::Algorithm::HS512,
+            Self::ES256 => jsonwebtoken::Algorithm::ES256,
+            Self::ES384 => jsonwebtoken::Algorithm::ES384,
+            Self::RS256 => jsonwebtoken::Algorithm::RS256,
+            Self::RS384 => jsonwebtoken::Algorithm::RS384,
+            Self::RS512 => jsonwebtoken::Algorithm::RS512,
+            Self::PS256 => jsonwebtoken::Algorithm::PS256,
+            Self::PS384 => jsonwebtoken::Algorithm::PS384,
+            Self::PS512 => jsonwebtoken::Algorithm::PS512,
+            Self::EdDSA => jsonwebtoken::Algorithm::EdDSA,
         }
     }
 }
@@ -106,8 +89,7 @@ mod tests {
             (Algorithm::EdDSA, jsonwebtoken::Algorithm::EdDSA),
         ];
         for (volga, jwt) in pairs {
-            assert_eq!(jsonwebtoken::Algorithm::from(volga), jwt);
-            assert_eq!(Algorithm::from(jwt), volga);
+            assert_eq!(volga.to_jwt(), jwt);
         }
     }
 
