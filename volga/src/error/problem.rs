@@ -9,132 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+const PROBLEM_JSON_MIME: &str = "application/problem+json";
+
 #[cfg(feature = "middleware")]
 use crate::routing::{Route, RouteGroup};
-
-/// Produces an error response in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
-///
-/// # Deprecated
-/// This macro is deprecated in favor of [`volga::error::Problem`].
-/// The `Problem` type provides a strongly typed API, better IDE support,
-/// compile-time safety, and a single source of truth for response behavior.
-///
-/// This macro is kept for backward compatibility and may be removed
-/// in a future release.
-///
-/// # Example
-/// ```no_run
-/// # use volga::problem;
-/// let problem_details = problem! {
-///     "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
-///     "title": "Bad Request",
-///     "status": 400,
-///     "details": "Your request parameters didn't validate.",
-///     "instance": "/some/resource/path",
-///     "invalid-params": [
-///         { "name": "id", "reason": "Must be a positive integer" }
-///     ]
-/// };
-/// ```
-#[macro_export]
-#[deprecated(
-    since = "0.7.3",
-    note = "Use `volga::error::Problem` for a typed and maintainable RFC 7807 API."
-)]
-macro_rules! problem {
-    (
-        "status": $status:expr
-        $(, $key:tt : $value:tt)*
-        $(,)?
-    ) => {{
-        let status = $crate::http::StatusCode::from_u16($status)
-            .unwrap_or($crate::http::StatusCode::OK);
-        match $crate::HttpBody::json($crate::json::json_internal!({
-            "type": $crate::error::problem::get_problem_type_url($status),
-            "title": status.canonical_reason().unwrap_or("unknown status code"),
-            "status": $status,
-            $($key: $value),*
-        })) {
-            Ok(body) => $crate::response!(
-                status,
-                body;
-                [
-                    ($crate::headers::CONTENT_TYPE, "problem+json"),
-                ]
-            ),
-            Err(err) => Err(err),
-        }
-    }};
-
-    (
-        "type": $type:expr,
-        "status": $status:expr
-        $(, $key:tt : $value:tt)* $(,)?
-    ) => {{
-        let status = $crate::http::StatusCode::from_u16($status)
-            .unwrap_or($crate::http::StatusCode::OK);
-        match $crate::HttpBody::json($crate::json::json_internal!({
-            "type": $type,
-            "title": status.canonical_reason().unwrap_or("unknown status code"),
-            "status": $status,
-            $($key: $value),*
-        })) {
-            Ok(body) => $crate::response!(
-                status,
-                body;
-                [
-                    ($crate::headers::CONTENT_TYPE, "problem+json"),
-                ]
-            ),
-            Err(err) => Err(err),
-        }
-    }};
-
-    (
-        "title": $title:expr,
-        "status": $status:expr
-        $(, $key:tt : $value:tt)* $(,)?
-    ) => {
-        match $crate::HttpBody::json($crate::json::json_internal!({
-            "type": $crate::error::problem::get_problem_type_url($status),
-            "title": $title,
-            "status": $status,
-            $($key: $value),*
-        })) {
-            Ok(body) => $crate::response!(
-                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-                body;
-                [
-                    ($crate::headers::CONTENT_TYPE, "problem+json"),
-                ]
-            ),
-            Err(err) => Err(err),
-        }
-    };
-
-    (
-        "type": $type:expr,
-        "title": $title:expr,
-        "status": $status:expr
-        $(, $key:tt : $value:tt)* $(,)?
-    ) => {
-        match $crate::HttpBody::json($crate::json::json_internal!({
-            "type": $type,
-            "title": $title,
-            "status": $status,
-            $($key: $value),*
-        })) {
-            Ok(body) => $crate::response!(
-                $crate::http::StatusCode::from_u16($status).unwrap_or($crate::http::StatusCode::OK),
-                body;
-                [
-                    ($crate::headers::CONTENT_TYPE, "problem+json"),
-                ]
-            ),
-            Err(err) => Err(err),
-        }
-    };
-}
 
 /// A general problem details.
 ///
@@ -202,7 +80,7 @@ impl<E: Serialize> IntoResponse for Problem<E> {
             self.status,
             HttpBody::json(self)?;
             [
-                (crate::headers::CONTENT_TYPE, "problem+json"),
+                (crate::headers::CONTENT_TYPE, PROBLEM_JSON_MIME),
             ]
         )
     }
@@ -446,52 +324,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    #[allow(deprecated)]
-    async fn it_serializes_and_deserializes_problem_details_from_macro() {
-        let problem = problem! {
-            "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
-            "title": "Bad Request",
-            "status": 400,
-            "detail": "Your request parameters didn't validate.",
-            "instance": "/some/resource/path",
-            "invalid-params": [
-                { "name": "id", "reason": "Must be a positive integer" }
-            ]
-        };
-
-        let body = &problem
-            .unwrap()
-            .body_mut()
-            .collect()
-            .await
-            .unwrap()
-            .to_bytes();
-
-        let problem: ProblemDetails = serde_json::from_slice(body).unwrap();
-
-        assert_eq!(
-            problem.r#type,
-            "https://tools.ietf.org/html/rfc9110#section-15.5.1"
-        );
-        assert_eq!(problem.title, "Bad Request");
-        assert_eq!(problem.status, 400);
-        assert_eq!(
-            problem.detail.unwrap(),
-            "Your request parameters didn't validate."
-        );
-        assert_eq!(problem.instance.unwrap(), "/some/resource/path");
-        assert_eq!(
-            problem.extensions["invalid-params"],
-            json!([
-                {
-                    "name": "id",
-                    "reason": "Must be a positive integer"
-                }
-            ])
-        );
-    }
-
     #[test]
     fn it_deserializes_extensions() {
         let json = r#"{"type":"https://tools.ietf.org/html/rfc9110#section-15.5.1","title":"Bad Request","status":400,"invalid-params":[{"name":"id","reason":"Must be a positive integer"}]}"#;
@@ -598,7 +430,6 @@ mod tests {
             (426, "https://tools.ietf.org/html/rfc9110#section-15.5.22"),
         ];
 
-        assert(client_errors).await;
         assert_struct(client_errors).await;
     }
 
@@ -613,32 +444,7 @@ mod tests {
             (505, "https://tools.ietf.org/html/rfc9110#section-15.6.6"),
         ];
 
-        assert(server_errors).await;
         assert_struct(server_errors).await;
-    }
-
-    #[allow(deprecated)]
-    async fn assert<const N: usize>(test_cases: [(u16, &str); N]) {
-        for (status, url) in test_cases {
-            let mut problem_details = problem! { "status": status }.unwrap();
-            let body = &problem_details
-                .body_mut()
-                .collect()
-                .await
-                .unwrap()
-                .to_bytes();
-            assert_eq!(
-                String::from_utf8_lossy(body),
-                format!(
-                    "{{\"status\":{},\"title\":\"{}\",\"type\":\"{}\"}}",
-                    status,
-                    problem_details.status().canonical_reason().unwrap(),
-                    url
-                )
-            );
-
-            assert_eq!(problem_details.status(), status);
-        }
     }
 
     async fn assert_struct<const N: usize>(test_cases: [(u16, &str); N]) {
