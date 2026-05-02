@@ -29,8 +29,8 @@ type ServerSetupFn = Box<dyn FnOnce(&mut App) + Send>;
 ///
 /// Configuration is split into two phases:
 ///
-/// 1. Application-level configuration using [`configure`]
-/// 2. Route and middleware setup using [`setup`]
+/// 1. Application-level configuration using [`configure`](Self::configure)
+/// 2. Route and middleware setup using [`setup`](Self::setup)
 ///
 /// This separation mirrors the lifecycle of a typical Volga application
 /// and helps keep test setup clear and intention-revealing.

@@ -95,7 +95,7 @@ pub trait TimeSource: Send + Sync {
     /// Returns a monotonic timestamp in microseconds.
     fn now_micros(&self) -> u64;
 
-    /// Returns the number of seconds elapsed since [`UNIX_EPOCH`]
+    /// Returns the number of seconds elapsed since [`UNIX_EPOCH`](std::time::UNIX_EPOCH)
     /// (`1970-01-01 00:00:00 UTC`).
     ///
     /// Implementations must ensure that the returned value is:

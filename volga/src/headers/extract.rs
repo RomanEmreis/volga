@@ -29,7 +29,7 @@ macro_rules! define_header {
             pub struct $struct_name;
 
             impl $struct_name {
-                /// Creates a new instance of [`Header<T>`] from a `static str`
+                /// Creates a new instance of [`Header<T>`](crate::headers::Header) from a `static str`
                 #[inline(always)]
                 pub const fn from_static(value: &'static str) -> $crate::headers::Header<$struct_name> {
                     $crate::headers::Header::<$struct_name>::from_static(value)

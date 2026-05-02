@@ -28,9 +28,9 @@ pub trait ErrorHandler: Send + Sync {
 
     /// Returns whether this handler requires argument extraction from [`Parts`].
     ///
-    /// When `false`, [`extract_error_args`] skips the `Box<dyn ErasedErrorArgs>`
+    /// When `false`, the framework skips the `Box<dyn ErasedErrorArgs>`
     /// allocation entirely and stores only the request URI. Overridden to `false`
-    /// by [`DefaultErrorHandler`] to eliminate a per-request heap allocation on
+    /// by the default error handler to eliminate a per-request heap allocation on
     /// the happy path.
     #[inline]
     fn needs_parts_extraction(&self) -> bool {

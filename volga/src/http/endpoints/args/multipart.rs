@@ -61,7 +61,7 @@ impl Field {
         self.0.chunk().await.map_err(MultipartError::read_error)
     }
 
-    /// Asynchronously writes a multipart field as a file stream to disk with a name taken from [`CONTENT_DISPOSITION`] header
+    /// Asynchronously writes a multipart field as a file stream to disk with a name taken from `CONTENT_DISPOSITION` header
     ///
     /// # Example
     /// ```no_run

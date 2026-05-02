@@ -107,7 +107,7 @@ impl SignedCookies {
 
     /// Returns a reference to the cookie inside the signed jar by `name`
     /// and verifies the authenticity and integrity of the cookie's value,
-    /// returning a [`Cookie`] with the authenticated value.
+    /// returning a [`Cookie`](cookie::Cookie) with the authenticated value.
     /// If the cookie cannot be found, or the cookie fails to verify, `None` is returned.
     pub fn get(&self, name: &str) -> Option<cookie::Cookie<'static>> {
         self.signed().get(name)

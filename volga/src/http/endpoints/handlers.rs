@@ -61,7 +61,7 @@ where
 }
 
 /// Describes a generic request handler that could take 0 or N parameters of types
-/// that are implement [`FromPayload`] trait
+/// that are implement `FromPayload` trait
 pub trait GenericHandler<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
@@ -70,7 +70,7 @@ pub trait GenericHandler<Args>: Clone + Send + Sync + 'static {
     fn call(&self, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
-/// Describes a generic [`map_err`] middleware handler that could take 0 or N parameters and [`Error`]
+/// Describes a generic `map_err` middleware handler that could take 0 or N parameters and [`Error`]
 pub trait MapErr<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;

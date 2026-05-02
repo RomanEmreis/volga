@@ -14,7 +14,7 @@ use std::{ops::Deref, sync::Arc};
 
 /// Provides read access to a pre-deserialized config section `T`.
 ///
-/// `T` must be registered via [`ConfigBuilder::bind_section`] before the server starts.
+/// `T` must be registered via [`ConfigBuilder::bind_section`](crate::ConfigBuilder::bind_section) before the server starts.
 /// On each request, `Config<T>` performs one atomic load + `Arc::clone` — no deserialization.
 ///
 /// # Example

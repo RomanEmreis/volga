@@ -114,22 +114,22 @@ pub trait Filter<Args>: Clone + Send + Sync + 'static {
     fn filter(&self, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 
-/// Describes a generic [`tap_req`] middleware handler that could take 0 or N parameters and [`HttpRequestMut`]
+/// Describes a generic `tap_req` middleware handler that could take 0 or N parameters and [`HttpRequestMut`]
 pub trait TapReq<Args = ()>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
 
-    /// Calls the [`tap_req`] handler
+    /// Calls the `tap_req` handler
     fn tap_req(&self, req: HttpRequestMut, args: Args)
     -> impl Future<Output = Self::Output> + Send;
 }
 
-/// Describes a generic [`map_ok`] middleware handler that could take 0 or N parameters and [`HttpResponse`]
+/// Describes a generic `map_ok` middleware handler that could take 0 or N parameters and [`HttpResponse`]
 pub trait MapOk<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
 
-    /// Calls the [`map_ok`] handler
+    /// Calls the `map_ok` handler
     fn map_ok(&self, resp: HttpResponse, args: Args) -> impl Future<Output = Self::Output> + Send;
 }
 

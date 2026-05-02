@@ -50,9 +50,9 @@ mod http2;
 ///
 /// # Variants
 ///
-/// - [`Default`] — Uses the framework or transport default (recommended).
-/// - [`Limited`] — Enforces an explicit upper bound.
-/// - [`Unlimited`] — Disables the limit entirely.
+/// - [`Limit::Default`] — Uses the framework or transport default (recommended).
+/// - [`Limit::Limited`] — Enforces an explicit upper bound.
+/// - [`Limit::Unlimited`] — Disables the limit entirely.
 ///
 /// ⚠️ Disabling limits may expose the server to resource exhaustion and
 /// should only be done in trusted environments.

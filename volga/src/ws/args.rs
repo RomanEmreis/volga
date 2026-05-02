@@ -221,7 +221,7 @@ pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
 }
 
 /// Describes a generic WebSocket/WebSocket-over-HTTP/2 message handler that could take a message
-/// in a format that implements the[`FromMessage`] and 0 or N parameters of types
+/// in a format that implements the `FromMessage` and 0 or N parameters of types
 pub trait MessageHandler<M: TryFrom<Message>, Args>: Clone + Send + Sync + 'static {
     /// The type of valure returned from a WebSocket message handler
     type Output;

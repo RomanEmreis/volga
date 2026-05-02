@@ -16,7 +16,7 @@ use std::{
     task::{Context, Poll},
 };
 
-/// Wraps typed data extracted from [`Uri`]
+/// Wraps typed data extracted from `Uri`
 ///
 /// # Example
 /// ```no_run

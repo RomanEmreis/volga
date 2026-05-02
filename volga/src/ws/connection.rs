@@ -69,7 +69,7 @@ impl WebSocketConnection {
     /// If set to `0` each message will be eagerly written to the underlying stream.
     /// It is often more optimal to allow them to buffer a little, hence the default value.
     ///
-    /// Note: [`flush`](SinkExt::flush) will always fully write the buffer regardless.
+    /// Note: [`flush`](futures_util::SinkExt::flush) will always fully write the buffer regardless.
     pub fn with_write_buffer_size(mut self, size: usize) -> Self {
         self.config.write_buffer_size = size;
         self
@@ -80,12 +80,12 @@ impl WebSocketConnection {
     ///
     /// Default: not set/unlimited
     ///
-    /// Note: The write buffer only builds up past [`write_buffer_size`](Self::write_buffer_size)
+    /// Note: The write buffer only builds up past [`with_write_buffer_size`](Self::with_write_buffer_size)
     /// when writes to the underlying stream are failing. So the **write buffer cannot
     /// fill up if you are not observing write errors even if not flushing**.
     ///
-    /// Note: Should always be at least [`write_buffer_size + 1 message`](Self::write_buffer_size)
-    /// and probably a little more depending on error handling strategy.
+    /// Note: Should always be at least [`with_write_buffer_size`](Self::with_write_buffer_size)
+    /// + 1 message and probably a little more depending on error handling strategy.
     pub fn with_max_write_buffer_size(mut self, max: usize) -> Self {
         self.config.max_write_buffer_size = max;
         self

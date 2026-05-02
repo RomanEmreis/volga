@@ -223,10 +223,10 @@ impl App {
     }
 
     /// Adds a filter middleware handler for a request pipeline that would return
-    /// either `bool`, [`Result`] or [`FilterResult`]
+    /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
-    /// > **Note:** [`Path`] and [`NamedPath`] extractors are not meaningful in a global
+    /// > **Note:** [`Path`](crate::http::endpoints::args::path::Path) and [`NamedPath`](crate::http::endpoints::args::path::NamedPath) extractors are not meaningful in a global
     /// > filter context since they depend on route-specific parameters. Use
     /// > them only when registering a filter for a specific route.
     /// > Attempting to extract route parameters globally will result in an
@@ -398,7 +398,7 @@ impl App {
     /// and the reference to the [`Next`] future; awaiting this `next` calls
     /// the next middleware in the pipeline
     ///
-    /// Unlike the [`wrap`], this method doesn't provide direct access to the [`HttpRequest`] and [`HttpBody`]
+    /// Unlike the [`wrap`](Self::wrap), this method doesn't provide direct access to the [`HttpRequest`](crate::http::HttpRequest) and [`HttpBody`](crate::http::HttpBody)
     ///
     /// # Example
     /// ```no_run
@@ -533,7 +533,7 @@ impl<'a> Route<'a> {
     }
 
     /// Adds a filter middleware handler for this route that would return
-    /// either `bool`, [`Result`] or [`FilterResult`]
+    /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
     /// # Example
@@ -731,7 +731,7 @@ impl<'a> Route<'a> {
     /// and the reference to the [`Next`] future; awaiting this `next` calls
     /// the next middleware in the pipeline
     ///
-    /// Unlike the [`wrap`], this method doesn't provide direct access to the [`HttpRequest`] and [`HttpBody`]
+    /// Unlike the [`wrap`](Self::wrap), this method doesn't provide direct access to the [`HttpRequest`](crate::http::HttpRequest) and [`HttpBody`](crate::http::HttpBody)
     ///
     /// # Example
     /// ```no_run
@@ -869,10 +869,10 @@ impl<'a> RouteGroup<'a> {
     }
 
     /// Adds a filter middleware handler for a group of routes that would return
-    /// either `bool`, [`Result`] or [`FilterResult`]
+    /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
-    /// > **Note:** [`Path`] and [`NamedPath`] extractors are not meaningful in a
+    /// > **Note:** [`Path`](crate::http::endpoints::args::path::Path) and [`NamedPath`](crate::http::endpoints::args::path::NamedPath) extractors are not meaningful in a
     /// > route group filter context since they depend on route-specific parameters. Use
     /// > them only when registering a filter for a specific route.
     /// > Attempting to extract route parameters globally will result in an
@@ -1090,7 +1090,7 @@ impl<'a> RouteGroup<'a> {
     /// and the reference to the [`Next`] future; awaiting this `next` calls
     /// the next middleware in the pipeline
     ///
-    /// Unlike the [`wrap`], this method doesn't provide direct access to the [`HttpRequest`] and [`HttpBody`]
+    /// Unlike the [`wrap`](Self::wrap), this method doesn't provide direct access to the [`HttpRequest`](crate::http::HttpRequest) and [`HttpBody`](crate::http::HttpBody)
     ///
     /// # Example
     /// ```no_run

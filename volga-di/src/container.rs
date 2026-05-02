@@ -244,7 +244,7 @@ impl Container {
     }
 
     /// Resolves a service and returns a cloned instance.
-    /// `T` must implement [`Clone`] otherwise use [`resolve_shared`] method
+    /// `T` must implement [`Clone`] otherwise use [`Container::resolve_shared`] method
     /// that returns a shared pointer.
     #[inline]
     pub fn resolve<T: Send + Sync + Clone + 'static>(&self) -> Result<T, Error> {
