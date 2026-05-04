@@ -58,6 +58,33 @@ impl ContentType {
     pub fn stream() -> Header<Self> {
         Self::from_static(APPLICATION_OCTET_STREAM.as_ref())
     }
+
+    /// Creates a `multipart/form-data; boundary=...` [`Header<ContentType>`].
+    #[inline]
+    pub fn multipart_form_data(boundary: &str) -> Header<Self> {
+        Self::multipart_custom("form-data", boundary)
+    }
+
+    /// Creates a `multipart/mixed; boundary=...` [`Header<ContentType>`].
+    #[inline]
+    pub fn multipart_mixed(boundary: &str) -> Header<Self> {
+        Self::multipart_custom("mixed", boundary)
+    }
+
+    /// Creates a `multipart/byteranges; boundary=...` [`Header<ContentType>`].
+    #[inline]
+    pub fn multipart_byteranges(boundary: &str) -> Header<Self> {
+        Self::multipart_custom("byteranges", boundary)
+    }
+
+    /// Creates a `multipart/<subtype>; boundary=...` [`Header<ContentType>`].
+    /// Boundary must already be RFC 2046 §5.1.1 compliant; use `Multipart::with_boundary`
+    /// for validation.
+    pub fn multipart_custom(subtype: &str, boundary: &str) -> Header<Self> {
+        let value = format!("multipart/{subtype}; boundary={boundary}");
+        Self::from_bytes(value.as_bytes())
+            .expect("boundary should produce a valid Content-Type header value")
+    }
 }
 
 impl CacheControl {
@@ -175,5 +202,34 @@ mod tests {
     #[test]
     fn it_creates_cache_control_private() {
         assert_header_value(CacheControl::private(), "private");
+    }
+}
+
+#[cfg(test)]
+mod multipart_content_type_tests {
+    use super::ContentType;
+
+    #[test]
+    fn form_data_with_boundary() {
+        let h = ContentType::multipart_form_data("X-BOUNDARY");
+        assert_eq!(h.as_ref(), "multipart/form-data; boundary=X-BOUNDARY");
+    }
+
+    #[test]
+    fn mixed_with_boundary() {
+        let h = ContentType::multipart_mixed("XYZ");
+        assert_eq!(h.as_ref(), "multipart/mixed; boundary=XYZ");
+    }
+
+    #[test]
+    fn byteranges_with_boundary() {
+        let h = ContentType::multipart_byteranges("abc");
+        assert_eq!(h.as_ref(), "multipart/byteranges; boundary=abc");
+    }
+
+    #[test]
+    fn custom_subtype() {
+        let h = ContentType::multipart_custom("alternative", "abc");
+        assert_eq!(h.as_ref(), "multipart/alternative; boundary=abc");
     }
 }

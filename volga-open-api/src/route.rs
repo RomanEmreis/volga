@@ -246,6 +246,20 @@ impl OpenApiRouteConfig {
         self
     }
 
+    /// Generates default `multipart/form-data` response schema.
+    pub fn produces_multipart(mut self, status: impl IntoStatusCode) -> Self {
+        let status = status.into_status_code();
+        self.responses.insert(
+            status,
+            ResponseBody::Content {
+                schema: Box::new(OpenApiSchema::multipart()),
+                example: None,
+                content_type: MULTIPART_FORM_DATA.to_string(),
+            },
+        );
+        self
+    }
+
     /// Generates stream response schema.
     pub fn produces_stream(mut self, status: impl IntoStatusCode) -> Self {
         let status = status.into_status_code();
@@ -607,7 +621,7 @@ fn type_display_name<T>() -> String {
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
-    use super::{IntoStatusCode, OpenApiRouteConfig};
+    use super::{IntoStatusCode, OpenApiRouteConfig, ResponseBody};
     use crate::{op::OpenApiOperation, schema::OpenApiSchema};
     use serde::{Deserialize, Serialize};
     use serde_json::json;
@@ -1115,6 +1129,18 @@ mod tests {
                     .is_some()
             );
             assert_eq!(op_json["responses"].as_object().unwrap().len(), 3);
+        }
+    }
+
+    #[test]
+    fn produces_multipart_sets_response_content_type() {
+        let cfg = OpenApiRouteConfig::default().produces_multipart(200u16);
+        let resp = cfg.responses.get(&200u16).expect("200 response defined");
+        match resp {
+            ResponseBody::Content { content_type, .. } => {
+                assert_eq!(content_type, "multipart/form-data");
+            }
+            _ => panic!("expected Content variant"),
         }
     }
 }

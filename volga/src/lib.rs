@@ -89,7 +89,9 @@ pub use http::HttpRequestMut;
 pub use limits::Limit;
 
 #[cfg(feature = "multipart")]
-pub use crate::http::endpoints::args::multipart::Multipart;
+pub use {
+    crate::http::endpoints::args::multipart, crate::http::endpoints::args::multipart::Multipart,
+};
 
 /// Route mapping helpers
 pub mod routing {

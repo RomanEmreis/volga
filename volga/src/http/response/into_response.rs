@@ -207,6 +207,38 @@ impl<T: Serialize> IntoResponse for Form<T> {
     }
 }
 
+#[cfg(feature = "multipart")]
+impl IntoResponse for crate::http::endpoints::args::multipart::Multipart {
+    fn into_response(self) -> HttpResult {
+        use crate::http::endpoints::args::multipart::MultipartInner;
+        use crate::response;
+
+        let ct = self.content_type_header().ok_or_else(|| {
+            Error::server_error(
+                "cannot return incoming multipart as response; call into_outgoing() first",
+            )
+        })?;
+
+        let MultipartInner::Outgoing {
+            boundary, parts, ..
+        } = self.into_inner()
+        else {
+            // Already filtered above by content_type_header(); unreachable.
+            unreachable!()
+        };
+
+        let body = crate::http::endpoints::args::multipart::encode_for_response(boundary, parts);
+        response!(200, body; [ct])
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
+        config.produces_multipart(200u16)
+    }
+}
+
 impl IntoResponse for StatusCode {
     #[inline]
     fn into_response(self) -> HttpResult {
