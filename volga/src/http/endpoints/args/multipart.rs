@@ -75,7 +75,7 @@ pub(crate) enum MultipartInner {
         subtype: MultipartSubtype,
         boundary: Arc<str>,
         #[allow(dead_code)]
-        parts: futures_util::stream::BoxStream<'static, Part>,
+        parts: futures_util::stream::BoxStream<'static, Result<Part, Error>>,
     },
 }
 
@@ -168,11 +168,12 @@ impl Multipart {
     where
         S: futures_util::Stream<Item = Part> + Send + 'static,
     {
+        use futures_util::StreamExt;
         Self {
             inner: MultipartInner::Outgoing {
                 subtype: MultipartSubtype::FormData,
                 boundary: encoder::generate_boundary(),
-                parts: Box::pin(parts),
+                parts: parts.map(Ok).boxed(),
             },
         }
     }
@@ -242,8 +243,12 @@ impl Multipart {
         };
 
         let boundary: Arc<str> = Arc::from(boundary);
-        let parts_stream = async_stream::stream! {
-            while let Ok(Some(field)) = multipart.next_field().await {
+        let parts_stream = async_stream::try_stream! {
+            while let Some(field) = multipart
+                .next_field()
+                .await
+                .map_err(MultipartError::read_error)?
+            {
                 yield field_to_part(field);
             }
         };
@@ -338,7 +343,7 @@ fn field_to_part(mut field: multer::Field<'static>) -> Part {
 /// so the encoder module stays `pub(super)`.
 pub(crate) fn encode_for_response(
     boundary: Arc<str>,
-    parts: futures_util::stream::BoxStream<'static, Part>,
+    parts: futures_util::stream::BoxStream<'static, Result<Part, Error>>,
 ) -> crate::http::body::HttpBody {
     encoder::encode(boundary, parts)
 }
@@ -543,5 +548,31 @@ mod tests {
         let mp = Multipart::from_parts(vec![Part::text("a", "1")]);
         let err = mp.into_outgoing().unwrap_err();
         assert!(format!("{err}").contains("already"));
+    }
+
+    #[tokio::test]
+    async fn into_outgoing_propagates_parse_error() {
+        use crate::http::IntoResponse;
+        use http_body_util::BodyExt;
+
+        // Truncated payload: opening boundary + headers but no closing boundary.
+        // multer should surface this as a parse error mid-stream.
+        let truncated =
+            "--X-BOUNDARY\r\nContent-Disposition: form-data; name=\"f\"\r\n\r\npartial-data";
+        let req = Request::get("/")
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=X-BOUNDARY")
+            .body(HttpBody::full(truncated))
+            .unwrap();
+        let (parts, body) = req.into_parts();
+        let mp = Multipart::from_payload(Payload::Full(&parts, body))
+            .await
+            .unwrap();
+
+        let resp = mp.into_outgoing().unwrap().into_response().unwrap();
+        let result = resp.into_inner().into_body().collect().await;
+        assert!(
+            result.is_err(),
+            "expected body stream to error on truncated multipart"
+        );
     }
 }

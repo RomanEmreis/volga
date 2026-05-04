@@ -125,9 +125,18 @@ use super::part::PartBody;
 /// The output stream yields one or more [`Bytes`] chunks per part:
 /// boundary line, header block, separator CRLF, body (possibly chunked),
 /// trailing CRLF; followed by the closing boundary at the end.
-pub(super) fn encode(boundary: Arc<str>, mut parts: BoxStream<'static, Part>) -> HttpBody {
+///
+/// A `Result::Err` from the input stream (e.g. a parse failure during a
+/// proxy/forward conversion) is propagated into the body stream so the
+/// connection aborts mid-body instead of completing as a successful but
+/// truncated multipart.
+pub(super) fn encode(
+    boundary: Arc<str>,
+    mut parts: BoxStream<'static, Result<Part, Error>>,
+) -> HttpBody {
     let stream = try_stream! {
         while let Some(part) = parts.next().await {
+            let part = part?;
             yield encode_boundary_open(&boundary);
             yield encode_part_headers(&part);
             yield Bytes::from_static(b"\r\n");
@@ -282,7 +291,7 @@ mod tests {
     #[tokio::test]
     async fn encode_empty_parts_produces_only_closing_boundary() {
         let boundary: Arc<str> = Arc::from("X-BOUNDARY");
-        let parts = Box::pin(stream::iter(Vec::<Part>::new())) as _;
+        let parts = Box::pin(stream::iter(Vec::<Result<Part, crate::error::Error>>::new())) as _;
         let body = encode(boundary, parts);
         let bytes = drain(body).await;
         assert_eq!(bytes, b"--X-BOUNDARY--\r\n");
@@ -291,7 +300,9 @@ mod tests {
     #[tokio::test]
     async fn encode_single_text_part_exact_bytes() {
         let boundary: Arc<str> = Arc::from("X-BOUNDARY");
-        let parts = Box::pin(stream::iter(vec![Part::text("name", "abcd")])) as _;
+        let parts = Box::pin(stream::iter(vec![Ok::<_, crate::error::Error>(
+            Part::text("name", "abcd"),
+        )])) as _;
         let body = encode(boundary, parts);
         let s = String::from_utf8(drain(body).await).unwrap();
         assert!(s.contains("--X-BOUNDARY\r\n"));
@@ -305,8 +316,12 @@ mod tests {
     async fn encode_round_trips_through_multer() {
         let boundary: Arc<str> = Arc::from("ROUND-TRIP");
         let parts = Box::pin(stream::iter(vec![
-            Part::text("name1", "value1"),
-            Part::file("upload", "data.bin", Bytes::from_static(b"\x01\x02\x03")),
+            Ok::<_, crate::error::Error>(Part::text("name1", "value1")),
+            Ok(Part::file(
+                "upload",
+                "data.bin",
+                Bytes::from_static(b"\x01\x02\x03"),
+            )),
         ])) as _;
         let body = encode(boundary.clone(), parts);
         let bytes = drain(body).await;
@@ -343,9 +358,22 @@ mod tests {
             crate::headers::ContentType::text_utf_8(),
             chunks,
         );
-        let parts = Box::pin(stream::iter(vec![part])) as _;
+        let parts = Box::pin(stream::iter(vec![Ok::<_, crate::error::Error>(part)])) as _;
         let body = encode(boundary, parts);
         let s = String::from_utf8(drain(body).await).unwrap();
         assert!(s.contains("\r\n\r\nchunk-1-chunk-2\r\n"), "got: {s}");
+    }
+
+    #[tokio::test]
+    async fn encode_propagates_input_error() {
+        use http_body_util::BodyExt;
+        let boundary: Arc<str> = Arc::from("ERR-BDY");
+        let parts = Box::pin(stream::iter(vec![
+            Ok(Part::text("ok", "first")),
+            Err(crate::error::Error::client_error("simulated parse failure")),
+        ])) as _;
+        let body = encode(boundary, parts);
+        let err = body.collect().await.unwrap_err();
+        assert!(format!("{err}").contains("simulated parse failure"));
     }
 }
