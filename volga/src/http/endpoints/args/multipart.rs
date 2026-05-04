@@ -31,10 +31,10 @@ mod part;
 ///
 /// # Outbound (response)
 /// ```no_run
-/// use volga::{HttpResult, Multipart};
+/// use volga::Multipart;
 /// use volga::multipart::Part;
 ///
-/// async fn handle() -> HttpResult {
+/// async fn handle() -> Multipart {
 ///     Multipart::from_parts(vec![
 ///         Part::text("greeting", "hi"),
 ///         Part::file("logo", "logo.png", b"...image bytes...".to_vec()),
