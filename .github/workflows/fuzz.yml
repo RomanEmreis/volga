@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 env:
+  RUST_NIGHTLY: nightly-2026-05-03
   CARGO_TERM_COLOR: always
   ASAN_OPTIONS: quarantine_size_mb=1:malloc_context_size=0
 
@@ -18,11 +19,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with: 
-          toolchain: nightly-2026-05-03
+          toolchain: ${{ env.RUST_NIGHTLY }}
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Build fuzz targets
-        run: cargo +nightly fuzz build
+        run: cargo +${{ env.RUST_NIGHTLY }} fuzz build
 
   fuzz_smoke:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
@@ -32,13 +33,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2026-05-03
+          toolchain: ${{ env.RUST_NIGHTLY }}
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Smoke run router
-        run: cargo +nightly fuzz run fuzz_router_match -- -max_len=512 -max_total_time=45 -rss_limit_mb=512
+        run: cargo +${{ env.RUST_NIGHTLY }} fuzz run fuzz_router_match -- -max_len=512 -max_total_time=45 -rss_limit_mb=512
       - name: Smoke run query
-        run: cargo +nightly fuzz run fuzz_query_decode -- -max_len=1024 -max_total_time=45 -rss_limit_mb=512
+        run: cargo +${{ env.RUST_NIGHTLY }} fuzz run fuzz_query_decode -- -max_len=1024 -max_total_time=45 -rss_limit_mb=512
 
   fuzz_nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -60,8 +61,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2026-05-03
+          toolchain: ${{ env.RUST_NIGHTLY }}
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Nightly fuzz run
-        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_len=${{ matrix.max_len }} -max_total_time=300 -rss_limit_mb=512
+        run: cargo +${{ env.RUST_NIGHTLY }} fuzz run ${{ matrix.target }} -- -max_len=${{ matrix.max_len }} -max_total_time=300 -rss_limit_mb=512

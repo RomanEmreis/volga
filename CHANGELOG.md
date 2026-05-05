@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Changed
 * HSTS default `max_age` is now 1 year (31,536,000 s); previously 30 days. Aligns with the [HSTS preload list](https://hstspreload.org/) requirement (#190).
+* `Multipart` request parsing accepts any `multipart/*` subtype (previously only `multipart/form-data`). Required for forwarding `multipart/byteranges`, `multipart/mixed`, etc.
 
 ## Breaking Changes
 * `HstsConfig::with_preload()` panics if `max_age < 1 year`; `HstsConfig::with_max_age(...)` panics if called when `preload` is enabled and the new value is below 1 year (#190).

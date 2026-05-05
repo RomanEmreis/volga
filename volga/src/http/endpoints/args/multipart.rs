@@ -69,6 +69,7 @@ impl std::fmt::Debug for Multipart {
 // streaming encoder. Asymmetry is intentional.
 pub(crate) enum MultipartInner {
     Incoming {
+        subtype: MultipartSubtype,
         boundary: String,
         multipart: multer::Multipart<'static>,
     },
@@ -101,6 +102,20 @@ impl MultipartSubtype {
             Self::Mixed => "mixed",
             Self::ByteRanges => "byteranges",
             Self::Custom(s) => s.as_ref(),
+        }
+    }
+
+    /// Parses the subtype from a `multipart/<subtype>[; ...]` Content-Type header value.
+    /// Falls back to [`Self::FormData`] if the value is malformed (caller has already
+    /// confirmed a boundary exists, so the value is structurally a multipart Content-Type).
+    fn from_content_type(value: &str) -> Self {
+        let after_slash = value.split_once('/').map(|(_, rest)| rest).unwrap_or("");
+        let token = after_slash.split(';').next().unwrap_or("").trim();
+        match token {
+            "" | "form-data" => Self::FormData,
+            "mixed" => Self::Mixed,
+            "byteranges" => Self::ByteRanges,
+            other => Self::Custom(Cow::Owned(other.to_owned())),
         }
     }
 }
@@ -141,9 +156,38 @@ impl Multipart {
     }
 
     #[inline]
+    /// Extracts the `boundary` parameter from a `multipart/*` Content-Type header.
+    /// Subtype-agnostic — accepts any `multipart/<subtype>`, not just form-data —
+    /// because volga supports forwarding `byteranges`, `mixed`, etc.
     fn parse_boundary(headers: &HeaderMap) -> Option<String> {
         let content_type = headers.get(CONTENT_TYPE)?.to_str().ok()?;
-        multer::parse_boundary(content_type).ok()
+        let lower = content_type.to_ascii_lowercase();
+        if !lower.trim_start().starts_with("multipart/") {
+            return None;
+        }
+        let idx = lower.find("boundary=")?;
+        let raw = content_type[idx + "boundary=".len()..].trim_start();
+        let boundary = if let Some(rest) = raw.strip_prefix('"') {
+            rest.split_once('"').map(|(b, _)| b)?
+        } else {
+            raw.split(|c: char| c == ';' || c.is_whitespace())
+                .next()
+                .filter(|s| !s.is_empty())?
+        };
+        if boundary.is_empty() {
+            None
+        } else {
+            Some(boundary.to_string())
+        }
+    }
+
+    #[inline]
+    fn parse_subtype(headers: &HeaderMap) -> MultipartSubtype {
+        headers
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(MultipartSubtype::from_content_type)
+            .unwrap_or(MultipartSubtype::FormData)
     }
 
     /// Consumes self and returns the inner enum.
@@ -237,6 +281,7 @@ impl Multipart {
     /// Errors if called on an already-outgoing multipart.
     pub fn into_outgoing(self) -> Result<Self, Error> {
         let MultipartInner::Incoming {
+            subtype,
             boundary,
             mut multipart,
         } = self.inner
@@ -253,13 +298,13 @@ impl Multipart {
                 .await
                 .map_err(MultipartError::read_error)?
             {
-                yield field_to_part(field)?;
+                yield field_to_part(field);
             }
         };
 
         Ok(Self {
             inner: MultipartInner::Outgoing {
-                subtype: MultipartSubtype::FormData,
+                subtype,
                 boundary,
                 parts: Box::pin(parts_stream),
             },
@@ -284,10 +329,12 @@ impl<'a> TryFrom<Payload<'a>> for Multipart {
         };
         let boundary =
             Self::parse_boundary(&parts.headers).ok_or(MultipartError::invalid_boundary())?;
+        let subtype = Self::parse_subtype(&parts.headers);
         let stream = body.into_data_stream();
         let multipart = multer::Multipart::new(stream, boundary.clone());
         Ok(Multipart {
             inner: MultipartInner::Incoming {
+                subtype,
                 boundary,
                 multipart,
             },
@@ -315,17 +362,15 @@ impl FromPayload for Multipart {
 
 /// Converts a single [`multer::Field`] into a [`Part`] whose body is a stream that
 /// drains chunks lazily from the field. No buffering.
-/// Errors if the field's name or filename produces an invalid `Content-Disposition`
-/// header value (e.g. CR/LF in upstream-supplied bytes).
-fn field_to_part(mut field: multer::Field<'static>) -> Result<Part, Error> {
-    use crate::headers::{ContentType, Header};
+///
+/// Forwards every per-part header verbatim — `Content-Type`, `Content-Disposition`
+/// (preserving `filename*` and other parameters), `Content-Range`, plus any custom
+/// header — so proxy / forwarding flows produce a semantically-equivalent body.
+fn field_to_part(mut field: multer::Field<'static>) -> Part {
+    use crate::headers::{ContentDisposition, ContentType, Header};
 
-    let name = field.name().unwrap_or("").to_owned();
-    let filename = field.file_name().map(|s| s.to_owned());
-    let content_type_header = field.content_type().map(|m| {
-        Header::<ContentType>::from_bytes(m.as_ref().as_bytes())
-            .unwrap_or_else(|_| ContentType::stream())
-    });
+    // Snapshot headers before `field.chunk()` takes a mutable borrow.
+    let headers = field.headers().clone();
 
     let body_stream = async_stream::try_stream! {
         while let Some(chunk) = field
@@ -336,13 +381,22 @@ fn field_to_part(mut field: multer::Field<'static>) -> Result<Part, Error> {
             yield chunk;
         }
     };
-    let body = PartBody::Stream(Box::pin(body_stream));
+    let mut part = Part::new(PartBody::Stream(Box::pin(body_stream)));
 
-    let mut part = Part::new(body).try_with_disposition(&name, filename.as_deref())?;
-    if let Some(ct) = content_type_header {
-        part = part.with_content_type(ct);
+    for (name, value) in headers.iter() {
+        if name == CONTENT_TYPE {
+            if let Ok(ct) = Header::<ContentType>::from_bytes(value.as_bytes()) {
+                part = part.with_content_type(ct);
+            }
+        } else if name == crate::headers::CONTENT_DISPOSITION {
+            if let Ok(cd) = Header::<ContentDisposition>::from_bytes(value.as_bytes()) {
+                part = part.with_disposition_raw(cd);
+            }
+        } else {
+            part = part.with_header_raw(name.clone(), value.clone());
+        }
     }
-    Ok(part)
+    part
 }
 
 /// Encodes an outgoing parts stream into an HTTP body. Wraps `encoder::encode`
@@ -592,6 +646,71 @@ mod tests {
             wire.contains("content-type: text/plain; charset=us-ascii"),
             "expected charset parameter to survive forwarding; got: {wire}\nresponse CT: {ct}"
         );
+    }
+
+    #[tokio::test]
+    async fn into_outgoing_preserves_incoming_subtype() {
+        // Inbound is multipart/byteranges; into_outgoing must keep that subtype on the
+        // response Content-Type instead of rewriting to multipart/form-data.
+        let body = "--BNDRY\r\nContent-Range: bytes 0-4/10\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--BNDRY--\r\n";
+        let req = Request::get("/")
+            .header(CONTENT_TYPE, "multipart/byteranges; boundary=BNDRY")
+            .body(HttpBody::full(body))
+            .unwrap();
+        let (parts, body) = req.into_parts();
+        let mp = Multipart::from_payload(Payload::Full(&parts, body))
+            .await
+            .unwrap();
+
+        let outgoing = mp.into_outgoing().unwrap();
+        let ct = outgoing.content_type_header().unwrap();
+        let ct_str = ct.as_ref().to_str().unwrap();
+        assert!(
+            ct_str.starts_with("multipart/byteranges"),
+            "expected byteranges to survive forwarding, got: {ct_str}"
+        );
+    }
+
+    #[tokio::test]
+    async fn into_outgoing_forwards_per_part_headers() {
+        use crate::http::IntoResponse;
+        use http_body_util::BodyExt;
+
+        // Source part has Content-Range, a filename* parameter on Content-Disposition,
+        // and a custom header — none of which the form-data builder API would set.
+        // All must survive the proxy round-trip.
+        let body = "--BNDRY\r\n\
+            Content-Disposition: form-data; name=\"upload\"; filename=\"plain.txt\"; filename*=UTF-8''r%C3%A9sum%C3%A9.txt\r\n\
+            Content-Type: text/plain; charset=utf-8\r\n\
+            Content-Range: bytes 0-4/10\r\n\
+            X-Custom-Trace: trace-abc\r\n\
+            \r\n\
+            hello\r\n--BNDRY--\r\n";
+        let req = Request::get("/")
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=BNDRY")
+            .body(HttpBody::full(body))
+            .unwrap();
+        let (parts, body) = req.into_parts();
+        let mp = Multipart::from_payload(Payload::Full(&parts, body))
+            .await
+            .unwrap();
+
+        let resp = mp.into_outgoing().unwrap().into_response().unwrap();
+        let bytes = resp
+            .into_inner()
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let wire = std::str::from_utf8(&bytes).unwrap();
+
+        assert!(
+            wire.contains("filename*=UTF-8''r%C3%A9sum%C3%A9.txt"),
+            "got: {wire}"
+        );
+        assert!(wire.contains("content-range: bytes 0-4/10"), "got: {wire}");
+        assert!(wire.contains("x-custom-trace: trace-abc"), "got: {wire}");
     }
 
     #[tokio::test]
