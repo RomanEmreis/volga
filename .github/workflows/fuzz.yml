@@ -16,7 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly-2026-05-03
+      - uses: dtolnay/rust-toolchain@nightly
+        with: 
+          toolchain: nightly-2026-05-03
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Build fuzz targets
@@ -28,7 +30,9 @@ jobs:
     needs: fuzz_build
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly-2026-05-03
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-05-03
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Smoke run router
@@ -54,7 +58,9 @@ jobs:
             max_len: 256
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly-2026-05-03
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-05-03
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
       - name: Nightly fuzz run
