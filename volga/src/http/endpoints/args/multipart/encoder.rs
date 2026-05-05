@@ -89,29 +89,26 @@ pub(super) fn encode_boundary_close(boundary: &str) -> Bytes {
 /// Returns a single allocation containing all `Name: Value\r\n` lines, ready to be yielded.
 #[inline]
 pub(super) fn encode_part_headers(part: &Part) -> Bytes {
-    let mut s = String::with_capacity(64);
+    let mut buf = Vec::with_capacity(64);
     if let Some(ct) = part.part_content_type() {
-        write_header(&mut s, &ct.name(), ct.value());
+        write_header(&mut buf, &ct.name(), ct.value());
     }
     if let Some(cd) = part.part_content_disposition() {
-        write_header(&mut s, &cd.name(), cd.value());
+        write_header(&mut buf, &cd.name(), cd.value());
     }
     if let Some(extras) = part.part_extras() {
         for (name, value) in extras.iter() {
-            write_header(&mut s, name, value);
+            write_header(&mut buf, name, value);
         }
     }
-    Bytes::from(s)
+    Bytes::from(buf)
 }
 
-fn write_header(out: &mut String, name: &HeaderName, value: &HeaderValue) {
-    out.push_str(name.as_str());
-    out.push_str(": ");
-    match value.to_str() {
-        Ok(v) => out.push_str(v),
-        Err(_) => out.push_str("<binary>"),
-    }
-    out.push_str("\r\n");
+fn write_header(out: &mut Vec<u8>, name: &HeaderName, value: &HeaderValue) {
+    out.extend_from_slice(name.as_str().as_bytes());
+    out.extend_from_slice(b": ");
+    out.extend_from_slice(value.as_bytes());
+    out.extend_from_slice(b"\r\n");
 }
 
 use crate::http::body::HttpBody;
@@ -275,6 +272,21 @@ mod tests {
         let bytes = encode_part_headers(&p);
         let s = std::str::from_utf8(&bytes).unwrap();
         assert!(!s.contains("x-"));
+    }
+
+    #[test]
+    fn part_headers_preserve_raw_obs_text_bytes() {
+        // RFC 7230 obs-text (0x80..=0xFF) is valid in HeaderValue but not UTF-8.
+        // The encoder must emit the original bytes, not substitute a placeholder.
+        let raw = crate::headers::HeaderValue::from_bytes(b"\xC3\x28").unwrap(); // invalid UTF-8
+        let p = Part::text("n", "v")
+            .with_header_raw(crate::headers::HeaderName::from_static("x-binary"), raw);
+        let bytes = encode_part_headers(&p);
+        let needle = b"x-binary: \xC3(\r\n";
+        assert!(
+            bytes.windows(needle.len()).any(|w| w == needle),
+            "expected raw obs-text bytes to be preserved verbatim, got {bytes:?}"
+        );
     }
 
     use super::encode;

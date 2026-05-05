@@ -63,32 +63,38 @@ impl ContentType {
     #[inline]
     pub fn multipart_form_data(boundary: &str) -> Header<Self> {
         Self::multipart_custom("form-data", boundary)
+            .expect("`form-data` is a static, valid subtype")
     }
 
     /// Creates a `multipart/mixed; boundary=...` [`Header<ContentType>`].
     #[inline]
     pub fn multipart_mixed(boundary: &str) -> Header<Self> {
-        Self::multipart_custom("mixed", boundary)
+        Self::multipart_custom("mixed", boundary).expect("`mixed` is a static, valid subtype")
     }
 
     /// Creates a `multipart/byteranges; boundary=...` [`Header<ContentType>`].
     #[inline]
-    pub fn multipart_byteranges(boundary: &str) -> Header<Self> {
+    pub fn multipart_byte_ranges(boundary: &str) -> Header<Self> {
         Self::multipart_custom("byteranges", boundary)
+            .expect("`byteranges` is a static, valid subtype")
     }
 
     /// Creates a `multipart/<subtype>; boundary=...` [`Header<ContentType>`].
     /// Boundary must already be RFC 2046 §5.1.1 compliant; use `Multipart::with_boundary`
     /// for validation. RFC 2045 tspecials in the boundary (e.g. `:` or space) trigger
     /// quoting of the parameter value so downstream parsers can extract it.
-    pub fn multipart_custom(subtype: &str, boundary: &str) -> Header<Self> {
+    /// Returns `Err` if `subtype` contains bytes that are invalid in an HTTP header
+    /// value (e.g. CR/LF) — the `subtype` is generally caller-controlled runtime input.
+    pub fn multipart_custom(
+        subtype: &str,
+        boundary: &str,
+    ) -> Result<Header<Self>, crate::error::Error> {
         let value = if boundary_needs_quoting(boundary) {
             format!("multipart/{subtype}; boundary=\"{boundary}\"")
         } else {
             format!("multipart/{subtype}; boundary={boundary}")
         };
         Self::from_bytes(value.as_bytes())
-            .expect("boundary should produce a valid Content-Type header value")
     }
 }
 
@@ -256,14 +262,21 @@ mod multipart_content_type_tests {
 
     #[test]
     fn byteranges_with_boundary() {
-        let h = ContentType::multipart_byteranges("abc");
+        let h = ContentType::multipart_byte_ranges("abc");
         assert_eq!(h.as_ref(), "multipart/byteranges; boundary=abc");
     }
 
     #[test]
     fn custom_subtype() {
-        let h = ContentType::multipart_custom("alternative", "abc");
+        let h = ContentType::multipart_custom("alternative", "abc").unwrap();
         assert_eq!(h.as_ref(), "multipart/alternative; boundary=abc");
+    }
+
+    #[test]
+    fn custom_subtype_rejects_invalid_header_bytes() {
+        // CR/LF in the subtype must surface as an error, not panic.
+        let err = ContentType::multipart_custom("evil\r\ninjected", "abc").unwrap_err();
+        assert!(!format!("{err}").is_empty());
     }
 
     #[test]

@@ -192,22 +192,25 @@ impl Multipart {
     }
 
     /// Returns the canonical Content-Type header for this outgoing multipart.
-    /// Returns `None` for incoming multiparts.
+    /// Returns `Err` for incoming multiparts (with a server-side error explaining the misuse)
+    /// or when the subtype contains bytes invalid in an HTTP header value.
     pub(crate) fn content_type_header(
         &self,
-    ) -> Option<crate::headers::Header<crate::headers::ContentType>> {
+    ) -> Result<crate::headers::Header<crate::headers::ContentType>, Error> {
         let MultipartInner::Outgoing {
             subtype, boundary, ..
         } = &self.inner
         else {
-            return None;
+            return Err(Error::server_error(
+                "cannot return incoming multipart as response; call into_outgoing() first",
+            ));
         };
         use crate::headers::ContentType;
-        Some(match subtype {
+        Ok(match subtype {
             MultipartSubtype::FormData => ContentType::multipart_form_data(boundary),
             MultipartSubtype::Mixed => ContentType::multipart_mixed(boundary),
-            MultipartSubtype::ByteRanges => ContentType::multipart_byteranges(boundary),
-            MultipartSubtype::Custom(s) => ContentType::multipart_custom(s, boundary),
+            MultipartSubtype::ByteRanges => ContentType::multipart_byte_ranges(boundary),
+            MultipartSubtype::Custom(s) => ContentType::multipart_custom(s, boundary)?,
         })
     }
 

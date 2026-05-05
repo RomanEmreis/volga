@@ -213,11 +213,7 @@ impl IntoResponse for crate::http::endpoints::args::multipart::Multipart {
         use crate::http::endpoints::args::multipart::MultipartInner;
         use crate::response;
 
-        let ct = self.content_type_header().ok_or_else(|| {
-            Error::server_error(
-                "cannot return incoming multipart as response; call into_outgoing() first",
-            )
-        })?;
+        let ct = self.content_type_header()?;
 
         let MultipartInner::Outgoing {
             boundary, parts, ..
