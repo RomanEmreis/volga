@@ -4,7 +4,6 @@
 
 use bytes::Bytes;
 use futures_util::stream;
-use volga::http::IntoResponse;
 use volga::http::endpoints::args::multipart::{Multipart, MultipartSubtype, Part};
 use volga::test::TestServer;
 
@@ -13,11 +12,10 @@ async fn end_to_end_form_data_response() {
     let server = TestServer::builder()
         .setup(|app| {
             app.map_get("/mp", || async {
-                let mp = Multipart::from_parts(vec![
+                Multipart::from_parts(vec![
                     Part::text("greeting", "hello"),
                     Part::file("logo", "logo.bin", Bytes::from_static(b"\x01\x02\x03")),
-                ]);
-                mp.into_response()
+                ])
             });
         })
         .build()

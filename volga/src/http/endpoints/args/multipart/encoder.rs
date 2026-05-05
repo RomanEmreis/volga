@@ -317,11 +317,7 @@ mod tests {
         let boundary: Arc<str> = Arc::from("ROUND-TRIP");
         let parts = Box::pin(stream::iter(vec![
             Ok::<_, crate::error::Error>(Part::text("name1", "value1")),
-            Ok(Part::file(
-                "upload",
-                "data.bin",
-                Bytes::from_static(b"\x01\x02\x03"),
-            )),
+            Ok(Part::file("upload", "data.bin", Bytes::from_static(b"\x01\x02\x03"))),
         ])) as _;
         let body = encode(boundary.clone(), parts);
         let bytes = drain(body).await;

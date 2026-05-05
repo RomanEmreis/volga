@@ -59,6 +59,9 @@ impl From<String> for PartBody {
 
 use crate::headers::{ContentDisposition, ContentType, FromHeaders, Header, HeaderMap};
 
+const INVALID_HEADER_BYTES_MSG: &str =
+    "invalid bytes in part name or filename (e.g. CR/LF); use the corresponding `try_*` constructor for untrusted input";
+
 /// An outgoing multipart part — either form-data, byteranges, or any RFC 2046 subtype.
 ///
 /// Construct with [`Part::new`] (bare) or one of the form-data convenience constructors:
@@ -86,44 +89,86 @@ impl Part {
 
     /// Constructs a form-data text field.
     /// Sets `Content-Type: text/plain; charset=utf-8` and `Content-Disposition: form-data; name="<name>"`.
+    ///
+    /// # Panics
+    /// if `name` contains bytes that are invalid in an HTTP header value (e.g. CR/LF).
+    /// For untrusted input, use [`Part::try_text`].
     pub fn text(name: impl AsRef<str>, value: impl Into<String>) -> Self {
+        Self::try_text(name, value).expect(INVALID_HEADER_BYTES_MSG)
+    }
+
+    /// Fallible counterpart of [`Part::text`]. Returns `Err` if `name` contains bytes
+    /// that are invalid in an HTTP header value.
+    pub fn try_text(name: impl AsRef<str>, value: impl Into<String>) -> Result<Self, Error> {
         let body: PartBody = value.into().into();
-        Self {
+        Ok(Self {
             content_type: Some(ContentType::text_utf_8()),
-            content_disposition: Some(make_form_disposition(name.as_ref(), None)),
+            content_disposition: Some(make_form_disposition(name.as_ref(), None)?),
             extra: None,
             body,
-        }
+        })
     }
 
     /// Constructs a form-data binary field (no filename).
     /// Sets `Content-Type: application/octet-stream` and `Content-Disposition: form-data; name="<name>"`.
+    ///
+    /// # Panics
+    /// if `name` contains bytes that are invalid in an HTTP header value (e.g. CR/LF).
+    /// For untrusted input, use [`Part::try_bytes`].
     pub fn bytes(name: impl AsRef<str>, bytes: impl Into<Bytes>) -> Self {
-        Self {
+        Self::try_bytes(name, bytes).expect(INVALID_HEADER_BYTES_MSG)
+    }
+
+    /// Fallible counterpart of [`Part::bytes`]. Returns `Err` if `name` contains bytes
+    /// that are invalid in an HTTP header value.
+    pub fn try_bytes(name: impl AsRef<str>, bytes: impl Into<Bytes>) -> Result<Self, Error> {
+        Ok(Self {
             content_type: Some(ContentType::stream()),
-            content_disposition: Some(make_form_disposition(name.as_ref(), None)),
+            content_disposition: Some(make_form_disposition(name.as_ref(), None)?),
             extra: None,
             body: PartBody::Bytes(bytes.into()),
-        }
+        })
     }
 
     /// Constructs a form-data file part. Content-Type is guessed from the filename
     /// extension via [`mime_guess`], falling back to `application/octet-stream`.
-    pub fn file(name: impl AsRef<str>, filename: impl AsRef<str>, bytes: impl Into<Bytes>) -> Self {
+    ///
+    /// # Panics
+    /// if `name` or `filename` contains bytes that are invalid in an HTTP header value.
+    /// For untrusted input, use [`Part::try_file`].
+    pub fn file(
+        name: impl AsRef<str>,
+        filename: impl AsRef<str>,
+        bytes: impl Into<Bytes>,
+    ) -> Self {
+        Self::try_file(name, filename, bytes).expect(INVALID_HEADER_BYTES_MSG)
+    }
+
+    /// Fallible counterpart of [`Part::file`]. Returns `Err` if `name` or `filename`
+    /// contains bytes that are invalid in an HTTP header value.
+    pub fn try_file(
+        name: impl AsRef<str>,
+        filename: impl AsRef<str>,
+        bytes: impl Into<Bytes>,
+    ) -> Result<Self, Error> {
         let filename_str = filename.as_ref();
         let mime = mime_guess::from_path(filename_str).first_or_octet_stream();
         let ct = Header::<ContentType>::from_bytes(mime.essence_str().as_bytes())
             .unwrap_or_else(|_| ContentType::stream());
-        Self {
+        Ok(Self {
             content_type: Some(ct),
-            content_disposition: Some(make_form_disposition(name.as_ref(), Some(filename_str))),
+            content_disposition: Some(make_form_disposition(name.as_ref(), Some(filename_str))?),
             extra: None,
             body: PartBody::Bytes(bytes.into()),
-        }
+        })
     }
 
     /// Constructs a streaming form-data file part. The caller supplies the Content-Type
     /// since filename-based guessing is not always meaningful for streams.
+    ///
+    /// # Panics
+    /// if `name` or `filename` contains bytes that are invalid in an HTTP header value.
+    /// For untrusted input, use [`Part::try_stream`].
     pub fn stream<S>(
         name: impl AsRef<str>,
         filename: impl AsRef<str>,
@@ -133,15 +178,29 @@ impl Part {
     where
         S: futures_util::Stream<Item = Result<Bytes, Error>> + Send + 'static,
     {
-        Self {
+        Self::try_stream(name, filename, content_type, stream).expect(INVALID_HEADER_BYTES_MSG)
+    }
+
+    /// Fallible counterpart of [`Part::stream`]. Returns `Err` if `name` or `filename`
+    /// contains bytes that are invalid in an HTTP header value.
+    pub fn try_stream<S>(
+        name: impl AsRef<str>,
+        filename: impl AsRef<str>,
+        content_type: Header<ContentType>,
+        stream: S,
+    ) -> Result<Self, Error>
+    where
+        S: futures_util::Stream<Item = Result<Bytes, Error>> + Send + 'static,
+    {
+        Ok(Self {
             content_type: Some(content_type),
             content_disposition: Some(make_form_disposition(
                 name.as_ref(),
                 Some(filename.as_ref()),
-            )),
+            )?),
             extra: None,
             body: PartBody::Stream(Box::pin(stream)),
-        }
+        })
     }
 
     /// Overrides the Content-Type header.
@@ -151,8 +210,23 @@ impl Part {
     }
 
     /// Sets the Content-Disposition header to `form-data; name="<name>"[; filename="<filename>"]`.
+    ///
+    /// # Panics
+    /// if `name` or `filename` contains bytes that are invalid in an HTTP header value.
+    /// For untrusted input, use [`Part::try_with_disposition`].
     pub fn with_disposition(self, name: &str, filename: Option<&str>) -> Self {
-        self.with_disposition_raw(make_form_disposition(name, filename))
+        self.try_with_disposition(name, filename)
+            .expect(INVALID_HEADER_BYTES_MSG)
+    }
+
+    /// Fallible counterpart of [`Part::with_disposition`]. Returns `Err` if `name` or
+    /// `filename` contains bytes that are invalid in an HTTP header value.
+    pub fn try_with_disposition(
+        self,
+        name: &str,
+        filename: Option<&str>,
+    ) -> Result<Self, Error> {
+        Ok(self.with_disposition_raw(make_form_disposition(name, filename)?))
     }
 
     /// Sets the Content-Disposition header verbatim — for cases not covered by the
@@ -210,10 +284,12 @@ impl Part {
 /// Builds a `Content-Disposition` header value of the form
 /// `form-data; name="<name>"[; filename="<filename>"]` with backslash-escaping
 /// of `"` and `\` in the parameter values per RFC 7578 / RFC 2183.
+/// Returns `Err` if `name` or `filename` contains bytes that aren't valid in an HTTP
+/// header value (e.g. CR / LF / NUL).
 pub(super) fn make_form_disposition(
     name: &str,
     filename: Option<&str>,
-) -> Header<ContentDisposition> {
+) -> Result<Header<ContentDisposition>, Error> {
     let mut s = String::with_capacity(32);
     s.push_str("form-data; name=\"");
     escape_disposition_param(&mut s, name);
@@ -224,7 +300,6 @@ pub(super) fn make_form_disposition(
         s.push('"');
     }
     Header::<ContentDisposition>::from_bytes(s.as_bytes())
-        .expect("escaped disposition value should be a valid header")
 }
 
 fn escape_disposition_param(out: &mut String, value: &str) {
@@ -310,6 +385,22 @@ mod tests {
     }
 
     #[test]
+    fn try_file_rejects_invalid_header_bytes() {
+        let err = Part::try_file("name\r\nfield", "ev\nil.txt", Bytes::from_static(b"x"))
+            .unwrap_err();
+        assert!(
+            !format!("{err}").is_empty(),
+            "expected an error describing the invalid header value"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid bytes in part name")]
+    fn text_panics_on_invalid_header_bytes() {
+        let _ = Part::text("name\r\nfield", "x");
+    }
+
+    #[test]
     fn file_guesses_pdf_mime() {
         let p = Part::file("doc", "report.pdf", Bytes::from_static(b"%PDF-1.4\n"));
         let ct = p.content_type.expect("ct set");
@@ -354,6 +445,14 @@ mod tests {
             p.content_disposition.unwrap().as_ref(),
             "form-data; name=\"new\"; filename=\"file.txt\""
         );
+    }
+
+    #[test]
+    fn try_with_disposition_returns_err_on_invalid_bytes() {
+        let err = Part::new("body")
+            .try_with_disposition("name\r\nfield", None)
+            .unwrap_err();
+        assert!(!format!("{err}").is_empty());
     }
 
     #[test]

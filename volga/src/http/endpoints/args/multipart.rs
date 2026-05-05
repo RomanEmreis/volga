@@ -40,6 +40,7 @@ mod part;
 ///         Part::file("logo", "logo.png", b"...image bytes...".to_vec()),
 ///     ])
 /// }
+/// # let _ = handle;
 /// ```
 pub struct Multipart {
     inner: MultipartInner,
@@ -249,7 +250,7 @@ impl Multipart {
                 .await
                 .map_err(MultipartError::read_error)?
             {
-                yield field_to_part(field);
+                yield field_to_part(field)?;
             }
         };
 
@@ -311,13 +312,15 @@ impl FromPayload for Multipart {
 
 /// Converts a single [`multer::Field`] into a [`Part`] whose body is a stream that
 /// drains chunks lazily from the field. No buffering.
-fn field_to_part(mut field: multer::Field<'static>) -> Part {
+/// Errors if the field's name or filename produces an invalid `Content-Disposition`
+/// header value (e.g. CR/LF in upstream-supplied bytes).
+fn field_to_part(mut field: multer::Field<'static>) -> Result<Part, Error> {
     use crate::headers::{ContentType, Header};
 
     let name = field.name().unwrap_or("").to_owned();
     let filename = field.file_name().map(|s| s.to_owned());
     let content_type_header = field.content_type().map(|m| {
-        Header::<ContentType>::from_bytes(m.essence_str().as_bytes())
+        Header::<ContentType>::from_bytes(m.as_ref().as_bytes())
             .unwrap_or_else(|_| ContentType::stream())
     });
 
@@ -332,11 +335,11 @@ fn field_to_part(mut field: multer::Field<'static>) -> Part {
     };
     let body = PartBody::Stream(Box::pin(body_stream));
 
-    let mut part = Part::new(body).with_disposition(&name, filename.as_deref());
+    let mut part = Part::new(body).try_with_disposition(&name, filename.as_deref())?;
     if let Some(ct) = content_type_header {
         part = part.with_content_type(ct);
     }
-    part
+    Ok(part)
 }
 
 /// Encodes an outgoing parts stream into an HTTP body. Wraps `encoder::encode`
@@ -396,14 +399,18 @@ mod tests {
 
     #[tokio::test]
     async fn from_parts_vec() {
-        let mp = Multipart::from_parts(vec![Part::text("a", "1"), Part::text("b", "2")]);
+        let mp = Multipart::from_parts(vec![
+            Part::text("a", "1"),
+            Part::text("b", "2"),
+        ]);
         assert!(matches!(mp.inner, MultipartInner::Outgoing { .. }));
         assert!(mp.boundary().starts_with("volga-"));
     }
 
     #[tokio::test]
     async fn from_parts_array() {
-        let _mp = Multipart::from_parts([Part::text("a", "1"), Part::text("b", "2")]);
+        let _mp =
+            Multipart::from_parts([Part::text("a", "1"), Part::text("b", "2")]);
     }
 
     #[tokio::test]
@@ -548,6 +555,44 @@ mod tests {
         let mp = Multipart::from_parts(vec![Part::text("a", "1")]);
         let err = mp.into_outgoing().unwrap_err();
         assert!(format!("{err}").contains("already"));
+    }
+
+    #[tokio::test]
+    async fn into_outgoing_preserves_part_content_type_parameters() {
+        use crate::http::IntoResponse;
+        use http_body_util::BodyExt;
+
+        // An inbound part declares a Content-Type with a `charset` parameter.
+        let body = "--B\r\nContent-Disposition: form-data; name=\"f\"\r\nContent-Type: text/plain; charset=us-ascii\r\n\r\nhello\r\n--B--\r\n";
+        let req = Request::get("/")
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=B")
+            .body(HttpBody::full(body))
+            .unwrap();
+        let (parts, body) = req.into_parts();
+        let mp = Multipart::from_payload(Payload::Full(&parts, body))
+            .await
+            .unwrap();
+
+        let resp = mp.into_outgoing().unwrap().into_response().unwrap();
+        let ct = resp
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        let bytes = resp
+            .into_inner()
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let wire = std::str::from_utf8(&bytes).unwrap();
+        assert!(
+            wire.contains("content-type: text/plain; charset=us-ascii"),
+            "expected charset parameter to survive forwarding; got: {wire}\nresponse CT: {ct}"
+        );
     }
 
     #[tokio::test]

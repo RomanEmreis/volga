@@ -79,12 +79,45 @@ impl ContentType {
 
     /// Creates a `multipart/<subtype>; boundary=...` [`Header<ContentType>`].
     /// Boundary must already be RFC 2046 §5.1.1 compliant; use `Multipart::with_boundary`
-    /// for validation.
+    /// for validation. RFC 2045 tspecials in the boundary (e.g. `:` or space) trigger
+    /// quoting of the parameter value so downstream parsers can extract it.
     pub fn multipart_custom(subtype: &str, boundary: &str) -> Header<Self> {
-        let value = format!("multipart/{subtype}; boundary={boundary}");
+        let value = if boundary_needs_quoting(boundary) {
+            format!("multipart/{subtype}; boundary=\"{boundary}\"")
+        } else {
+            format!("multipart/{subtype}; boundary={boundary}")
+        };
         Self::from_bytes(value.as_bytes())
             .expect("boundary should produce a valid Content-Type header value")
     }
+}
+
+/// Returns `true` if `value` contains any RFC 2045 tspecial or whitespace and must
+/// therefore be wrapped in `"..."` when used as a Content-Type parameter value.
+/// The validated boundary alphabet excludes `"` and `\`, so simple wrapping is safe.
+#[inline]
+fn boundary_needs_quoting(value: &str) -> bool {
+    value.bytes().any(|b| {
+        matches!(
+            b,
+            b' ' | b'\t'
+                | b'('
+                | b')'
+                | b'<'
+                | b'>'
+                | b'@'
+                | b','
+                | b';'
+                | b':'
+                | b'\\'
+                | b'"'
+                | b'/'
+                | b'['
+                | b']'
+                | b'?'
+                | b'='
+        )
+    })
 }
 
 impl CacheControl {
@@ -231,5 +264,24 @@ mod multipart_content_type_tests {
     fn custom_subtype() {
         let h = ContentType::multipart_custom("alternative", "abc");
         assert_eq!(h.as_ref(), "multipart/alternative; boundary=abc");
+    }
+
+    #[test]
+    fn boundary_with_tspecials_is_quoted() {
+        // ':' is a tspecial — must be wrapped in quotes per RFC 2045.
+        let h = ContentType::multipart_form_data("a:b");
+        assert_eq!(h.as_ref(), "multipart/form-data; boundary=\"a:b\"");
+    }
+
+    #[test]
+    fn boundary_with_internal_space_is_quoted() {
+        let h = ContentType::multipart_form_data("with space");
+        assert_eq!(h.as_ref(), "multipart/form-data; boundary=\"with space\"");
+    }
+
+    #[test]
+    fn plain_token_boundary_remains_unquoted() {
+        let h = ContentType::multipart_form_data("plain-token_42");
+        assert_eq!(h.as_ref(), "multipart/form-data; boundary=plain-token_42");
     }
 }
