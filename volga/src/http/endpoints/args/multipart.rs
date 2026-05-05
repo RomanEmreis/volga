@@ -155,29 +155,35 @@ impl Multipart {
         }
     }
 
-    #[inline]
     /// Extracts the `boundary` parameter from a `multipart/*` Content-Type header.
     /// Subtype-agnostic — accepts any `multipart/<subtype>`, not just form-data —
     /// because volga supports forwarding `byteranges`, `mixed`, etc.
+    ///
+    /// Walks parameters as `(name, value)` pairs (RFC 7231 §3.1.1.1) so a quoted
+    /// value containing the substring `boundary=` (e.g. `foo="xboundary=y"`) does
+    /// not confuse the match — the parameter name lookup is structural, not textual.
     fn parse_boundary(headers: &HeaderMap) -> Option<String> {
         let content_type = headers.get(CONTENT_TYPE)?.to_str().ok()?;
-        let lower = content_type.to_ascii_lowercase();
-        if !lower.trim_start().starts_with("multipart/") {
+        let trimmed = content_type.trim_start();
+        let (ty, after_slash) = trimmed.split_once('/')?;
+        if !ty.eq_ignore_ascii_case("multipart") {
             return None;
         }
-        let idx = lower.find("boundary=")?;
-        let raw = content_type[idx + "boundary=".len()..].trim_start();
-        let boundary = if let Some(rest) = raw.strip_prefix('"') {
-            rest.split_once('"').map(|(b, _)| b)?
-        } else {
-            raw.split(|c: char| c == ';' || c.is_whitespace())
-                .next()
-                .filter(|s| !s.is_empty())?
-        };
-        if boundary.is_empty() {
-            None
-        } else {
-            Some(boundary.to_string())
+        // Skip the subtype to the first ';'; absent ';' means no parameters at all.
+        let mut rest = after_slash.split_once(';')?.1;
+        loop {
+            rest = trim_ows(rest);
+            if rest.is_empty() {
+                return None;
+            }
+            let (name, after_eq) = rest.split_once('=')?;
+            let name = name.trim();
+            let (value, tail) = parse_param_value(trim_ows(after_eq))?;
+            if name.eq_ignore_ascii_case("boundary") {
+                return if value.is_empty() { None } else { Some(value) };
+            }
+            // Advance past the trailing ';' (if any) to the next parameter.
+            rest = trim_ows(tail).strip_prefix(';')?;
         }
     }
 
@@ -366,6 +372,38 @@ impl FromPayload for Multipart {
 /// Forwards every per-part header verbatim — `Content-Type`, `Content-Disposition`
 /// (preserving `filename*` and other parameters), `Content-Range`, plus any custom
 /// header — so proxy / forwarding flows produce a semantically-equivalent body.
+/// Strips RFC 7230 OWS (optional whitespace: SP / HTAB) from the front of `s`.
+#[inline]
+fn trim_ows(s: &str) -> &str {
+    s.trim_start_matches([' ', '\t'])
+}
+
+/// Parses a Content-Type parameter value at the start of `s`. Handles either a
+/// `token` (consumed up to the next `;` or end) or a `quoted-string` per RFC 7230
+/// (with backslash-quoted-pair escapes). Returns the unquoted value and the
+/// remainder of the input after the value.
+fn parse_param_value(s: &str) -> Option<(String, &str)> {
+    if let Some(after_quote) = s.strip_prefix('"') {
+        let mut value = String::new();
+        let mut chars = after_quote.char_indices();
+        while let Some((idx, c)) = chars.next() {
+            match c {
+                '"' => return Some((value, &after_quote[idx + c.len_utf8()..])),
+                '\\' => match chars.next() {
+                    Some((_, esc)) => value.push(esc),
+                    None => return None,
+                },
+                other => value.push(other),
+            }
+        }
+        None
+    } else {
+        let end = s.find(';').unwrap_or(s.len());
+        let value = s[..end].trim_end_matches([' ', '\t']).to_owned();
+        Some((value, &s[end..]))
+    }
+}
+
 fn field_to_part(mut field: multer::Field<'static>) -> Part {
     use crate::headers::{ContentDisposition, ContentType, Header};
 
@@ -415,6 +453,53 @@ mod tests {
     use crate::http::body::HttpBody;
     use crate::http::endpoints::args::{FromPayload, Payload};
     use hyper::Request;
+
+    fn make_headers(content_type: &str) -> crate::headers::HeaderMap {
+        let mut h = crate::headers::HeaderMap::new();
+        h.insert(
+            CONTENT_TYPE,
+            crate::headers::HeaderValue::from_str(content_type).unwrap(),
+        );
+        h
+    }
+
+    #[test]
+    fn parse_boundary_simple_token() {
+        let h = make_headers("multipart/form-data; boundary=ABCDEF");
+        assert_eq!(Multipart::parse_boundary(&h).as_deref(), Some("ABCDEF"));
+    }
+
+    #[test]
+    fn parse_boundary_quoted_value() {
+        let h = make_headers(r#"multipart/form-data; boundary="with space""#);
+        assert_eq!(Multipart::parse_boundary(&h).as_deref(), Some("with space"));
+    }
+
+    #[test]
+    fn parse_boundary_skips_other_quoted_param_containing_boundary_substring() {
+        // Regression: substring scan would have matched the literal "boundary=" inside
+        // foo's quoted value. The structured parser must skip it and pick the real one.
+        let h = make_headers(r#"multipart/form-data; foo="xboundary=y"; boundary=real"#);
+        assert_eq!(Multipart::parse_boundary(&h).as_deref(), Some("real"));
+    }
+
+    #[test]
+    fn parse_boundary_case_insensitive_type_and_param_name() {
+        let h = make_headers("MULTIPART/Form-Data; BOUNDARY=ZZZ");
+        assert_eq!(Multipart::parse_boundary(&h).as_deref(), Some("ZZZ"));
+    }
+
+    #[test]
+    fn parse_boundary_rejects_non_multipart_type() {
+        let h = make_headers("text/plain; boundary=ZZZ");
+        assert_eq!(Multipart::parse_boundary(&h), None);
+    }
+
+    #[test]
+    fn parse_boundary_rejects_when_param_absent() {
+        let h = make_headers("multipart/form-data; charset=utf-8");
+        assert_eq!(Multipart::parse_boundary(&h), None);
+    }
 
     #[tokio::test]
     async fn it_reads_from_payload() {
