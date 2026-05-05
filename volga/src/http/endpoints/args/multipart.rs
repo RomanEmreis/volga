@@ -399,18 +399,14 @@ mod tests {
 
     #[tokio::test]
     async fn from_parts_vec() {
-        let mp = Multipart::from_parts(vec![
-            Part::text("a", "1"),
-            Part::text("b", "2"),
-        ]);
+        let mp = Multipart::from_parts(vec![Part::text("a", "1"), Part::text("b", "2")]);
         assert!(matches!(mp.inner, MultipartInner::Outgoing { .. }));
         assert!(mp.boundary().starts_with("volga-"));
     }
 
     #[tokio::test]
     async fn from_parts_array() {
-        let _mp =
-            Multipart::from_parts([Part::text("a", "1"), Part::text("b", "2")]);
+        let _mp = Multipart::from_parts([Part::text("a", "1"), Part::text("b", "2")]);
     }
 
     #[tokio::test]

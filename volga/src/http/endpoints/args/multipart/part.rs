@@ -59,8 +59,7 @@ impl From<String> for PartBody {
 
 use crate::headers::{ContentDisposition, ContentType, FromHeaders, Header, HeaderMap};
 
-const INVALID_HEADER_BYTES_MSG: &str =
-    "invalid bytes in part name or filename (e.g. CR/LF); use the corresponding `try_*` constructor for untrusted input";
+const INVALID_HEADER_BYTES_MSG: &str = "invalid bytes in part name or filename (e.g. CR/LF); use the corresponding `try_*` constructor for untrusted input";
 
 /// An outgoing multipart part — either form-data, byteranges, or any RFC 2046 subtype.
 ///
@@ -136,11 +135,7 @@ impl Part {
     /// # Panics
     /// if `name` or `filename` contains bytes that are invalid in an HTTP header value.
     /// For untrusted input, use [`Part::try_file`].
-    pub fn file(
-        name: impl AsRef<str>,
-        filename: impl AsRef<str>,
-        bytes: impl Into<Bytes>,
-    ) -> Self {
+    pub fn file(name: impl AsRef<str>, filename: impl AsRef<str>, bytes: impl Into<Bytes>) -> Self {
         Self::try_file(name, filename, bytes).expect(INVALID_HEADER_BYTES_MSG)
     }
 
@@ -221,11 +216,7 @@ impl Part {
 
     /// Fallible counterpart of [`Part::with_disposition`]. Returns `Err` if `name` or
     /// `filename` contains bytes that are invalid in an HTTP header value.
-    pub fn try_with_disposition(
-        self,
-        name: &str,
-        filename: Option<&str>,
-    ) -> Result<Self, Error> {
+    pub fn try_with_disposition(self, name: &str, filename: Option<&str>) -> Result<Self, Error> {
         Ok(self.with_disposition_raw(make_form_disposition(name, filename)?))
     }
 
@@ -386,8 +377,8 @@ mod tests {
 
     #[test]
     fn try_file_rejects_invalid_header_bytes() {
-        let err = Part::try_file("name\r\nfield", "ev\nil.txt", Bytes::from_static(b"x"))
-            .unwrap_err();
+        let err =
+            Part::try_file("name\r\nfield", "ev\nil.txt", Bytes::from_static(b"x")).unwrap_err();
         assert!(
             !format!("{err}").is_empty(),
             "expected an error describing the invalid header value"

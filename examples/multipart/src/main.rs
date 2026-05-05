@@ -37,10 +37,7 @@ async fn main() -> std::io::Result<()> {
     });
 
     app.map_post("/outbound", || async move {
-        Multipart::from_parts([
-            Part::text("greeting", "hello"),
-            Part::text("name", "world"),
-        ])
+        Multipart::from_parts([Part::text("greeting", "hello"), Part::text("name", "world")])
     });
 
     app.run().await
