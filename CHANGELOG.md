@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.2
+
+## Added
+* `Multipart` is now bidirectional — in addition to acting as a request extractor, it implements `IntoResponse` and can be returned from handlers to produce a `multipart/*` response.
+* `Multipart::from_parts(iter)` / `Multipart::from_stream(stream)` — build an outgoing multipart from any `IntoIterator<Item = Part>` or `Stream<Item = Part>`.
+* `Multipart::with_subtype(MultipartSubtype)` — switch between `form-data`, `mixed`, `byteranges`, or a `Custom(...)` subtype on outgoing responses.
+* `Multipart::with_boundary(...)` — override the auto-generated boundary; validated per RFC 2046 §5.1.1.
+* `Multipart::into_outgoing()` — re-encode an incoming multipart as a streaming outgoing one for proxy / forwarding scenarios.
+* `Part` builder API: `Part::text`, `Part::bytes`, `Part::file`, `Part::stream`, `Part::new`, plus `with_content_type`, `with_disposition`, `with_header_raw`. `Content-Type` is auto-inferred from filename via `mime_guess`. The static-input constructors panic on invalid header bytes; fallible `try_text` / `try_bytes` / `try_file` / `try_stream` / `try_with_disposition` counterparts are provided for untrusted input.
+* `OpenApiRouteConfig::produces_multipart(status)` — describe `multipart/form-data` responses in OpenAPI specs.
+
+## Changed
+* HSTS default `max_age` is now 1 year (31,536,000 s); previously 30 days. Aligns with the [HSTS preload list](https://hstspreload.org/) requirement (#190).
+* `Multipart` request parsing accepts any `multipart/*` subtype (previously only `multipart/form-data`). Required for forwarding `multipart/byteranges`, `multipart/mixed`, etc.
+
+## Breaking Changes
+* `HstsConfig::with_preload()` panics if `max_age < 1 year`; `HstsConfig::with_max_age(...)` panics if called when `preload` is enabled and the new value is below 1 year (#190).
+* `TlsConfig`, `RedirectionConfig`, and `Problem` are now `#[non_exhaustive]`. External code can no longer construct them with struct literals or exhaustively pattern-match (#190, #191).
+* Removed the deprecated `problem!` macro. Use `volga::error::Problem` instead (#191).
+* `From<Algorithm> for jsonwebtoken::Algorithm` and the reverse impl are removed. `jsonwebtoken::Algorithm` is no longer reachable through volga's public API; conversion is crate-internal via `Algorithm::to_jwt()` (#191).
+* `Problem` responses now use the correct `application/problem+json` content type (#191).
+
 # 0.9.1
 
 ## Added

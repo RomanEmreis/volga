@@ -5,7 +5,7 @@
 //! ```
 
 use std::path::Path;
-use volga::{App, Multipart, ok};
+use volga::{App, Multipart, multipart::Part, ok};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -30,6 +30,14 @@ async fn main() -> std::io::Result<()> {
             results.push(text);
         }
         ok!(results)
+    });
+
+    app.map_post("/trace", |multipart: Multipart| async move {
+        multipart.into_outgoing()
+    });
+
+    app.map_post("/outbound", || async move {
+        Multipart::from_parts([Part::text("greeting", "hello"), Part::text("name", "world")])
     });
 
     app.run().await
