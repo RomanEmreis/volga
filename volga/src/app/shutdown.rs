@@ -3,17 +3,45 @@
 //! Wraps a [`tokio_util::sync::CancellationToken`] so callers can trigger
 //! a graceful server shutdown without sending an OS signal.
 
+use std::fmt;
 use std::future::Future;
+use std::pin::Pin;
 
 use tokio_util::sync::CancellationToken;
 
-/// A handle that triggers a graceful shutdown of a running [`crate::App`].
+type PendingFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+
+/// A handle that triggers a graceful shutdown of running [`crate::App`].
 ///
-/// Cloning a handle yields another reference to the same shutdown signal —
-/// any clone calling [`ShutdownHandle::shutdown`] cancels the shared token.
-#[derive(Debug, Clone, Default)]
+/// Clones share the same shutdown signal — any clone calling
+/// [`ShutdownHandle::shutdown`] cancels the shared token. Each clone
+/// carries its own empty trigger list, so register triggers via
+/// [`ShutdownHandle::shutdown_on`] (or [`ShutdownHandle::on_signal`])
+/// *before* passing the handle to [`crate::App::with_shutdown_signal`].
+#[derive(Default)]
 pub struct ShutdownHandle {
     token: CancellationToken,
+    /// Async triggers registered while no Tokio runtime was active.
+    /// Spawned by [`ShutdownHandle::arm_pending`] once a runtime is available.
+    pending: Vec<PendingFuture>,
+}
+
+impl Clone for ShutdownHandle {
+    fn clone(&self) -> Self {
+        Self {
+            token: self.token.clone(),
+            pending: Vec::new(),
+        }
+    }
+}
+
+impl fmt::Debug for ShutdownHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShutdownHandle")
+            .field("token", &self.token)
+            .field("pending", &self.pending.len())
+            .finish()
+    }
 }
 
 impl ShutdownHandle {
@@ -21,6 +49,7 @@ impl ShutdownHandle {
     pub fn new() -> Self {
         Self {
             token: CancellationToken::new(),
+            pending: Vec::new(),
         }
     }
 
@@ -29,7 +58,10 @@ impl ShutdownHandle {
     /// Useful for sharing a single shutdown signal with other subsystems
     /// that already use a `CancellationToken`.
     pub fn from_token(token: CancellationToken) -> Self {
-        Self { token }
+        Self {
+            token,
+            pending: Vec::new(),
+        }
     }
 
     /// Builds a handle whose shutdown is triggered when the given
@@ -52,7 +84,7 @@ impl ShutdownHandle {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let handle = Self::new();
+        let mut handle = Self::new();
         handle.shutdown_on(future);
         handle
     }
@@ -63,15 +95,39 @@ impl ShutdownHandle {
     /// resolving will trigger shutdown. The underlying [`CancellationToken::cancel`]
     /// is idempotent, so triggers that fire after shutdown was already
     /// requested are no-ops.
-    pub fn shutdown_on<F>(&self, future: F)
+    ///
+    /// Safe to call outside a Tokio runtime: when no runtime is active
+    /// the future is queued and spawned automatically once [`crate::App::run`]
+    /// (or [`crate::App::run_blocking`]) enters async context. Register
+    /// triggers *before* cloning or moving the handle into the app —
+    /// each clone starts with an empty trigger list.
+    pub fn shutdown_on<F>(&mut self, future: F)
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let token = self.token.clone();
-        tokio::spawn(async move {
-            future.await;
-            token.cancel();
-        });
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let token = self.token.clone();
+            tokio::spawn(async move {
+                future.await;
+                token.cancel();
+            });
+        } else {
+            self.pending.push(Box::pin(future));
+        }
+    }
+
+    /// Spawns any futures registered via [`ShutdownHandle::shutdown_on`]
+    /// while no Tokio runtime was active. Must be called from within a
+    /// runtime; called once by [`crate::App::run`] before the shutdown
+    /// signal task is spawned.
+    pub(crate) fn arm_pending(&mut self) {
+        for future in std::mem::take(&mut self.pending) {
+            let token = self.token.clone();
+            tokio::spawn(async move {
+                future.await;
+                token.cancel();
+            });
+        }
     }
 
     /// Triggers a graceful shutdown of the associated server.
@@ -91,13 +147,11 @@ impl ShutdownHandle {
         self.token.is_cancelled()
     }
 
-    /// Resolves when shutdown has been requested.
-    ///
-    /// The returned future borrows `self`. For an owned future suitable
-    /// for passing to [`tokio::spawn`] without cloning the handle, use
-    /// `handle.token().cancelled_owned()`.
-    pub async fn cancelled(&self) {
-        self.token.cancelled().await;
+    /// Returns a `'static` future that resolves when shutdown has been
+    /// requested. Suitable for passing to [`tokio::spawn`] without
+    /// cloning the handle.
+    pub fn cancelled(&self) -> impl Future<Output = ()> + Send + 'static {
+        self.token.clone().cancelled_owned()
     }
 
     /// Returns a clone of the underlying [`CancellationToken`] for
@@ -199,7 +253,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_composes_multiple_shutdown_on_triggers() {
-        let handle = ShutdownHandle::new();
+        let mut handle = ShutdownHandle::new();
         let (tx_a, rx_a) = tokio::sync::oneshot::channel::<()>();
         let (_tx_b, rx_b) = tokio::sync::oneshot::channel::<()>();
         handle.shutdown_on(async move {
@@ -217,12 +271,47 @@ mod tests {
 
     #[tokio::test]
     async fn it_treats_shutdown_on_after_cancel_as_noop() {
-        let handle = ShutdownHandle::new();
+        let mut handle = ShutdownHandle::new();
         handle.shutdown();
         // The trigger future is allowed to run but cancel() is a no-op.
         handle.shutdown_on(async {});
         // Yield to let the spawned task execute and call cancel() on the already-cancelled token.
         tokio::task::yield_now().await;
+        assert!(handle.is_shutdown_requested());
+    }
+
+    #[test]
+    fn it_does_not_panic_when_shutdown_on_is_called_without_runtime() {
+        let mut handle = ShutdownHandle::new();
+        handle.shutdown_on(async {});
+        assert!(!handle.is_shutdown_requested());
+    }
+
+    #[test]
+    fn it_does_not_panic_when_on_signal_is_called_without_runtime() {
+        let _handle = ShutdownHandle::on_signal(async {});
+    }
+
+    #[test]
+    fn it_arms_pending_triggers_once_runtime_starts() {
+        let mut handle = ShutdownHandle::new();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        // Registered outside a runtime — must be queued.
+        handle.shutdown_on(async move {
+            let _ = rx.await;
+        });
+        assert!(!handle.is_shutdown_requested());
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            handle.arm_pending();
+            tx.send(()).unwrap();
+            handle.cancelled().await;
+        });
         assert!(handle.is_shutdown_requested());
     }
 }

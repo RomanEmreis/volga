@@ -732,7 +732,7 @@ impl App {
     }
 
     #[inline]
-    async fn run_internal(self, tcp_listener: TcpListener) -> io::Result<()> {
+    async fn run_internal(mut self, tcp_listener: TcpListener) -> io::Result<()> {
         #[cfg(all(debug_assertions, feature = "openapi"))]
         if self.openapi.is_configure_but_not_exposed() {
             #[cfg(feature = "tracing")]
@@ -761,6 +761,11 @@ impl App {
 
         let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
         let shutdown_tx = Arc::new(shutdown_tx);
+
+        if let Some(handle) = self.shutdown_handle.as_mut() {
+            handle.arm_pending();
+        }
+
         Self::shutdown_signal(shutdown_rx, self.shutdown_handle.clone());
 
         #[cfg(feature = "tls")]
@@ -850,9 +855,10 @@ impl App {
             };
             match handle {
                 Some(h) => {
+                    let cancelled = h.token().cancelled_owned();
                     tokio::select! {
                         _ = os => {},
-                        _ = h.cancelled() => {},
+                        _ = cancelled => {},
                     }
                 }
                 None => os.await,

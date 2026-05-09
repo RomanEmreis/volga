@@ -101,7 +101,7 @@ async fn on_signal_constructor_drives_server_shutdown() {
 #[tokio::test]
 async fn shutdown_on_chained_triggers_compose() {
     let port = pick_free_port();
-    let handle = ShutdownHandle::new();
+    let mut handle = ShutdownHandle::new();
     let (tx_a, rx_a) = tokio::sync::oneshot::channel::<()>();
     let (_tx_b, rx_b) = tokio::sync::oneshot::channel::<()>();
     handle.shutdown_on(async move {
@@ -112,7 +112,7 @@ async fn shutdown_on_chained_triggers_compose() {
     });
 
     let mut app = App::new()
-        .with_shutdown_signal(handle.clone())
+        .with_shutdown_signal(handle)
         .bind(format!("127.0.0.1:{port}"))
         .without_greeter();
     app.map_get("/ping", || async { ok!("pong") });
