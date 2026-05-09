@@ -66,6 +66,7 @@ pub use crate::limits::Http2Limits;
 #[cfg(feature = "tls")]
 pub(crate) use app_env::GRACEFUL_SHUTDOWN_TIMEOUT;
 
+use crate::app::shutdown::ShutdownHandle;
 pub(crate) use app_env::AppEnv;
 
 mod app_env;
@@ -76,6 +77,7 @@ mod host_env;
 pub(crate) mod pipeline;
 pub mod router;
 pub(crate) mod scope;
+pub(crate) mod shutdown;
 
 /// The main entry point for building and running a Volga application.
 ///
@@ -199,6 +201,10 @@ pub struct App {
     /// Pre-built config store (populated by `with_config`/`with_default_config`, passed to `AppEnv`)
     #[cfg(feature = "config")]
     pub(crate) config_store: Option<Arc<crate::config::ConfigStore>>,
+
+    /// Optional user-provided shutdown handle that composes with the
+    /// built-in OS signal handler.
+    shutdown_handle: Option<ShutdownHandle>,
 }
 
 impl Default for App {
@@ -258,7 +264,57 @@ impl App {
             openapi: Default::default(),
             #[cfg(feature = "config")]
             config_store: None,
+            shutdown_handle: None,
         }
+    }
+
+    /// Creates a new [`App`] paired with a fresh [`ShutdownHandle`].
+    ///
+    /// The returned handle can be cloned freely. Calling
+    /// [`ShutdownHandle::shutdown`] from anywhere triggers a graceful
+    /// server shutdown that composes with the built-in OS signal
+    /// handler (Ctrl+C, SIGTERM).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let (app, shutdown) = App::with_shutdown();
+    ///     tokio::spawn(async move {
+    ///         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    ///         shutdown.shutdown();
+    ///     });
+    ///     app.run().await
+    /// }
+    /// ```
+    pub fn with_shutdown() -> (Self, ShutdownHandle) {
+        let handle = ShutdownHandle::new();
+        (Self::new().with_shutdown_signal(handle.clone()), handle)
+    }
+
+    /// Registers an external shutdown signal.
+    ///
+    /// The handle is composed with the built-in OS signal handler
+    /// (Ctrl+C, SIGTERM on Unix, or the equivalents on Windows) —
+    /// whichever fires first triggers a graceful shutdown.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use volga::{App, ShutdownHandle};
+    ///
+    /// let handle = ShutdownHandle::new();
+    /// let app = App::new().with_shutdown_signal(handle.clone());
+    /// // Later: handle.shutdown() triggers a graceful shutdown.
+    /// # let _ = app;
+    /// # let _ = handle;
+    /// ```
+    pub fn with_shutdown_signal(mut self, handle: ShutdownHandle) -> Self {
+        self.shutdown_handle = Some(handle);
+        self
     }
 
     /// Returns the current bound socket address.
@@ -705,7 +761,7 @@ impl App {
 
         let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
         let shutdown_tx = Arc::new(shutdown_tx);
-        Self::shutdown_signal(shutdown_rx);
+        Self::shutdown_signal(shutdown_rx, self.shutdown_handle.clone());
 
         #[cfg(feature = "tls")]
         let redirection_config = self
@@ -784,14 +840,22 @@ impl App {
     }
 
     #[inline]
-    fn shutdown_signal(shutdown_rx: watch::Receiver<()>) {
+    fn shutdown_signal(shutdown_rx: watch::Receiver<()>, handle: Option<ShutdownHandle>) {
         tokio::spawn(async move {
-            match Self::wait_for_shutdown_signal().await {
-                Ok(_) => (),
-                #[cfg(feature = "tracing")]
-                Err(err) => tracing::error!("unable to listen for shutdown signal: {err:#}"),
-                #[cfg(not(feature = "tracing"))]
-                Err(_) => (),
+            let os = async {
+                if let Err(_err) = Self::wait_for_shutdown_signal().await {
+                    #[cfg(feature = "tracing")]
+                    tracing::error!("unable to listen for shutdown signal: {_err:#}");
+                }
+            };
+            match handle {
+                Some(h) => {
+                    tokio::select! {
+                        _ = os => {},
+                        _ = h.cancelled() => {},
+                    }
+                }
+                None => os.await,
             }
             #[cfg(feature = "tracing")]
             tracing::trace!("shutdown signal received, not accepting new requests");
