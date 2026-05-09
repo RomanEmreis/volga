@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.3
+
+## Added
+* `ShutdownHandle` — programmatic graceful shutdown that composes with the built-in OS signal handler. Construct via `ShutdownHandle::new()`, `ShutdownHandle::from_token(token)` / `From<CancellationToken>`, or `ShutdownHandle::on_signal(future)`. Chain additional async triggers with `handle.shutdown_on(future)`.
+* `App::with_shutdown()` — returns `(App, ShutdownHandle)` for the common case where the framework owns the handle.
+* `App::with_shutdown_signal(handle)` — registers an externally-owned `ShutdownHandle` on an existing `App`.
+
 # 0.9.2
 
 ## Added
