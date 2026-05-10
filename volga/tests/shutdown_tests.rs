@@ -73,17 +73,16 @@ async fn shutdown_is_idempotent_with_a_running_server() {
 }
 
 #[tokio::test]
-async fn on_signal_constructor_drives_server_shutdown() {
+async fn shutdown_on_drives_server_shutdown() {
     let port = pick_free_port();
     let (signal_tx, signal_rx) = tokio::sync::oneshot::channel::<()>();
-    let handle = ShutdownHandle::on_signal(async move {
-        let _ = signal_rx.await;
-    });
 
     let mut app = App::new()
-        .with_shutdown_signal(handle)
         .bind(format!("127.0.0.1:{port}"))
-        .without_greeter();
+        .without_greeter()
+        .shutdown_on(async move {
+            let _ = signal_rx.await;
+        });
     app.map_get("/ping", || async { ok!("pong") });
     let task = tokio::spawn(async move { app.run().await });
 
@@ -93,7 +92,7 @@ async fn on_signal_constructor_drives_server_shutdown() {
 
     tokio::time::timeout(Duration::from_secs(5), task)
         .await
-        .expect("server did not exit after on_signal trigger")
+        .expect("server did not exit after shutdown_on trigger")
         .expect("server task panicked")
         .expect("server returned an error");
 }
@@ -101,20 +100,18 @@ async fn on_signal_constructor_drives_server_shutdown() {
 #[tokio::test]
 async fn shutdown_on_chained_triggers_compose() {
     let port = pick_free_port();
-    let mut handle = ShutdownHandle::new();
     let (tx_a, rx_a) = tokio::sync::oneshot::channel::<()>();
     let (_tx_b, rx_b) = tokio::sync::oneshot::channel::<()>();
-    handle.shutdown_on(async move {
-        let _ = rx_a.await;
-    });
-    handle.shutdown_on(async move {
-        let _ = rx_b.await;
-    });
 
     let mut app = App::new()
-        .with_shutdown_signal(handle)
         .bind(format!("127.0.0.1:{port}"))
-        .without_greeter();
+        .without_greeter()
+        .shutdown_on(async move {
+            let _ = rx_a.await;
+        })
+        .shutdown_on(async move {
+            let _ = rx_b.await;
+        });
     app.map_get("/ping", || async { ok!("pong") });
     let task = tokio::spawn(async move { app.run().await });
 
@@ -128,6 +125,35 @@ async fn shutdown_on_chained_triggers_compose() {
         .expect("server did not exit after first trigger")
         .expect("server task panicked")
         .expect("server returned an error");
+}
+
+#[tokio::test]
+async fn shutdown_on_composes_with_with_shutdown_handle() {
+    let port = pick_free_port();
+    let (signal_tx, signal_rx) = tokio::sync::oneshot::channel::<()>();
+    let (app, handle) = App::with_shutdown();
+
+    let mut app = app
+        .bind(format!("127.0.0.1:{port}"))
+        .without_greeter()
+        .shutdown_on(async move {
+            let _ = signal_rx.await;
+        });
+    app.map_get("/ping", || async { ok!("pong") });
+    let task = tokio::spawn(async move { app.run().await });
+
+    wait_until_listening(port).await;
+
+    // Firing the trigger should cancel the handle's shared token.
+    signal_tx.send(()).unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("server did not exit after shutdown_on trigger")
+        .expect("server task panicked")
+        .expect("server returned an error");
+
+    assert!(handle.is_shutdown_requested());
 }
 
 #[tokio::test]

@@ -8,9 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 # 0.9.3
 
 ## Added
-* `ShutdownHandle` — programmatic graceful shutdown that composes with the built-in OS signal handler. Construct via `ShutdownHandle::new()`, `ShutdownHandle::from_token(token)` / `From<CancellationToken>`, or `ShutdownHandle::on_signal(future)`. Chain additional async triggers with `handle.shutdown_on(future)`.
+* `ShutdownHandle` — programmatic graceful shutdown that composes with the built-in OS signal handler. Construct via `ShutdownHandle::new()` or `ShutdownHandle::from_token(token)` / `From<CancellationToken>`. Trigger with `handle.shutdown()`; observe with `handle.is_shutdown_requested()` and `handle.cancelled()`.
 * `App::with_shutdown()` — returns `(App, ShutdownHandle)` for the common case where the framework owns the handle.
 * `App::with_shutdown_signal(handle)` — registers an externally-owned `ShutdownHandle` on an existing `App`.
+* `App::shutdown_on(future)` — chains async triggers (e.g. an external watchdog future) that fire a graceful shutdown when they resolve. Composes with the OS signal handler and any `ShutdownHandle` already registered, and is safe to call before a Tokio runtime exists.
 
 # 0.9.2
 

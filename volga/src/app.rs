@@ -9,7 +9,9 @@ use connection::Connection;
 use hyper_util::rt::TokioIo;
 
 use std::{
+    fmt,
     future::Future,
+    pin::Pin,
     sync::{Arc, Weak},
 };
 
@@ -205,6 +207,24 @@ pub struct App {
     /// Optional user-provided shutdown handle that composes with the
     /// built-in OS signal handler.
     shutdown_handle: Option<ShutdownHandle>,
+
+    /// Async triggers registered via [`App::shutdown_on`]. Drained and
+    /// spawned by [`App::run_internal`] once a Tokio runtime is active.
+    shutdown_triggers: ShutdownTriggers,
+}
+
+/// Async triggers queued via [`App::shutdown_on`]. Wraps a vector of
+/// boxed futures with a manual [`fmt::Debug`] impl, since trait objects
+/// don't implement [`Debug`].
+#[derive(Default)]
+struct ShutdownTriggers(Vec<Pin<Box<dyn Future<Output = ()> + Send + 'static>>>);
+
+impl fmt::Debug for ShutdownTriggers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShutdownTriggers")
+            .field("len", &self.0.len())
+            .finish()
+    }
 }
 
 impl Default for App {
@@ -265,6 +285,7 @@ impl App {
             #[cfg(feature = "config")]
             config_store: None,
             shutdown_handle: None,
+            shutdown_triggers: ShutdownTriggers::default(),
         }
     }
 
@@ -314,6 +335,47 @@ impl App {
     /// ```
     pub fn with_shutdown_signal(mut self, handle: ShutdownHandle) -> Self {
         self.shutdown_handle = Some(handle);
+        self
+    }
+
+    /// Registers an async trigger that fires a graceful shutdown when
+    /// the given future resolves.
+    ///
+    /// Multiple `shutdown_on` calls compose — any of the registered
+    /// futures resolving will trigger shutdown. The trigger composes
+    /// with both the OS signal handler and any [`ShutdownHandle`]
+    /// registered via [`App::with_shutdown`] or
+    /// [`App::with_shutdown_signal`]. If no handle has been registered,
+    /// a fresh internal one is created automatically.
+    ///
+    /// The future is spawned onto the Tokio runtime when the app starts
+    /// running, so this method is safe to call before any runtime exists
+    /// (e.g. before [`App::run_blocking`]).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> std::io::Result<()> {
+    ///     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    ///     let app = App::new()
+    ///         .bind("127.0.0.1:7878")
+    ///         .shutdown_on(async move { let _ = rx.await; });
+    ///     // Sending on `tx` later triggers a graceful shutdown.
+    ///     # let _ = tx;
+    ///     app.run().await
+    /// }
+    /// ```
+    pub fn shutdown_on<F>(mut self, future: F) -> Self
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        if self.shutdown_handle.is_none() {
+            self.shutdown_handle = Some(ShutdownHandle::new());
+        }
+        self.shutdown_triggers.0.push(Box::pin(future));
         self
     }
 
@@ -762,8 +824,18 @@ impl App {
         let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
         let shutdown_tx = Arc::new(shutdown_tx);
 
-        if let Some(handle) = self.shutdown_handle.as_mut() {
-            handle.arm_pending();
+        // Spawn any async triggers registered via `App::shutdown_on`.
+        // Each trigger cancels the handle's token when it resolves.
+        if !self.shutdown_triggers.0.is_empty() {
+            let handle = self.shutdown_handle.get_or_insert_with(ShutdownHandle::new);
+            let token = handle.token();
+            for trigger in self.shutdown_triggers.0.drain(..) {
+                let token = token.clone();
+                tokio::spawn(async move {
+                    trigger.await;
+                    token.cancel();
+                });
+            }
         }
 
         Self::shutdown_signal(shutdown_rx, self.shutdown_handle.clone());
