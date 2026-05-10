@@ -140,6 +140,63 @@ async fn shutdown_on_chained_triggers_compose() {
 }
 
 #[tokio::test]
+async fn shutdown_on_remaining_triggers_release_after_shutdown() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let port = pick_free_port();
+    let (tx_a, rx_a) = tokio::sync::oneshot::channel::<()>();
+    // The second trigger never resolves on its own — it's a watchdog future.
+    // The trigger task wraps it in a `select!` against the shared token,
+    // so when trigger A cancels, this future is *dropped*, which fires
+    // `dropped` via the `Drop` impl below.
+    let dropped = Arc::new(AtomicBool::new(false));
+    let dropped_for_future = Arc::clone(&dropped);
+
+    struct DropFlag(Arc<AtomicBool>);
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    let watchdog = async move {
+        let _flag = DropFlag(dropped_for_future);
+        std::future::pending::<()>().await;
+    };
+
+    let mut app = App::new()
+        .bind(format!("127.0.0.1:{port}"))
+        .without_greeter()
+        .shutdown_on(async move {
+            let _ = rx_a.await;
+        })
+        .shutdown_on(watchdog);
+    app.map_get("/ping", || async { ok!("pong") });
+    let task = tokio::spawn(async move { app.run().await });
+
+    wait_until_listening(&local_client(), port).await;
+
+    tx_a.send(()).unwrap();
+
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("server did not exit after trigger")
+        .expect("server task panicked")
+        .expect("server returned an error");
+
+    // Give the task scheduler a tick to drop the unresolved trigger.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !dropped.load(Ordering::SeqCst) {
+        assert!(
+            Instant::now() < deadline,
+            "remaining shutdown_on trigger was not dropped after shutdown"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
 async fn shutdown_on_composes_with_with_shutdown_handle() {
     let port = pick_free_port();
     let (signal_tx, signal_rx) = tokio::sync::oneshot::channel::<()>();

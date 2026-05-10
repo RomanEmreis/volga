@@ -825,15 +825,19 @@ impl App {
         let shutdown_tx = Arc::new(shutdown_tx);
 
         // Spawn any async triggers registered via `App::shutdown_on`.
-        // Each trigger cancels the handle's token when it resolves.
+        // Each trigger cancels the handle's token when it resolves, and
+        // exits early if another arm cancels the token first — otherwise
+        // an unresolved watchdog future would leak its task after shutdown.
         if !self.shutdown_triggers.0.is_empty() {
             let handle = self.shutdown_handle.get_or_insert_with(ShutdownHandle::new);
             let token = handle.token();
             for trigger in self.shutdown_triggers.0.drain(..) {
                 let token = token.clone();
                 tokio::spawn(async move {
-                    trigger.await;
-                    token.cancel();
+                    tokio::select! {
+                        _ = trigger => token.cancel(),
+                        _ = token.cancelled() => {}
+                    }
                 });
             }
         }
