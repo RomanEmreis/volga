@@ -13,11 +13,20 @@ fn pick_free_port() -> u16 {
         .port()
 }
 
-async fn wait_until_listening(port: u16) {
+/// A `reqwest::Client` with proxies disabled, so localhost probes are
+/// not redirected by HTTP(S)_PROXY env vars set in the test environment.
+fn local_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .expect("failed to build reqwest client")
+}
+
+async fn wait_until_listening(client: &reqwest::Client, port: u16) {
     let deadline = Instant::now() + Duration::from_secs(5);
     let url = format!("http://127.0.0.1:{port}/ping");
     while Instant::now() < deadline {
-        if reqwest::get(&url).await.is_ok() {
+        if client.get(&url).send().await.is_ok() {
             return;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -38,9 +47,12 @@ async fn manual_shutdown_stops_a_running_server() {
     let (app, handle) = build_app(port);
     let task = tokio::spawn(async move { app.run().await });
 
-    wait_until_listening(port).await;
+    let client = local_client();
+    wait_until_listening(&client, port).await;
 
-    let response = reqwest::get(format!("http://127.0.0.1:{port}/ping"))
+    let response = client
+        .get(format!("http://127.0.0.1:{port}/ping"))
+        .send()
         .await
         .unwrap();
     assert!(response.status().is_success());
@@ -60,7 +72,7 @@ async fn shutdown_is_idempotent_with_a_running_server() {
     let (app, handle) = build_app(port);
     let task = tokio::spawn(async move { app.run().await });
 
-    wait_until_listening(port).await;
+    wait_until_listening(&local_client(), port).await;
 
     handle.shutdown();
     handle.shutdown(); // second call must be a no-op
@@ -86,7 +98,7 @@ async fn shutdown_on_drives_server_shutdown() {
     app.map_get("/ping", || async { ok!("pong") });
     let task = tokio::spawn(async move { app.run().await });
 
-    wait_until_listening(port).await;
+    wait_until_listening(&local_client(), port).await;
 
     signal_tx.send(()).unwrap();
 
@@ -115,7 +127,7 @@ async fn shutdown_on_chained_triggers_compose() {
     app.map_get("/ping", || async { ok!("pong") });
     let task = tokio::spawn(async move { app.run().await });
 
-    wait_until_listening(port).await;
+    wait_until_listening(&local_client(), port).await;
 
     // Firing only the first trigger is enough.
     tx_a.send(()).unwrap();
@@ -142,7 +154,7 @@ async fn shutdown_on_composes_with_with_shutdown_handle() {
     app.map_get("/ping", || async { ok!("pong") });
     let task = tokio::spawn(async move { app.run().await });
 
-    wait_until_listening(port).await;
+    wait_until_listening(&local_client(), port).await;
 
     // Firing the trigger should cancel the handle's shared token.
     signal_tx.send(()).unwrap();
@@ -171,7 +183,7 @@ async fn from_cancellation_token_drives_server_shutdown() {
     app.map_get("/ping", || async { ok!("pong") });
     let task = tokio::spawn(async move { app.run().await });
 
-    wait_until_listening(port).await;
+    wait_until_listening(&local_client(), port).await;
 
     token.cancel();
 
@@ -204,10 +216,13 @@ async fn shutdown_drains_in_flight_requests() {
     app.map_get("/ping", || async { ok!("pong") });
     let task = tokio::spawn(async move { app.run().await });
 
-    wait_until_listening(port).await;
+    let client = local_client();
+    wait_until_listening(&client, port).await;
 
     let request = tokio::spawn(async move {
-        reqwest::get(format!("http://127.0.0.1:{port}/slow"))
+        client
+            .get(format!("http://127.0.0.1:{port}/slow"))
+            .send()
             .await
             .unwrap()
     });
