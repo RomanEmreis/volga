@@ -932,6 +932,11 @@ impl App {
                         _ = os => {},
                         _ = cancelled => {},
                     }
+                    // Mirror the `shutdown_on` path: ensure the shared
+                    // token is cancelled when the OS arm wins, so external
+                    // observers awaiting `handle.cancelled()` /
+                    // `is_shutdown_requested()` see the signal.
+                    h.shutdown();
                 }
                 None => os.await,
             }
