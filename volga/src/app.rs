@@ -918,28 +918,30 @@ impl App {
 
     #[inline]
     fn shutdown_signal(shutdown_rx: watch::Receiver<()>, handle: Option<ShutdownHandle>) {
+        let token = handle.map(|h| h.token()).unwrap_or_default();
+
+        // OS signal listener — spawned as its own task so it lives
+        // independently of the manual-shutdown path. Tokio's process-wide
+        // signal handlers are installed on first poll and never removed
+        // (see `tokio::signal::ctrl_c` docs), so dropping the polled
+        // signal future when the manual-shutdown path wins would leave
+        // future SIGINT/SIGTERM with no Volga listener. Keeping the
+        // listener alive ensures the next signal is still consumed and
+        // (idempotently) cancels the shared token.
+        let os_token = token.clone();
         tokio::spawn(async move {
-            let os = async {
-                if let Err(_err) = Self::wait_for_shutdown_signal().await {
-                    #[cfg(feature = "tracing")]
-                    tracing::error!("unable to listen for shutdown signal: {_err:#}");
-                }
-            };
-            match handle {
-                Some(h) => {
-                    let cancelled = h.token().cancelled_owned();
-                    tokio::select! {
-                        _ = os => {},
-                        _ = cancelled => {},
-                    }
-                    // Mirror the `shutdown_on` path: ensure the shared
-                    // token is cancelled when the OS arm wins, so external
-                    // observers awaiting `handle.cancelled()` /
-                    // `is_shutdown_requested()` see the signal.
-                    h.shutdown();
-                }
-                None => os.await,
+            if let Err(_err) = Self::wait_for_shutdown_signal().await {
+                #[cfg(feature = "tracing")]
+                tracing::error!("unable to listen for shutdown signal: {_err:#}");
             }
+            os_token.cancel();
+        });
+
+        // Watch the shared token: any source (OS signal, `ShutdownHandle`,
+        // or `App::shutdown_on` trigger) cancels it, and we then drop
+        // `shutdown_rx` to start the accept loop's drain.
+        tokio::spawn(async move {
+            token.cancelled_owned().await;
             #[cfg(feature = "tracing")]
             tracing::trace!("shutdown signal received, not accepting new requests");
             drop(shutdown_rx);
