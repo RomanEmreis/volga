@@ -66,6 +66,7 @@ pub mod utils;
 pub mod ws;
 
 pub use crate::app::App;
+pub use crate::app::shutdown::ShutdownHandle;
 pub use crate::http::{
     BoxBody, HttpBody, HttpRequest, HttpResponse, HttpResult, UnsyncBoxBody,
     endpoints::args::{
