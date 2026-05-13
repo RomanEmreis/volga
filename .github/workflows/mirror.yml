@@ -22,5 +22,6 @@ jobs:
           TOKEN: ${{ secrets.CODEBERG_TOKEN }}
         run: |
           git remote add codeberg https://RomanEmreis:${TOKEN}@codeberg.org/RomanEmreis/volga.git
-          git push --force codeberg main
+          git fetch origin main --tags --prune
+          git push --force codeberg refs/remotes/origin/main:refs/heads/main
           git push --force --tags codeberg
