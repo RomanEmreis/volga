@@ -8,6 +8,7 @@ use crate::{
 use std::fmt::{Debug, Formatter};
 
 /// Default server name
+#[cfg(debug_assertions)]
 pub(crate) const SERVER_NAME: &str = "Volga";
 /// Default resource builder error
 pub(crate) const RESPONSE_ERROR: &str = "HTTP Response: Unable to create a response";
