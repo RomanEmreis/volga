@@ -5,7 +5,7 @@
 //! ```
 
 use std::path::Path;
-use volga::{App, Multipart, multipart::Part, ok};
+use volga::{App, HttpBody, HttpResponse, Multipart, headers::ContentType, multipart::Part, ok};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -34,6 +34,13 @@ async fn main() -> std::io::Result<()> {
 
     app.map_post("/trace", |multipart: Multipart| async move {
         multipart.into_outgoing()
+    });
+
+    app.map_post("/raw-trace", |body: HttpBody| async move {
+        HttpResponse::builder()
+            .status(200)
+            .header(ContentType::multipart_form_data("X-BOUNDARY"))
+            .body(body)
     });
 
     app.map_post("/outbound", || async move {
