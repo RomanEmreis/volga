@@ -1,7 +1,6 @@
 # Rust / Cargo
 /target
 **/target/
-Cargo.lock
 **/*.rs.bk
 
 # Debug symbols (MSVC)

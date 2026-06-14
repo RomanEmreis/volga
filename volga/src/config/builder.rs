@@ -159,7 +159,7 @@ pub(crate) fn parse_config_file(path: &Path) -> Result<Value, String> {
         .map_err(|e| format!("config: cannot read file '{}': {e}", path.display()))?;
 
     if path.extension().is_some_and(|ext| ext == "toml") {
-        let table: toml::Value = contents
+        let table: toml::Table = contents
             .parse()
             .map_err(|e| format!("config: TOML parse error in '{}': {e}", path.display()))?;
         serde_json::to_value(table)

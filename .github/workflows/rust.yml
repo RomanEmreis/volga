@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
   doc_check:
     runs-on: ubuntu-latest
@@ -35,7 +35,7 @@ jobs:
       - name: Check documentation
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --no-deps --all-features --locked
 
   build:
     environment: CICD
@@ -45,7 +45,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build
-        run: cargo build
+        run: cargo build --locked
         
   test:
     environment: CICD
@@ -55,13 +55,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build
+      run: cargo build --locked
     - name: Run tests - Full
-      run: cargo test --all-features
+      run: cargo test --locked --all-features
     - name: Run tests - http1
-      run: cargo test --features http1
+      run: cargo test --locked --features http1
     - name: Run tests - http2
-      run: cargo test --features http2
+      run: cargo test --locked --features http2
 
   coverage:
     runs-on: ubuntu-latest
@@ -72,4 +72,4 @@ jobs:
         run: cargo install cargo-tarpaulin
       - name: Code coverage check
         run: |
-          cargo tarpaulin --all-features --workspace --config coverage.toml --fail-under 80
+          cargo tarpaulin --locked --all-features --workspace --config coverage.toml --fail-under 80

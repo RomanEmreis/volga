@@ -1,6 +1,6 @@
 //! Extractors for the whole HTTP request
 
-use crate::{HttpRequest, error::Error};
+use crate::{HttpBody, HttpRequest, error::Error};
 use futures_util::future::{Ready, ok};
 
 use hyper::{Method, Uri, http::request::Parts};
@@ -79,11 +79,26 @@ impl FromPayload for HttpRequest {
     }
 }
 
+impl FromPayload for HttpBody {
+    type Future = Ready<Result<Self, Error>>;
+
+    const SOURCE: Source = Source::Body;
+
+    #[inline]
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
+        let Payload::Body(body) = payload else {
+            unreachable!()
+        };
+        ok(body)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{FromPayload, FromRequestParts, Payload};
     use crate::error::Error;
     use crate::{HttpBody, HttpRequest};
+    use http_body_util::BodyExt;
     use hyper::{Method, Request, Uri};
 
     #[test]
@@ -113,7 +128,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_gets_http_req_from_parts() {
+    async fn it_gets_http_req_from_payload() {
         let req = Request::get("/").body(HttpBody::empty()).unwrap();
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
@@ -154,5 +169,19 @@ mod tests {
 
         let uri = uri.unwrap();
         assert_eq!(uri.path(), "/");
+    }
+
+    #[tokio::test]
+    async fn it_gets_http_body_from_payload() {
+        let req = Request::get("/").body(HttpBody::full("test")).unwrap();
+        let (_, body) = req.into_parts();
+
+        let req = HttpBody::from_payload(Payload::Body(body)).await;
+
+        assert!(req.is_ok());
+
+        let bytes = req.unwrap().collect().await.unwrap().to_bytes();
+
+        assert_eq!(String::from_utf8_lossy(&bytes), "test");
     }
 }

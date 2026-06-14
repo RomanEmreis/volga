@@ -14,10 +14,10 @@ categories.workspace = true
 keywords = ["volga", "server", "https", "tls"]
 
 [dependencies]
-rcgen = "0.14.7"
+rcgen = "0.14.8"
 
 [dev-dependencies]
-serial_test = "3.4.0"
+serial_test = "3.5.0"
 
 [lints]
 workspace = true
