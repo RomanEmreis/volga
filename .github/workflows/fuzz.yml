@@ -22,6 +22,8 @@ jobs:
           toolchain: ${{ env.RUST_NIGHTLY }}
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
+      - name: Verify fuzz lockfile is up to date
+        run: cargo +${{ env.RUST_NIGHTLY }} metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null
       - name: Build fuzz targets
         run: cargo +${{ env.RUST_NIGHTLY }} fuzz build
 
