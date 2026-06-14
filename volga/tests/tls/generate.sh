@@ -10,7 +10,7 @@ echo "1. Creating CA..."
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout ca.key \
   -out ca.pem \
-  -days 3650 \
+  -days 365 \
   -subj "/CN=Test CA"
 
 # 2. Create server certificate
@@ -41,7 +41,7 @@ openssl x509 -req -in server.csr \
   -CA ca.pem -CAkey ca.key \
   -CAcreateserial \
   -out server.pem \
-  -days 3650 \
+  -days 365 \
   -extensions v3_req \
   -extfile server.conf
 
@@ -68,7 +68,7 @@ openssl x509 -req -in client.csr \
   -CA ca.pem -CAkey ca.key \
   -CAcreateserial \
   -out client.pem \
-  -days 3650 \
+  -days 365 \
   -extensions v3_req \
   -extfile client.conf
 

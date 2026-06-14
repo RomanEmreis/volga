@@ -14,7 +14,7 @@ categories.workspace = true
 keywords = ["volga", "http", "web", "framework"]
 
 [dependencies]
-dashmap = "6.1.0"
+dashmap = "6.2.1"
 
 [lints]
 workspace = true
