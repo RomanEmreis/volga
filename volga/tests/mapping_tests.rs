@@ -188,6 +188,31 @@ async fn it_maps_to_query_request() {
 }
 
 #[tokio::test]
+async fn it_maps_to_query_request_in_group() {
+    let server = TestServer::spawn(|app| {
+        app.group("/test", |api| {
+            api.map_query("/test", async || "Pass!");
+        });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .request(
+            Method::from_bytes(b"QUERY").unwrap(),
+            server.url("/test/test"),
+        )
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "Pass!");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn it_maps_to_head_along_with_get_request() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", async || "Pass!");

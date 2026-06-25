@@ -16,6 +16,8 @@ use crate::openapi::{OpenApiRouteConfig, RouteKey};
 #[cfg(feature = "middleware")]
 use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
+const QUERY: &[u8] = b"QUERY";
+
 /// Routes mapping
 impl App {
     /// Maps a group of request handlers combined by `prefix`
@@ -317,7 +319,6 @@ impl App {
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
     {
-        const QUERY: &[u8] = b"QUERY";
         let method = Method::from_bytes(QUERY).expect("invalid QUERY verb");
         self.map_route(method, pattern, handler)
     }
@@ -619,4 +620,5 @@ define_route_group_methods! {
     (map_options, Method::OPTIONS)
     (map_trace, Method::TRACE)
     (map_connect, Method::CONNECT)
+    (map_query, Method::from_bytes(QUERY).expect("invalid QUERY verb"))
 }
