@@ -172,7 +172,7 @@ async fn it_maps_to_query_request() {
     let server = TestServer::spawn(|app| {
         app.map_query("/test", async || "Pass!");
     })
-        .await;
+    .await;
 
     let response = server
         .client()
