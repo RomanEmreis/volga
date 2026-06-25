@@ -284,6 +284,44 @@ impl App {
         self.map_route(Method::CONNECT, pattern, handler)
     }
 
+    /// Adds a request handler that matches HTTP QUERY requests for the specified pattern.
+    ///
+    /// > **Note:** Prefer putting complex selection criteria in the request body.
+    /// > Use URI query parameters only for routing/cache-affecting metadata such as tenant,
+    /// > locale, version, flags, or pagination compatibility.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use volga::{App, Json, ok};
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct SearchQuery {
+    ///     criteria: String
+    /// }
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.map_query("/search", |query: Json<SearchQuery>| async {
+    ///    // do search by query.criteria....
+    ///    ok!("search, result...")
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_query<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    where
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequest + Send + 'static,
+    {
+        const QUERY: &[u8] = b"QUERY";
+        let method = Method::from_bytes(QUERY).expect("invalid QUERY verb");
+        self.map_route(method, pattern, handler)
+    }
+
     #[inline]
     fn map_route<'a, F, R, Args>(
         &'a mut self,
