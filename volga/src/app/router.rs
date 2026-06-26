@@ -323,6 +323,53 @@ impl App {
         self.map_route(method, pattern, handler)
     }
 
+    /// Adds a request handler that matches the given HTTP `method` for the specified pattern.
+    ///
+    /// This is a generic counterpart to [`map_get`](Self::map_get) and friends, useful when the
+    /// method is only known at runtime, when registering the same handler for several methods,
+    /// or for non-standard verbs. The `method` accepts both a typed [`Method`] and a string
+    /// (e.g. `"QUERY"`).
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use volga::{App, ok};
+    /// use volga::http::Method;
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.map(Method::GET, "/hello", || async {
+    ///    ok!("Hello World!")
+    /// });
+    ///
+    /// // a string verb works as well
+    /// app.map("QUERY", "/search", || async {
+    ///    ok!("search, result...")
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    ///
+    /// # Panics
+    /// if `method` cannot be converted into a valid [`Method`].
+    pub fn map<'a, M, F, R, Args>(
+        &'a mut self,
+        method: M,
+        pattern: &'a str,
+        handler: F,
+    ) -> Route<'a>
+    where
+        M: TryInto<Method>,
+        M::Error: std::fmt::Debug,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequest + Send + 'static,
+    {
+        let method = method.try_into().expect("invalid HTTP method");
+        self.map_route(method, pattern, handler)
+    }
+
     #[inline]
     fn map_route<'a, F, R, Args>(
         &'a mut self,
@@ -541,6 +588,55 @@ impl<'a> RouteGroup<'a> {
         }
 
         f(&mut child);
+    }
+
+    /// Maps a request handler that matches the given HTTP `method` for the specified pattern.
+    ///
+    /// See [`App::map`] for more details.
+    pub fn map<M, F, R, Args>(&mut self, method: M, pattern: &str, handler: F) -> Route<'_>
+    where
+        M: TryInto<Method>,
+        M::Error: std::fmt::Debug,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequest + Send + 'static,
+    {
+        let method = method.try_into().expect("invalid HTTP method");
+        self.route_count += 1;
+        let pattern = [self.prefix.as_str(), pattern].concat();
+
+        #[cfg(feature = "middleware")]
+        {
+            let mut route = self
+                .app
+                .map_route_owned(method, pattern, handler)
+                .cors_override(self.cors.clone());
+
+            for filter in self.middleware.iter() {
+                route = route.map_middleware(filter.clone());
+            }
+
+            #[cfg(feature = "openapi")]
+            {
+                let openapi_config = self.openapi_config.clone();
+                route = route.open_api(|config| config.merge(&openapi_config));
+            }
+
+            route
+        }
+
+        #[cfg(not(feature = "middleware"))]
+        {
+            let route = self.app.map_route_owned(method, pattern, handler);
+
+            #[cfg(feature = "openapi")]
+            let route = {
+                let openapi_config = self.openapi_config.clone();
+                route.open_api(|config| config.merge(&openapi_config))
+            };
+
+            route
+        }
     }
 }
 
