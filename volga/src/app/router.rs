@@ -328,7 +328,8 @@ impl App {
     /// This is a generic counterpart to [`map_get`](Self::map_get) and friends, useful when the
     /// method is only known at runtime, when registering the same handler for several methods,
     /// or for non-standard verbs. The `method` accepts both a typed [`Method`] and a string
-    /// (e.g. `"QUERY"`).
+    /// (e.g. `"QUERY"`), and the `pattern` accepts both a borrowed `&str` (no allocation) and an
+    /// owned [`String`] (e.g. built at runtime).
     ///
     /// # Examples
     /// ```no_run
@@ -343,8 +344,8 @@ impl App {
     ///    ok!("Hello World!")
     /// });
     ///
-    /// // a string verb works as well
-    /// app.map("QUERY", "/search", || async {
+    /// // a string verb and a runtime-built pattern work as well
+    /// app.map("QUERY", format!("/search/{}", "v1"), || async {
     ///    ok!("search, result...")
     /// });
     ///# app.run().await
@@ -353,21 +354,17 @@ impl App {
     ///
     /// # Panics
     /// if `method` cannot be converted into a valid [`Method`].
-    pub fn map<'a, M, F, R, Args>(
-        &'a mut self,
-        method: M,
-        pattern: &'a str,
-        handler: F,
-    ) -> Route<'a>
+    pub fn map<'a, M, P, F, R, Args>(&'a mut self, method: M, pattern: P, handler: F) -> Route<'a>
     where
         M: TryInto<Method>,
         M::Error: std::fmt::Debug,
+        P: Into<Cow<'a, str>>,
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
     {
         let method = method.try_into().expect("invalid HTTP method");
-        self.map_route(method, pattern, handler)
+        self.map_route_impl(method, pattern.into(), handler)
     }
 
     #[inline]
@@ -593,17 +590,18 @@ impl<'a> RouteGroup<'a> {
     /// Maps a request handler that matches the given HTTP `method` for the specified pattern.
     ///
     /// See [`App::map`] for more details.
-    pub fn map<M, F, R, Args>(&mut self, method: M, pattern: &str, handler: F) -> Route<'_>
+    pub fn map<M, P, F, R, Args>(&mut self, method: M, pattern: P, handler: F) -> Route<'_>
     where
         M: TryInto<Method>,
         M::Error: std::fmt::Debug,
+        P: AsRef<str>,
         F: GenericHandler<Args, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
     {
         let method = method.try_into().expect("invalid HTTP method");
         self.route_count += 1;
-        let pattern = [self.prefix.as_str(), pattern].concat();
+        let pattern = [self.prefix.as_str(), pattern.as_ref()].concat();
 
         #[cfg(feature = "middleware")]
         {

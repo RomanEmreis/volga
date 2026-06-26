@@ -253,6 +253,26 @@ async fn it_maps_with_string_method() {
 }
 
 #[tokio::test]
+async fn it_maps_with_owned_string_pattern() {
+    let server = TestServer::spawn(|app| {
+        app.map(Method::GET, format!("/test/{}", "v1"), async || "Pass!");
+    })
+    .await;
+
+    let response = server
+        .client()
+        .get(server.url("/test/v1"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "Pass!");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn it_maps_with_method_in_group() {
     let server = TestServer::spawn(|app| {
         app.group("/test", |api| {
