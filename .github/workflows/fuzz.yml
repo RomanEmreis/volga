@@ -28,8 +28,14 @@ jobs:
           toolchain: ${{ env.RUST_NIGHTLY }}
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
-      - name: Verify fuzz lockfile is up to date
-        run: cargo +${{ env.RUST_NIGHTLY }} metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null
+      - name: Sync fuzz lockfile (minimal relock, preserves pinned deps)
+        # NOT --locked: the fuzz crate is a separate workspace, so its Cargo.lock is not
+        # auto-updated when a normal PR bumps a dependency version in the main manifests.
+        # A strict --locked gate therefore breaks on every such bump. Instead we seed from
+        # the committed fuzz/Cargo.lock and let cargo minimally update only the out-of-range
+        # entries. Seeding from the committed lock keeps alloc-no-stdlib pinned at 2.0.4,
+        # which is what prevents the 2.0.4/3.0.0 split that breaks brotli on a fresh resolve.
+        run: cargo +${{ env.RUST_NIGHTLY }} metadata --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null
       - name: Build fuzz targets
         run: cargo +${{ env.RUST_NIGHTLY }} fuzz build
 

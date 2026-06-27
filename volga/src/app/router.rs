@@ -16,6 +16,8 @@ use crate::openapi::{OpenApiRouteConfig, RouteKey};
 #[cfg(feature = "middleware")]
 use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
+const QUERY: &[u8] = b"QUERY";
+
 /// Routes mapping
 impl App {
     /// Maps a group of request handlers combined by `prefix`
@@ -284,6 +286,87 @@ impl App {
         self.map_route(Method::CONNECT, pattern, handler)
     }
 
+    /// Adds a request handler that matches HTTP QUERY requests for the specified pattern.
+    ///
+    /// > **Note:** Prefer putting complex selection criteria in the request body.
+    /// > Use URI query parameters only for routing/cache-affecting metadata such as tenant,
+    /// > locale, version, flags, or pagination compatibility.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use volga::{App, Json, ok};
+    /// use serde::Deserialize;
+    ///
+    /// #[derive(Deserialize)]
+    /// struct SearchQuery {
+    ///     criteria: String
+    /// }
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.map_query("/search", |query: Json<SearchQuery>| async {
+    ///    // do search by query.criteria....
+    ///    ok!("search, result...")
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_query<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    where
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequest + Send + 'static,
+    {
+        let method = Method::from_bytes(QUERY).expect("invalid QUERY verb");
+        self.map_route(method, pattern, handler)
+    }
+
+    /// Adds a request handler that matches the given HTTP `method` for the specified pattern.
+    ///
+    /// This is a generic counterpart to [`map_get`](Self::map_get) and friends, useful when the
+    /// method is only known at runtime, when registering the same handler for several methods,
+    /// or for non-standard verbs. The `method` accepts both a typed [`Method`] and a string
+    /// (e.g. `"QUERY"`), and the `pattern` accepts both a borrowed `&str` (no allocation) and an
+    /// owned [`String`] (e.g. built at runtime).
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use volga::{App, ok};
+    /// use volga::http::Method;
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.map(Method::GET, "/hello", || async {
+    ///    ok!("Hello World!")
+    /// });
+    ///
+    /// // a string verb and a runtime-built pattern work as well
+    /// app.map("QUERY", format!("/search/{}", "v1"), || async {
+    ///    ok!("search, result...")
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    ///
+    /// # Panics
+    /// if `method` cannot be converted into a valid [`Method`].
+    pub fn map<'a, M, P, F, R, Args>(&'a mut self, method: M, pattern: P, handler: F) -> Route<'a>
+    where
+        M: TryInto<Method>,
+        M::Error: std::fmt::Debug,
+        P: Into<Cow<'a, str>>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequest + Send + 'static,
+    {
+        let method = method.try_into().expect("invalid HTTP method");
+        self.map_route_impl(method, pattern.into(), handler)
+    }
+
     #[inline]
     fn map_route<'a, F, R, Args>(
         &'a mut self,
@@ -503,6 +586,56 @@ impl<'a> RouteGroup<'a> {
 
         f(&mut child);
     }
+
+    /// Maps a request handler that matches the given HTTP `method` for the specified pattern.
+    ///
+    /// See [`App::map`] for more details.
+    pub fn map<M, P, F, R, Args>(&mut self, method: M, pattern: P, handler: F) -> Route<'_>
+    where
+        M: TryInto<Method>,
+        M::Error: std::fmt::Debug,
+        P: AsRef<str>,
+        F: GenericHandler<Args, Output = R>,
+        R: IntoResponse + 'static,
+        Args: FromRequest + Send + 'static,
+    {
+        let method = method.try_into().expect("invalid HTTP method");
+        self.route_count += 1;
+        let pattern = [self.prefix.as_str(), pattern.as_ref()].concat();
+
+        #[cfg(feature = "middleware")]
+        {
+            let mut route = self
+                .app
+                .map_route_owned(method, pattern, handler)
+                .cors_override(self.cors.clone());
+
+            for filter in self.middleware.iter() {
+                route = route.map_middleware(filter.clone());
+            }
+
+            #[cfg(feature = "openapi")]
+            {
+                let openapi_config = self.openapi_config.clone();
+                route = route.open_api(|config| config.merge(&openapi_config));
+            }
+
+            route
+        }
+
+        #[cfg(not(feature = "middleware"))]
+        {
+            let route = self.app.map_route_owned(method, pattern, handler);
+
+            #[cfg(feature = "openapi")]
+            let route = {
+                let openapi_config = self.openapi_config.clone();
+                route.open_api(|config| config.merge(&openapi_config))
+            };
+
+            route
+        }
+    }
 }
 
 macro_rules! define_route_group_methods {
@@ -581,4 +714,5 @@ define_route_group_methods! {
     (map_options, Method::OPTIONS)
     (map_trace, Method::TRACE)
     (map_connect, Method::CONNECT)
+    (map_query, Method::from_bytes(QUERY).expect("invalid QUERY verb"))
 }
