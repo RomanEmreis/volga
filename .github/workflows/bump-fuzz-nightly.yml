@@ -47,8 +47,13 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
 
-      - name: Verify the locked graph still resolves
-        run: cargo +nightly metadata --locked --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null
+      - name: Verify the fuzz graph still resolves
+        # NOT --locked: the fuzz crate is a separate workspace, so its Cargo.lock is not
+        # auto-updated when a normal PR bumps a dependency version in the main manifests.
+        # A strict --locked gate therefore breaks on every such drift (see fuzz.yml). Mirror
+        # fuzz.yml here: seed from the committed lock and let cargo minimally relock only the
+        # out-of-range entries, which keeps alloc-no-stdlib pinned at 2.0.4.
+        run: cargo +nightly metadata --manifest-path fuzz/Cargo.toml --format-version 1 > /dev/null
 
       - name: Build fuzz targets on the new nightly
         run: cargo +nightly fuzz build
