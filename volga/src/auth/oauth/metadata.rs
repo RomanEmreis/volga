@@ -50,7 +50,9 @@ pub struct AuthorizationServerMetadata {
     pub scopes_supported: Vec<String>,
 
     /// `response_type` values supported by this server
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ///
+    /// REQUIRED per RFC 8414 §2: always serialized and must be present when
+    /// deserializing a metadata document.
     pub response_types_supported: Vec<String>,
 
     /// `response_mode` values supported by this server
@@ -120,9 +122,15 @@ pub struct AuthorizationServerMetadata {
 
 impl AuthorizationServerMetadata {
     /// Creates a new metadata document for the given issuer identifier
+    ///
+    /// `response_types_supported` (REQUIRED per RFC 8414 §2) is prefilled
+    /// with `["code"]` — the authorization code flow is the only
+    /// redirect-based flow retained in OAuth 2.1. Overwrite the field if the
+    /// server supports a different set.
     pub fn new(issuer: impl Into<String>) -> Self {
         Self {
             issuer: issuer.into(),
+            response_types_supported: vec!["code".into()],
             ..Default::default()
         }
     }
@@ -214,7 +222,26 @@ mod tests {
     fn it_serializes_minimal_server_metadata() {
         let metadata = AuthorizationServerMetadata::new("https://auth.example.com");
         let json = serde_json::to_value(&metadata).unwrap();
-        assert_eq!(json, json!({ "issuer": "https://auth.example.com" }));
+        assert_eq!(
+            json,
+            json!({
+                "issuer": "https://auth.example.com",
+                "response_types_supported": ["code"]
+            })
+        );
+    }
+
+    #[test]
+    fn it_requires_response_types_when_deserializing_server_metadata() {
+        let result: Result<AuthorizationServerMetadata, _> =
+            serde_json::from_value(json!({ "issuer": "https://auth.example.com" }));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("response_types_supported")
+        );
     }
 
     #[test]
@@ -243,6 +270,7 @@ mod tests {
         let doc = json!({
             "issuer": "https://auth.example.com",
             "token_endpoint": "https://auth.example.com/token",
+            "response_types_supported": ["code", "id_token"],
             "userinfo_endpoint": "https://auth.example.com/userinfo",
             "claims_supported": ["sub", "email"]
         });
