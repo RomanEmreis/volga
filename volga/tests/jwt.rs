@@ -162,7 +162,7 @@ async fn it_generates_jwt_and_failed_to_authenticates_it() {
     assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-store");
     assert_eq!(
         response.headers().get(WWW_AUTHENTICATE).unwrap(),
-        "Bearer error=\"insufficient_scope\" error_description=\"User does not have required role or permission\""
+        "Bearer error=\"insufficient_scope\", error_description=\"User does not have required role or permission\""
     );
 
     server.shutdown().await;

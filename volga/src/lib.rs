@@ -32,7 +32,7 @@
 mod server;
 
 pub mod app;
-#[cfg(any(feature = "basic-auth", feature = "jwt-auth"))]
+#[cfg(any(feature = "basic-auth", feature = "jwt-auth", feature = "oauth"))]
 pub mod auth;
 #[cfg(feature = "config")]
 pub mod config;

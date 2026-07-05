@@ -50,6 +50,8 @@ pub mod claims;
 pub mod decoding_key;
 #[cfg(feature = "jwt-auth")]
 pub mod encoding_key;
+#[cfg(feature = "oauth")]
+pub mod oauth;
 #[cfg(feature = "jwt-auth")]
 pub(crate) mod pem;
 
@@ -85,53 +87,37 @@ fn map_jwt_error_to_status(err: &ErrorKind) -> StatusCode {
 
 #[cfg(feature = "jwt-auth")]
 fn build_www_authenticate(err: &ErrorKind, resource_metadata_url: Option<&str>) -> String {
-    use ErrorKind::*;
-    let base = match err {
-        ExpiredSignature => {
-            r#"Bearer error="invalid_token", error_description="Token has expired""#
-        }
-        InvalidSignature => {
-            r#"Bearer error="invalid_token", error_description="Invalid signature""#
-        }
-        InvalidToken => {
-            r#"Bearer error="invalid_token", error_description="Token is malformed or invalid""#
-        }
-        ImmatureSignature => {
-            r#"Bearer error="invalid_token", error_description="Token is not valid yet (nbf)""#
-        }
-        MissingRequiredClaim(_) => {
-            r#"Bearer error="invalid_token", error_description="Missing required claim""#
-        }
-        InvalidIssuer => {
-            r#"Bearer error="invalid_token", error_description="Invalid issuer (iss)""#
-        }
-        InvalidAudience => {
-            r#"Bearer error="invalid_token", error_description="Invalid audience (aud)""#
-        }
-        InvalidSubject => {
-            r#"Bearer error="invalid_token", error_description="Invalid subject (sub)""#
-        }
-        InvalidAlgorithm | InvalidAlgorithmName => {
-            r#"Bearer error="invalid_token", error_description="Invalid algorithm""#
-        }
-        Base64(_) => {
-            r#"Bearer error="invalid_request", error_description="Token is not properly base64-encoded""#
-        }
-        Json(_) => {
-            r#"Bearer error="invalid_request", error_description="Token payload is not valid JSON""#
-        }
-        Utf8(_) => {
-            r#"Bearer error="invalid_request", error_description="Token contains invalid UTF-8 characters""#
-        }
-        InvalidKeyFormat => {
-            r#"Bearer error="invalid_request", error_description="Invalid key format""#
-        }
-        _ => r#"Bearer error="server_error", error_description="Internal token processing error""#,
+    use crate::auth::oauth::OAuthErrorCode::{
+        InvalidRequest, InvalidToken as InvalidTokenCode, ServerError,
     };
-    match resource_metadata_url {
-        Some(url) => format!(r#"{base}, resource_metadata="{url}""#),
-        None => base.to_string(),
+    use ErrorKind::*;
+
+    let (code, description) = match err {
+        ExpiredSignature => (InvalidTokenCode, "Token has expired"),
+        InvalidSignature => (InvalidTokenCode, "Invalid signature"),
+        InvalidToken => (InvalidTokenCode, "Token is malformed or invalid"),
+        ImmatureSignature => (InvalidTokenCode, "Token is not valid yet (nbf)"),
+        MissingRequiredClaim(_) => (InvalidTokenCode, "Missing required claim"),
+        InvalidIssuer => (InvalidTokenCode, "Invalid issuer (iss)"),
+        InvalidAudience => (InvalidTokenCode, "Invalid audience (aud)"),
+        InvalidSubject => (InvalidTokenCode, "Invalid subject (sub)"),
+        InvalidAlgorithm | InvalidAlgorithmName => (InvalidTokenCode, "Invalid algorithm"),
+        Base64(_) => (InvalidRequest, "Token is not properly base64-encoded"),
+        Json(_) => (InvalidRequest, "Token payload is not valid JSON"),
+        Utf8(_) => (InvalidRequest, "Token contains invalid UTF-8 characters"),
+        InvalidKeyFormat => (InvalidRequest, "Invalid key format"),
+        _ => (ServerError, "Internal token processing error"),
+    };
+
+    let mut challenge = oauth::BearerChallenge::new()
+        .with_error(code)
+        .with_description(description);
+
+    if let Some(url) = resource_metadata_url {
+        challenge = challenge.with_resource_metadata(url);
     }
+
+    challenge.to_string()
 }
 
 #[cfg(feature = "jwt-auth")]
@@ -658,7 +644,7 @@ mod tests {
         let www_auth = authorizer::default_error_msg(None);
         assert_eq!(
             www_auth,
-            r#"Bearer error="insufficient_scope" error_description="User does not have required role or permission""#
+            r#"Bearer error="insufficient_scope", error_description="User does not have required role or permission""#
         );
     }
 
@@ -669,7 +655,7 @@ mod tests {
         ));
         assert_eq!(
             www_auth,
-            r#"Bearer error="insufficient_scope" error_description="User does not have required role or permission", resource_metadata="https://api.example.com/.well-known/oauth-protected-resource""#
+            r#"Bearer error="insufficient_scope", error_description="User does not have required role or permission", resource_metadata="https://api.example.com/.well-known/oauth-protected-resource""#
         );
     }
 
