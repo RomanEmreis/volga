@@ -125,12 +125,17 @@ impl AuthorizationServerMetadata {
     ///
     /// `response_types_supported` (REQUIRED per RFC 8414 §2) is prefilled
     /// with `["code"]` — the authorization code flow is the only
-    /// redirect-based flow retained in OAuth 2.1. Overwrite the field if the
-    /// server supports a different set.
+    /// redirect-based flow retained in OAuth 2.1. `grant_types_supported`
+    /// is prefilled with `["authorization_code"]` to match: when this field
+    /// is omitted, RFC 8414 clients assume the default
+    /// `["authorization_code", "implicit"]`, which would wrongly advertise
+    /// the implicit grant. Overwrite either field if the server supports a
+    /// different set.
     pub fn new(issuer: impl Into<String>) -> Self {
         Self {
             issuer: issuer.into(),
             response_types_supported: vec!["code".into()],
+            grant_types_supported: vec!["authorization_code".into()],
             ..Default::default()
         }
     }
@@ -226,7 +231,8 @@ mod tests {
             json,
             json!({
                 "issuer": "https://auth.example.com",
-                "response_types_supported": ["code"]
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code"]
             })
         );
     }
@@ -260,6 +266,7 @@ mod tests {
                 "authorization_endpoint": "https://auth.example.com/authorize",
                 "token_endpoint": "https://auth.example.com/token",
                 "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code"],
                 "code_challenge_methods_supported": ["S256"]
             })
         );
