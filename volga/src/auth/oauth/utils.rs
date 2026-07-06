@@ -135,7 +135,8 @@ fn write_param(f: &mut Formatter<'_>, first: &mut bool, name: &str, value: &str)
 ///
 /// Returns an [`OAuthError`] with code `invalid_target` when the URI is not
 /// an absolute URI, contains a fragment, userinfo, whitespace, control or
-/// non-ASCII characters. Percent-encoding and dot-segment normalization are
+/// non-ASCII characters, or uses a web scheme (`http`, `https`, `ws`, `wss`)
+/// without an authority (`https:api.example.com`). Percent-encoding and dot-segment normalization are
 /// not performed.
 ///
 /// # Example
@@ -173,6 +174,11 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
     let scheme = scheme.to_ascii_lowercase();
 
     let Some(after_scheme) = rest.strip_prefix("//") else {
+        // Web schemes always carry an authority: `https:api.example.com`
+        // or `https:/api` is a mistyped resource, not a URN-style URI
+        if matches!(scheme.as_str(), "http" | "https" | "ws" | "wss") {
+            return Err(invalid_target("resource URI must have an authority"));
+        }
         // No authority component (e.g. `urn:example:resource`) —
         // only the scheme is subject to normalization
         return Ok(format!("{scheme}:{rest}"));
@@ -396,6 +402,9 @@ mod tests {
             "https://[::1/api",
             "https://2001:db8::1/api",
             "1https://example.com",
+            "https:api.example.com",
+            "https:/api.example.com",
+            "WS:example.com/socket",
         ];
         for uri in cases {
             let err = canonicalize_resource_uri(uri).unwrap_err();
