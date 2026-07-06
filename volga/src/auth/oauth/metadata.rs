@@ -56,15 +56,30 @@ pub struct AuthorizationServerMetadata {
     pub response_types_supported: Vec<String>,
 
     /// `response_mode` values supported by this server
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ///
+    /// When absent in a deserialized document, set to the RFC 8414 §2
+    /// default `["query", "fragment"]`.
+    #[serde(
+        default = "default_response_modes",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub response_modes_supported: Vec<String>,
 
     /// Grant type values supported by this server
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ///
+    /// When absent in a deserialized document, set to the RFC 8414 §2
+    /// default `["authorization_code", "implicit"]`.
+    #[serde(default = "default_grant_types", skip_serializing_if = "Vec::is_empty")]
     pub grant_types_supported: Vec<String>,
 
     /// Client authentication methods supported by the token endpoint
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ///
+    /// When absent in a deserialized document, set to the RFC 8414 §2
+    /// default `["client_secret_basic"]`.
+    #[serde(
+        default = "default_client_auth_methods",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub token_endpoint_auth_methods_supported: Vec<String>,
 
     /// JWS signing algorithms supported by the token endpoint for client authentication
@@ -92,7 +107,13 @@ pub struct AuthorizationServerMetadata {
     pub revocation_endpoint: Option<String>,
 
     /// Client authentication methods supported by the revocation endpoint
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    ///
+    /// When absent in a deserialized document, set to the RFC 8414 §2
+    /// default `["client_secret_basic"]`.
+    #[serde(
+        default = "default_client_auth_methods",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub revocation_endpoint_auth_methods_supported: Vec<String>,
 
     /// JWS signing algorithms supported by the revocation endpoint for client authentication
@@ -139,6 +160,24 @@ impl AuthorizationServerMetadata {
             ..Default::default()
         }
     }
+}
+
+/// RFC 8414 §2 default for an omitted `response_modes_supported`
+#[inline]
+fn default_response_modes() -> Vec<String> {
+    vec!["query".into(), "fragment".into()]
+}
+
+/// RFC 8414 §2 default for an omitted `grant_types_supported`
+#[inline]
+fn default_grant_types() -> Vec<String> {
+    vec!["authorization_code".into(), "implicit".into()]
+}
+
+/// RFC 8414 §2 default for omitted token/revocation endpoint auth methods
+#[inline]
+fn default_client_auth_methods() -> Vec<String> {
+    vec!["client_secret_basic".into()]
 }
 
 /// OAuth 2.0 Protected Resource Metadata per RFC 9728 §2
@@ -293,8 +332,56 @@ mod tests {
             Some(&json!(["sub", "email"]))
         );
 
+        // Omitted RFC-defaulted fields are materialized on the way out;
+        // the result is semantically equivalent per RFC 8414 §2.
+        let mut expected = doc;
+        expected["response_modes_supported"] = json!(["query", "fragment"]);
+        expected["grant_types_supported"] = json!(["authorization_code", "implicit"]);
+        expected["token_endpoint_auth_methods_supported"] = json!(["client_secret_basic"]);
+        expected["revocation_endpoint_auth_methods_supported"] = json!(["client_secret_basic"]);
+
         let back = serde_json::to_value(&metadata).unwrap();
-        assert_eq!(back, doc);
+        assert_eq!(back, expected);
+    }
+
+    #[test]
+    fn it_applies_rfc_defaults_when_deserializing_server_metadata() {
+        let metadata: AuthorizationServerMetadata = serde_json::from_value(json!({
+            "issuer": "https://auth.example.com",
+            "response_types_supported": ["code"]
+        }))
+        .unwrap();
+
+        assert_eq!(metadata.response_modes_supported, ["query", "fragment"]);
+        assert_eq!(
+            metadata.grant_types_supported,
+            ["authorization_code", "implicit"]
+        );
+        assert_eq!(
+            metadata.token_endpoint_auth_methods_supported,
+            ["client_secret_basic"]
+        );
+        assert_eq!(
+            metadata.revocation_endpoint_auth_methods_supported,
+            ["client_secret_basic"]
+        );
+    }
+
+    #[test]
+    fn it_keeps_explicit_values_over_rfc_defaults_when_deserializing() {
+        let metadata: AuthorizationServerMetadata = serde_json::from_value(json!({
+            "issuer": "https://auth.example.com",
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code"],
+            "token_endpoint_auth_methods_supported": ["private_key_jwt"]
+        }))
+        .unwrap();
+
+        assert_eq!(metadata.grant_types_supported, ["authorization_code"]);
+        assert_eq!(
+            metadata.token_endpoint_auth_methods_supported,
+            ["private_key_jwt"]
+        );
     }
 
     #[test]
