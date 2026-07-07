@@ -141,8 +141,10 @@ fn write_param(f: &mut Formatter<'_>, first: &mut bool, name: &str, value: &str)
 /// an absolute URI, contains a fragment, userinfo, whitespace, control or
 /// non-ASCII characters, uses a web scheme (`http`, `https`, `ws`, `wss`)
 /// without an authority (`https:api.example.com`), has a bracketed host that
-/// is not a valid IPv6/IPvFuture literal, or an unbracketed host with
-/// characters outside the RFC 3986 `reg-name` grammar. Percent-encoding and dot-segment normalization are
+/// is not a valid IPv6/IPvFuture literal, an unbracketed host with
+/// characters outside the RFC 3986 `reg-name` grammar, or a path/query with
+/// characters outside the `pchar` / `query` grammar (including incomplete
+/// percent-escapes). Percent-encoding and dot-segment normalization are
 /// not performed.
 ///
 /// # Example
@@ -186,8 +188,12 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
         if is_web_scheme {
             return Err(invalid_target("resource URI must have an authority"));
         }
-        // No authority component (e.g. `urn:example:resource`) —
-        // only the scheme is subject to normalization
+        // No authority component (e.g. `urn:example:resource`) — the
+        // scheme-specific part is pchar-based too (`hier-part [ "?" query ]`,
+        // RFC 3986 §3.3), and only the scheme is subject to normalization
+        if !is_valid_uri_component(rest, b":@/?") {
+            return Err(invalid_target("resource URI contains invalid characters"));
+        }
         return Ok(format!("{scheme}:{rest}"));
     };
 
@@ -195,6 +201,13 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
     let (authority, path_and_query) = after_scheme.split_at(authority_end);
     if authority.contains('@') {
         return Err(invalid_target("resource URI must not contain userinfo"));
+    }
+    // `pchar` plus the `/` and `?` delimiters (RFC 3986 §3.3–3.4); `#` was
+    // already rejected above, so everything after the first `?` is the query
+    if !is_valid_uri_component(path_and_query, b":@/?") {
+        return Err(invalid_target(
+            "resource URI path or query contains invalid characters",
+        ));
     }
     let (host, port) = split_host_port(authority)?;
     if host.is_empty() {
@@ -259,7 +272,8 @@ fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> 
             Some((host, port)) => (host, Some(port)),
             None => (authority, None),
         };
-        if !is_valid_reg_name(host) {
+        // `reg-name = *( unreserved / pct-encoded / sub-delims )` (§3.2.2)
+        if !is_valid_uri_component(host, b"") {
             return Err(invalid_target(
                 "resource URI host contains invalid characters",
             ));
@@ -268,11 +282,14 @@ fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> 
     }
 }
 
-/// Checks that an unbracketed host is a valid `reg-name` per RFC 3986 §3.2.2:
-/// `*( unreserved / pct-encoded / sub-delims )`. Percent-escapes must be
-/// complete (`%` followed by two hex digits); their decoding is not performed.
-fn is_valid_reg_name(host: &str) -> bool {
-    let mut bytes = host.bytes();
+/// Checks that a string consists of RFC 3986 `unreserved` / `sub-delims`
+/// characters, complete percent-escapes (`%` followed by two hex digits;
+/// their decoding is not performed) and the given extra delimiter bytes.
+///
+/// With no extras this is exactly the `reg-name` grammar (§3.2.2); with
+/// `b":@/?"` it covers a path with an optional query (§3.3–3.4).
+fn is_valid_uri_component(component: &str, extra: &[u8]) -> bool {
+    let mut bytes = component.bytes();
     while let Some(byte) = bytes.next() {
         match byte {
             b'%' => {
@@ -287,6 +304,7 @@ fn is_valid_reg_name(host: &str) -> bool {
             byte if byte.is_ascii_alphanumeric() => {}
             b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+'
             | b',' | b';' | b'=' => {}
+            byte if extra.contains(&byte) => {}
             _ => return false,
         }
     }
@@ -489,6 +507,14 @@ mod tests {
     }
 
     #[test]
+    fn it_keeps_valid_pchar_and_query_characters() {
+        assert_eq!(
+            canonicalize_resource_uri("https://api.example.com/a%20b/v1:x@y?q=?&r=/").unwrap(),
+            "https://api.example.com/a%20b/v1:x@y?q=?&r=/"
+        );
+    }
+
+    #[test]
     fn it_preserves_root_path_and_port_for_custom_schemes() {
         assert_eq!(
             canonicalize_resource_uri("FOO://API.Example.com/").unwrap(),
@@ -539,6 +565,13 @@ mod tests {
             "https://example.com|evil",
             "https://ex%2Gmple.com",
             "https://example.com%2",
+            "https://api.example.com/%",
+            "https://api.example.com/a%2",
+            "https://api.example.com/|evil",
+            "https://api.example.com/x?a=^b",
+            "https://api.example.com/a\\b",
+            "urn:example:res|ource",
+            "urn:example:a%2",
         ];
         for uri in cases {
             let err = canonicalize_resource_uri(uri).unwrap_err();
