@@ -131,8 +131,11 @@ fn write_param(f: &mut Formatter<'_>, first: &mut bool, name: &str, value: &str)
 /// Normalization applied:
 /// * the scheme and host are lowercased;
 /// * default ports are removed (`http`/`ws`: 80, `https`/`wss`: 443);
-/// * a lone root path (`https://example.com/`) is dropped
-///   (`https://example.com`); non-root paths and query strings are preserved.
+/// * for web schemes (`http`, `https`, `ws`, `wss`) a lone root path
+///   (`https://example.com/`) is dropped (`https://example.com`); for other
+///   schemes the path is preserved verbatim, as the empty-path/`/`
+///   equivalence is scheme-specific (RFC 3986 §6.2.3). Non-root paths and
+///   query strings are always preserved.
 ///
 /// Returns an [`OAuthError`] with code `invalid_target` when the URI is not
 /// an absolute URI, contains a fragment, userinfo, whitespace, control or
@@ -175,11 +178,12 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
         return Err(invalid_target("resource URI scheme is invalid"));
     }
     let scheme = scheme.to_ascii_lowercase();
+    let is_web_scheme = matches!(scheme.as_str(), "http" | "https" | "ws" | "wss");
 
     let Some(after_scheme) = rest.strip_prefix("//") else {
         // Web schemes always carry an authority: `https:api.example.com`
         // or `https:/api` is a mistyped resource, not a URN-style URI
-        if matches!(scheme.as_str(), "http" | "https" | "ws" | "wss") {
+        if is_web_scheme {
             return Err(invalid_target("resource URI must have an authority"));
         }
         // No authority component (e.g. `urn:example:resource`) —
@@ -217,7 +221,9 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
         result.push(':');
         result.push_str(port);
     }
-    if path_and_query != "/" {
+    // Empty-path/`/` equivalence is scheme-based normalization
+    // (RFC 3986 §6.2.3) — only apply it to schemes we know
+    if path_and_query != "/" || !is_web_scheme {
         result.push_str(path_and_query);
     }
     Ok(result)
@@ -479,6 +485,22 @@ mod tests {
         assert_eq!(
             canonicalize_resource_uri("https://[v1.FE:x]:8443/api").unwrap(),
             "https://[v1.fe:x]:8443/api"
+        );
+    }
+
+    #[test]
+    fn it_preserves_root_path_and_port_for_custom_schemes() {
+        assert_eq!(
+            canonicalize_resource_uri("FOO://API.Example.com/").unwrap(),
+            "foo://api.example.com/"
+        );
+        assert_eq!(
+            canonicalize_resource_uri("foo://api.example.com").unwrap(),
+            "foo://api.example.com"
+        );
+        assert_eq!(
+            canonicalize_resource_uri("foo://api.example.com:80/x").unwrap(),
+            "foo://api.example.com:80/x"
         );
     }
 
