@@ -131,11 +131,12 @@ fn write_param(f: &mut Formatter<'_>, first: &mut bool, name: &str, value: &str)
 /// Normalization applied:
 /// * the scheme and host are lowercased;
 /// * default ports are removed (`http`/`ws`: 80, `https`/`wss`: 443);
-/// * for web schemes (`http`, `https`, `ws`, `wss`) a lone root path
-///   (`https://example.com/`) is dropped (`https://example.com`); for other
-///   schemes the path is preserved verbatim, as the empty-path/`/`
-///   equivalence is scheme-specific (RFC 3986 §6.2.3). Non-root paths and
-///   query strings are always preserved.
+/// * for web schemes (`http`, `https`, `ws`, `wss`) a lone root path is
+///   dropped, both bare (`https://example.com/` → `https://example.com`)
+///   and before a query (`…/?q=1` → `…?q=1`); for other schemes the path is
+///   preserved verbatim, as the empty-path/`/` equivalence is
+///   scheme-specific (RFC 3986 §6.2.3). Non-root paths and query strings
+///   are always preserved.
 ///
 /// Returns an [`OAuthError`] with code `invalid_target` when the URI is not
 /// an absolute URI, contains a fragment, userinfo, whitespace, control or
@@ -235,8 +236,11 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
         result.push_str(port);
     }
     // Empty-path/`/` equivalence is scheme-based normalization
-    // (RFC 3986 §6.2.3) — only apply it to schemes we know
-    if path_and_query != "/" || !is_web_scheme {
+    // (RFC 3986 §6.2.3) — only apply it to schemes we know. The lone root
+    // slash is dropped both bare (`/`) and before a query (`/?q=1`)
+    if is_web_scheme && (path_and_query == "/" || path_and_query.starts_with("/?")) {
+        result.push_str(&path_and_query[1..]);
+    } else {
         result.push_str(path_and_query);
     }
     Ok(result)
@@ -468,9 +472,26 @@ mod tests {
             canonicalize_resource_uri("https://example.com/api/?page=1").unwrap(),
             "https://example.com/api/?page=1"
         );
+    }
+
+    #[test]
+    fn it_normalizes_root_path_before_query() {
         assert_eq!(
             canonicalize_resource_uri("https://example.com/?q=1").unwrap(),
-            "https://example.com/?q=1"
+            "https://example.com?q=1"
+        );
+        assert_eq!(
+            canonicalize_resource_uri("https://example.com?q=1").unwrap(),
+            "https://example.com?q=1"
+        );
+        // Not scheme-equivalent for custom schemes — both forms are kept
+        assert_eq!(
+            canonicalize_resource_uri("foo://api/?q=1").unwrap(),
+            "foo://api/?q=1"
+        );
+        assert_eq!(
+            canonicalize_resource_uri("foo://api?q=1").unwrap(),
+            "foo://api?q=1"
         );
     }
 
