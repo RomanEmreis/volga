@@ -8,6 +8,7 @@
 
 use super::error::{OAuthError, OAuthErrorCode};
 use std::fmt::{self, Display, Formatter, Write};
+use std::net::Ipv6Addr;
 
 /// Builder for a `WWW-Authenticate: Bearer` challenge header value
 ///
@@ -135,8 +136,9 @@ fn write_param(f: &mut Formatter<'_>, first: &mut bool, name: &str, value: &str)
 ///
 /// Returns an [`OAuthError`] with code `invalid_target` when the URI is not
 /// an absolute URI, contains a fragment, userinfo, whitespace, control or
-/// non-ASCII characters, or uses a web scheme (`http`, `https`, `ws`, `wss`)
-/// without an authority (`https:api.example.com`). Percent-encoding and dot-segment normalization are
+/// non-ASCII characters, uses a web scheme (`http`, `https`, `ws`, `wss`)
+/// without an authority (`https:api.example.com`), or has a bracketed host
+/// that is not a valid IPv6/IPvFuture literal. Percent-encoding and dot-segment normalization are
 /// not performed.
 ///
 /// # Example
@@ -221,12 +223,17 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
 }
 
 /// Splits a URI authority (without userinfo) into host and optional port,
-/// keeping IPv6 literals (`[::1]`) intact.
+/// keeping IP literals (`[::1]`) intact and validating their content.
 fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> {
     if let Some(inner) = authority.strip_prefix('[') {
         let Some(close) = inner.find(']') else {
             return Err(invalid_target("resource URI IPv6 literal is not closed"));
         };
+        if !is_valid_ip_literal(&inner[..close]) {
+            return Err(invalid_target(
+                "resource URI bracketed host must be a valid IP literal",
+            ));
+        }
         let host_end = close + 2; // '[' + literal + ']'
         let host = &authority[..host_end];
         let after_host = &authority[host_end..];
@@ -243,6 +250,46 @@ fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> 
             Some((host, port)) => Ok((host, Some(port))),
             None => Ok((authority, None)),
         }
+    }
+}
+
+/// Checks that the content of a bracketed host is an IP literal per
+/// RFC 3986 §3.2.2: an IPv6 address or an IPvFuture
+/// (`"v" 1*HEXDIG "." 1*(unreserved / sub-delims / ":")`).
+///
+/// Zone identifiers (RFC 6874, `[fe80::1%25eth0]`) are rejected: link-local
+/// addresses are not meaningful as resource indicators.
+fn is_valid_ip_literal(literal: &str) -> bool {
+    if let Some(rest) = literal.strip_prefix(['v', 'V']) {
+        let Some((version, addr)) = rest.split_once('.') else {
+            return false;
+        };
+        !version.is_empty()
+            && version.bytes().all(|b| b.is_ascii_hexdigit())
+            && !addr.is_empty()
+            && addr.bytes().all(|b| {
+                b.is_ascii_alphanumeric()
+                    || matches!(
+                        b,
+                        b'-' | b'.'
+                            | b'_'
+                            | b'~'
+                            | b'!'
+                            | b'$'
+                            | b'&'
+                            | b'\''
+                            | b'('
+                            | b')'
+                            | b'*'
+                            | b'+'
+                            | b','
+                            | b';'
+                            | b'='
+                            | b':'
+                    )
+            })
+    } else {
+        literal.parse::<Ipv6Addr>().is_ok()
     }
 }
 
@@ -382,6 +429,14 @@ mod tests {
     }
 
     #[test]
+    fn it_keeps_ip_vfuture_literals() {
+        assert_eq!(
+            canonicalize_resource_uri("https://[v1.FE:x]:8443/api").unwrap(),
+            "https://[v1.fe:x]:8443/api"
+        );
+    }
+
+    #[test]
     fn it_keeps_urn_style_uris() {
         assert_eq!(
             canonicalize_resource_uri("URN:example:resource").unwrap(),
@@ -405,6 +460,12 @@ mod tests {
             "https:api.example.com",
             "https:/api.example.com",
             "WS:example.com/socket",
+            "https://[]",
+            "https://[not-an-ip]/api",
+            "https://[1.2.3.4]",
+            "https://[fe80::1%25eth0]/api",
+            "https://[v.abc]",
+            "https://[v1.]",
         ];
         for uri in cases {
             let err = canonicalize_resource_uri(uri).unwrap_err();
