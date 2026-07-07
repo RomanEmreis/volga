@@ -298,7 +298,7 @@ impl HstsConfig {
     {
         self.exclude_hosts = hosts
             .into_iter()
-            .map(|h| normalize_host(h.as_ref()))
+            .map(|h| normalize_host(h.as_ref()).to_ascii_lowercase())
             .collect();
         self
     }
@@ -767,21 +767,27 @@ impl App {
     }
 }
 
+/// Normalizes a host name for comparison: trims whitespace, strips a default
+/// `:443`/`:80` port and trailing dots. Borrow-only — case is preserved, so
+/// compare results with [`str::eq_ignore_ascii_case`] (or lowercase once when
+/// storing, as [`HstsConfig::with_exclude_hosts`] does).
 #[inline]
-fn normalize_host(host: &str) -> String {
-    let host = match host.trim().rsplit_once(':') {
-        Some((h, "443")) => h,
+pub(crate) fn normalize_host(host: &str) -> &str {
+    let host = host.trim();
+
+    let host = match host.rsplit_once(':') {
+        Some((h, "443" | "80")) => h,
         _ => host,
     };
 
-    host.trim_end_matches('.').to_ascii_lowercase()
+    host.trim_end_matches('.')
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         CERT_FILE_NAME, ClientAuth, DEFAULT_MAX_AGE, DEFAULT_PORT, HstsConfig, KEY_FILE_NAME,
-        RedirectionConfig, TlsConfig,
+        RedirectionConfig, TlsConfig, normalize_host,
     };
     use crate::{App, tls::HstsHeader};
     use std::path::PathBuf;
@@ -1095,6 +1101,16 @@ mod tests {
     }
 
     #[test]
+    fn it_normalizes_host_without_allocating() {
+        assert_eq!(normalize_host(" example.com. "), "example.com");
+        assert_eq!(normalize_host("Example.COM:443"), "Example.COM");
+        assert_eq!(normalize_host("example.com:80"), "example.com");
+        assert_eq!(normalize_host("example.com:8443"), "example.com:8443");
+        assert_eq!(normalize_host("[::1]:443"), "[::1]");
+        assert_eq!(normalize_host("[::1]"), "[::1]");
+    }
+
+    #[test]
     fn it_normalizes_excluded_hosts() {
         let hsts_config = HstsConfig::default().with_exclude_hosts([
             "www.ExAmplE.com.",
@@ -1104,7 +1120,7 @@ mod tests {
 
         assert_eq!(
             hsts_config.exclude_hosts,
-            &["www.example.com", "www.example.net:80", "www.example.org"]
+            &["www.example.com", "www.example.net", "www.example.org"]
         );
     }
 
