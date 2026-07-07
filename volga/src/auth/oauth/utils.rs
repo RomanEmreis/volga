@@ -137,8 +137,9 @@ fn write_param(f: &mut Formatter<'_>, first: &mut bool, name: &str, value: &str)
 /// Returns an [`OAuthError`] with code `invalid_target` when the URI is not
 /// an absolute URI, contains a fragment, userinfo, whitespace, control or
 /// non-ASCII characters, uses a web scheme (`http`, `https`, `ws`, `wss`)
-/// without an authority (`https:api.example.com`), or has a bracketed host
-/// that is not a valid IPv6/IPvFuture literal. Percent-encoding and dot-segment normalization are
+/// without an authority (`https:api.example.com`), has a bracketed host that
+/// is not a valid IPv6/IPvFuture literal, or an unbracketed host with
+/// characters outside the RFC 3986 `reg-name` grammar. Percent-encoding and dot-segment normalization are
 /// not performed.
 ///
 /// # Example
@@ -243,14 +244,47 @@ fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> 
             None => Err(invalid_target("resource URI authority is invalid")),
         }
     } else {
-        match authority.rsplit_once(':') {
-            Some((host, _)) if host.contains(':') => Err(invalid_target(
-                "resource URI IPv6 literal must be enclosed in brackets",
-            )),
-            Some((host, port)) => Ok((host, Some(port))),
-            None => Ok((authority, None)),
+        let (host, port) = match authority.rsplit_once(':') {
+            Some((host, _)) if host.contains(':') => {
+                return Err(invalid_target(
+                    "resource URI IPv6 literal must be enclosed in brackets",
+                ));
+            }
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        };
+        if !is_valid_reg_name(host) {
+            return Err(invalid_target(
+                "resource URI host contains invalid characters",
+            ));
+        }
+        Ok((host, port))
+    }
+}
+
+/// Checks that an unbracketed host is a valid `reg-name` per RFC 3986 §3.2.2:
+/// `*( unreserved / pct-encoded / sub-delims )`. Percent-escapes must be
+/// complete (`%` followed by two hex digits); their decoding is not performed.
+fn is_valid_reg_name(host: &str) -> bool {
+    let mut bytes = host.bytes();
+    while let Some(byte) = bytes.next() {
+        match byte {
+            b'%' => {
+                let valid_escape = matches!(
+                    (bytes.next(), bytes.next()),
+                    (Some(hi), Some(lo)) if hi.is_ascii_hexdigit() && lo.is_ascii_hexdigit()
+                );
+                if !valid_escape {
+                    return false;
+                }
+            }
+            byte if byte.is_ascii_alphanumeric() => {}
+            b'-' | b'.' | b'_' | b'~' | b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+'
+            | b',' | b';' | b'=' => {}
+            _ => return false,
         }
     }
+    true
 }
 
 /// Checks that the content of a bracketed host is an IP literal per
@@ -429,6 +463,18 @@ mod tests {
     }
 
     #[test]
+    fn it_keeps_pct_encoded_and_sub_delim_hosts() {
+        assert_eq!(
+            canonicalize_resource_uri("https://ex%41mple.com/api").unwrap(),
+            "https://ex%41mple.com/api"
+        );
+        assert_eq!(
+            canonicalize_resource_uri("https://api.ex-ample_1.com").unwrap(),
+            "https://api.ex-ample_1.com"
+        );
+    }
+
+    #[test]
     fn it_keeps_ip_vfuture_literals() {
         assert_eq!(
             canonicalize_resource_uri("https://[v1.FE:x]:8443/api").unwrap(),
@@ -466,6 +512,11 @@ mod tests {
             "https://[fe80::1%25eth0]/api",
             "https://[v.abc]",
             "https://[v1.]",
+            "https://exa[mple.com",
+            "https://exa\\mple.com/api",
+            "https://example.com|evil",
+            "https://ex%2Gmple.com",
+            "https://example.com%2",
         ];
         for uri in cases {
             let err = canonicalize_resource_uri(uri).unwrap_err();
