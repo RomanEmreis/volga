@@ -26,13 +26,14 @@ prompt = no
 CN = localhost
 
 [v3_req]
-keyUsage = keyEncipherment, dataEncipherment
+keyUsage = digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
 DNS.1 = localhost
 IP.1 = 127.0.0.1
+IP.2 = ::1
 EOF
 
 openssl genrsa -out server.key 2048

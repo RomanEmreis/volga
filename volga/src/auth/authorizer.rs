@@ -10,11 +10,17 @@ use std::sync::Arc;
 /// When `resource_metadata_url` is `Some`, an RFC 9728 `resource_metadata`
 /// parameter is appended to the challenge.
 pub(crate) fn default_error_msg(resource_metadata_url: Option<&str>) -> String {
-    let base = r#"Bearer error="insufficient_scope" error_description="User does not have required role or permission""#;
-    match resource_metadata_url {
-        Some(url) => format!(r#"{base}, resource_metadata="{url}""#),
-        None => base.to_string(),
+    use crate::auth::oauth::{BearerChallenge, OAuthErrorCode};
+
+    let mut challenge = BearerChallenge::new()
+        .with_error(OAuthErrorCode::InsufficientScope)
+        .with_description("User does not have required role or permission");
+
+    if let Some(url) = resource_metadata_url {
+        challenge = challenge.with_resource_metadata(url);
     }
+
+    challenge.to_string()
 }
 
 /// Creates an [`Authorizer::Role`] authorizer for a single role.

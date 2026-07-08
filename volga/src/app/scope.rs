@@ -22,7 +22,7 @@ use crate::{
 #[cfg(feature = "tls")]
 use crate::{
     headers::{HOST, STRICT_TRANSPORT_SECURITY},
-    tls::HstsHeader,
+    tls::{HstsHeader, normalize_host},
 };
 
 #[cfg(feature = "tracing")]
@@ -315,23 +315,11 @@ fn is_excluded(host: Option<HeaderValue>, exclude_hosts: &[String]) -> bool {
         .and_then(|h| h.to_str().ok())
         .map(|h| {
             let h = normalize_host(h);
-            exclude_hosts.iter().any(|e| e == h)
+            // Stored exclude hosts are normalized and lowercased once at
+            // configuration time; the incoming Host header is only borrowed
+            exclude_hosts.iter().any(|e| e.eq_ignore_ascii_case(h))
         })
         .unwrap_or(false)
-}
-
-#[inline]
-#[cfg(feature = "tls")]
-fn normalize_host(host: &str) -> &str {
-    let host = host.trim();
-
-    let host = match host.rsplit_once(':') {
-        Some((h, "443")) => h,
-        Some((h, "80")) => h,
-        _ => host,
-    };
-
-    host.trim_end_matches('.')
 }
 
 fn keep_content_length(size_hint: SizeHint, headers: &mut HeaderMap) {
