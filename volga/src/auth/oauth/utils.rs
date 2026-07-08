@@ -334,7 +334,9 @@ fn parse_auth_param(element: &str) -> Result<(String, String), OAuthError> {
     };
     let name = name.trim_end();
     if name.is_empty() || !name.bytes().all(is_tchar) {
-        return Err(invalid_challenge("auth parameter name is not a valid token"));
+        return Err(invalid_challenge(
+            "auth parameter name is not a valid token",
+        ));
     }
     let value = value.trim_start();
     let value = if let Some(quoted) = value.strip_prefix('"') {
@@ -361,7 +363,9 @@ fn unquote(quoted: &str) -> Result<String, OAuthError> {
                 return if symbols.as_str().trim().is_empty() {
                     Ok(value)
                 } else {
-                    Err(invalid_challenge("unexpected content after a quoted string"))
+                    Err(invalid_challenge(
+                        "unexpected content after a quoted string",
+                    ))
                 };
             }
             '\\' => match symbols.next() {
@@ -720,9 +724,7 @@ mod tests {
             .with_error(OAuthErrorCode::InvalidToken)
             .with_description(r#"a "quoted" \ value"#)
             .with_scope("read write")
-            .with_resource_metadata(
-                "https://api.example.com/.well-known/oauth-protected-resource",
-            );
+            .with_resource_metadata("https://api.example.com/.well-known/oauth-protected-resource");
         let parsed = BearerChallenge::parse(&original.to_string()).unwrap();
         assert_eq!(parsed, original);
     }
@@ -791,20 +793,20 @@ mod tests {
         let cases = [
             "",
             "   ",
-            r#"Basic realm="api""#,          // no Bearer challenge
-            r#"realm="api", Bearer"#,        // parameter before any scheme
-            r#"Bearer realm="api"#,          // unterminated quoted string
-            "Bearer realm=",                 // empty value
-            r#"Bearer realm="a" junk"#,      // content after a quoted string
-            "Bearer foo bar",                // missing '='
-            "Bearer Zm9vYmFyCg==",           // token68 payload
-            "Bearer =x",                     // parameter with an empty name
-            r#"Bearer re alm="x""#,          // invalid parameter name
+            r#"Basic realm="api""#,           // no Bearer challenge
+            r#"realm="api", Bearer"#,         // parameter before any scheme
+            r#"Bearer realm="api"#,           // unterminated quoted string
+            "Bearer realm=",                  // empty value
+            r#"Bearer realm="a" junk"#,       // content after a quoted string
+            "Bearer foo bar",                 // missing '='
+            "Bearer Zm9vYmFyCg==",            // token68 payload
+            "Bearer =x",                      // parameter with an empty name
+            r#"Bearer re alm="x""#,           // invalid parameter name
             r#"Bearer realm="a", realm="b""#, // duplicate parameter
             r#"Bearer error="a", error="b""#, // duplicate error
-            "Bearer realm=\"a\u{1}b\"",      // control character in a value
-            r#"Bearer realm=\"#,             // bare backslash value
-            r#"foo/bar, Bearer realm="x""#,  // malformed auth scheme
+            "Bearer realm=\"a\u{1}b\"",       // control character in a value
+            r#"Bearer realm=\"#,              // bare backslash value
+            r#"foo/bar, Bearer realm="x""#,   // malformed auth scheme
         ];
         for header in cases {
             let err = BearerChallenge::parse(header).unwrap_err();
