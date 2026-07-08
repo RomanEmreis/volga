@@ -5,8 +5,8 @@
 //!   and [RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1)
 //! * Authorization Server Metadata per [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414)
 //! * Protected Resource Metadata per [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)
-//! * Utilities: the `WWW-Authenticate` Bearer challenge builder and
-//!   resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
+//! * Utilities: the `WWW-Authenticate` Bearer challenge builder and parser,
+//!   and resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
 //!
 //! This module intentionally contains no client or server flows yet — those
 //! are built on top of these types (discovery handlers in `volga`, the OAuth

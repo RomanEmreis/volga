@@ -1,6 +1,6 @@
 //! Shared OAuth utilities
 //!
-//! * [`BearerChallenge`] — builder for `WWW-Authenticate: Bearer ...`
+//! * [`BearerChallenge`] — builder and parser for `WWW-Authenticate: Bearer ...`
 //!   challenges per [RFC 6750 §3](https://www.rfc-editor.org/rfc/rfc6750#section-3)
 //!   and [RFC 9728 §5.1](https://www.rfc-editor.org/rfc/rfc9728#section-5.1)
 //! * [`canonicalize_resource_uri`] — resource indicator normalization per
@@ -9,13 +9,18 @@
 use super::error::{OAuthError, OAuthErrorCode};
 use std::fmt::{self, Display, Formatter, Write};
 use std::net::Ipv6Addr;
+use std::str::FromStr;
 
-/// Builder for a `WWW-Authenticate: Bearer` challenge header value
+/// Builder and parser for a `WWW-Authenticate: Bearer` challenge header value
 ///
 /// Parameters are emitted in a stable order: `realm`, `error`,
 /// `error_description`, `scope`, `resource_metadata`. All values are
 /// quoted; embedded `"` and `\` are escaped and control characters are
 /// replaced with spaces so the result is always a valid header value.
+///
+/// The inverse operation — extracting a `Bearer` challenge from a received
+/// `WWW-Authenticate` header value — is available via
+/// [`BearerChallenge::parse`] (also exposed through [`FromStr`]).
 ///
 /// # Example
 /// ```
@@ -76,6 +81,141 @@ impl BearerChallenge {
         self.resource_metadata = Some(url.into());
         self
     }
+
+    /// Returns the `realm` parameter, if set
+    #[inline]
+    pub fn realm(&self) -> Option<&str> {
+        self.realm.as_deref()
+    }
+
+    /// Returns the `error` parameter, if set
+    #[inline]
+    pub fn error(&self) -> Option<&OAuthErrorCode> {
+        self.error.as_ref()
+    }
+
+    /// Returns the `error_description` parameter, if set
+    #[inline]
+    pub fn description(&self) -> Option<&str> {
+        self.error_description.as_deref()
+    }
+
+    /// Returns the `scope` parameter, if set
+    #[inline]
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
+    /// Returns the `resource_metadata` parameter, if set
+    #[inline]
+    pub fn resource_metadata(&self) -> Option<&str> {
+        self.resource_metadata.as_deref()
+    }
+
+    /// Parses a `WWW-Authenticate` header value and extracts the `Bearer`
+    /// challenge from it
+    ///
+    /// The header may carry several comma-separated challenges
+    /// ([RFC 9110 §11.6.1](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.1));
+    /// the first `Bearer` challenge is used and the auth scheme is matched
+    /// case-insensitively. Parameter names are matched case-insensitively
+    /// as well, values may be given as tokens or quoted strings
+    /// (quoted-pair escapes are decoded), and unrecognized parameters are
+    /// ignored for forward compatibility.
+    ///
+    /// Returns an [`OAuthError`] with code `invalid_request` when the value
+    /// contains no `Bearer` challenge or is malformed: an invalid scheme or
+    /// parameter name, a value that is neither a token nor a quoted string,
+    /// an unterminated quoted string, a control character, a duplicated
+    /// recognized parameter, or a `token68` payload, which the Bearer scheme
+    /// does not use ([RFC 6750 §3](https://www.rfc-editor.org/rfc/rfc6750#section-3)).
+    ///
+    /// # Example
+    /// ```
+    /// use volga::auth::oauth::{BearerChallenge, OAuthErrorCode};
+    ///
+    /// let challenge = BearerChallenge::parse(
+    ///     r#"Basic realm="legacy", Bearer error="invalid_token", error_description="Token has expired""#,
+    /// ).unwrap();
+    ///
+    /// assert_eq!(challenge.error(), Some(&OAuthErrorCode::InvalidToken));
+    /// assert_eq!(challenge.description(), Some("Token has expired"));
+    /// ```
+    pub fn parse(header: &str) -> Result<Self, OAuthError> {
+        let mut bearer: Option<Self> = None;
+        let mut seen_scheme = false;
+        for element in split_list_elements(header)? {
+            // Empty list elements (`Bearer, , Basic`) are legal per RFC 9110 §5.6.1
+            if element.is_empty() {
+                continue;
+            }
+            match classify_element(element) {
+                Element::Scheme { scheme, param } => {
+                    // The Bearer challenge ends where the next challenge begins
+                    if bearer.is_some() {
+                        break;
+                    }
+                    if !scheme.bytes().all(is_tchar) {
+                        return Err(invalid_challenge("auth scheme is not a valid token"));
+                    }
+                    seen_scheme = true;
+                    if scheme.eq_ignore_ascii_case("Bearer") {
+                        let mut challenge = Self::new();
+                        if let Some(param) = param {
+                            let (name, value) = parse_auth_param(param)?;
+                            challenge.set_param(&name, value)?;
+                        }
+                        bearer = Some(challenge);
+                    }
+                }
+                Element::Param => {
+                    if let Some(challenge) = &mut bearer {
+                        let (name, value) = parse_auth_param(element)?;
+                        challenge.set_param(&name, value)?;
+                    } else if !seen_scheme {
+                        return Err(invalid_challenge(
+                            "auth parameter appears before any challenge scheme",
+                        ));
+                    }
+                    // Parameters of other schemes are skipped
+                }
+            }
+        }
+        bearer.ok_or_else(|| invalid_challenge("no Bearer challenge found"))
+    }
+
+    /// Stores a parsed auth parameter; `name` must already be lowercased.
+    /// Unknown parameters are ignored for forward compatibility, duplicates
+    /// of recognized ones are rejected (RFC 7235 §2.1).
+    fn set_param(&mut self, name: &str, value: String) -> Result<(), OAuthError> {
+        let slot = match name {
+            "realm" => &mut self.realm,
+            "error_description" => &mut self.error_description,
+            "scope" => &mut self.scope,
+            "resource_metadata" => &mut self.resource_metadata,
+            "error" => {
+                return if self.error.replace(OAuthErrorCode::from(value)).is_some() {
+                    Err(invalid_challenge("duplicate parameter in Bearer challenge"))
+                } else {
+                    Ok(())
+                };
+            }
+            _ => return Ok(()),
+        };
+        if slot.replace(value).is_some() {
+            return Err(invalid_challenge("duplicate parameter in Bearer challenge"));
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for BearerChallenge {
+    type Err = OAuthError;
+
+    #[inline]
+    fn from_str(header: &str) -> Result<Self, Self::Err> {
+        Self::parse(header)
+    }
 }
 
 impl Display for BearerChallenge {
@@ -123,6 +263,145 @@ fn write_param(f: &mut Formatter<'_>, first: &mut bool, name: &str, value: &str)
         }
     }
     f.write_char('"')
+}
+
+/// A single comma-separated element of a `WWW-Authenticate` header value:
+/// either the start of a challenge (a bare scheme, optionally followed by
+/// its first space-separated item) or an auth parameter belonging to the
+/// current challenge.
+enum Element<'a> {
+    Scheme {
+        scheme: &'a str,
+        param: Option<&'a str>,
+    },
+    Param,
+}
+
+/// Classifies a non-empty, trimmed list element. An element starts a new
+/// challenge when it is a bare token or a token separated from the rest by
+/// whitespace; `name=value` pairs (with optional bad whitespace around `=`,
+/// RFC 9110 §5.6.3) are parameters of the current challenge.
+fn classify_element(element: &str) -> Element<'_> {
+    match element.split_once([' ', '\t']) {
+        None if !element.contains('=') => Element::Scheme {
+            scheme: element,
+            param: None,
+        },
+        Some((scheme, rest)) if !scheme.contains('=') && !rest.trim_start().starts_with('=') => {
+            Element::Scheme {
+                scheme,
+                param: Some(rest.trim_start()),
+            }
+        }
+        _ => Element::Param,
+    }
+}
+
+/// Splits a header value at top-level commas, leaving commas inside quoted
+/// strings (including escaped quotes) intact. Elements are trimmed but may
+/// be empty — the `#challenge` list grammar allows empty elements.
+fn split_list_elements(header: &str) -> Result<Vec<&str>, OAuthError> {
+    let bytes = header.as_bytes();
+    let mut elements = Vec::new();
+    let (mut start, mut index, mut in_quotes) = (0, 0, false);
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => in_quotes = !in_quotes,
+            // Skip the escaped byte; multi-byte characters are left alone
+            // since only ASCII `"` and `,` are meaningful here
+            b'\\' if in_quotes => index += 1,
+            b',' if !in_quotes => {
+                elements.push(header[start..index].trim());
+                start = index + 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    if in_quotes {
+        return Err(invalid_challenge("quoted string is not terminated"));
+    }
+    elements.push(header[start..].trim());
+    Ok(elements)
+}
+
+/// Parses a single `name=value` auth parameter (RFC 9110 §11.2): the name
+/// is lowercased, the value is either a token or a quoted string with
+/// quoted-pair escapes decoded. Bad whitespace around `=` is tolerated.
+fn parse_auth_param(element: &str) -> Result<(String, String), OAuthError> {
+    let Some((name, value)) = element.split_once('=') else {
+        return Err(invalid_challenge("auth parameter is missing '='"));
+    };
+    let name = name.trim_end();
+    if name.is_empty() || !name.bytes().all(is_tchar) {
+        return Err(invalid_challenge("auth parameter name is not a valid token"));
+    }
+    let value = value.trim_start();
+    let value = if let Some(quoted) = value.strip_prefix('"') {
+        unquote(quoted)?
+    } else if !value.is_empty() && value.bytes().all(is_tchar) {
+        value.to_owned()
+    } else {
+        return Err(invalid_challenge(
+            "auth parameter value must be a token or a quoted string",
+        ));
+    };
+    Ok((name.to_ascii_lowercase(), value))
+}
+
+/// Decodes the remainder of a quoted string (the opening `"` already
+/// stripped): `\x` escapes are unquoted, control characters other than
+/// HTAB are rejected, and nothing may follow the closing quote.
+fn unquote(quoted: &str) -> Result<String, OAuthError> {
+    let mut value = String::with_capacity(quoted.len());
+    let mut symbols = quoted.chars();
+    while let Some(symbol) = symbols.next() {
+        match symbol {
+            '"' => {
+                return if symbols.as_str().trim().is_empty() {
+                    Ok(value)
+                } else {
+                    Err(invalid_challenge("unexpected content after a quoted string"))
+                };
+            }
+            '\\' => match symbols.next() {
+                Some(escaped) if escaped == '\t' || !escaped.is_control() => value.push(escaped),
+                _ => return Err(invalid_challenge("invalid escape in a quoted string")),
+            },
+            symbol if symbol.is_control() && symbol != '\t' => {
+                return Err(invalid_challenge("control character in a quoted string"));
+            }
+            symbol => value.push(symbol),
+        }
+    }
+    Err(invalid_challenge("quoted string is not terminated"))
+}
+
+/// Checks the RFC 9110 §5.6.2 `tchar` grammar (token characters)
+fn is_tchar(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric()
+        || matches!(
+            byte,
+            b'!' | b'#'
+                | b'$'
+                | b'%'
+                | b'&'
+                | b'\''
+                | b'*'
+                | b'+'
+                | b'-'
+                | b'.'
+                | b'^'
+                | b'_'
+                | b'`'
+                | b'|'
+                | b'~'
+        )
+}
+
+#[inline]
+fn invalid_challenge(description: &str) -> OAuthError {
+    OAuthError::new(OAuthErrorCode::InvalidRequest).with_description(description)
 }
 
 /// Canonicalizes an OAuth 2.0 resource indicator (RFC 8707) so that
@@ -416,6 +695,121 @@ mod tests {
     fn it_renders_custom_error_code() {
         let challenge = BearerChallenge::new().with_error(OAuthErrorCode::from("use_dpop_nonce"));
         assert_eq!(challenge.to_string(), r#"Bearer error="use_dpop_nonce""#);
+    }
+
+    #[test]
+    fn it_parses_full_challenge() {
+        let challenge = BearerChallenge::parse(
+            r#"Bearer realm="api", error="insufficient_scope", error_description="Insufficient privileges", scope="read write", resource_metadata="https://api.example.com/.well-known/oauth-protected-resource""#,
+        )
+        .unwrap();
+        assert_eq!(challenge.realm(), Some("api"));
+        assert_eq!(challenge.error(), Some(&OAuthErrorCode::InsufficientScope));
+        assert_eq!(challenge.description(), Some("Insufficient privileges"));
+        assert_eq!(challenge.scope(), Some("read write"));
+        assert_eq!(
+            challenge.resource_metadata(),
+            Some("https://api.example.com/.well-known/oauth-protected-resource")
+        );
+    }
+
+    #[test]
+    fn it_roundtrips_built_challenge() {
+        let original = BearerChallenge::new()
+            .with_realm("api")
+            .with_error(OAuthErrorCode::InvalidToken)
+            .with_description(r#"a "quoted" \ value"#)
+            .with_scope("read write")
+            .with_resource_metadata(
+                "https://api.example.com/.well-known/oauth-protected-resource",
+            );
+        let parsed = BearerChallenge::parse(&original.to_string()).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn it_parses_empty_bearer_challenge() {
+        assert_eq!(
+            BearerChallenge::parse("Bearer").unwrap(),
+            BearerChallenge::new()
+        );
+        assert_eq!(
+            BearerChallenge::parse("  bearer  ").unwrap(),
+            BearerChallenge::new()
+        );
+    }
+
+    #[test]
+    fn it_parses_case_insensitively_and_accepts_token_values() {
+        let challenge = BearerChallenge::parse("BEARER ERROR=invalid_token, Realm=api").unwrap();
+        assert_eq!(challenge.error(), Some(&OAuthErrorCode::InvalidToken));
+        assert_eq!(challenge.realm(), Some("api"));
+    }
+
+    #[test]
+    fn it_tolerates_bad_whitespace_around_equals() {
+        let challenge = BearerChallenge::parse(r#"Bearer realm = "api", scope= read"#).unwrap();
+        assert_eq!(challenge.realm(), Some("api"));
+        assert_eq!(challenge.scope(), Some("read"));
+    }
+
+    #[test]
+    fn it_picks_bearer_among_multiple_challenges() {
+        let challenge = BearerChallenge::parse(
+            r#"Negotiate Zm9vYmFyCg==, Newauth title="Login, please", Bearer realm="api", Basic realm="other""#,
+        )
+        .unwrap();
+        assert_eq!(challenge.realm(), Some("api"));
+        assert_eq!(challenge.error(), None);
+    }
+
+    #[test]
+    fn it_ignores_unknown_parameters() {
+        let challenge =
+            BearerChallenge::parse(r#"Bearer nonce="abc", error="use_dpop_nonce""#).unwrap();
+        assert_eq!(
+            challenge.error(),
+            Some(&OAuthErrorCode::from("use_dpop_nonce"))
+        );
+        assert_eq!(challenge.realm(), None);
+    }
+
+    #[test]
+    fn it_skips_empty_list_elements() {
+        let challenge = BearerChallenge::parse(r#", Bearer realm="api", ,"#).unwrap();
+        assert_eq!(challenge.realm(), Some("api"));
+    }
+
+    #[test]
+    fn it_parses_via_from_str() {
+        let challenge: BearerChallenge = r#"Bearer scope="read""#.parse().unwrap();
+        assert_eq!(challenge.scope(), Some("read"));
+    }
+
+    #[test]
+    fn it_rejects_malformed_challenges() {
+        let cases = [
+            "",
+            "   ",
+            r#"Basic realm="api""#,          // no Bearer challenge
+            r#"realm="api", Bearer"#,        // parameter before any scheme
+            r#"Bearer realm="api"#,          // unterminated quoted string
+            "Bearer realm=",                 // empty value
+            r#"Bearer realm="a" junk"#,      // content after a quoted string
+            "Bearer foo bar",                // missing '='
+            "Bearer Zm9vYmFyCg==",           // token68 payload
+            "Bearer =x",                     // parameter with an empty name
+            r#"Bearer re alm="x""#,          // invalid parameter name
+            r#"Bearer realm="a", realm="b""#, // duplicate parameter
+            r#"Bearer error="a", error="b""#, // duplicate error
+            "Bearer realm=\"a\u{1}b\"",      // control character in a value
+            r#"Bearer realm=\"#,             // bare backslash value
+            r#"foo/bar, Bearer realm="x""#,  // malformed auth scheme
+        ];
+        for header in cases {
+            let err = BearerChallenge::parse(header).unwrap_err();
+            assert_eq!(err.error, OAuthErrorCode::InvalidRequest, "case: {header}");
+        }
     }
 
     #[test]
