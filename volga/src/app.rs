@@ -136,6 +136,11 @@ pub struct App {
     #[cfg(feature = "jwt-auth")]
     pub(super) auth_config: Option<BearerAuthConfig>,
 
+    /// Metadata URL derived by [`App::use_oauth_resource_metadata`], used as
+    /// the default `resource_metadata` challenge parameter (RFC 9728 §5.1)
+    #[cfg(feature = "jwt-auth")]
+    pub(super) oauth_resource_metadata_url: Option<String>,
+
     /// Global rate limiter
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<GlobalRateLimiter>,
@@ -257,6 +262,8 @@ impl App {
             host_env: HostEnv::default(),
             #[cfg(feature = "jwt-auth")]
             auth_config: None,
+            #[cfg(feature = "jwt-auth")]
+            oauth_resource_metadata_url: None,
             #[cfg(feature = "rate-limiting")]
             rate_limiter: None,
             #[cfg(feature = "rate-limiting")]

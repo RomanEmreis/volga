@@ -6,19 +6,27 @@
 //! * Authorization Server Metadata per [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414)
 //! * Protected Resource Metadata per [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)
 //! * Utilities: the `WWW-Authenticate` Bearer challenge builder and parser,
-//!   and resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
+//!   resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
+//!   and well-known metadata URL derivation
+//! * Built-in handlers serving the metadata documents from a volga
+//!   application ([`App::use_oauth_resource_metadata`](crate::App::use_oauth_resource_metadata),
+//!   [`App::use_oauth_server_metadata`](crate::App::use_oauth_server_metadata),
+//!   [`App::use_oidc_metadata`](crate::App::use_oidc_metadata))
 //!
-//! This module intentionally contains no client or server flows yet — those
-//! are built on top of these types (discovery handlers in `volga`, the OAuth
-//! client in a separate crate).
+//! This module intentionally contains no client flows yet — the discovery
+//! client is built on top of these types separately.
 
 pub use error::{OAuthError, OAuthErrorCode};
 pub use metadata::{
     AuthorizationServerMetadata, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
     WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
 };
-pub use utils::{BearerChallenge, canonicalize_resource_uri};
+pub use utils::{
+    BearerChallenge, authorization_server_metadata_url, canonicalize_resource_uri,
+    openid_configuration_url, protected_resource_metadata_url,
+};
 
 mod error;
+mod handlers;
 mod metadata;
 mod utils;

@@ -150,9 +150,12 @@ impl TryFrom<App> for AppEnv {
         };
 
         #[cfg(feature = "jwt-auth")]
-        let bearer_token_service = app
-            .auth_config
-            .map(|cfg| crate::auth::BearerTokenService::from_config(cfg, tls_enabled));
+        let bearer_token_service = {
+            let derived_metadata_url = app.oauth_resource_metadata_url;
+            app.auth_config.map(|cfg| {
+                crate::auth::BearerTokenService::from_config(cfg, tls_enabled, derived_metadata_url)
+            })
+        };
 
         let default_cache_control = app.cache_control.map(|c| c.try_into()).transpose()?;
 
