@@ -141,6 +141,16 @@ pub struct App {
     #[cfg(feature = "jwt-auth")]
     pub(super) oauth_resource_metadata_url: Option<String>,
 
+    /// OAuth 2.0 Protected Resource Metadata (RFC 9728) configuration options,
+    /// served by [`App::use_oauth_resource_metadata`]
+    #[cfg(feature = "oauth")]
+    pub(super) oauth_resource_metadata: Option<crate::auth::oauth::ProtectedResourceMetadata>,
+
+    /// OAuth 2.0 Authorization Server Metadata (RFC 8414) configuration options,
+    /// served by [`App::use_oauth_server_metadata`] and [`App::use_oidc_metadata`]
+    #[cfg(feature = "oauth")]
+    pub(super) oauth_server_metadata: Option<crate::auth::oauth::AuthorizationServerMetadata>,
+
     /// Global rate limiter
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<GlobalRateLimiter>,
@@ -264,6 +274,10 @@ impl App {
             auth_config: None,
             #[cfg(feature = "jwt-auth")]
             oauth_resource_metadata_url: None,
+            #[cfg(feature = "oauth")]
+            oauth_resource_metadata: None,
+            #[cfg(feature = "oauth")]
+            oauth_server_metadata: None,
             #[cfg(feature = "rate-limiting")]
             rate_limiter: None,
             #[cfg(feature = "rate-limiting")]

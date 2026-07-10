@@ -161,6 +161,12 @@ impl AuthorizationServerMetadata {
         }
     }
 
+    /// Sets the authorization server's issuer identifier URL
+    pub fn with_issuer(mut self, issuer: impl Into<String>) -> Self {
+        self.issuer = issuer.into();
+        self
+    }
+
     /// Sets the URL of the authorization endpoint
     pub fn with_authorization_endpoint(mut self, url: impl Into<String>) -> Self {
         self.authorization_endpoint = Some(url.into());
@@ -462,6 +468,12 @@ impl ProtectedResourceMetadata {
             resource: resource.into(),
             ..Default::default()
         }
+    }
+
+    /// Sets the protected resource's resource identifier URL
+    pub fn with_resource(mut self, resource: impl Into<String>) -> Self {
+        self.resource = resource.into();
+        self
     }
 
     /// Sets the issuer identifiers of authorization servers that can be
@@ -767,7 +779,8 @@ mod tests {
 
     #[test]
     fn it_builds_server_metadata_with_builder_methods() {
-        let metadata = AuthorizationServerMetadata::new("https://auth.example.com")
+        let metadata = AuthorizationServerMetadata::new("https://old.example.com")
+            .with_issuer("https://auth.example.com")
             .with_authorization_endpoint("https://auth.example.com/authorize")
             .with_token_endpoint("https://auth.example.com/token")
             .with_jwks_uri("https://auth.example.com/jwks")
@@ -824,7 +837,8 @@ mod tests {
 
     #[test]
     fn it_builds_resource_metadata_with_builder_methods() {
-        let metadata = ProtectedResourceMetadata::new("https://api.example.com")
+        let metadata = ProtectedResourceMetadata::new("https://old.example.com")
+            .with_resource("https://api.example.com")
             .with_authorization_servers(["https://auth.example.com"])
             .with_jwks_uri("https://api.example.com/jwks")
             .with_scopes(["read", "write"])

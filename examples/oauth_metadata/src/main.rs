@@ -18,7 +18,7 @@
 use serde::Deserialize;
 use volga::{
     App,
-    auth::{AuthClaims, DecodingKey, oauth::ProtectedResourceMetadata, roles},
+    auth::{AuthClaims, DecodingKey, roles},
     ok,
 };
 
@@ -40,23 +40,29 @@ fn main() {
         .with_bearer_auth(|auth| {
             auth.set_decoding_key(DecodingKey::from_secret(b"secret"))
                 .require_https(false)
-        });
+        })
+        // Protected Resource Metadata (RFC 9728)
+        .with_oauth_resource_metadata(|metadata| {
+            metadata
+                .with_resource("http://127.0.0.1:7878")
+                .with_authorization_servers(["https://auth.example.com"])
+                .with_scopes(["read", "write"])
+                .with_bearer_methods(["header"])
+        })
+        // Authorization Server Metadata (RFC 8414) — only when the
+        // application is also an authorization server; the identifier
+        // string alone configures the minimal document. Both documents can
+        // also come from the `[oauth.resource]`/`[oauth.server]` sections
+        // of the config file (`config` feature).
+        .set_oauth_server_metadata("http://127.0.0.1:7878");
 
-    // Protected Resource Metadata (RFC 9728),
-    // served at /.well-known/oauth-protected-resource
-    let resource = ProtectedResourceMetadata::new("http://127.0.0.1:7878")
-        .with_authorization_servers(["https://auth.example.com"])
-        .with_scopes(["read", "write"])
-        .with_bearer_methods(["header"]);
-    app.use_oauth_resource_metadata(resource);
+    // GET /.well-known/oauth-protected-resource
+    app.use_oauth_resource_metadata();
 
-    // Authorization Server Metadata (RFC 8414) — only when the application
-    // is also an authorization server; the identifier string alone serves
-    // the minimal document at /.well-known/oauth-authorization-server.
-    // The same document is commonly published at the OpenID Connect
-    // Discovery path too (/.well-known/openid-configuration)
-    app.use_oauth_server_metadata("http://127.0.0.1:7878")
-        .use_oidc_metadata("http://127.0.0.1:7878");
+    // The same server document is commonly published at both discovery paths:
+    // GET /.well-known/oauth-authorization-server
+    // GET /.well-known/openid-configuration
+    app.use_oauth_server_metadata().use_oidc_metadata();
 
     app.map_get("/protected", || async { ok!("protected") })
         .authorize::<Claims>(roles(["admin"]));

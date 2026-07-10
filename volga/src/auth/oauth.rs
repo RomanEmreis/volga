@@ -9,9 +9,14 @@
 //!   resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
 //!   and well-known metadata URL derivation
 //! * Built-in handlers serving the metadata documents from a volga
-//!   application ([`App::use_oauth_resource_metadata`](crate::App::use_oauth_resource_metadata),
-//!   [`App::use_oauth_server_metadata`](crate::App::use_oauth_server_metadata),
-//!   [`App::use_oidc_metadata`](crate::App::use_oidc_metadata))
+//!   application: configure with
+//!   [`App::with_oauth_resource_metadata`](crate::App::with_oauth_resource_metadata) /
+//!   [`App::with_oauth_server_metadata`](crate::App::with_oauth_server_metadata)
+//!   (or the `set_*` counterparts, or the `[oauth.resource]`/`[oauth.server]`
+//!   config file sections), then serve via
+//!   [`App::use_oauth_resource_metadata`](crate::App::use_oauth_resource_metadata),
+//!   [`App::use_oauth_server_metadata`](crate::App::use_oauth_server_metadata) and
+//!   [`App::use_oidc_metadata`](crate::App::use_oidc_metadata)
 //!
 //! This module intentionally contains no client flows yet — the discovery
 //! client is built on top of these types separately.
