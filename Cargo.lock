@@ -1677,6 +1677,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "oauth_metadata"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "volga",
+]
+
+[[package]]
 name = "oid-registry"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

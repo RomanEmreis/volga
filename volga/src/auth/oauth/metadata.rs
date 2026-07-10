@@ -160,6 +160,214 @@ impl AuthorizationServerMetadata {
             ..Default::default()
         }
     }
+
+    /// Sets the URL of the authorization endpoint
+    pub fn with_authorization_endpoint(mut self, url: impl Into<String>) -> Self {
+        self.authorization_endpoint = Some(url.into());
+        self
+    }
+
+    /// Sets the URL of the token endpoint
+    pub fn with_token_endpoint(mut self, url: impl Into<String>) -> Self {
+        self.token_endpoint = Some(url.into());
+        self
+    }
+
+    /// Sets the URL of the server's JWK Set document
+    pub fn with_jwks_uri(mut self, uri: impl Into<String>) -> Self {
+        self.jwks_uri = Some(uri.into());
+        self
+    }
+
+    /// Sets the URL of the dynamic client registration endpoint (RFC 7591)
+    pub fn with_registration_endpoint(mut self, url: impl Into<String>) -> Self {
+        self.registration_endpoint = Some(url.into());
+        self
+    }
+
+    /// Sets the scope values supported by this server
+    pub fn with_scopes<I, S>(mut self, scopes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.scopes_supported = scopes.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the `response_type` values supported by this server,
+    /// replacing the `["code"]` prefilled by [`new`](Self::new)
+    pub fn with_response_types<I, S>(mut self, types: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.response_types_supported = types.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the `response_mode` values supported by this server
+    pub fn with_response_modes<I, S>(mut self, modes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.response_modes_supported = modes.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the grant type values supported by this server, replacing the
+    /// `["authorization_code"]` prefilled by [`new`](Self::new)
+    pub fn with_grant_types<I, S>(mut self, types: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.grant_types_supported = types.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the client authentication methods supported by the token endpoint
+    pub fn with_token_endpoint_auth_methods<I, S>(mut self, methods: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.token_endpoint_auth_methods_supported = methods.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the JWS signing algorithms supported by the token endpoint for
+    /// client authentication
+    pub fn with_token_endpoint_auth_signing_algs<I, S>(mut self, algs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.token_endpoint_auth_signing_alg_values_supported =
+            algs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the URL of a page with human-readable developer documentation
+    pub fn with_service_documentation(mut self, url: impl Into<String>) -> Self {
+        self.service_documentation = Some(url.into());
+        self
+    }
+
+    /// Sets the languages supported for the user interface
+    pub fn with_ui_locales<I, S>(mut self, locales: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.ui_locales_supported = locales.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the URL of the server's policy on client usage of registration data
+    pub fn with_op_policy_uri(mut self, url: impl Into<String>) -> Self {
+        self.op_policy_uri = Some(url.into());
+        self
+    }
+
+    /// Sets the URL of the server's terms of service
+    pub fn with_op_tos_uri(mut self, url: impl Into<String>) -> Self {
+        self.op_tos_uri = Some(url.into());
+        self
+    }
+
+    /// Sets the URL of the token revocation endpoint (RFC 7009)
+    pub fn with_revocation_endpoint(mut self, url: impl Into<String>) -> Self {
+        self.revocation_endpoint = Some(url.into());
+        self
+    }
+
+    /// Sets the client authentication methods supported by the revocation endpoint
+    pub fn with_revocation_endpoint_auth_methods<I, S>(mut self, methods: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.revocation_endpoint_auth_methods_supported =
+            methods.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the JWS signing algorithms supported by the revocation endpoint
+    /// for client authentication
+    pub fn with_revocation_endpoint_auth_signing_algs<I, S>(mut self, algs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.revocation_endpoint_auth_signing_alg_values_supported =
+            algs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the URL of the token introspection endpoint (RFC 7662)
+    pub fn with_introspection_endpoint(mut self, url: impl Into<String>) -> Self {
+        self.introspection_endpoint = Some(url.into());
+        self
+    }
+
+    /// Sets the client authentication methods supported by the introspection endpoint
+    pub fn with_introspection_endpoint_auth_methods<I, S>(mut self, methods: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.introspection_endpoint_auth_methods_supported =
+            methods.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the JWS signing algorithms supported by the introspection
+    /// endpoint for client authentication
+    pub fn with_introspection_endpoint_auth_signing_algs<I, S>(mut self, algs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.introspection_endpoint_auth_signing_alg_values_supported =
+            algs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the PKCE code challenge methods supported (e.g. `S256`)
+    pub fn with_code_challenge_methods<I, S>(mut self, methods: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.code_challenge_methods_supported = methods.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Adds an extension or OIDC-specific field not modeled by the typed fields
+    pub fn with_additional_field(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<serde_json::Value>,
+    ) -> Self {
+        self.additional_fields.insert(name.into(), value.into());
+        self
+    }
+}
+
+impl From<&str> for AuthorizationServerMetadata {
+    #[inline]
+    fn from(issuer: &str) -> Self {
+        Self::new(issuer)
+    }
+}
+
+impl From<String> for AuthorizationServerMetadata {
+    #[inline]
+    fn from(issuer: String) -> Self {
+        Self::new(issuer)
+    }
 }
 
 /// RFC 8414 §2 default for an omitted `response_modes_supported`
@@ -254,6 +462,145 @@ impl ProtectedResourceMetadata {
             resource: resource.into(),
             ..Default::default()
         }
+    }
+
+    /// Sets the issuer identifiers of authorization servers that can be
+    /// used with this resource
+    pub fn with_authorization_servers<I, S>(mut self, servers: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.authorization_servers = servers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the URL of the protected resource's JWK Set document
+    pub fn with_jwks_uri(mut self, uri: impl Into<String>) -> Self {
+        self.jwks_uri = Some(uri.into());
+        self
+    }
+
+    /// Sets the scope values used in authorization requests to access
+    /// this resource
+    pub fn with_scopes<I, S>(mut self, scopes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.scopes_supported = scopes.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the supported methods of sending a bearer token
+    /// (`header`, `body`, `query`)
+    pub fn with_bearer_methods<I, S>(mut self, methods: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.bearer_methods_supported = methods.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the JWS signing algorithms supported for signed resource responses
+    pub fn with_resource_signing_algs<I, S>(mut self, algs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.resource_signing_alg_values_supported = algs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the human-readable name of the protected resource
+    pub fn with_resource_name(mut self, name: impl Into<String>) -> Self {
+        self.resource_name = Some(name.into());
+        self
+    }
+
+    /// Sets the URL of a page with human-readable developer documentation
+    pub fn with_resource_documentation(mut self, url: impl Into<String>) -> Self {
+        self.resource_documentation = Some(url.into());
+        self
+    }
+
+    /// Sets the URL of the resource's policy on client usage of data
+    pub fn with_resource_policy_uri(mut self, url: impl Into<String>) -> Self {
+        self.resource_policy_uri = Some(url.into());
+        self
+    }
+
+    /// Sets the URL of the resource's terms of service
+    pub fn with_resource_tos_uri(mut self, url: impl Into<String>) -> Self {
+        self.resource_tos_uri = Some(url.into());
+        self
+    }
+
+    /// Sets whether the resource supports mutual-TLS certificate-bound
+    /// access tokens
+    #[inline]
+    pub fn with_tls_client_certificate_bound_access_tokens(mut self, enabled: bool) -> Self {
+        self.tls_client_certificate_bound_access_tokens = Some(enabled);
+        self
+    }
+
+    /// Sets the authorization details type values supported (RFC 9396)
+    pub fn with_authorization_details_types<I, S>(mut self, types: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.authorization_details_types_supported = types.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the JWS algorithms supported for validating DPoP proof JWTs
+    /// (RFC 9449)
+    pub fn with_dpop_signing_algs<I, S>(mut self, algs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.dpop_signing_alg_values_supported = algs.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets whether the resource always requires DPoP-bound access tokens
+    #[inline]
+    pub fn with_dpop_bound_access_tokens(mut self, required: bool) -> Self {
+        self.dpop_bound_access_tokens_required = Some(required);
+        self
+    }
+
+    /// Sets the signed JWT containing the metadata itself
+    pub fn with_signed_metadata(mut self, jwt: impl Into<String>) -> Self {
+        self.signed_metadata = Some(jwt.into());
+        self
+    }
+
+    /// Adds an extension field not modeled by the typed fields
+    pub fn with_additional_field(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<serde_json::Value>,
+    ) -> Self {
+        self.additional_fields.insert(name.into(), value.into());
+        self
+    }
+}
+
+impl From<&str> for ProtectedResourceMetadata {
+    #[inline]
+    fn from(resource: &str) -> Self {
+        Self::new(resource)
+    }
+}
+
+impl From<String> for ProtectedResourceMetadata {
+    #[inline]
+    fn from(resource: String) -> Self {
+        Self::new(resource)
     }
 }
 
@@ -416,6 +763,106 @@ mod tests {
 
         let back = serde_json::to_value(&metadata).unwrap();
         assert_eq!(back, doc);
+    }
+
+    #[test]
+    fn it_builds_server_metadata_with_builder_methods() {
+        let metadata = AuthorizationServerMetadata::new("https://auth.example.com")
+            .with_authorization_endpoint("https://auth.example.com/authorize")
+            .with_token_endpoint("https://auth.example.com/token")
+            .with_jwks_uri("https://auth.example.com/jwks")
+            .with_registration_endpoint("https://auth.example.com/register")
+            .with_scopes(["read", "write"])
+            .with_response_types(["code", "id_token"])
+            .with_response_modes(["query"])
+            .with_grant_types(["authorization_code", "refresh_token"])
+            .with_token_endpoint_auth_methods(["private_key_jwt"])
+            .with_token_endpoint_auth_signing_algs(["ES256"])
+            .with_service_documentation("https://auth.example.com/docs")
+            .with_ui_locales(["en", "de"])
+            .with_op_policy_uri("https://auth.example.com/policy")
+            .with_op_tos_uri("https://auth.example.com/tos")
+            .with_revocation_endpoint("https://auth.example.com/revoke")
+            .with_revocation_endpoint_auth_methods(["client_secret_basic"])
+            .with_revocation_endpoint_auth_signing_algs(["RS256"])
+            .with_introspection_endpoint("https://auth.example.com/introspect")
+            .with_introspection_endpoint_auth_methods(["client_secret_post"])
+            .with_introspection_endpoint_auth_signing_algs(["PS256"])
+            .with_code_challenge_methods(["S256"])
+            .with_additional_field("subject_types_supported", json!(["public"]));
+
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "issuer": "https://auth.example.com",
+                "authorization_endpoint": "https://auth.example.com/authorize",
+                "token_endpoint": "https://auth.example.com/token",
+                "jwks_uri": "https://auth.example.com/jwks",
+                "registration_endpoint": "https://auth.example.com/register",
+                "scopes_supported": ["read", "write"],
+                "response_types_supported": ["code", "id_token"],
+                "response_modes_supported": ["query"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "token_endpoint_auth_methods_supported": ["private_key_jwt"],
+                "token_endpoint_auth_signing_alg_values_supported": ["ES256"],
+                "service_documentation": "https://auth.example.com/docs",
+                "ui_locales_supported": ["en", "de"],
+                "op_policy_uri": "https://auth.example.com/policy",
+                "op_tos_uri": "https://auth.example.com/tos",
+                "revocation_endpoint": "https://auth.example.com/revoke",
+                "revocation_endpoint_auth_methods_supported": ["client_secret_basic"],
+                "revocation_endpoint_auth_signing_alg_values_supported": ["RS256"],
+                "introspection_endpoint": "https://auth.example.com/introspect",
+                "introspection_endpoint_auth_methods_supported": ["client_secret_post"],
+                "introspection_endpoint_auth_signing_alg_values_supported": ["PS256"],
+                "code_challenge_methods_supported": ["S256"],
+                "subject_types_supported": ["public"]
+            })
+        );
+    }
+
+    #[test]
+    fn it_builds_resource_metadata_with_builder_methods() {
+        let metadata = ProtectedResourceMetadata::new("https://api.example.com")
+            .with_authorization_servers(["https://auth.example.com"])
+            .with_jwks_uri("https://api.example.com/jwks")
+            .with_scopes(["read", "write"])
+            .with_bearer_methods(["header"])
+            .with_resource_signing_algs(["ES256"])
+            .with_resource_name("Example API")
+            .with_resource_documentation("https://api.example.com/docs")
+            .with_resource_policy_uri("https://api.example.com/policy")
+            .with_resource_tos_uri("https://api.example.com/tos")
+            .with_tls_client_certificate_bound_access_tokens(true)
+            .with_authorization_details_types(["payment_initiation"])
+            .with_dpop_signing_algs(["ES256"])
+            .with_dpop_bound_access_tokens(false)
+            .with_signed_metadata("header.payload.signature")
+            .with_additional_field("custom_extension", json!({ "nested": true }));
+
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "resource": "https://api.example.com",
+                "authorization_servers": ["https://auth.example.com"],
+                "jwks_uri": "https://api.example.com/jwks",
+                "scopes_supported": ["read", "write"],
+                "bearer_methods_supported": ["header"],
+                "resource_signing_alg_values_supported": ["ES256"],
+                "resource_name": "Example API",
+                "resource_documentation": "https://api.example.com/docs",
+                "resource_policy_uri": "https://api.example.com/policy",
+                "resource_tos_uri": "https://api.example.com/tos",
+                "tls_client_certificate_bound_access_tokens": true,
+                "authorization_details_types_supported": ["payment_initiation"],
+                "dpop_signing_alg_values_supported": ["ES256"],
+                "dpop_bound_access_tokens_required": false,
+                "signed_metadata": "header.payload.signature",
+                "custom_extension": { "nested": true }
+            })
+        );
     }
 
     #[test]

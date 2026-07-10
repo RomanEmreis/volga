@@ -315,9 +315,11 @@ impl BearerAuthConfig {
     /// Sets the URL advertised as `resource_metadata` in the `WWW-Authenticate`
     /// challenge per RFC 9728 (OAuth 2.0 Protected Resource Metadata).
     ///
-    /// volga does **not** serve the metadata document at this URL — that is
-    /// the application's responsibility. This setting only controls the
-    /// challenge-header hint sent to clients.
+    /// This setting only controls the challenge-header hint sent to clients;
+    /// serving the document is a separate concern. When the application
+    /// serves it via [`App::use_oauth_resource_metadata`](crate::App::use_oauth_resource_metadata),
+    /// the URL is derived automatically and this setting is only needed to
+    /// override it.
     pub fn with_resource_metadata_url<U: Into<String>>(mut self, url: U) -> Self {
         self.resource_metadata_url = Some(url.into());
         self
@@ -386,7 +388,7 @@ impl std::fmt::Debug for BearerTokenService {
 impl From<BearerAuthConfig> for BearerTokenService {
     #[inline]
     fn from(value: BearerAuthConfig) -> Self {
-        Self::from_config(value, false)
+        Self::from_config(value, false, None)
     }
 }
 
@@ -395,16 +397,28 @@ impl BearerTokenService {
     /// whether the outer server accepts TLS traffic.
     ///
     /// `tls_enabled` is consulted together with `require_https` to decide
-    /// whether to reject plaintext requests. Applications should prefer the
-    /// [`From<BearerAuthConfig>`] impl in tests and when TLS status is irrelevant.
+    /// whether to reject plaintext requests. `default_resource_metadata_url`
+    /// is the URL derived by
+    /// [`App::use_oauth_resource_metadata`](crate::App::use_oauth_resource_metadata);
+    /// it applies only when the config carries no explicit
+    /// [`with_resource_metadata_url`](BearerAuthConfig::with_resource_metadata_url).
+    /// Applications should prefer the [`From<BearerAuthConfig>`] impl in tests
+    /// and when TLS status is irrelevant.
     #[inline]
-    pub(crate) fn from_config(cfg: BearerAuthConfig, tls_enabled: bool) -> Self {
+    pub(crate) fn from_config(
+        cfg: BearerAuthConfig,
+        tls_enabled: bool,
+        default_resource_metadata_url: Option<String>,
+    ) -> Self {
         Self {
             validation: Arc::new(cfg.validation),
             encoding: cfg.encoding.map(Arc::new),
             decoding: cfg.decoding.map(Arc::new),
             strip_token_from_request: cfg.strip_token_from_request,
-            resource_metadata_url: cfg.resource_metadata_url.map(Into::into),
+            resource_metadata_url: cfg
+                .resource_metadata_url
+                .or(default_resource_metadata_url)
+                .map(Into::into),
             require_https: cfg.require_https,
             tls_enabled,
         }
@@ -1184,8 +1198,31 @@ mod tests {
 
     #[tokio::test]
     async fn it_from_config_records_tls_enabled() {
-        let service = BearerTokenService::from_config(BearerAuthConfig::default(), true);
+        let service = BearerTokenService::from_config(BearerAuthConfig::default(), true, None);
         assert!(service.tls_enabled);
+    }
+
+    #[tokio::test]
+    async fn it_from_config_prefers_explicit_resource_metadata_url_over_default() {
+        let service = BearerTokenService::from_config(
+            BearerAuthConfig::default().with_resource_metadata_url("https://a.com/explicit"),
+            false,
+            Some("https://a.com/derived".into()),
+        );
+        assert_eq!(
+            service.resource_metadata_url.as_deref(),
+            Some("https://a.com/explicit")
+        );
+
+        let service = BearerTokenService::from_config(
+            BearerAuthConfig::default(),
+            false,
+            Some("https://a.com/derived".into()),
+        );
+        assert_eq!(
+            service.resource_metadata_url.as_deref(),
+            Some("https://a.com/derived")
+        );
     }
 
     #[tokio::test]

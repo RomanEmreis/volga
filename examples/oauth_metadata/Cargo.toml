@@ -1,0 +1,12 @@
+[package]
+name = "oauth_metadata"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+volga = { path = "../../volga", features = ["jwt-auth"] }
+serde = "1.0.219"
+
+[lints]
+workspace = true

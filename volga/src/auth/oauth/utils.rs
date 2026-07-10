@@ -7,6 +7,9 @@
 //!   [RFC 8707 §2](https://www.rfc-editor.org/rfc/rfc8707#section-2)
 
 use super::error::{OAuthError, OAuthErrorCode};
+use super::metadata::{
+    WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
+};
 use std::fmt::{self, Display, Formatter, Write};
 use std::net::Ipv6Addr;
 use std::str::FromStr;
@@ -529,6 +532,106 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
     Ok(result)
 }
 
+/// Derives the Protected Resource Metadata URL for a resource identifier
+/// per [RFC 9728 §3.1](https://www.rfc-editor.org/rfc/rfc9728#section-3.1):
+/// the well-known path is inserted between the host and the path components
+/// of the canonicalized resource identifier.
+///
+/// Returns an [`OAuthError`] with code `invalid_target` when the resource
+/// identifier is not a valid `http`/`https` URI or contains a query.
+///
+/// # Example
+/// ```
+/// use volga::auth::oauth::protected_resource_metadata_url;
+///
+/// let url = protected_resource_metadata_url("https://api.example.com").unwrap();
+/// assert_eq!(url, "https://api.example.com/.well-known/oauth-protected-resource");
+///
+/// let url = protected_resource_metadata_url("https://api.example.com/v1").unwrap();
+/// assert_eq!(url, "https://api.example.com/.well-known/oauth-protected-resource/v1");
+/// ```
+pub fn protected_resource_metadata_url(resource: &str) -> Result<String, OAuthError> {
+    insert_well_known_path(resource, WELL_KNOWN_PROTECTED_RESOURCE)
+}
+
+/// Derives the Authorization Server Metadata URL for an issuer identifier
+/// per [RFC 8414 §3.1](https://www.rfc-editor.org/rfc/rfc8414#section-3.1):
+/// the well-known path is inserted between the host and the path components
+/// of the canonicalized issuer identifier.
+///
+/// Returns an [`OAuthError`] with code `invalid_target` when the issuer
+/// identifier is not a valid `http`/`https` URI or contains a query
+/// (RFC 8414 §2 forbids query and fragment components in the issuer).
+///
+/// # Example
+/// ```
+/// use volga::auth::oauth::authorization_server_metadata_url;
+///
+/// let url = authorization_server_metadata_url("https://auth.example.com/tenant1").unwrap();
+/// assert_eq!(url, "https://auth.example.com/.well-known/oauth-authorization-server/tenant1");
+/// ```
+pub fn authorization_server_metadata_url(issuer: &str) -> Result<String, OAuthError> {
+    insert_well_known_path(issuer, WELL_KNOWN_AUTHORIZATION_SERVER)
+}
+
+/// Derives the OpenID Connect Discovery metadata URL for an issuer identifier
+/// per [OpenID Connect Discovery 1.0 §4](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig):
+/// unlike the RFC 8414 rule, the well-known path is appended **after** the
+/// issuer's path component (a trailing slash in the issuer is dropped first).
+///
+/// Returns an [`OAuthError`] with code `invalid_target` when the issuer
+/// identifier is not a valid `http`/`https` URI or contains a query.
+///
+/// # Example
+/// ```
+/// use volga::auth::oauth::openid_configuration_url;
+///
+/// let url = openid_configuration_url("https://auth.example.com").unwrap();
+/// assert_eq!(url, "https://auth.example.com/.well-known/openid-configuration");
+///
+/// let url = openid_configuration_url("https://auth.example.com/tenant1").unwrap();
+/// assert_eq!(url, "https://auth.example.com/tenant1/.well-known/openid-configuration");
+/// ```
+pub fn openid_configuration_url(issuer: &str) -> Result<String, OAuthError> {
+    let canonical = canonical_metadata_base(issuer)?;
+    let base = canonical.strip_suffix('/').unwrap_or(&canonical);
+    let mut url = String::with_capacity(base.len() + WELL_KNOWN_OPENID_CONFIGURATION.len());
+    url.push_str(base);
+    url.push_str(WELL_KNOWN_OPENID_CONFIGURATION);
+    Ok(url)
+}
+
+/// Canonicalizes a resource/issuer identifier and validates that a metadata
+/// URL can be derived from it: an `http`/`https` URI without a query.
+fn canonical_metadata_base(uri: &str) -> Result<String, OAuthError> {
+    let canonical = canonicalize_resource_uri(uri)?;
+    if !canonical.starts_with("https://") && !canonical.starts_with("http://") {
+        return Err(invalid_target(
+            "metadata URL can only be derived from an http(s) URI",
+        ));
+    }
+    if canonical.contains('?') {
+        return Err(invalid_target("metadata URL base must not contain a query"));
+    }
+    Ok(canonical)
+}
+
+/// Inserts a well-known path between the authority and the path of a
+/// canonicalized `http`/`https` URI (the insertion rule shared by
+/// RFC 8414 §3.1 and RFC 9728 §3.1).
+fn insert_well_known_path(uri: &str, well_known: &str) -> Result<String, OAuthError> {
+    let canonical = canonical_metadata_base(uri)?;
+    let after_scheme = canonical.find("://").expect("scheme checked above") + 3;
+    let path_start = canonical[after_scheme..]
+        .find('/')
+        .map_or(canonical.len(), |i| after_scheme + i);
+    let mut url = String::with_capacity(canonical.len() + well_known.len());
+    url.push_str(&canonical[..path_start]);
+    url.push_str(well_known);
+    url.push_str(&canonical[path_start..]);
+    Ok(url)
+}
+
 /// Splits a URI authority (without userinfo) into host and optional port,
 /// keeping IP literals (`[::1]`) intact and validating their content.
 fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> {
@@ -945,6 +1048,64 @@ mod tests {
             canonicalize_resource_uri("foo://api.example.com:80/x").unwrap(),
             "foo://api.example.com:80/x"
         );
+    }
+
+    #[test]
+    fn it_derives_metadata_urls() {
+        assert_eq!(
+            protected_resource_metadata_url("HTTPS://API.Example.com:443").unwrap(),
+            "https://api.example.com/.well-known/oauth-protected-resource"
+        );
+        assert_eq!(
+            protected_resource_metadata_url("https://api.example.com/v1").unwrap(),
+            "https://api.example.com/.well-known/oauth-protected-resource/v1"
+        );
+        assert_eq!(
+            protected_resource_metadata_url("http://localhost:8080/api").unwrap(),
+            "http://localhost:8080/.well-known/oauth-protected-resource/api"
+        );
+        assert_eq!(
+            authorization_server_metadata_url("https://auth.example.com/").unwrap(),
+            "https://auth.example.com/.well-known/oauth-authorization-server"
+        );
+        assert_eq!(
+            authorization_server_metadata_url("https://auth.example.com/tenant1").unwrap(),
+            "https://auth.example.com/.well-known/oauth-authorization-server/tenant1"
+        );
+    }
+
+    #[test]
+    fn it_derives_openid_configuration_urls() {
+        assert_eq!(
+            openid_configuration_url("HTTPS://Auth.Example.com:443").unwrap(),
+            "https://auth.example.com/.well-known/openid-configuration"
+        );
+        // OIDC appends after the path, unlike the RFC 8414 insertion rule
+        assert_eq!(
+            openid_configuration_url("https://auth.example.com/tenant1").unwrap(),
+            "https://auth.example.com/tenant1/.well-known/openid-configuration"
+        );
+        assert_eq!(
+            openid_configuration_url("https://auth.example.com/tenant1/").unwrap(),
+            "https://auth.example.com/tenant1/.well-known/openid-configuration"
+        );
+    }
+
+    #[test]
+    fn it_rejects_underivable_metadata_urls() {
+        let cases = [
+            "urn:example:resource",           // no authority to insert after
+            "https://api.example.com?x=1",    // query in the base URI
+            "https://api.example.com/v1?x=1", // query in the base URI
+            "wss://api.example.com",          // not an http(s) scheme
+            "not a uri",
+        ];
+        for uri in cases {
+            let err = protected_resource_metadata_url(uri).unwrap_err();
+            assert_eq!(err.error, OAuthErrorCode::InvalidTarget, "case: {uri}");
+            let err = openid_configuration_url(uri).unwrap_err();
+            assert_eq!(err.error, OAuthErrorCode::InvalidTarget, "case: {uri}");
+        }
     }
 
     #[test]
