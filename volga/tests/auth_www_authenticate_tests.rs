@@ -68,9 +68,10 @@ async fn it_derives_resource_metadata_from_mounted_metadata_route() {
             app.with_bearer_auth(|auth| {
                 auth.set_decoding_key(DecodingKey::from_secret(b"wrong-secret"))
             })
+            .set_oauth_resource_metadata("https://api.example.com")
         })
         .setup(|app: &mut App| {
-            app.use_oauth_resource_metadata("https://api.example.com");
+            app.use_oauth_resource_metadata();
             app.map_get("/x", || async { volga::ok!("x") })
                 .authorize::<Claims>(roles(["admin"]));
         })
@@ -105,9 +106,10 @@ async fn it_prefers_explicit_resource_metadata_url_over_derived() {
                 auth.set_decoding_key(DecodingKey::from_secret(b"wrong-secret"))
                     .with_resource_metadata_url("https://api.example.com/custom-metadata")
             })
+            .set_oauth_resource_metadata("https://api.example.com")
         })
         .setup(|app: &mut App| {
-            app.use_oauth_resource_metadata("https://api.example.com");
+            app.use_oauth_resource_metadata();
             app.map_get("/x", || async { volga::ok!("x") })
                 .authorize::<Claims>(roles(["admin"]));
         })

@@ -48,6 +48,10 @@ impl App {
         {
             self = self.apply_cors_section(&full_value)?;
         }
+        #[cfg(feature = "oauth")]
+        {
+            self = self.apply_oauth_section(&full_value)?;
+        }
 
         let store = builder
             .build_from_value(&full_value)
@@ -151,6 +155,54 @@ impl App {
         }
         Ok(self)
     }
+
+    /// Applies the `[oauth.resource]` and `[oauth.server]` sections from the
+    /// parsed config value.
+    #[cfg(feature = "oauth")]
+    fn apply_oauth_section(mut self, value: &Value) -> Result<Self, io::Error> {
+        use crate::auth::oauth::{AuthorizationServerMetadata, ProtectedResourceMetadata};
+
+        let Some(section) = value.get("oauth") else {
+            return Ok(self);
+        };
+
+        if let Some(resource) = section.get("resource") {
+            let metadata: ProtectedResourceMetadata = parse_subsection(resource, "oauth.resource")?;
+            self = self.set_oauth_resource_metadata(metadata);
+        }
+        if let Some(server) = section.get("server") {
+            let mut server = server.clone();
+            // Mirror the `AuthorizationServerMetadata::new()` prefills so a
+            // minimal `[oauth.server]` section behaves like the builder DSL:
+            // `response_types_supported` is REQUIRED per RFC 8414 §2, and
+            // leaving `grant_types_supported` absent would make clients
+            // assume the implicit grant is supported
+            if let Some(obj) = server.as_object_mut() {
+                obj.entry("response_types_supported")
+                    .or_insert_with(|| serde_json::json!(["code"]));
+                obj.entry("grant_types_supported")
+                    .or_insert_with(|| serde_json::json!(["authorization_code"]));
+            }
+            let metadata: AuthorizationServerMetadata = parse_subsection(&server, "oauth.server")?;
+            self = self.set_oauth_server_metadata(metadata);
+        }
+        Ok(self)
+    }
+}
+
+/// Deserializes a nested built-in section (e.g. `[oauth.server]`), reporting
+/// the full dotted key in the startup error.
+#[cfg(feature = "oauth")]
+fn parse_subsection<T: serde::de::DeserializeOwned>(
+    value: &Value,
+    key: &str,
+) -> Result<T, io::Error> {
+    serde_json::from_value(value.clone()).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("config: [{key}] section is invalid: {e}"),
+        )
+    })
 }
 
 /// Spawns a background task that periodically reloads config from file.
@@ -378,6 +430,64 @@ mod tests {
     #[test]
     fn cors_section_applied_from_config() {
         let file = write_toml("[cors]\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[cfg(feature = "oauth")]
+    #[test]
+    fn oauth_section_applied_from_config() {
+        let file = write_toml(
+            "[oauth.resource]\n\
+             resource = \"https://api.example.com\"\n\
+             authorization_servers = [\"https://auth.example.com\"]\n\
+             scopes_supported = [\"read\"]\n\
+             \n\
+             [oauth.server]\n\
+             issuer = \"https://auth.example.com\"\n\
+             subject_types_supported = [\"public\"]\n",
+        );
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        let resource = app.oauth_resource_metadata.as_ref().unwrap();
+        assert_eq!(resource.resource, "https://api.example.com");
+        assert_eq!(resource.authorization_servers, ["https://auth.example.com"]);
+        assert_eq!(resource.scopes_supported, ["read"]);
+
+        let server = app.oauth_server_metadata.as_ref().unwrap();
+        assert_eq!(server.issuer, "https://auth.example.com");
+        // a minimal section gets the `new()` prefills
+        assert_eq!(server.response_types_supported, ["code"]);
+        assert_eq!(server.grant_types_supported, ["authorization_code"]);
+        // unknown keys land in `additional_fields` (flatten)
+        assert_eq!(
+            server.additional_fields["subject_types_supported"],
+            serde_json::json!(["public"])
+        );
+    }
+
+    #[cfg(feature = "oauth")]
+    #[test]
+    fn oauth_section_overrides_builder_calls() {
+        let file = write_toml("[oauth.server]\nissuer = \"https://file.example.com\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new()
+            .set_oauth_server_metadata("https://builder.example.com")
+            .with_config(|cfg| cfg.with_file(&path));
+
+        let server = app.oauth_server_metadata.as_ref().unwrap();
+        assert_eq!(server.issuer, "https://file.example.com");
+    }
+
+    #[cfg(feature = "oauth")]
+    #[test]
+    #[should_panic(expected = "config: [oauth.resource] section is invalid")]
+    fn invalid_oauth_section_panics_at_startup() {
+        // `resource` is required for the resource metadata document
+        let file = write_toml("[oauth.resource]\nscopes_supported = [\"read\"]\n");
         let path = file.path().to_str().unwrap().to_owned();
         App::new().with_config(|cfg| cfg.with_file(&path));
     }
