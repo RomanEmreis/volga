@@ -5,6 +5,7 @@
 //!   and [RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1)
 //! * Authorization Server Metadata per [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414)
 //! * Protected Resource Metadata per [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)
+//! * Dynamic Client Registration models per [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)
 //! * Utilities: the `WWW-Authenticate` Bearer challenge builder and parser,
 //!   resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
 //!   and well-known metadata URL derivation
@@ -23,10 +24,11 @@
 //! adds the server-side integration on top.
 
 pub use volga_oauth_core::{
-    AuthorizationServerMetadata, BearerChallenge, OAuthError, OAuthErrorCode,
-    ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION,
-    WELL_KNOWN_PROTECTED_RESOURCE, authorization_server_metadata_url, canonicalize_resource_uri,
-    openid_configuration_url, protected_resource_metadata_url,
+    AuthorizationServerMetadata, BearerChallenge, ClientMetadata, ClientRegistrationResponse,
+    OAuthError, OAuthErrorCode, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
+    WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
+    authorization_server_metadata_url, canonicalize_resource_uri, openid_configuration_url,
+    protected_resource_metadata_url,
 };
 
 mod handlers;

@@ -12,10 +12,10 @@
 //!   mandatory PKCE ([`Pkce`], S256 only), refresh tokens and resource
 //!   indicators (RFC 8707), plus token persistence through the
 //!   [`TokenStore`] abstraction.
+//! * [`RegistrationClient`] — Dynamic Client Registration (RFC 7591).
 //!
-//! Both share the transport policy of [`ClientConfig`] and the error
-//! model of [`ClientError`]. Dynamic Client Registration (RFC 7591) lands
-//! on the same foundation.
+//! All of them share the transport policy of [`ClientConfig`] and the
+//! error model of [`ClientError`].
 
 #[cfg(not(any(feature = "http1", feature = "http2")))]
 compile_error!(
@@ -30,15 +30,17 @@ pub use config::{ClientConfig, DEFAULT_MAX_REDIRECTS, DEFAULT_TIMEOUT};
 pub use discovery::DiscoveryClient;
 pub use error::ClientError;
 pub use pkce::{PKCE_METHOD, Pkce};
+pub use registration::RegistrationClient;
 pub use store::{InMemoryTokenStore, TokenStore};
 pub use token::{TokenResponse, TokenSet};
 
 // Shared protocol types (`volga::auth::oauth` re-exports the same set)
 pub use volga_oauth_core::{
-    AuthorizationServerMetadata, BearerChallenge, OAuthError, OAuthErrorCode,
-    ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION,
-    WELL_KNOWN_PROTECTED_RESOURCE, authorization_server_metadata_url, canonicalize_resource_uri,
-    openid_configuration_url, protected_resource_metadata_url,
+    AuthorizationServerMetadata, BearerChallenge, ClientMetadata, ClientRegistrationResponse,
+    OAuthError, OAuthErrorCode, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
+    WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
+    authorization_server_metadata_url, canonicalize_resource_uri, openid_configuration_url,
+    protected_resource_metadata_url,
 };
 
 mod cache;
@@ -47,6 +49,7 @@ mod config;
 mod discovery;
 mod error;
 mod pkce;
+mod registration;
 mod store;
 mod token;
 mod transport;

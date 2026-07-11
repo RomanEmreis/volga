@@ -85,7 +85,24 @@ impl Transport {
     ) -> Result<Value, ClientError> {
         tokio::time::timeout(
             self.config.timeout(),
-            self.post_form_inner(url, body, authorization),
+            self.post_inner(url, FORM_CONTENT_TYPE, body, authorization),
+        )
+        .await
+        .map_err(|_| self.timeout_error())?
+    }
+
+    /// Submits an `application/json` body to `url` with `POST` and parses
+    /// the response body as JSON, under the same policy as
+    /// [`post_form`](Self::post_form).
+    pub(crate) async fn post_json(
+        &self,
+        url: &str,
+        body: String,
+        authorization: Option<HeaderValue>,
+    ) -> Result<Value, ClientError> {
+        tokio::time::timeout(
+            self.config.timeout(),
+            self.post_inner(url, "application/json", body, authorization),
         )
         .await
         .map_err(|_| self.timeout_error())?
@@ -139,9 +156,10 @@ impl Transport {
         }
     }
 
-    async fn post_form_inner(
+    async fn post_inner(
         &self,
         url: &str,
+        content_type: &'static str,
         body: String,
         authorization: Option<HeaderValue>,
     ) -> Result<Value, ClientError> {
@@ -154,7 +172,7 @@ impl Transport {
             .method(Method::POST)
             .uri(uri)
             .header(ACCEPT, "application/json")
-            .header(CONTENT_TYPE, FORM_CONTENT_TYPE)
+            .header(CONTENT_TYPE, content_type)
             .header(USER_AGENT, USER_AGENT_VALUE);
         if let Some(authorization) = authorization {
             builder = builder.header(AUTHORIZATION, authorization);

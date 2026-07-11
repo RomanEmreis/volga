@@ -99,6 +99,27 @@ impl OAuthClient {
         }
     }
 
+    /// Creates a client from a Dynamic Client Registration response
+    /// (RFC 7591), adopting the issued credentials
+    ///
+    /// The registered `token_endpoint_auth_method` selects the
+    /// [`ClientAuthMethod`] and, when exactly one `redirect_uri` was
+    /// registered, it becomes the client's redirect URI.
+    pub fn from_registration(response: &volga_oauth_core::ClientRegistrationResponse) -> Self {
+        let mut client = Self::new(response.client_id.clone());
+        if let Some(secret) = &response.client_secret {
+            client = client.with_secret(secret.clone());
+            if response.metadata.token_endpoint_auth_method.as_deref() == Some("client_secret_post")
+            {
+                client = client.with_auth_method(ClientAuthMethod::Post);
+            }
+        }
+        if let [redirect_uri] = response.metadata.redirect_uris.as_slice() {
+            client = client.with_redirect_uri(redirect_uri.clone());
+        }
+        client
+    }
+
     /// Replaces the transport configuration
     pub fn with_config(mut self, config: ClientConfig) -> Self {
         self.transport = Transport::new(config);
