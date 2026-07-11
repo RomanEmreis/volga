@@ -6,8 +6,8 @@
 //! * [`canonicalize_resource_uri`] — resource indicator normalization per
 //!   [RFC 8707 §2](https://www.rfc-editor.org/rfc/rfc8707#section-2)
 
-use super::error::{OAuthError, OAuthErrorCode};
-use super::metadata::{
+use crate::error::{OAuthError, OAuthErrorCode};
+use crate::metadata::{
     WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
 };
 use std::fmt::{self, Display, Formatter, Write};
@@ -27,7 +27,7 @@ use std::str::FromStr;
 ///
 /// # Example
 /// ```
-/// use volga::auth::oauth::{BearerChallenge, OAuthErrorCode};
+/// use volga_oauth_core::{BearerChallenge, OAuthErrorCode};
 ///
 /// let challenge = BearerChallenge::new()
 ///     .with_error(OAuthErrorCode::InvalidToken)
@@ -135,7 +135,7 @@ impl BearerChallenge {
     ///
     /// # Example
     /// ```
-    /// use volga::auth::oauth::{BearerChallenge, OAuthErrorCode};
+    /// use volga_oauth_core::{BearerChallenge, OAuthErrorCode};
     ///
     /// let challenge = BearerChallenge::parse(
     ///     r#"Basic realm="legacy", Bearer error="invalid_token", error_description="Token has expired""#,
@@ -436,7 +436,7 @@ fn invalid_challenge(description: &str) -> OAuthError {
 ///
 /// # Example
 /// ```
-/// use volga::auth::oauth::canonicalize_resource_uri;
+/// use volga_oauth_core::canonicalize_resource_uri;
 ///
 /// let uri = canonicalize_resource_uri("HTTPS://API.Example.COM:443/v1").unwrap();
 /// assert_eq!(uri, "https://api.example.com/v1");
@@ -542,7 +542,7 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
 ///
 /// # Example
 /// ```
-/// use volga::auth::oauth::protected_resource_metadata_url;
+/// use volga_oauth_core::protected_resource_metadata_url;
 ///
 /// let url = protected_resource_metadata_url("https://api.example.com").unwrap();
 /// assert_eq!(url, "https://api.example.com/.well-known/oauth-protected-resource");
@@ -565,7 +565,7 @@ pub fn protected_resource_metadata_url(resource: &str) -> Result<String, OAuthEr
 ///
 /// # Example
 /// ```
-/// use volga::auth::oauth::authorization_server_metadata_url;
+/// use volga_oauth_core::authorization_server_metadata_url;
 ///
 /// let url = authorization_server_metadata_url("https://auth.example.com/tenant1").unwrap();
 /// assert_eq!(url, "https://auth.example.com/.well-known/oauth-authorization-server/tenant1");
@@ -584,7 +584,7 @@ pub fn authorization_server_metadata_url(issuer: &str) -> Result<String, OAuthEr
 ///
 /// # Example
 /// ```
-/// use volga::auth::oauth::openid_configuration_url;
+/// use volga_oauth_core::openid_configuration_url;
 ///
 /// let url = openid_configuration_url("https://auth.example.com").unwrap();
 /// assert_eq!(url, "https://auth.example.com/.well-known/openid-configuration");

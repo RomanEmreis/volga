@@ -1,0 +1,25 @@
+[package]
+name = "volga-oauth-client"
+version.workspace = true
+readme = "README.md"
+description = "OAuth 2.1/OIDC client for Volga Web Framework"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords = ["volga", "oauth", "oidc", "client", "discovery"]
+
+[dependencies]
+http = "1.4.2"
+serde_json = "1.0.150"
+volga-oauth-core = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

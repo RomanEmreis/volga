@@ -4,7 +4,7 @@
 //! [RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1) and
 //! [RFC 8707 §2](https://www.rfc-editor.org/rfc/rfc8707#section-2).
 
-use crate::{error::Error, http::StatusCode};
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
@@ -17,7 +17,7 @@ use std::fmt::{Display, Formatter};
 ///
 /// Serializes to/from its `snake_case` wire form:
 /// ```
-/// use volga::auth::oauth::OAuthErrorCode;
+/// use volga_oauth_core::OAuthErrorCode;
 ///
 /// let code = OAuthErrorCode::InvalidToken;
 /// assert_eq!(code.as_str(), "invalid_token");
@@ -216,16 +216,6 @@ impl Display for OAuthError {
 
 impl std::error::Error for OAuthError {}
 
-impl From<OAuthError> for Error {
-    /// Converts an [`OAuthError`] into a [`volga::Error`](Error), so OAuth
-    /// failures can be propagated from handlers with `?`. The HTTP status is
-    /// derived from the error code via [`OAuthErrorCode::status`].
-    #[inline]
-    fn from(err: OAuthError) -> Self {
-        Error::from_parts(err.error.status(), None, err)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,15 +356,5 @@ mod tests {
         for (code, status) in cases {
             assert_eq!(code.status(), status, "code: {code}");
         }
-    }
-
-    #[test]
-    fn it_converts_oauth_error_into_volga_error() {
-        let err: Error = OAuthError::new(OAuthErrorCode::InvalidToken)
-            .with_description("Token has expired")
-            .into();
-        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
-        assert!(err.instance().is_none());
-        assert_eq!(err.to_string(), "invalid_token: Token has expired");
     }
 }

@@ -3228,6 +3228,7 @@ dependencies = [
  "volga-dev-cert",
  "volga-di",
  "volga-macros",
+ "volga-oauth-core",
  "volga-open-api",
  "volga-rate-limiter",
 ]
@@ -3254,6 +3255,24 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "volga-oauth-client"
+version = "0.9.5"
+dependencies = [
+ "http",
+ "serde_json",
+ "volga-oauth-core",
+]
+
+[[package]]
+name = "volga-oauth-core"
+version = "0.9.5"
+dependencies = [
+ "http",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

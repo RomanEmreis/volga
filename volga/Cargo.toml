@@ -57,6 +57,7 @@ uuid = { version = "1.23.3", features = ["v4"], optional = true }
 volga-dev-cert     = { workspace = true, optional = true }
 volga-di           = { workspace = true, optional = true }
 volga-macros       = { workspace = true, optional = true }
+volga-oauth-core   = { workspace = true, optional = true }
 volga-open-api     = { workspace = true, optional = true }
 volga-rate-limiter = { workspace = true, optional = true }
 
@@ -106,7 +107,7 @@ basic-auth = ["dep:base64", "dep:subtle", "middleware"]
 jwt-auth-full = ["jwt-auth", "jwt-derive"]
 jwt-auth = ["dep:jsonwebtoken", "middleware", "oauth"]
 jwt-derive = ["dep:volga-macros", "volga-macros?/jwt-auth-derive"]
-oauth = ["serde/derive"]
+oauth = ["dep:volga-oauth-core", "serde/derive"]
 
 dev-cert = ["dep:volga-dev-cert"]
 di = ["dep:volga-di"]

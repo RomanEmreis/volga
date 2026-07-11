@@ -18,20 +18,41 @@
 //!   [`App::use_oauth_server_metadata`](crate::App::use_oauth_server_metadata) and
 //!   [`App::use_oidc_metadata`](crate::App::use_oidc_metadata)
 //!
-//! This module intentionally contains no client flows yet — the discovery
-//! client is built on top of these types separately.
+//! The protocol-level types are shared with the OAuth client crates through
+//! [`volga-oauth-core`](volga_oauth_core) and re-exported here; this module
+//! adds the server-side integration on top.
 
-pub use error::{OAuthError, OAuthErrorCode};
-pub use metadata::{
-    AuthorizationServerMetadata, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
-    WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
-};
-pub use utils::{
-    BearerChallenge, authorization_server_metadata_url, canonicalize_resource_uri,
+pub use volga_oauth_core::{
+    AuthorizationServerMetadata, BearerChallenge, OAuthError, OAuthErrorCode,
+    ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION,
+    WELL_KNOWN_PROTECTED_RESOURCE, authorization_server_metadata_url, canonicalize_resource_uri,
     openid_configuration_url, protected_resource_metadata_url,
 };
 
-mod error;
 mod handlers;
-mod metadata;
-mod utils;
+
+impl From<OAuthError> for crate::error::Error {
+    /// Converts an [`OAuthError`] into a [`volga::Error`](crate::error::Error),
+    /// so OAuth failures can be propagated from handlers with `?`. The HTTP
+    /// status is derived from the error code via [`OAuthErrorCode::status`].
+    #[inline]
+    fn from(err: OAuthError) -> Self {
+        Self::from_parts(err.error.status(), None, err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OAuthError, OAuthErrorCode};
+    use crate::{error::Error, http::StatusCode};
+
+    #[test]
+    fn it_converts_oauth_error_into_volga_error() {
+        let err: Error = OAuthError::new(OAuthErrorCode::InvalidToken)
+            .with_description("Token has expired")
+            .into();
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
+        assert!(err.instance().is_none());
+        assert_eq!(err.to_string(), "invalid_token: Token has expired");
+    }
+}
