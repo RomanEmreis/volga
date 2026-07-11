@@ -1,5 +1,14 @@
 //! End-to-end discovery tests: a real volga application serving the
 //! metadata documents (the `use_*` handlers) fetched by [`DiscoveryClient`].
+//!
+//! The dev-dependency volga server is built with `http1` (with `http2` it
+//! serves HTTP/2 exclusively), and these plaintext tests have no ALPN, so
+//! they require the client's `http1` feature. The HTTP/2 path was verified
+//! end-to-end manually (`http2`-only client with prior knowledge against an
+//! `http2` volga server passes this whole suite); in CI the `http2`-only
+//! build is covered by unit tests and compilation.
+
+#![cfg(feature = "http1")]
 
 use std::{
     collections::HashMap,

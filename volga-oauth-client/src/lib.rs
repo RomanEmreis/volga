@@ -12,6 +12,11 @@
 //! Client Registration (RFC 7591) land incrementally on the same
 //! foundation.
 
+#[cfg(not(any(feature = "http1", feature = "http2")))]
+compile_error!(
+    "volga-oauth-client requires at least one of the `http1` or `http2` features to be enabled"
+);
+
 pub use cache::MetadataCache;
 pub use config::{ClientConfig, DEFAULT_MAX_REDIRECTS, DEFAULT_TIMEOUT};
 pub use discovery::DiscoveryClient;

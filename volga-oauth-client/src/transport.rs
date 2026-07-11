@@ -33,14 +33,31 @@ pub(crate) struct Transport {
 
 impl Transport {
     pub(crate) fn new(config: ClientConfig) -> Self {
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_webpki_roots()
             // plain-http connections are still rejected by `check_scheme`
             // unless the config disables HTTPS enforcement
-            .https_or_http()
-            .enable_http1()
-            .build();
-        let client = Client::builder(TokioExecutor::new()).build(https);
+            .https_or_http();
+
+        // The HTTP version is negotiated via TLS ALPN from the enabled set
+        #[cfg(all(feature = "http1", feature = "http2"))]
+        let https = builder.enable_all_versions().build();
+        #[cfg(all(feature = "http1", not(feature = "http2")))]
+        let https = builder.enable_http1().build();
+        #[cfg(all(feature = "http2", not(feature = "http1")))]
+        let https = builder.enable_http2().build();
+
+        let client = Client::builder(TokioExecutor::new());
+        // Plaintext connections have no ALPN; in the HTTP/2-only build the
+        // client must use prior knowledge (RFC 9113 §3.3) instead of
+        // silently requiring TLS
+        #[cfg(all(feature = "http2", not(feature = "http1")))]
+        let client = {
+            let mut client = client;
+            client.http2_only(true);
+            client
+        };
+        let client = client.build(https);
         Self { client, config }
     }
 
