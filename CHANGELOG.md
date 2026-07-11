@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.5
+
+## Added
+* `oauth` feature (implied by `jwt-auth`) — OAuth 2.1/OIDC foundation at `volga::auth::oauth`: error models (`OAuthError` / `OAuthErrorCode`, covering the registered codes from RFC 6749, 6750, 7591 and 8707), the `WWW-Authenticate` Bearer challenge builder and parser (`BearerChallenge`), resource URI canonicalization and well-known metadata URL derivation.
+* OAuth metadata documents and serving: `AuthorizationServerMetadata` (RFC 8414 / OIDC Discovery) and `ProtectedResourceMetadata` (RFC 9728) with builder DSLs. Configure via `App::with_oauth_server_metadata` / `App::with_oauth_resource_metadata` (or the `set_*` counterparts, or the `[oauth.server]` / `[oauth.resource]` config file sections); serve via `App::use_oauth_server_metadata`, `App::use_oauth_resource_metadata` and `App::use_oidc_metadata`.
+* Dynamic Client Registration models (RFC 7591): `ClientMetadata` and `ClientRegistrationResponse`.
+* New crate `volga-oauth-core` — the protocol-type layer behind `volga::auth::oauth` (no HTTP I/O), shared with the client crate; public `volga` paths are unchanged.
+* New crate `volga-oauth-client` — OAuth 2.1/OIDC client independent of the `volga` server crate, usable from any Tokio application (feature flags `http1` (default) / `http2`):
+  * `DiscoveryClient` — fetches Authorization Server Metadata (RFC 8414), Protected Resource Metadata (RFC 9728) and the OIDC provider configuration, with the identifier validation the specs require and a `MetadataCache` hook.
+  * `OAuthClient` — Authorization Code flow with mandatory PKCE (S256 only), refresh tokens and resource indicators (RFC 8707); token persistence and transparent refresh through the `TokenStore` trait (`InMemoryTokenStore` built in).
+  * `RegistrationClient` — Dynamic Client Registration (RFC 7591), including initial access tokens; `OAuthClient::from_registration` adopts the issued credentials.
+  * `ClientConfig` transport policy (HTTPS enforcement, total timeouts, redirect limits) and the `ClientError` model shared by all three clients.
+
 # 0.9.3
 
 ## Added
