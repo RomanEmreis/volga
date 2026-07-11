@@ -113,6 +113,7 @@ impl Transport {
         let mut redirects = 0u8;
         loop {
             self.check_scheme(&url)?;
+
             let uri: Uri = url
                 .parse()
                 .map_err(|err| ClientError::validation(format!("invalid URL '{url}': {err}")))?;
@@ -164,6 +165,7 @@ impl Transport {
         authorization: Option<HeaderValue>,
     ) -> Result<Value, ClientError> {
         self.check_scheme(url)?;
+
         let uri: Uri = url
             .parse()
             .map_err(|err| ClientError::validation(format!("invalid URL '{url}': {err}")))?;
@@ -174,9 +176,11 @@ impl Transport {
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, content_type)
             .header(USER_AGENT, USER_AGENT_VALUE);
+
         if let Some(authorization) = authorization {
             builder = builder.header(AUTHORIZATION, authorization);
         }
+
         let req = builder
             .body(Full::new(Bytes::from(body)))
             .map_err(ClientError::transport)?;
@@ -186,12 +190,14 @@ impl Transport {
             .request(req)
             .await
             .map_err(ClientError::transport)?;
+
         if res.status().is_redirection() {
             return Err(ClientError::validation(format!(
                 "unexpected redirect ({}) from '{url}'",
                 res.status()
             )));
         }
+
         read_json(res).await
     }
 
@@ -245,6 +251,7 @@ async fn read_json(res: http::Response<Incoming>) -> Result<Value, ClientError> 
             Err(_) => Err(ClientError::Http(status)),
         };
     }
+
     serde_json::from_slice(&bytes).map_err(Into::into)
 }
 
@@ -256,11 +263,13 @@ fn resolve_redirect(current: &Uri, location: &str) -> Result<String, ClientError
     if location.starts_with("https://") || location.starts_with("http://") {
         return Ok(location.to_owned());
     }
+
     if location.starts_with('/')
         && let (Some(scheme), Some(authority)) = (current.scheme_str(), current.authority())
     {
         return Ok(format!("{scheme}://{authority}{location}"));
     }
+
     Err(ClientError::validation(format!(
         "unsupported redirect location: '{location}'"
     )))

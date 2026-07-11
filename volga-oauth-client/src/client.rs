@@ -107,6 +107,7 @@ impl OAuthClient {
     /// registered, it becomes the client's redirect URI.
     pub fn from_registration(response: &volga_oauth_core::ClientRegistrationResponse) -> Self {
         let mut client = Self::new(response.client_id.clone());
+
         if let Some(secret) = &response.client_secret {
             client = client.with_secret(secret.clone());
             if response.metadata.token_endpoint_auth_method.as_deref() == Some("client_secret_post")
@@ -114,9 +115,11 @@ impl OAuthClient {
                 client = client.with_auth_method(ClientAuthMethod::Post);
             }
         }
+
         if let [redirect_uri] = response.metadata.redirect_uris.as_slice() {
             client = client.with_redirect_uri(redirect_uri.clone());
         }
+
         client
     }
 
@@ -185,15 +188,19 @@ impl OAuthClient {
     ) -> Result<TokenSet, ClientError> {
         let endpoint = token_endpoint(metadata)?;
         let mut form = form_urlencoded::Serializer::new(String::new());
+
         form.append_pair("grant_type", "authorization_code")
             .append_pair("code", code)
             .append_pair("code_verifier", request.pkce.verifier());
+
         if let Some(redirect_uri) = &self.redirect_uri {
             form.append_pair("redirect_uri", redirect_uri);
         }
+
         for resource in &request.resources {
             form.append_pair("resource", resource);
         }
+
         let authorization = self.apply_client_auth(&mut form);
         self.request_tokens(endpoint, form.finish(), authorization)
             .await
@@ -211,8 +218,10 @@ impl OAuthClient {
     ) -> Result<TokenSet, ClientError> {
         let endpoint = token_endpoint(metadata)?;
         let mut form = form_urlencoded::Serializer::new(String::new());
+
         form.append_pair("grant_type", "refresh_token")
             .append_pair("refresh_token", refresh_token);
+
         let authorization = self.apply_client_auth(&mut form);
         self.request_tokens(endpoint, form.finish(), authorization)
             .await
@@ -238,13 +247,16 @@ impl OAuthClient {
         let Some(tokens) = store.get(key) else {
             return Ok(None);
         };
+
         if !tokens.expires_within(EXPIRY_LEEWAY) {
             return Ok(Some(tokens));
         }
+
         let Some(refresh_token) = tokens.refresh_token else {
             store.remove(key);
             return Ok(None);
         };
+
         match self.refresh(metadata, &refresh_token).await {
             Ok(mut fresh) => {
                 // no rotation in the response — the old token stays valid
@@ -285,6 +297,7 @@ impl OAuthClient {
             .transport
             .post_form(endpoint, body, authorization)
             .await?;
+
         let response: TokenResponse = serde_json::from_value(value)?;
         Ok(response.into())
     }
@@ -386,6 +399,7 @@ impl AuthorizationRequestBuilder<'_> {
             .ok_or_else(|| {
                 ClientError::validation("server metadata declares no authorization_endpoint")
             })?;
+
         self.client.transport.check_scheme(endpoint)?;
 
         let methods = &self.metadata.code_challenge_methods_supported;
@@ -405,18 +419,23 @@ impl AuthorizationRequestBuilder<'_> {
             .append_pair("state", &state)
             .append_pair("code_challenge", pkce.challenge())
             .append_pair("code_challenge_method", PKCE_METHOD);
+
         if let Some(redirect_uri) = &self.client.redirect_uri {
             query.append_pair("redirect_uri", redirect_uri);
         }
+
         if !self.scopes.is_empty() {
             query.append_pair("scope", &self.scopes.join(" "));
         }
+
         for resource in &self.resources {
             query.append_pair("resource", resource);
         }
+
         for (name, value) in &self.extra {
             query.append_pair(name, value);
         }
+
         let query = query.finish();
 
         let separator = if endpoint.contains('?') { '&' } else { '?' };
@@ -477,7 +496,9 @@ impl AuthorizationRequest {
 fn basic_credentials(client_id: &str, client_secret: &str) -> HeaderValue {
     let encode =
         |value: &str| -> String { form_urlencoded::byte_serialize(value.as_bytes()).collect() };
+
     let credentials = STANDARD.encode(format!("{}:{}", encode(client_id), encode(client_secret)));
+
     HeaderValue::from_str(&format!("Basic {credentials}"))
         .expect("base64 output is always a valid header value")
 }

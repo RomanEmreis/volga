@@ -100,6 +100,7 @@ impl RegistrationClient {
         let endpoint = metadata.registration_endpoint.as_deref().ok_or_else(|| {
             ClientError::validation("server metadata declares no registration_endpoint")
         })?;
+
         self.register_at(endpoint, request).await
     }
 
@@ -116,10 +117,12 @@ impl RegistrationClient {
             .as_deref()
             .map(bearer_credentials)
             .transpose()?;
+
         let value = self
             .transport
             .post_json(endpoint, body, authorization)
             .await?;
+
         serde_json::from_value(value).map_err(Into::into)
     }
 }
@@ -133,16 +136,19 @@ fn validate_request(request: &ClientMetadata) -> Result<(), ClientError> {
         .any(|grant| grant == "authorization_code" || grant == "implicit")
         // omitted grant_types default to authorization_code (§2)
         || request.grant_types.is_empty();
+
     if redirect_based && request.redirect_uris.is_empty() {
         return Err(ClientError::validation(
             "redirect_uris is required for redirect-based grant types",
         ));
     }
+
     if request.jwks.is_some() && request.jwks_uri.is_some() {
         return Err(ClientError::validation(
             "jwks and jwks_uri are mutually exclusive",
         ));
     }
+
     Ok(())
 }
 

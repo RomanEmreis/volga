@@ -152,16 +152,20 @@ impl BearerChallenge {
             if element.is_empty() {
                 continue;
             }
+
             match classify_element(element) {
                 Element::Scheme { scheme, param } => {
                     // The Bearer challenge ends where the next challenge begins
                     if bearer.is_some() {
                         break;
                     }
+
                     if !scheme.bytes().all(is_tchar) {
                         return Err(invalid_challenge("auth scheme is not a valid token"));
                     }
+
                     seen_scheme = true;
+
                     if scheme.eq_ignore_ascii_case("Bearer") {
                         let mut challenge = Self::new();
                         if let Some(param) = param {
@@ -205,9 +209,11 @@ impl BearerChallenge {
             }
             _ => return Ok(()),
         };
+
         if slot.replace(value).is_some() {
             return Err(invalid_challenge("duplicate parameter in Bearer challenge"));
         }
+
         Ok(())
     }
 }
@@ -335,12 +341,14 @@ fn parse_auth_param(element: &str) -> Result<(String, String), OAuthError> {
     let Some((name, value)) = element.split_once('=') else {
         return Err(invalid_challenge("auth parameter is missing '='"));
     };
+
     let name = name.trim_end();
     if name.is_empty() || !name.bytes().all(is_tchar) {
         return Err(invalid_challenge(
             "auth parameter name is not a valid token",
         ));
     }
+
     let value = value.trim_start();
     let value = if let Some(quoted) = value.strip_prefix('"') {
         unquote(quoted)?
@@ -351,6 +359,7 @@ fn parse_auth_param(element: &str) -> Result<(String, String), OAuthError> {
             "auth parameter value must be a token or a quoted string",
         ));
     };
+
     Ok((name.to_ascii_lowercase(), value))
 }
 
@@ -360,6 +369,7 @@ fn parse_auth_param(element: &str) -> Result<(String, String), OAuthError> {
 fn unquote(quoted: &str) -> Result<String, OAuthError> {
     let mut value = String::with_capacity(quoted.len());
     let mut symbols = quoted.chars();
+
     while let Some(symbol) = symbols.next() {
         match symbol {
             '"' => {
@@ -445,17 +455,21 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
     if uri.is_empty() {
         return Err(invalid_target("resource URI must not be empty"));
     }
+
     if uri.bytes().any(|b| !(0x21..=0x7e).contains(&b)) {
         return Err(invalid_target(
             "resource URI must not contain whitespace, control or non-ASCII characters",
         ));
     }
+
     if uri.contains('#') {
         return Err(invalid_target("resource URI must not contain a fragment"));
     }
+
     let Some((scheme, rest)) = uri.split_once(':') else {
         return Err(invalid_target("resource URI must be an absolute URI"));
     };
+
     let valid_scheme = scheme
         .chars()
         .next()
@@ -463,9 +477,11 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
         && scheme
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+
     if !valid_scheme {
         return Err(invalid_target("resource URI scheme is invalid"));
     }
+
     let scheme = scheme.to_ascii_lowercase();
     let is_web_scheme = matches!(scheme.as_str(), "http" | "https" | "ws" | "wss");
 
@@ -496,10 +512,12 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
             "resource URI path or query contains invalid characters",
         ));
     }
+
     let (host, port) = split_host_port(authority)?;
     if host.is_empty() {
         return Err(invalid_target("resource URI must have a host"));
     }
+
     let host = host.to_ascii_lowercase();
 
     let port = match port {
@@ -529,6 +547,7 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
     } else {
         result.push_str(path_and_query);
     }
+
     Ok(result)
 }
 
@@ -596,8 +615,10 @@ pub fn openid_configuration_url(issuer: &str) -> Result<String, OAuthError> {
     let canonical = canonical_metadata_base(issuer)?;
     let base = canonical.strip_suffix('/').unwrap_or(&canonical);
     let mut url = String::with_capacity(base.len() + WELL_KNOWN_OPENID_CONFIGURATION.len());
+
     url.push_str(base);
     url.push_str(WELL_KNOWN_OPENID_CONFIGURATION);
+
     Ok(url)
 }
 
@@ -610,9 +631,11 @@ fn canonical_metadata_base(uri: &str) -> Result<String, OAuthError> {
             "metadata URL can only be derived from an http(s) URI",
         ));
     }
+
     if canonical.contains('?') {
         return Err(invalid_target("metadata URL base must not contain a query"));
     }
+
     Ok(canonical)
 }
 
@@ -625,10 +648,13 @@ fn insert_well_known_path(uri: &str, well_known: &str) -> Result<String, OAuthEr
     let path_start = canonical[after_scheme..]
         .find('/')
         .map_or(canonical.len(), |i| after_scheme + i);
+
     let mut url = String::with_capacity(canonical.len() + well_known.len());
+
     url.push_str(&canonical[..path_start]);
     url.push_str(well_known);
     url.push_str(&canonical[path_start..]);
+
     Ok(url)
 }
 
@@ -639,14 +665,17 @@ fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> 
         let Some(close) = inner.find(']') else {
             return Err(invalid_target("resource URI IPv6 literal is not closed"));
         };
+
         if !is_valid_ip_literal(&inner[..close]) {
             return Err(invalid_target(
                 "resource URI bracketed host must be a valid IP literal",
             ));
         }
+
         let host_end = close + 2; // '[' + literal + ']'
         let host = &authority[..host_end];
         let after_host = &authority[host_end..];
+
         match after_host.strip_prefix(':') {
             Some(port) => Ok((host, Some(port))),
             None if after_host.is_empty() => Ok((host, None)),
@@ -680,6 +709,7 @@ fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> 
 /// `b":@/?"` it covers a path with an optional query (§3.3–3.4).
 fn is_valid_uri_component(component: &str, extra: &[u8]) -> bool {
     let mut bytes = component.bytes();
+
     while let Some(byte) = bytes.next() {
         match byte {
             b'%' => {

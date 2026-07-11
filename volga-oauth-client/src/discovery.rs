@@ -94,8 +94,10 @@ impl DiscoveryClient {
     ) -> Result<AuthorizationServerMetadata, ClientError> {
         let url = authorization_server_metadata_url(issuer)
             .map_err(|err| ClientError::validation(err.to_string()))?;
+
         let metadata: AuthorizationServerMetadata = self.fetch_document(&url).await?;
         validate_identifier("issuer", &metadata.issuer, issuer)?;
+
         Ok(metadata)
     }
 
@@ -111,8 +113,10 @@ impl DiscoveryClient {
     ) -> Result<AuthorizationServerMetadata, ClientError> {
         let url = openid_configuration_url(issuer)
             .map_err(|err| ClientError::validation(err.to_string()))?;
+
         let metadata: AuthorizationServerMetadata = self.fetch_document(&url).await?;
         validate_identifier("issuer", &metadata.issuer, issuer)?;
+
         Ok(metadata)
     }
 
@@ -126,8 +130,10 @@ impl DiscoveryClient {
     ) -> Result<ProtectedResourceMetadata, ClientError> {
         let url = protected_resource_metadata_url(resource)
             .map_err(|err| ClientError::validation(err.to_string()))?;
+
         let metadata: ProtectedResourceMetadata = self.fetch_document(&url).await?;
         validate_identifier("resource", &metadata.resource, resource)?;
+
         Ok(metadata)
     }
 
@@ -147,6 +153,7 @@ impl DiscoveryClient {
         if let Some(expected) = expected_resource {
             validate_identifier("resource", &metadata.resource, expected)?;
         }
+
         Ok(metadata)
     }
 
@@ -168,6 +175,7 @@ impl DiscoveryClient {
                     "resource metadata advertises no authorization servers".to_owned(),
                 )
             })?;
+
         match self.fetch_server_metadata(issuer).await {
             Err(ClientError::Http(status)) if status == http::StatusCode::NOT_FOUND => {
                 self.fetch_oidc_metadata(issuer).await
@@ -184,10 +192,12 @@ impl DiscoveryClient {
         {
             return serde_json::from_value(document).map_err(Into::into);
         }
+
         let document = self.transport.get_json(url).await?;
         if let Some(cache) = &self.cache {
             cache.put(url, &document);
         }
+
         serde_json::from_value(document).map_err(Into::into)
     }
 }
@@ -197,6 +207,7 @@ impl DiscoveryClient {
 fn validate_identifier(field: &str, returned: &str, requested: &str) -> Result<(), ClientError> {
     let requested = canonicalize_resource_uri(requested)
         .map_err(|err| ClientError::validation(err.to_string()))?;
+
     if canonicalize_resource_uri(returned).is_ok_and(|returned| returned == requested) {
         Ok(())
     } else {
