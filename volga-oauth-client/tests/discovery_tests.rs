@@ -10,43 +10,18 @@
 
 #![cfg(feature = "http1")]
 
+mod common;
+
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::Duration,
 };
 
+use common::{free_port, serve};
 use volga::App;
 use volga_oauth_client::{
     ClientConfig, ClientError, DiscoveryClient, MetadataCache, OAuthErrorCode,
 };
-
-/// Grabs a free localhost port.
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
-}
-
-/// Spawns `app` bound to `port` and waits until it accepts connections.
-async fn serve(port: u16, app: App) -> tokio::task::JoinHandle<()> {
-    let app = app.bind(format!("127.0.0.1:{port}")).without_greeter();
-    let handle = tokio::spawn(async move {
-        let _ = app.run().await;
-    });
-    for _ in 0..200 {
-        if tokio::net::TcpStream::connect(("127.0.0.1", port))
-            .await
-            .is_ok()
-        {
-            return handle;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("test server did not start on port {port}");
-}
 
 /// A discovery client accepting the plaintext test server.
 fn plaintext_client() -> DiscoveryClient {

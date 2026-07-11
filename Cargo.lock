@@ -3262,7 +3262,10 @@ dependencies = [
 name = "volga-oauth-client"
 version = "0.9.5"
 dependencies = [
+ "aws-lc-rs",
+ "base64",
  "bytes",
+ "form_urlencoded",
  "http",
  "http-body-util",
  "hyper",
