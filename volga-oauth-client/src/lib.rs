@@ -4,12 +4,17 @@
 //! (re-exported here) and independent of the `volga` server crate — usable
 //! from any Tokio application.
 //!
-//! This crate currently provides the client configuration ([`ClientConfig`])
-//! and error model ([`ClientError`]); the discovery client (RFC 8414 /
-//! RFC 9728), the Authorization Code + PKCE flow and Dynamic Client
-//! Registration (RFC 7591) land incrementally on top of them.
+//! Currently provides the discovery client ([`DiscoveryClient`]) fetching
+//! Authorization Server Metadata (RFC 8414), Protected Resource Metadata
+//! (RFC 9728) and OpenID Connect provider configuration, on top of the
+//! client configuration ([`ClientConfig`]) and error model
+//! ([`ClientError`]). The Authorization Code + PKCE flow and Dynamic
+//! Client Registration (RFC 7591) land incrementally on the same
+//! foundation.
 
+pub use cache::MetadataCache;
 pub use config::{ClientConfig, DEFAULT_MAX_REDIRECTS, DEFAULT_TIMEOUT};
+pub use discovery::DiscoveryClient;
 pub use error::ClientError;
 
 // Shared protocol types (`volga::auth::oauth` re-exports the same set)
@@ -20,5 +25,8 @@ pub use volga_oauth_core::{
     openid_configuration_url, protected_resource_metadata_url,
 };
 
+mod cache;
 mod config;
+mod discovery;
 mod error;
+mod transport;
