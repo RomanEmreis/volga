@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   * `RegistrationClient` — Dynamic Client Registration (RFC 7591), including initial access tokens; `OAuthClient::from_registration` adopts the issued credentials.
   * `ClientConfig` transport policy (HTTPS enforcement, total timeouts, redirect limits) and the `ClientError` model shared by all three clients.
 
+# 0.9.4
+
+## Added
+* HTTP `QUERY` method support: `App::map_query` / `RouteGroup::map_query` register routes for the new verb (#195).
+* Generic `App::map` / `RouteGroup::map` — register a route for any HTTP method; accepts anything `TryInto<Method>` (including string verbs like `"QUERY"`) and an owned or borrowed pattern. The named `map_*` helpers are unchanged (#195).
+* `HttpBody` is now an extractor — take it directly as a handler argument to access the raw request body (#194).
+
+## Security
+* Added a `cargo audit` CI pipeline (#196).
+* `jsonwebtoken` switched from the `rust_crypto` backend to `aws_lc_rs`, resolving RUSTSEC-2026-0185 and RUSTSEC-2023-0071 (#196).
+
 # 0.9.3
 
 ## Added
