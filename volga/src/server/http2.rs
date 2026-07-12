@@ -5,10 +5,13 @@ use hyper::rt::{Read, Write};
 use hyper_util::rt::TokioExecutor;
 use std::sync::Arc;
 
-#[cfg(feature = "ws")]
+// When HTTP/1 is also enabled the connection may be either protocol
+// (TLS ALPN advertises both), so the auto-detecting builder is required;
+// WebSockets additionally need it for upgrades
+#[cfg(any(feature = "ws", feature = "http1"))]
 use hyper_util::server::conn::auto::Builder;
 
-#[cfg(not(feature = "ws"))]
+#[cfg(not(any(feature = "ws", feature = "http1")))]
 use hyper::server::conn::http2::Builder;
 
 /// HTTP/2 impl
@@ -17,11 +20,17 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     pub(super) async fn serve_core(self, scope: Scope, env: Arc<AppEnv>) {
         let scoped_cancellation_token = scope.cancellation_token.clone();
 
-        #[cfg(feature = "ws")]
+        #[cfg(any(feature = "ws", feature = "http1"))]
         {
             let mut connection_builder = Builder::new(TokioExecutor::new());
 
+            #[cfg(feature = "http1")]
+            if let Limit::Limited(max_header_count) = env.max_header_count {
+                connection_builder.http1().max_headers(max_header_count);
+            }
+
             let http2_builder = &mut connection_builder.http2();
+            #[cfg(feature = "ws")]
             http2_builder.enable_connect_protocol();
 
             if let Limit::Limited(max_header_size) = env.max_header_size {
@@ -30,7 +39,10 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
 
             configure_http2(http2_builder, env.http2_limits);
 
+            #[cfg(feature = "ws")]
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
+            #[cfg(not(feature = "ws"))]
+            let connection = connection_builder.serve_connection(self.io, scope);
             let connection = env.graceful_shutdown.watch(connection);
 
             drop(env);
@@ -41,7 +53,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
                 scoped_cancellation_token.cancel();
             }
         }
-        #[cfg(not(feature = "ws"))]
+        #[cfg(not(any(feature = "ws", feature = "http1")))]
         {
             let mut connection_builder = Builder::new(TokioExecutor::new());
             if let Limit::Limited(max_header_size) = env.max_header_size {
@@ -65,7 +77,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
 }
 
 #[inline]
-#[cfg(feature = "ws")]
+#[cfg(any(feature = "ws", feature = "http1"))]
 fn configure_http2<E>(
     builder: &mut hyper_util::server::conn::auto::Http2Builder<'_, E>,
     limits: Http2Limits,
@@ -96,7 +108,7 @@ fn configure_http2<E>(
 }
 
 #[inline]
-#[cfg(not(feature = "ws"))]
+#[cfg(not(any(feature = "ws", feature = "http1")))]
 fn configure_http2<E>(builder: &mut Builder<E>, limits: Http2Limits) {
     match limits.max_concurrent_streams {
         Limit::Limited(limit) => builder.max_concurrent_streams(limit),
