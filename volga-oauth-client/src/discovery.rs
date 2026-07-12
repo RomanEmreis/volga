@@ -99,10 +99,10 @@ impl DiscoveryClient {
         let url = authorization_server_metadata_url(issuer)
             .map_err(|err| ClientError::validation(err.to_string()))?;
 
-        let metadata: AuthorizationServerMetadata = self.fetch_document(&url).await?;
-        validate_identifier("issuer", &metadata.issuer, issuer)?;
-
-        Ok(metadata)
+        self.fetch_document(&url, |metadata: &AuthorizationServerMetadata| {
+            validate_identifier("issuer", &metadata.issuer, issuer)
+        })
+        .await
     }
 
     /// Fetches the OpenID Connect provider configuration for `issuer`
@@ -118,10 +118,10 @@ impl DiscoveryClient {
         let url = openid_configuration_url(issuer)
             .map_err(|err| ClientError::validation(err.to_string()))?;
 
-        let metadata: AuthorizationServerMetadata = self.fetch_document(&url).await?;
-        validate_identifier("issuer", &metadata.issuer, issuer)?;
-
-        Ok(metadata)
+        self.fetch_document(&url, |metadata: &AuthorizationServerMetadata| {
+            validate_identifier("issuer", &metadata.issuer, issuer)
+        })
+        .await
     }
 
     /// Fetches Protected Resource Metadata (RFC 9728 §3) for `resource`
@@ -135,10 +135,10 @@ impl DiscoveryClient {
         let url = protected_resource_metadata_url(resource)
             .map_err(|err| ClientError::validation(err.to_string()))?;
 
-        let metadata: ProtectedResourceMetadata = self.fetch_document(&url).await?;
-        validate_identifier("resource", &metadata.resource, resource)?;
-
-        Ok(metadata)
+        self.fetch_document(&url, |metadata: &ProtectedResourceMetadata| {
+            validate_identifier("resource", &metadata.resource, resource)
+        })
+        .await
     }
 
     /// Fetches Protected Resource Metadata from an explicit URL — typically
@@ -153,12 +153,12 @@ impl DiscoveryClient {
         url: &str,
         expected_resource: Option<&str>,
     ) -> Result<ProtectedResourceMetadata, ClientError> {
-        let metadata: ProtectedResourceMetadata = self.fetch_document(url).await?;
-        if let Some(expected) = expected_resource {
-            validate_identifier("resource", &metadata.resource, expected)?;
-        }
-
-        Ok(metadata)
+        self.fetch_document(url, |metadata: &ProtectedResourceMetadata| {
+            expected_resource.map_or(Ok(()), |expected| {
+                validate_identifier("resource", &metadata.resource, expected)
+            })
+        })
+        .await
     }
 
     /// Discovers the authorization server protecting `resource_metadata`
@@ -189,8 +189,13 @@ impl DiscoveryClient {
     }
 
     /// Fetches and deserializes a document, going through the cache when
-    /// one is configured.
-    async fn fetch_document<T: DeserializeOwned>(&self, url: &str) -> Result<T, ClientError> {
+    /// one is configured; `validate` runs the caller's semantic checks on
+    /// both fresh and cached documents.
+    async fn fetch_document<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        validate: impl FnOnce(&T) -> Result<(), ClientError>,
+    ) -> Result<T, ClientError> {
         // the HTTPS policy applies to cached documents too — a cache hit
         // must not resolve a URL the transport would refuse to fetch
         self.transport.check_scheme(url)?;
@@ -198,15 +203,24 @@ impl DiscoveryClient {
         if let Some(cache) = &self.cache
             && let Some(document) = cache.get(url)
         {
-            return serde_json::from_value(document).map_err(Into::into);
+            let document: T = serde_json::from_value(document)?;
+            validate(&document)?;
+            return Ok(document);
         }
 
-        let document = self.transport.get_json(url).await?;
+        let raw = self.transport.get_json(url).await?;
         if let Some(cache) = &self.cache {
-            cache.put(url, &document);
+            let document: T = serde_json::from_value(raw.clone())?;
+            validate(&document)?;
+            // only an accepted document is stored — one malformed or
+            // lying response must not poison the cache
+            cache.put(url, &raw);
+            Ok(document)
+        } else {
+            let document: T = serde_json::from_value(raw)?;
+            validate(&document)?;
+            Ok(document)
         }
-
-        serde_json::from_value(document).map_err(Into::into)
     }
 }
 

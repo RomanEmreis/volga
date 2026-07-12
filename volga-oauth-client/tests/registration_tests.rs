@@ -70,7 +70,7 @@ async fn it_registers_a_client_and_builds_an_oauth_client_from_it() {
     );
 
     // the issued credentials carry over into an OAuthClient
-    let client = OAuthClient::from_registration(&registered);
+    let client = OAuthClient::from_registration(&registered).unwrap();
     let debug = format!("{client:?}");
     assert!(debug.contains("generated-id"));
     assert!(debug.contains("Post"));

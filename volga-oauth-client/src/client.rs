@@ -103,16 +103,46 @@ impl OAuthClient {
     /// (RFC 7591), adopting the issued credentials
     ///
     /// The registered `token_endpoint_auth_method` selects the
-    /// [`ClientAuthMethod`] and, when exactly one `redirect_uri` was
-    /// registered, it becomes the client's redirect URI.
-    pub fn from_registration(response: &volga_oauth_core::ClientRegistrationResponse) -> Self {
+    /// [`ClientAuthMethod`] (`client_secret_basic` when omitted, per
+    /// RFC 7591 §2) and, when exactly one `redirect_uri` was registered,
+    /// it becomes the client's redirect URI.
+    ///
+    /// Fails with [`ClientError::Validation`] when the registered method
+    /// is one this client cannot perform (e.g. `client_secret_jwt`) —
+    /// authenticating differently from the registration would only yield
+    /// `invalid_client` at the token endpoint. A registration with `none`
+    /// produces a public client; a secret issued alongside it is ignored,
+    /// since that method sends no credentials.
+    pub fn from_registration(
+        response: &volga_oauth_core::ClientRegistrationResponse,
+    ) -> Result<Self, ClientError> {
         let mut client = Self::new(response.client_id.clone());
 
-        if let Some(secret) = &response.client_secret {
-            client = client.with_secret(secret.clone());
-            if response.metadata.token_endpoint_auth_method.as_deref() == Some("client_secret_post")
-            {
-                client = client.with_auth_method(ClientAuthMethod::Post);
+        // an omitted method defaults to client_secret_basic (RFC 7591 §2)
+        match response
+            .metadata
+            .token_endpoint_auth_method
+            .as_deref()
+            .unwrap_or("client_secret_basic")
+        {
+            "none" => {}
+            "client_secret_basic" => {
+                if let Some(secret) = &response.client_secret {
+                    client = client.with_secret(secret.clone());
+                }
+            }
+            "client_secret_post" => {
+                if let Some(secret) = &response.client_secret {
+                    client = client
+                        .with_secret(secret.clone())
+                        .with_auth_method(ClientAuthMethod::Post);
+                }
+            }
+            unsupported => {
+                return Err(ClientError::validation(format!(
+                    "registered token_endpoint_auth_method '{unsupported}' is not supported; \
+                     this client supports client_secret_basic, client_secret_post and none"
+                )));
             }
         }
 
@@ -120,7 +150,7 @@ impl OAuthClient {
             client = client.with_redirect_uri(redirect_uri.clone());
         }
 
-        client
+        Ok(client)
     }
 
     /// Replaces the transport configuration
@@ -641,6 +671,50 @@ mod tests {
         let mut form = form_urlencoded::Serializer::new(String::new());
         assert!(post.apply_client_auth(&mut form).is_none());
         assert_eq!(form.finish(), "client_id=my-client&client_secret=s3cret");
+    }
+
+    #[test]
+    fn it_adopts_registered_credentials_per_auth_method() {
+        let registration = |auth_method: serde_json::Value| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "client_secret": "generated-secret",
+                    "token_endpoint_auth_method": auth_method,
+                    "redirect_uris": ["https://app.example.com/callback"]
+                }),
+            )
+            .unwrap()
+        };
+
+        // an omitted method defaults to client_secret_basic
+        let client =
+            OAuthClient::from_registration(&registration(serde_json::Value::Null)).unwrap();
+        assert_eq!(client.auth_method, ClientAuthMethod::Basic);
+        assert_eq!(client.client_secret.as_deref(), Some("generated-secret"));
+        assert_eq!(
+            client.redirect_uri.as_deref(),
+            Some("https://app.example.com/callback")
+        );
+
+        let client =
+            OAuthClient::from_registration(&registration("client_secret_post".into())).unwrap();
+        assert_eq!(client.auth_method, ClientAuthMethod::Post);
+        assert_eq!(client.client_secret.as_deref(), Some("generated-secret"));
+
+        // `none` sends no credentials — the client stays public even
+        // though the server issued a secret
+        let client = OAuthClient::from_registration(&registration("none".into())).unwrap();
+        assert_eq!(client.client_secret, None);
+
+        // a method this client cannot perform is rejected upfront rather
+        // than failing with invalid_client at the token endpoint
+        let err =
+            OAuthClient::from_registration(&registration("client_secret_jwt".into())).unwrap_err();
+        assert!(matches!(
+            err,
+            ClientError::Validation(reason) if reason.contains("client_secret_jwt")
+        ));
     }
 
     #[test]

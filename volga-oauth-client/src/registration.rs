@@ -40,7 +40,7 @@ use crate::{ClientConfig, ClientError, transport::Transport};
 ///     .await?;
 ///
 /// // ready-to-use client under the issued credentials
-/// let client = OAuthClient::from_registration(&registered);
+/// let client = OAuthClient::from_registration(&registered)?;
 /// # Ok(())
 /// # }
 /// ```

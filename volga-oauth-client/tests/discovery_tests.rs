@@ -254,6 +254,36 @@ impl MetadataCache for ToyCache {
 }
 
 #[tokio::test]
+async fn it_caches_only_validated_documents() {
+    let port = free_port();
+    let issuer = format!("http://127.0.0.1:{port}");
+
+    let mut app = App::new();
+    // a document claiming a different issuer than the one it is fetched for
+    app.map_get("/.well-known/oauth-authorization-server", || async {
+        volga::ok!({
+            "issuer": "https://evil.example.com",
+            "response_types_supported": ["code"]
+        })
+    });
+    // a 200 response that is not a metadata document at all
+    app.map_get("/.well-known/openid-configuration", || async {
+        volga::ok!({ "hello": "world" })
+    });
+    let server = serve(port, app).await;
+
+    let cache = Arc::new(ToyCache::default());
+    let client = DiscoveryClient::with_config(ClientConfig::new().require_https(false))
+        .with_cache(cache.clone());
+
+    // neither the lying nor the malformed response makes it into the cache
+    assert!(client.fetch_server_metadata(&issuer).await.is_err());
+    assert!(client.fetch_oidc_metadata(&issuer).await.is_err());
+    assert!(cache.documents.lock().unwrap().is_empty());
+    server.abort();
+}
+
+#[tokio::test]
 async fn it_serves_documents_from_the_cache() {
     let port = free_port();
     let issuer = format!("http://127.0.0.1:{port}");
