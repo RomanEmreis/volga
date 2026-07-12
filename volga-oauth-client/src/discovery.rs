@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use volga_oauth_core::{
     AuthorizationServerMetadata, ProtectedResourceMetadata, authorization_server_metadata_url,
-    canonicalize_resource_uri, openid_configuration_url, protected_resource_metadata_url,
+    openid_configuration_url, protected_resource_metadata_url,
 };
 
 use crate::{ClientConfig, ClientError, MetadataCache, transport::Transport};
@@ -202,13 +202,13 @@ impl DiscoveryClient {
     }
 }
 
-/// Compares a returned identifier against the requested one in canonical
-/// form (RFC 8414 §3.3 / RFC 9728 §3.3 require them to be identical).
+/// Compares a returned identifier against the requested one; RFC 8414
+/// §3.3 / RFC 9728 §3.3 require the returned value to be **identical** to
+/// the identifier used for discovery, so no normalization is applied — a
+/// value differing only in case, default port or trailing slash still
+/// binds to a distinct identifier and is rejected.
 fn validate_identifier(field: &str, returned: &str, requested: &str) -> Result<(), ClientError> {
-    let requested = canonicalize_resource_uri(requested)
-        .map_err(|err| ClientError::validation(err.to_string()))?;
-
-    if canonicalize_resource_uri(returned).is_ok_and(|returned| returned == requested) {
+    if returned == requested {
         Ok(())
     } else {
         Err(ClientError::validation(format!(
@@ -222,21 +222,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_validates_identifiers_in_canonical_form() {
-        // canonicalization strips the default port and lowercases host
+    fn it_requires_identical_identifiers() {
+        assert!(
+            validate_identifier(
+                "issuer",
+                "https://auth.example.com",
+                "https://auth.example.com"
+            )
+            .is_ok()
+        );
+        // equivalent under URI normalization is still not identical
         assert!(
             validate_identifier(
                 "issuer",
                 "https://AUTH.example.com:443",
                 "https://auth.example.com"
             )
-            .is_ok()
+            .is_err()
+        );
+        assert!(
+            validate_identifier(
+                "issuer",
+                "https://auth.example.com/",
+                "https://auth.example.com"
+            )
+            .is_err()
         );
         assert!(matches!(
             validate_identifier("issuer", "https://other.example.com", "https://auth.example.com"),
             Err(ClientError::Validation(reason)) if reason.contains("issuer mismatch")
         ));
-        // a non-canonicalizable returned value is a mismatch, not a crash
-        assert!(validate_identifier("issuer", "not a uri", "https://auth.example.com").is_err());
     }
 }

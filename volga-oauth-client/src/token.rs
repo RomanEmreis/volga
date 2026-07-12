@@ -58,7 +58,7 @@ pub struct TokenSet {
     pub id_token: Option<String>,
 
     /// Absolute access token expiration; `None` when the server did not
-    /// report a lifetime
+    /// report a lifetime (or reported one too large to represent)
     pub expires_at: Option<SystemTime>,
 }
 
@@ -73,9 +73,14 @@ impl TokenSet {
 
     /// Returns `true` when the access token expires within `leeway` from
     /// now (or already has)
+    ///
+    /// A `leeway` too large to represent covers any expiration.
     pub fn expires_within(&self, leeway: Duration) -> bool {
-        self.expires_at
-            .is_some_and(|expires_at| SystemTime::now() + leeway >= expires_at)
+        self.expires_at.is_some_and(|expires_at| {
+            SystemTime::now()
+                .checked_add(leeway)
+                .is_none_or(|deadline| deadline >= expires_at)
+        })
     }
 }
 
@@ -87,9 +92,12 @@ impl From<TokenResponse> for TokenSet {
             refresh_token: response.refresh_token,
             scope: response.scope,
             id_token: response.id_token,
+            // an `expires_in` too large to represent as a `SystemTime`
+            // (a buggy or malicious server) is treated as no reported
+            // lifetime rather than panicking
             expires_at: response
                 .expires_in
-                .map(|secs| SystemTime::now() + Duration::from_secs(secs)),
+                .and_then(|secs| SystemTime::now().checked_add(Duration::from_secs(secs))),
         }
     }
 }
@@ -168,6 +176,21 @@ mod tests {
 
         let tokens = TokenSet::from(response(Some(0)));
         assert!(tokens.is_expired());
+    }
+
+    #[test]
+    fn it_survives_unrepresentable_lifetimes() {
+        // an overflowing `expires_in` must not panic — it degrades to
+        // "no reported lifetime"
+        let tokens = TokenSet::from(response(Some(u64::MAX)));
+        assert_eq!(tokens.expires_at, None);
+        assert!(!tokens.is_expired());
+
+        // an overflowing leeway covers any expiration
+        let tokens = TokenSet::from(response(Some(3600)));
+        assert!(tokens.expires_within(Duration::MAX));
+        let tokens = TokenSet::from(response(None));
+        assert!(!tokens.expires_within(Duration::MAX));
     }
 
     #[test]
