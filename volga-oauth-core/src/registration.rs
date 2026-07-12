@@ -123,12 +123,26 @@ impl ClientMetadata {
     }
 
     /// Sets the grant types the client will use
+    ///
+    /// Response types only accompany redirect-based grants; when none of
+    /// the given grants is redirect-based (`authorization_code` or
+    /// `implicit`), the response types are cleared so the profile default
+    /// `code` does not leak into e.g. a `client_credentials` registration
+    /// (RFC 7591 §2 requires the two fields to be consistent). Set
+    /// response types after grant types when an extension grant needs them.
     pub fn with_grant_types<I, S>(mut self, grant_types: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
         self.grant_types = grant_types.into_iter().map(Into::into).collect();
+        if !self
+            .grant_types
+            .iter()
+            .any(|grant| grant == "authorization_code" || grant == "implicit")
+        {
+            self.response_types.clear();
+        }
         self
     }
 
@@ -310,6 +324,26 @@ mod tests {
         let metadata = ClientMetadata::new();
         assert_eq!(metadata.grant_types, ["authorization_code"]);
         assert_eq!(metadata.response_types, ["code"]);
+    }
+
+    #[test]
+    fn it_drops_response_types_for_non_redirect_grants() {
+        let metadata = ClientMetadata::new().with_grant_types(["client_credentials"]);
+        assert!(metadata.response_types.is_empty());
+        // and the empty list is omitted from the wire document
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(json, json!({ "grant_types": ["client_credentials"] }));
+
+        // a redirect-based grant in the set keeps the response types
+        let metadata =
+            ClientMetadata::new().with_grant_types(["authorization_code", "refresh_token"]);
+        assert_eq!(metadata.response_types, ["code"]);
+
+        // explicitly set response types afterwards are kept as-is
+        let metadata = ClientMetadata::new()
+            .with_grant_types(["urn:example:custom"])
+            .with_response_types(["custom"]);
+        assert_eq!(metadata.response_types, ["custom"]);
     }
 
     #[test]

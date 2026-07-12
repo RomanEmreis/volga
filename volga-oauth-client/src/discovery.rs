@@ -76,6 +76,10 @@ impl DiscoveryClient {
 
     /// Attaches a [`MetadataCache`] consulted before each fetch and updated
     /// after each successful one
+    ///
+    /// The transport's HTTPS policy applies to cached lookups as well: a
+    /// URL the client would refuse to fetch is rejected even when the
+    /// cache holds a document for it.
     pub fn with_cache(mut self, cache: Arc<dyn MetadataCache>) -> Self {
         self.cache = Some(cache);
         self
@@ -187,6 +191,10 @@ impl DiscoveryClient {
     /// Fetches and deserializes a document, going through the cache when
     /// one is configured.
     async fn fetch_document<T: DeserializeOwned>(&self, url: &str) -> Result<T, ClientError> {
+        // the HTTPS policy applies to cached documents too — a cache hit
+        // must not resolve a URL the transport would refuse to fetch
+        self.transport.check_scheme(url)?;
+
         if let Some(cache) = &self.cache
             && let Some(document) = cache.get(url)
         {
@@ -220,6 +228,56 @@ fn validate_identifier(field: &str, returned: &str, requested: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{Value, json};
+    use std::sync::Mutex;
+    use volga_oauth_core::protected_resource_metadata_url;
+
+    struct StaticCache(Mutex<std::collections::HashMap<String, Value>>);
+
+    impl StaticCache {
+        fn with_document(url: &str, document: Value) -> Arc<Self> {
+            Arc::new(Self(Mutex::new(
+                [(url.to_owned(), document)].into_iter().collect(),
+            )))
+        }
+    }
+
+    impl MetadataCache for StaticCache {
+        fn get(&self, url: &str) -> Option<Value> {
+            self.0.lock().unwrap().get(url).cloned()
+        }
+
+        fn put(&self, url: &str, document: &Value) {
+            self.0
+                .lock()
+                .unwrap()
+                .insert(url.to_owned(), document.clone());
+        }
+    }
+
+    #[tokio::test]
+    async fn it_enforces_https_before_consulting_the_cache() {
+        let resource = "http://api.example.com";
+        let url = protected_resource_metadata_url(resource).unwrap();
+        let cache = StaticCache::with_document(
+            &url,
+            json!({ "resource": resource, "authorization_servers": ["http://auth.example.com"] }),
+        );
+
+        // a strict client must reject the plain-http URL even though the
+        // cache could satisfy it without any network I/O
+        let strict = DiscoveryClient::new().with_cache(cache.clone());
+        assert!(matches!(
+            strict.fetch_resource_metadata(resource).await,
+            Err(ClientError::InsecureUrl(_))
+        ));
+
+        // a relaxed client serves the same entry straight from the cache
+        let relaxed = DiscoveryClient::with_config(crate::ClientConfig::new().require_https(false))
+            .with_cache(cache);
+        let metadata = relaxed.fetch_resource_metadata(resource).await.unwrap();
+        assert_eq!(metadata.resource, resource);
+    }
 
     #[test]
     fn it_requires_identical_identifiers() {

@@ -129,13 +129,16 @@ impl RegistrationClient {
 
 /// Client-side sanity checks per RFC 7591 §2 before any I/O.
 fn validate_request(request: &ClientMetadata) -> Result<(), ClientError> {
-    // redirect_uris is REQUIRED for redirect-based grants
+    // redirect_uris is REQUIRED for redirect-based grants; any declared
+    // response type implies one too, since response types are delivered
+    // via the redirection endpoint
     let redirect_based = request
         .grant_types
         .iter()
         .any(|grant| grant == "authorization_code" || grant == "implicit")
         // omitted grant_types default to authorization_code (§2)
-        || request.grant_types.is_empty();
+        || request.grant_types.is_empty()
+        || !request.response_types.is_empty();
 
     if redirect_based && request.redirect_uris.is_empty() {
         return Err(ClientError::validation(
@@ -176,9 +179,21 @@ mod tests {
         let valid = ClientMetadata::new().with_redirect_uris(["https://app.example.com/cb"]);
         assert!(validate_request(&valid).is_ok());
 
-        // non-redirect grants need no redirect_uris
+        // non-redirect grants need no redirect_uris (the builder clears
+        // the default `code` response type for them)
         let client_credentials = ClientMetadata::new().with_grant_types(["client_credentials"]);
+        assert!(client_credentials.response_types.is_empty());
         assert!(validate_request(&client_credentials).is_ok());
+
+        // an explicitly declared response type still demands redirect_uris —
+        // response types are delivered via the redirection endpoint
+        let inconsistent = ClientMetadata::new()
+            .with_grant_types(["client_credentials"])
+            .with_response_types(["code"]);
+        assert!(matches!(
+            validate_request(&inconsistent),
+            Err(ClientError::Validation(reason)) if reason.contains("redirect_uris")
+        ));
 
         let conflicting = valid
             .with_jwks_uri("https://app.example.com/jwks")
