@@ -133,13 +133,15 @@ impl Transport {
             let status = res.status();
 
             if status.is_redirection() {
-                redirects += 1;
-                if redirects > self.config.max_redirects() {
+                // checking before incrementing keeps the counter within
+                // `max_redirects`, so a limit of `u8::MAX` cannot overflow it
+                if redirects == self.config.max_redirects() {
                     return Err(ClientError::transport(format!(
                         "too many redirects (limit: {})",
                         self.config.max_redirects()
                     )));
                 }
+                redirects += 1;
                 let location = res
                     .headers()
                     .get(LOCATION)

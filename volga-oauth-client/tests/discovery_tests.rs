@@ -235,6 +235,35 @@ async fn it_follows_redirects_within_the_configured_limit() {
     server.abort();
 }
 
+#[tokio::test]
+async fn it_stops_a_redirect_loop_at_the_maximum_limit() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+
+    let mut app = App::new();
+    app.map_get("/loop", || async {
+        volga::status!(302; [("Location", "/loop")])
+    });
+    let server = serve(port, app).await;
+
+    // u8::MAX is the largest configurable limit; the redirect counter must
+    // reach it without overflowing
+    let client = DiscoveryClient::with_config(
+        ClientConfig::new()
+            .require_https(false)
+            .with_max_redirects(u8::MAX),
+    );
+    let err = client
+        .fetch_resource_metadata_from_url(&format!("{base}/loop"), None)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, ClientError::Transport(source) if source.to_string().contains("too many redirects (limit: 255)")),
+        "error was: {err}"
+    );
+    server.abort();
+}
+
 #[derive(Debug, Default)]
 struct ToyCache {
     documents: Mutex<HashMap<String, serde_json::Value>>,
