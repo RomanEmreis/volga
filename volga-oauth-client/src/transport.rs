@@ -258,12 +258,24 @@ async fn read_json(res: http::Response<Incoming>) -> Result<Value, ClientError> 
 }
 
 /// Resolves a `Location` header value against the URI being fetched;
-/// absolute URLs are taken as-is, absolute paths inherit scheme and
-/// authority. Other relative forms are rejected — metadata endpoints have
-/// no business issuing them.
+/// absolute URLs are taken as-is, scheme-relative URLs (`//host/path`)
+/// inherit the scheme, absolute paths inherit scheme and authority. Other
+/// relative forms are rejected — metadata endpoints have no business
+/// issuing them.
 fn resolve_redirect(current: &Uri, location: &str) -> Result<String, ClientError> {
     if location.starts_with("https://") || location.starts_with("http://") {
         return Ok(location.to_owned());
+    }
+
+    // a scheme-relative location designates its own authority (RFC 3986
+    // §4.2) — it must not be mistaken for an absolute path below
+    if let Some(authority_and_path) = location.strip_prefix("//") {
+        return match current.scheme_str() {
+            Some(scheme) => Ok(format!("{scheme}://{authority_and_path}")),
+            None => Err(ClientError::validation(format!(
+                "cannot resolve scheme-relative redirect '{location}'"
+            ))),
+        };
     }
 
     if location.starts_with('/')
@@ -291,6 +303,12 @@ mod tests {
         assert_eq!(
             resolve_redirect(&current, "/x/y").unwrap(),
             "https://auth.example.com/x/y"
+        );
+        // scheme-relative: the advertised authority wins, the scheme is
+        // inherited — not glued onto the current authority as a path
+        assert_eq!(
+            resolve_redirect(&current, "//other.example.com/x").unwrap(),
+            "https://other.example.com/x"
         );
         assert!(matches!(
             resolve_redirect(&current, "x/y"),
