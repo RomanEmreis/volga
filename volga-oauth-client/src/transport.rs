@@ -247,11 +247,17 @@ async fn read_json(res: http::Response<Incoming>) -> Result<Value, ClientError> 
         .to_bytes();
 
     if !status.is_success() {
-        // an OAuth error body (RFC 6749 §5.2) beats the bare status
-        return match serde_json::from_slice::<OAuthError>(&bytes) {
-            Ok(err) => Err(err.into()),
-            Err(_) => Err(ClientError::Http(status)),
-        };
+        // an OAuth error body (RFC 6749 §5.2) beats the bare status —
+        // except on 404, which means the endpoint is not served at all:
+        // no OAuth flow defines protocol errors for it, discovery keys
+        // its OIDC fallback off that status, and frameworks commonly
+        // attach JSON bodies to their catch-all 404
+        if status != http::StatusCode::NOT_FOUND
+            && let Ok(err) = serde_json::from_slice::<OAuthError>(&bytes)
+        {
+            return Err(err.into());
+        }
+        return Err(ClientError::Http(status));
     }
 
     serde_json::from_slice(&bytes).map_err(Into::into)

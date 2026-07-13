@@ -127,6 +127,36 @@ async fn it_falls_back_to_oidc_path_when_rfc8414_is_not_served() {
 }
 
 #[tokio::test]
+async fn it_falls_back_to_oidc_path_on_a_json_404() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let resource = format!("{base}/api");
+
+    // the RFC 8414 path 404s with a framework-style JSON error body —
+    // still "not served", not an OAuth protocol error
+    let mut app = App::new()
+        .with_oauth_resource_metadata(|m| {
+            m.with_resource(&resource)
+                .with_authorization_servers([&base])
+        })
+        .set_oauth_server_metadata(base.as_str());
+    app.use_oauth_resource_metadata().use_oidc_metadata();
+    app.map_get("/.well-known/oauth-authorization-server", || async {
+        volga::status!(404, { "error": "not_found" })
+    });
+    let server = serve(port, app).await;
+
+    let client = plaintext_client();
+    let resource_metadata = client.fetch_resource_metadata(&resource).await.unwrap();
+    let server_metadata = client
+        .discover_authorization_server(&resource_metadata)
+        .await
+        .unwrap();
+    assert_eq!(server_metadata.issuer, base);
+    server.abort();
+}
+
+#[tokio::test]
 async fn it_rejects_issuer_mismatch() {
     let port = free_port();
     let issuer = format!("http://127.0.0.1:{port}");

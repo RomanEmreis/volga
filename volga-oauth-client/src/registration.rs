@@ -129,21 +129,27 @@ impl RegistrationClient {
 
 /// Client-side sanity checks per RFC 7591 §2 before any I/O.
 fn validate_request(request: &ClientMetadata) -> Result<(), ClientError> {
-    // redirect_uris is REQUIRED for redirect-based grants; any declared
-    // response type implies one too, since response types are delivered
-    // via the redirection endpoint
-    let redirect_based = request
-        .grant_types
-        .iter()
-        .any(|grant| grant == "authorization_code" || grant == "implicit")
-        // omitted grant_types default to authorization_code (§2)
-        || request.grant_types.is_empty()
-        || !request.response_types.is_empty();
+    // a software statement is passed through opaquely and may itself
+    // carry redirect_uris and grant_types (RFC 7591 §2.3), so the
+    // redirect-based check below cannot be decided from the top-level
+    // values alone — the server validates the signed metadata
+    if request.software_statement.is_none() {
+        // redirect_uris is REQUIRED for redirect-based grants; any declared
+        // response type implies one too, since response types are delivered
+        // via the redirection endpoint
+        let redirect_based = request
+            .grant_types
+            .iter()
+            .any(|grant| grant == "authorization_code" || grant == "implicit")
+            // omitted grant_types default to authorization_code (§2)
+            || request.grant_types.is_empty()
+            || !request.response_types.is_empty();
 
-    if redirect_based && request.redirect_uris.is_empty() {
-        return Err(ClientError::validation(
-            "redirect_uris is required for redirect-based grant types",
-        ));
+        if redirect_based && request.redirect_uris.is_empty() {
+            return Err(ClientError::validation(
+                "redirect_uris is required for redirect-based grant types",
+            ));
+        }
     }
 
     if request.jwks.is_some() && request.jwks_uri.is_some() {
@@ -194,6 +200,11 @@ mod tests {
             validate_request(&inconsistent),
             Err(ClientError::Validation(reason)) if reason.contains("redirect_uris")
         ));
+
+        // a software statement may carry redirect_uris/grant_types inside
+        // the signed JWT — the redirect-based check must not pre-reject it
+        let signed_only = ClientMetadata::new().with_software_statement("a.b.c");
+        assert!(validate_request(&signed_only).is_ok());
 
         let conflicting = valid
             .with_jwks_uri("https://app.example.com/jwks")
