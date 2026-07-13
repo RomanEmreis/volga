@@ -24,6 +24,8 @@ categories = [
 volga-dev-cert    = { path = "volga-dev-cert",    version = "0.9.5" }
 volga-di          = { path = "volga-di",          version = "0.9.5" }
 volga-macros      = { path = "volga-macros",      version = "0.9.5" }
+volga-oauth-client = { path = "volga-oauth-client", version = "0.9.5" }
+volga-oauth-core  = { path = "volga-oauth-core",  version = "0.9.5" }
 volga-open-api    = { path = "volga-open-api",    version = "0.9.5" }
 volga-rate-limiter = { path = "volga-rate-limiter", version = "0.9.5" }
 

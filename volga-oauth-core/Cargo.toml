@@ -1,0 +1,25 @@
+[package]
+name = "volga-oauth-core"
+version.workspace = true
+readme = "README.md"
+description = "Shared OAuth 2.1/OIDC foundation types for Volga Web Framework"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+categories.workspace = true
+keywords = ["volga", "oauth", "oidc", "metadata", "discovery"]
+
+[dependencies]
+http = "1.4.2"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+
+[features]
+default = []
+
+[lints]
+workspace = true

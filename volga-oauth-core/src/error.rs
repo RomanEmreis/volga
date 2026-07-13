@@ -4,20 +4,20 @@
 //! [RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1) and
 //! [RFC 8707 §2](https://www.rfc-editor.org/rfc/rfc8707#section-2).
 
-use crate::{error::Error, http::StatusCode};
+use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
 /// Machine-readable OAuth 2.0 error code
 ///
 /// Covers the registered codes from RFC 6749 (authorization and token
-/// endpoints), RFC 6750 (bearer token usage) and RFC 8707 (resource
-/// indicators). Unregistered extension codes are preserved as
-/// [`OAuthErrorCode::Other`].
+/// endpoints), RFC 6750 (bearer token usage), RFC 8707 (resource
+/// indicators) and RFC 7591 (dynamic client registration). Unregistered
+/// extension codes are preserved as [`OAuthErrorCode::Other`].
 ///
 /// Serializes to/from its `snake_case` wire form:
 /// ```
-/// use volga::auth::oauth::OAuthErrorCode;
+/// use volga_oauth_core::OAuthErrorCode;
 ///
 /// let code = OAuthErrorCode::InvalidToken;
 /// assert_eq!(code.as_str(), "invalid_token");
@@ -54,6 +54,15 @@ pub enum OAuthErrorCode {
     InsufficientScope,
     /// The requested resource is invalid, missing, unknown or malformed (RFC 8707)
     InvalidTarget,
+    /// The value of one or more redirection URIs is invalid (RFC 7591)
+    InvalidRedirectUri,
+    /// The value of one of the client metadata fields is invalid (RFC 7591)
+    InvalidClientMetadata,
+    /// The software statement presented is invalid (RFC 7591)
+    InvalidSoftwareStatement,
+    /// The software statement is not approved for use by this
+    /// authorization server (RFC 7591)
+    UnapprovedSoftwareStatement,
     /// An unregistered extension error code
     Other(String),
 }
@@ -75,6 +84,10 @@ impl OAuthErrorCode {
             OAuthErrorCode::InvalidToken => "invalid_token",
             OAuthErrorCode::InsufficientScope => "insufficient_scope",
             OAuthErrorCode::InvalidTarget => "invalid_target",
+            OAuthErrorCode::InvalidRedirectUri => "invalid_redirect_uri",
+            OAuthErrorCode::InvalidClientMetadata => "invalid_client_metadata",
+            OAuthErrorCode::InvalidSoftwareStatement => "invalid_software_statement",
+            OAuthErrorCode::UnapprovedSoftwareStatement => "unapproved_software_statement",
             OAuthErrorCode::Other(code) => code,
         }
     }
@@ -116,6 +129,10 @@ impl OAuthErrorCode {
             "invalid_token" => OAuthErrorCode::InvalidToken,
             "insufficient_scope" => OAuthErrorCode::InsufficientScope,
             "invalid_target" => OAuthErrorCode::InvalidTarget,
+            "invalid_redirect_uri" => OAuthErrorCode::InvalidRedirectUri,
+            "invalid_client_metadata" => OAuthErrorCode::InvalidClientMetadata,
+            "invalid_software_statement" => OAuthErrorCode::InvalidSoftwareStatement,
+            "unapproved_software_statement" => OAuthErrorCode::UnapprovedSoftwareStatement,
             _ => return None,
         };
         Some(known)
@@ -216,16 +233,6 @@ impl Display for OAuthError {
 
 impl std::error::Error for OAuthError {}
 
-impl From<OAuthError> for Error {
-    /// Converts an [`OAuthError`] into a [`volga::Error`](Error), so OAuth
-    /// failures can be propagated from handlers with `?`. The HTTP status is
-    /// derived from the error code via [`OAuthErrorCode::status`].
-    #[inline]
-    fn from(err: OAuthError) -> Self {
-        Error::from_parts(err.error.status(), None, err)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -255,6 +262,19 @@ mod tests {
             (OAuthErrorCode::InvalidToken, "invalid_token"),
             (OAuthErrorCode::InsufficientScope, "insufficient_scope"),
             (OAuthErrorCode::InvalidTarget, "invalid_target"),
+            (OAuthErrorCode::InvalidRedirectUri, "invalid_redirect_uri"),
+            (
+                OAuthErrorCode::InvalidClientMetadata,
+                "invalid_client_metadata",
+            ),
+            (
+                OAuthErrorCode::InvalidSoftwareStatement,
+                "invalid_software_statement",
+            ),
+            (
+                OAuthErrorCode::UnapprovedSoftwareStatement,
+                "unapproved_software_statement",
+            ),
         ];
         for (code, wire) in cases {
             assert_eq!(code.as_str(), wire);
@@ -366,15 +386,5 @@ mod tests {
         for (code, status) in cases {
             assert_eq!(code.status(), status, "code: {code}");
         }
-    }
-
-    #[test]
-    fn it_converts_oauth_error_into_volga_error() {
-        let err: Error = OAuthError::new(OAuthErrorCode::InvalidToken)
-            .with_description("Token has expired")
-            .into();
-        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
-        assert!(err.instance().is_none());
-        assert_eq!(err.to_string(), "invalid_token: Token has expired");
     }
 }

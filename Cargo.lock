@@ -1189,6 +1189,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -3228,6 +3229,7 @@ dependencies = [
  "volga-dev-cert",
  "volga-di",
  "volga-macros",
+ "volga-oauth-core",
  "volga-open-api",
  "volga-rate-limiter",
 ]
@@ -3254,6 +3256,35 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "volga-oauth-client"
+version = "0.9.5"
+dependencies = [
+ "aws-lc-rs",
+ "base64",
+ "bytes",
+ "form_urlencoded",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-rustls",
+ "hyper-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "volga",
+ "volga-oauth-core",
+]
+
+[[package]]
+name = "volga-oauth-core"
+version = "0.9.5"
+dependencies = [
+ "http",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3444,6 +3475,15 @@ name = "webpki-root-certs"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f31141ce3fc3e300ae89b78c0dd67f9708061d1d2eda54b8209346fd6be9a92c"
+dependencies = [
+ "rustls-pki-types",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf85cb06032201fa7c6f829d7db5a7e5aa45bcc0655327713065f6f0576731bf"
 dependencies = [
  "rustls-pki-types",
 ]

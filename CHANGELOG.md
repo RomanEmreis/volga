@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.5
+
+## Added
+* `oauth` feature (implied by `jwt-auth`) — OAuth 2.1/OIDC foundation at `volga::auth::oauth`: error models (`OAuthError` / `OAuthErrorCode`, covering the registered codes from RFC 6749, 6750, 7591 and 8707), the `WWW-Authenticate` Bearer challenge builder and parser (`BearerChallenge`), resource URI canonicalization and well-known metadata URL derivation.
+* OAuth metadata documents and serving: `AuthorizationServerMetadata` (RFC 8414 / OIDC Discovery) and `ProtectedResourceMetadata` (RFC 9728) with builder DSLs. Configure via `App::with_oauth_server_metadata` / `App::with_oauth_resource_metadata` (or the `set_*` counterparts, or the `[oauth.server]` / `[oauth.resource]` config file sections); serve via `App::use_oauth_server_metadata`, `App::use_oauth_resource_metadata` and `App::use_oidc_metadata`.
+* Dynamic Client Registration models (RFC 7591): `ClientMetadata` and `ClientRegistrationResponse`.
+* New crate `volga-oauth-core` — the protocol-type layer behind `volga::auth::oauth` (no HTTP I/O), shared with the client crate; public `volga` paths are unchanged.
+* New crate `volga-oauth-client` — OAuth 2.1/OIDC client independent of the `volga` server crate, usable from any Tokio application (feature flags `http1` (default) / `http2`):
+  * `DiscoveryClient` — fetches Authorization Server Metadata (RFC 8414), Protected Resource Metadata (RFC 9728) and the OIDC provider configuration, with the identifier validation the specs require and a `MetadataCache` hook.
+  * `OAuthClient` — Authorization Code flow with mandatory PKCE (S256 only), refresh tokens and resource indicators (RFC 8707); token persistence and transparent refresh through the `TokenStore` trait (`InMemoryTokenStore` built in).
+  * `RegistrationClient` — Dynamic Client Registration (RFC 7591), including initial access tokens; `OAuthClient::from_registration` adopts the issued credentials.
+  * `ClientConfig` transport policy (HTTPS enforcement, total timeouts, redirect limits) and the `ClientError` model shared by all three clients.
+
+## Fixed
+* A server built with both `http1` and `http2` (without `ws`) served HTTP/2 exclusively, rejecting HTTP/1 clients even though TLS ALPN advertised `http/1.1`. Such builds now auto-detect the protocol per connection and serve both, matching the `ws` behavior; `http2`-only builds still serve pure HTTP/2.
+
+# 0.9.4
+
+## Added
+* HTTP `QUERY` method support: `App::map_query` / `RouteGroup::map_query` register routes for the new verb (#195).
+* Generic `App::map` / `RouteGroup::map` — register a route for any HTTP method; accepts anything `TryInto<Method>` (including string verbs like `"QUERY"`) and an owned or borrowed pattern. The named `map_*` helpers are unchanged (#195).
+* `HttpBody` is now an extractor — take it directly as a handler argument to access the raw request body (#194).
+
+## Security
+* Added a `cargo audit` CI pipeline (#196).
+* `jsonwebtoken` switched from the `rust_crypto` backend to `aws_lc_rs`, resolving RUSTSEC-2026-0185 and RUSTSEC-2023-0071 (#196).
+
 # 0.9.3
 
 ## Added
