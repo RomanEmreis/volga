@@ -342,6 +342,11 @@ impl BearerAuthConfig {
     pub(crate) fn set_default_issuer(&mut self, issuer: &str) {
         if self.validation.iss.is_none() {
             self.validation.set_issuer(&[issuer]);
+            // jsonwebtoken only compares `iss` when the claim is present —
+            // a token that omits it must not bypass the issuer constraint
+            self.validation
+                .required_spec_claims
+                .insert("iss".to_owned());
         }
     }
 

@@ -64,6 +64,21 @@ impl AuthClaims for Claims {
     }
 }
 
+/// Claims that do not ask for `iss` — the middleware must still enforce
+/// the issuer constraint at the validation level.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct LaxClaims {
+    sub: String,
+    role: String,
+    exp: u64,
+}
+
+impl AuthClaims for LaxClaims {
+    fn role(&self) -> Option<&str> {
+        Some(&self.role)
+    }
+}
+
 fn signing_key() -> EncodingKey {
     EncodingKey::from_rsa_pem(RSA_PRIVATE_PEM).unwrap()
 }
@@ -165,8 +180,12 @@ async fn spawn_issuer(initial_kid: &str) -> Issuer {
     }
 }
 
-/// Spawns the protected resource app validating tokens against `issuer`.
-async fn spawn_resource(issuer: String, cooldown: Duration) -> TestServer {
+/// Spawns the protected resource app validating tokens against `issuer`,
+/// deserializing them into the given claims type.
+async fn spawn_resource_for<C>(issuer: String, cooldown: Duration) -> TestServer
+where
+    C: AuthClaims + Send + Sync + 'static,
+{
     TestServer::builder()
         .configure(move |app| {
             app.with_oauth(|oauth| {
@@ -179,10 +198,15 @@ async fn spawn_resource(issuer: String, cooldown: Duration) -> TestServer {
         .setup(|app: &mut App| {
             app.use_oauth();
             app.map_get("/protected", || async { volga::ok!("secret") })
-                .authorize::<Claims>(roles(["admin"]));
+                .authorize::<C>(roles(["admin"]));
         })
         .build()
         .await
+}
+
+/// Spawns the protected resource app validating tokens against `issuer`.
+async fn spawn_resource(issuer: String, cooldown: Duration) -> TestServer {
+    spawn_resource_for::<Claims>(issuer, cooldown).await
 }
 
 #[tokio::test]
@@ -340,6 +364,49 @@ async fn it_answers_503_while_the_issuer_is_unreachable() {
     assert!(res.headers().get("www-authenticate").is_none());
 
     resource.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_requires_the_iss_claim_by_default() {
+    let issuer = spawn_issuer("key-1").await;
+    // the resource's claims type does not ask for `iss` at all
+    let resource = spawn_resource_for::<LaxClaims>(issuer.url(), Duration::from_secs(60)).await;
+
+    // a token that omits `iss` entirely must not bypass the issuer
+    // constraint, even though it is signed by the issuer's own key
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some("key-1".to_owned());
+    let exp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    let no_iss = json!({ "sub": "test-user", "role": "admin", "exp": exp });
+    let token = jsonwebtoken::encode(&header, &no_iss, &signing_key()).unwrap();
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 403);
+    let challenge = res.headers()["www-authenticate"].to_str().unwrap();
+    assert!(challenge.contains("invalid_token"), "was: {challenge}");
+
+    // the same claims carrying the right `iss` pass
+    let token = sign_token("key-1", &issuer.url(), "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    resource.shutdown().await;
+    issuer.server.shutdown().await;
 }
 
 #[tokio::test]
