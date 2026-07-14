@@ -10,7 +10,7 @@ use serde_json::json;
 use std::{
     sync::{
         Arc, RwLock,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -96,6 +96,7 @@ struct Issuer {
     server: TestServer,
     jwks: Arc<RwLock<serde_json::Value>>,
     jwks_hits: Arc<AtomicUsize>,
+    available: Arc<AtomicBool>,
 }
 
 impl Issuer {
@@ -106,28 +107,42 @@ impl Issuer {
     fn rotate_to(&self, kid: &str) {
         *self.jwks.write().unwrap() = json!({ "keys": [jwk(kid)] });
     }
+
+    fn set_available(&self, up: bool) {
+        self.available.store(up, Ordering::SeqCst);
+    }
 }
 
 /// Spawns a volga app playing the authorization server: RFC 8414 metadata
 /// (the issuer is derived from the `Host` header, so the dynamically
 /// assigned port needs no coordination) and a mutable JWKS endpoint.
+/// `set_available(false)` makes the metadata endpoint answer 500 to
+/// simulate an outage.
 async fn spawn_issuer(initial_kid: &str) -> Issuer {
     let jwks = Arc::new(RwLock::new(json!({ "keys": [jwk(initial_kid)] })));
     let jwks_hits = Arc::new(AtomicUsize::new(0));
+    let available = Arc::new(AtomicBool::new(true));
 
     let served = jwks.clone();
     let hits = jwks_hits.clone();
+    let up = available.clone();
     let server = TestServer::spawn(move |app| {
         app.map_get(
             "/.well-known/oauth-authorization-server",
-            |req: HttpRequest| async move {
-                let host = req.headers().get("host").unwrap().to_str().unwrap();
-                let issuer = format!("http://{host}");
-                volga::ok!({
-                    "issuer": issuer,
-                    "jwks_uri": format!("{issuer}/jwks"),
-                    "response_types_supported": ["code"]
-                })
+            move |req: HttpRequest| {
+                let up = up.clone();
+                async move {
+                    if !up.load(Ordering::SeqCst) {
+                        return volga::status!(500, "issuer is down");
+                    }
+                    let host = req.headers().get("host").unwrap().to_str().unwrap();
+                    let issuer = format!("http://{host}");
+                    volga::ok!({
+                        "issuer": issuer,
+                        "jwks_uri": format!("{issuer}/jwks"),
+                        "response_types_supported": ["code"]
+                    })
+                }
             },
         );
         app.map_get("/jwks", move || {
@@ -146,6 +161,7 @@ async fn spawn_issuer(initial_kid: &str) -> Issuer {
         server,
         jwks,
         jwks_hits,
+        available,
     }
 }
 
@@ -324,6 +340,40 @@ async fn it_answers_503_while_the_issuer_is_unreachable() {
     assert!(res.headers().get("www-authenticate").is_none());
 
     resource.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_recovers_immediately_after_a_failed_initial_load() {
+    let issuer = spawn_issuer("key-1").await;
+    // a long cooldown that must NOT apply to failed initial loads
+    let resource = spawn_resource(issuer.url(), Duration::from_secs(3600)).await;
+
+    // the issuer is down for the very first request — 503, no keys cached
+    issuer.set_available(false);
+    let token = sign_token("key-1", &issuer.url(), "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
+
+    // the issuer recovers: the next request retries at once instead of
+    // sitting out the cooldown
+    issuer.set_available(true);
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    resource.shutdown().await;
+    issuer.server.shutdown().await;
 }
 
 #[tokio::test]

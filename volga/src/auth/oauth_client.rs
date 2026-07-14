@@ -41,7 +41,9 @@
 
 use jsonwebtoken::{
     Algorithm,
-    jwk::{AlgorithmParameters, EllipticCurve, Jwk, JwkSet, KeyAlgorithm, PublicKeyUse},
+    jwk::{
+        AlgorithmParameters, EllipticCurve, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse,
+    },
 };
 use std::{
     collections::HashMap,
@@ -220,6 +222,13 @@ fn entry_from_jwk(jwk: &Jwk) -> Option<KeyEntry> {
     {
         return None;
     }
+    // `key_ops` is the issuer's other way of restricting a key: present
+    // without `verify`, the key is not meant to check signatures
+    if let Some(ops) = &jwk.common.key_operations
+        && !ops.contains(&KeyOperations::Verify)
+    {
+        return None;
+    }
     // a symmetric key in a public JWKS is a token forgery kit: anyone who
     // reads the document holds the HMAC secret
     if matches!(jwk.algorithm, AlgorithmParameters::OctetKey(_)) {
@@ -344,6 +353,19 @@ impl JwksStore {
         }
         *last_attempt = Some(Instant::now());
 
+        let result = self.fetch_latest().await;
+        if result.is_err() && self.current().is_none() {
+            // the cooldown protects an existing key set from unknown-kid
+            // floods; a failed initial load has nothing to protect — the
+            // next request should retry instead of serving 503 for the
+            // whole window (still one attempt at a time via the lock)
+            *last_attempt = None;
+        }
+        result
+    }
+
+    /// Fetches the issuer metadata and JWKS and swaps in the new key set
+    async fn fetch_latest(&self) -> Result<(), Error> {
         // re-discover metadata every time: a rotation may come along with
         // a jwks_uri move
         let metadata = match self.client.fetch_server_metadata(&self.issuer).await {
@@ -465,17 +487,32 @@ mod tests {
         // an explicit non-signing alg must not fall back to the inferred
         // default — the issuer did not advertise this key for signing
         let oaep = rsa_jwk(Some("oaep"), Some("RSA-OAEP"));
+        // `key_ops` without `verify` is the issuer restricting the key
+        // away from signature checks, same as `use: enc`
+        let mut ops_encrypt = rsa_jwk(Some("ops-enc"), Some("RS256"));
+        ops_encrypt["key_ops"] = json!(["encrypt"]);
 
         let keys = Keys::from_set(&set_from(vec![
             encryption_key,
             symmetric,
             symmetric_hs256,
             oaep,
+            ops_encrypt,
         ]));
         assert!(keys.lookup(Some("enc")).is_none());
         assert!(keys.lookup(Some("sym")).is_none());
         assert!(keys.lookup(Some("sym-hs")).is_none());
         assert!(keys.lookup(Some("oaep")).is_none());
+        assert!(keys.lookup(Some("ops-enc")).is_none());
         assert!(keys.lookup(None).is_none());
+    }
+
+    #[test]
+    fn it_accepts_keys_declaring_the_verify_operation() {
+        let mut jwk = rsa_jwk(Some("ops-verify"), Some("RS256"));
+        jwk["key_ops"] = json!(["verify"]);
+
+        let keys = Keys::from_set(&set_from(vec![jwk]));
+        assert!(keys.lookup(Some("ops-verify")).is_some());
     }
 }

@@ -29,6 +29,11 @@
 //! }
 //! ```
 
+#[cfg(not(any(feature = "http1", feature = "http2")))]
+compile_error!(
+    "volga requires an HTTP transport: enable at least one of the `http1` or `http2` features"
+);
+
 mod server;
 
 pub mod app;
