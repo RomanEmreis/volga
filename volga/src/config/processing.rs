@@ -156,8 +156,8 @@ impl App {
         Ok(self)
     }
 
-    /// Applies the `[oauth.resource]` and `[oauth.server]` sections from the
-    /// parsed config value.
+    /// Applies the `[oauth.resource]`, `[oauth.server]` and `[oauth.client]`
+    /// sections from the parsed config value.
     #[cfg(feature = "oauth")]
     fn apply_oauth_section(mut self, value: &Value) -> Result<Self, io::Error> {
         use crate::auth::oauth::{AuthorizationServerMetadata, ProtectedResourceMetadata};
@@ -186,6 +186,56 @@ impl App {
             let metadata: AuthorizationServerMetadata = parse_subsection(&server, "oauth.server")?;
             self = self.set_oauth_server_metadata(metadata);
         }
+        #[cfg(feature = "oauth-client")]
+        if let Some(client) = section.get("client") {
+            self = self.apply_oauth_client_section(client)?;
+        }
+        Ok(self)
+    }
+
+    /// Applies the `[oauth.client]` section from the parsed config value.
+    ///
+    /// Present fields are merged into the [`OAuthConfig`](crate::auth::OAuthConfig)
+    /// built so far, overriding prior builder calls; activation still requires
+    /// an explicit [`App::use_oauth`] call in code.
+    #[cfg(feature = "oauth-client")]
+    fn apply_oauth_client_section(mut self, value: &Value) -> Result<Self, io::Error> {
+        use std::time::Duration;
+
+        // unknown keys are rejected: a silently ignored typo in a
+        // security-relevant knob (`require_https`) must not go unnoticed
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct OAuthClientSection {
+            issuer: Option<String>,
+            refresh_cooldown_secs: Option<u64>,
+            require_https: Option<bool>,
+            timeout_secs: Option<u64>,
+            max_redirects: Option<u8>,
+        }
+
+        let s: OAuthClientSection = parse_subsection(value, "oauth.client")?;
+
+        let mut oauth = self.oauth_client_config.take().unwrap_or_default();
+        if let Some(issuer) = s.issuer {
+            oauth = oauth.with_issuer(issuer);
+        }
+        if let Some(secs) = s.refresh_cooldown_secs {
+            oauth = oauth.with_refresh_cooldown(Duration::from_secs(secs));
+        }
+        oauth = oauth.with_client_config(|mut client| {
+            if let Some(required) = s.require_https {
+                client = client.require_https(required);
+            }
+            if let Some(secs) = s.timeout_secs {
+                client = client.with_timeout(Duration::from_secs(secs));
+            }
+            if let Some(limit) = s.max_redirects {
+                client = client.with_max_redirects(limit);
+            }
+            client
+        });
+        self.oauth_client_config = Some(oauth);
         Ok(self)
     }
 }
@@ -490,5 +540,85 @@ mod tests {
         let file = write_toml("[oauth.resource]\nscopes_supported = [\"read\"]\n");
         let path = file.path().to_str().unwrap().to_owned();
         App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[cfg(feature = "oauth-client")]
+    #[test]
+    fn oauth_client_section_applied_from_config() {
+        use std::time::Duration;
+
+        let file = write_toml(
+            "[oauth.client]\n\
+             issuer = \"https://auth.example.com\"\n\
+             refresh_cooldown_secs = 5\n\
+             require_https = false\n\
+             timeout_secs = 10\n\
+             max_redirects = 2\n",
+        );
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        let oauth = app.oauth_client_config.as_ref().unwrap();
+        assert_eq!(oauth.issuer.as_deref(), Some("https://auth.example.com"));
+        assert_eq!(oauth.refresh_cooldown(), Duration::from_secs(5));
+        assert!(!oauth.client_config().enforce_https());
+        assert_eq!(oauth.client_config().timeout(), Duration::from_secs(10));
+        assert_eq!(oauth.client_config().max_redirects(), 2);
+        // the file only describes the issuer — activation stays in code
+        assert!(!app.oauth_client_enabled);
+    }
+
+    #[cfg(feature = "oauth-client")]
+    #[test]
+    fn oauth_client_section_merges_with_builder_calls() {
+        use std::time::Duration;
+
+        // the file sets only the cooldown; the builder-set issuer survives
+        let file = write_toml("[oauth.client]\nrefresh_cooldown_secs = 5\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new()
+            .with_oauth(|oauth| oauth.with_issuer("https://builder.example.com"))
+            .with_config(|cfg| cfg.with_file(&path));
+
+        let oauth = app.oauth_client_config.as_ref().unwrap();
+        assert_eq!(oauth.issuer.as_deref(), Some("https://builder.example.com"));
+        assert_eq!(oauth.refresh_cooldown(), Duration::from_secs(5));
+    }
+
+    #[cfg(feature = "oauth-client")]
+    #[test]
+    fn oauth_client_section_overrides_builder_fields_it_names() {
+        let file = write_toml("[oauth.client]\nissuer = \"https://file.example.com\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new()
+            .with_oauth(|oauth| oauth.with_issuer("https://builder.example.com"))
+            .with_config(|cfg| cfg.with_file(&path));
+
+        let oauth = app.oauth_client_config.as_ref().unwrap();
+        assert_eq!(oauth.issuer.as_deref(), Some("https://file.example.com"));
+    }
+
+    #[cfg(feature = "oauth-client")]
+    #[test]
+    #[should_panic(expected = "config: [oauth.client] section is invalid")]
+    fn unknown_oauth_client_key_panics_at_startup() {
+        // a typo in a security-relevant knob must not be silently ignored
+        let file = write_toml("[oauth.client]\nrequire_http = false\n");
+        let path = file.path().to_str().unwrap().to_owned();
+        App::new().with_config(|cfg| cfg.with_file(&path));
+    }
+
+    #[cfg(feature = "oauth-client")]
+    #[test]
+    fn oauth_client_section_enables_use_oauth() {
+        let file = write_toml("[oauth.client]\nissuer = \"https://auth.example.com\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let mut app = App::new().with_config(|cfg| cfg.with_file(&path));
+        app.use_oauth();
+        assert!(app.oauth_client_enabled);
     }
 }

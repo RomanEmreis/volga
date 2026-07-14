@@ -155,6 +155,10 @@ impl App {
     /// `iss` (audience, expiry, …) stay on
     /// [`with_bearer_auth`](App::with_bearer_auth).
     ///
+    /// With the `config` feature the same knobs can come from the
+    /// `[oauth.client]` section of the configuration file instead —
+    /// [`use_oauth`](App::use_oauth) remains a code-only call either way.
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;

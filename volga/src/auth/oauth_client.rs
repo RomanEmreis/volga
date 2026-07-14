@@ -24,6 +24,20 @@
 //! [`with_refresh_cooldown`](OAuthConfig::with_refresh_cooldown); concurrent
 //! misses share a single refresh. While the issuer is unreachable and no
 //! keys have been loaded yet, protected routes answer `503`.
+//!
+//! With the `config` feature the same knobs can be described in the
+//! `[oauth.client]` section of the configuration file (fields present in
+//! the file override builder calls; activation still requires
+//! [`App::use_oauth`](crate::App::use_oauth) in code):
+//!
+//! ```toml
+//! [oauth.client]
+//! issuer = "https://auth.example.com"
+//! refresh_cooldown_secs = 60   # optional
+//! require_https = true         # optional
+//! timeout_secs = 30            # optional
+//! max_redirects = 5            # optional
+//! ```
 
 use jsonwebtoken::{
     Algorithm,
@@ -119,6 +133,18 @@ impl OAuthConfig {
     pub fn with_refresh_cooldown(mut self, cooldown: Duration) -> Self {
         self.refresh_cooldown = cooldown;
         self
+    }
+
+    /// The configured minimum interval between two JWKS refresh attempts
+    #[cfg(test)]
+    pub(crate) fn refresh_cooldown(&self) -> Duration {
+        self.refresh_cooldown
+    }
+
+    /// The transport policy used for discovery and JWKS requests
+    #[cfg(test)]
+    pub(crate) fn client_config(&self) -> &ClientConfig {
+        &self.client_config
     }
 
     /// Builds the runtime key store; the caller has verified the issuer

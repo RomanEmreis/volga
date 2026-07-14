@@ -346,3 +346,47 @@ async fn it_challenges_missing_credentials_with_401() {
     resource.shutdown().await;
     issuer.server.shutdown().await;
 }
+
+#[cfg(feature = "config")]
+#[tokio::test]
+async fn it_configures_the_issuer_from_a_config_file() {
+    use std::io::Write;
+
+    let issuer = spawn_issuer("key-1").await;
+
+    // the issuer is described in the config file; activation stays in code
+    let mut file = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
+    write!(
+        file,
+        "[oauth.client]\n\
+         issuer = \"{}\"\n\
+         require_https = false\n",
+        issuer.url()
+    )
+    .unwrap();
+    let path = file.path().to_str().unwrap().to_owned();
+
+    let resource = TestServer::builder()
+        .configure(move |app| app.with_config(|cfg| cfg.with_file(&path)))
+        .setup(|app: &mut App| {
+            app.use_oauth();
+            app.map_get("/protected", || async { volga::ok!("secret") })
+                .authorize::<Claims>(roles(["admin"]));
+        })
+        .build()
+        .await;
+
+    let token = sign_token("key-1", &issuer.url(), "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.text().await.unwrap(), "secret");
+
+    resource.shutdown().await;
+    issuer.server.shutdown().await;
+}
