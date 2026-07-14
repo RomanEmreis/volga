@@ -533,6 +533,9 @@ impl TryFrom<&HeaderValue> for Bearer {
         let token = token
             .strip_prefix(SCHEME)
             .map(str::trim)
+            // a scheme with nothing (or only whitespace) after it is not
+            // a credential
+            .filter(|token| !token.is_empty())
             .ok_or_else(|| Error::client_error("Header: Missing Credentials"))?;
         Ok(Self(token.into()))
     }
@@ -666,6 +669,22 @@ mod tests {
     }
 
     const SECRET: &[u8] = b"test_secret_key";
+
+    #[test]
+    fn it_parses_a_bearer_header() {
+        let header = HeaderValue::from_static("Bearer abc.def.ghi");
+        let bearer = Bearer::try_from(&header).unwrap();
+        assert_eq!(&*bearer.0, "abc.def.ghi");
+    }
+
+    #[test]
+    fn it_rejects_bearer_headers_without_a_token() {
+        // the scheme alone (or padded with whitespace) is not a credential
+        for value in ["Bearer ", "Bearer   ", "Bearer"] {
+            let header = HeaderValue::from_static(value);
+            assert!(Bearer::try_from(&header).is_err(), "accepted: {value:?}");
+        }
+    }
 
     #[tokio::test]
     async fn it_tests_bearer_auth_config_default() {
