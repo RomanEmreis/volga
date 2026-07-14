@@ -220,6 +220,11 @@ fn entry_from_jwk(jwk: &Jwk) -> Option<KeyEntry> {
     {
         return None;
     }
+    // a symmetric key in a public JWKS is a token forgery kit: anyone who
+    // reads the document holds the HMAC secret
+    if matches!(jwk.algorithm, AlgorithmParameters::OctetKey(_)) {
+        return None;
+    }
     let alg = jwk
         .common
         .key_algorithm
@@ -229,13 +234,11 @@ fn entry_from_jwk(jwk: &Jwk) -> Option<KeyEntry> {
     Some(KeyEntry { key, alg })
 }
 
-/// Maps a JWK `alg` to a JWS signing algorithm; encryption algorithms
-/// (`RSA-OAEP`, …) have no place in signature verification.
+/// Maps a JWK `alg` to an asymmetric JWS signing algorithm; encryption
+/// algorithms (`RSA-OAEP`, …) have no place in signature verification, and
+/// symmetric ones (`HS*`) must never be driven by a public JWKS.
 fn signing_algorithm(alg: KeyAlgorithm) -> Option<Algorithm> {
     match alg {
-        KeyAlgorithm::HS256 => Some(Algorithm::HS256),
-        KeyAlgorithm::HS384 => Some(Algorithm::HS384),
-        KeyAlgorithm::HS512 => Some(Algorithm::HS512),
         KeyAlgorithm::ES256 => Some(Algorithm::ES256),
         KeyAlgorithm::ES384 => Some(Algorithm::ES384),
         KeyAlgorithm::RS256 => Some(Algorithm::RS256),
@@ -452,12 +455,17 @@ mod tests {
     fn it_skips_unusable_keys() {
         let mut encryption_key = rsa_jwk(Some("enc"), Some("RS256"));
         encryption_key["use"] = "enc".into();
-        // symmetric keys are never inferred from a public JWKS
+        // symmetric keys are never accepted from a public JWKS — with or
+        // without an explicit `alg`, the published `k` would hand every
+        // reader the HMAC signing secret
         let symmetric = json!({ "kty": "oct", "kid": "sym", "k": "c2VjcmV0" });
+        let symmetric_hs256 =
+            json!({ "kty": "oct", "kid": "sym-hs", "k": "c2VjcmV0", "alg": "HS256" });
 
-        let keys = Keys::from_set(&set_from(vec![encryption_key, symmetric]));
+        let keys = Keys::from_set(&set_from(vec![encryption_key, symmetric, symmetric_hs256]));
         assert!(keys.lookup(Some("enc")).is_none());
         assert!(keys.lookup(Some("sym")).is_none());
+        assert!(keys.lookup(Some("sym-hs")).is_none());
         assert!(keys.lookup(None).is_none());
     }
 }
