@@ -343,6 +343,19 @@ async fn it_challenges_missing_credentials_with_401() {
     assert!(challenge.starts_with("Bearer"), "was: {challenge}");
     assert!(!challenge.contains("error"), "was: {challenge}");
 
+    // RFC 6750 §3.1: credentials were presented but are malformed — the
+    // client should fix the header, not start an authorization flow
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .header("authorization", "Basic dXNlcjpwYXNz")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
+    let challenge = res.headers()["www-authenticate"].to_str().unwrap();
+    assert!(challenge.contains("invalid_request"), "was: {challenge}");
+
     resource.shutdown().await;
     issuer.server.shutdown().await;
 }

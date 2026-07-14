@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   * `ClientConfig` transport policy (HTTPS enforcement, total timeouts, redirect limits) and the `ClientError` model shared by all three clients.
 
 ## Fixed
-* Missing or malformed `Authorization` credentials on a route guarded by `authorize` now answer `401` with a bare `Bearer` challenge (plus `resource_metadata` when configured) per RFC 6750 §3, instead of a plain `400` without a challenge — clients can now discover the resource metadata and start an authorization flow. Present-but-invalid tokens keep answering `403` with the detailed challenge as before.
+* Requests without `Authorization` credentials on a route guarded by `authorize` now answer `401` with a bare `Bearer` challenge (plus `resource_metadata` when configured) per RFC 6750 §3, instead of a plain `400` without a challenge — clients can now discover the resource metadata and start an authorization flow. A present but malformed `Authorization` header (wrong scheme, empty token) answers `400` with an `invalid_request` challenge per RFC 6750 §3.1; present-but-invalid tokens keep answering `403` with the detailed challenge as before.
 * A server built with both `http1` and `http2` (without `ws`) served HTTP/2 exclusively, rejecting HTTP/1 clients even though TLS ALPN advertised `http/1.1`. Such builds now auto-detect the protocol per connection and serve both, matching the `ws` behavior; `http2`-only builds still serve pure HTTP/2.
 
 # 0.9.4

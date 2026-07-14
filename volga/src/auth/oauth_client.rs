@@ -225,11 +225,12 @@ fn entry_from_jwk(jwk: &Jwk) -> Option<KeyEntry> {
     if matches!(jwk.algorithm, AlgorithmParameters::OctetKey(_)) {
         return None;
     }
-    let alg = jwk
-        .common
-        .key_algorithm
-        .and_then(signing_algorithm)
-        .or_else(|| default_alg(&jwk.algorithm))?;
+    // an explicit non-signing or unknown `alg` disqualifies the key — the
+    // inferred default is only for keys that don't declare one at all
+    let alg = match jwk.common.key_algorithm {
+        Some(alg) => signing_algorithm(alg)?,
+        None => default_alg(&jwk.algorithm)?,
+    };
     let key = jsonwebtoken::DecodingKey::from_jwk(jwk).ok()?;
     Some(KeyEntry { key, alg })
 }
@@ -461,11 +462,20 @@ mod tests {
         let symmetric = json!({ "kty": "oct", "kid": "sym", "k": "c2VjcmV0" });
         let symmetric_hs256 =
             json!({ "kty": "oct", "kid": "sym-hs", "k": "c2VjcmV0", "alg": "HS256" });
+        // an explicit non-signing alg must not fall back to the inferred
+        // default — the issuer did not advertise this key for signing
+        let oaep = rsa_jwk(Some("oaep"), Some("RSA-OAEP"));
 
-        let keys = Keys::from_set(&set_from(vec![encryption_key, symmetric, symmetric_hs256]));
+        let keys = Keys::from_set(&set_from(vec![
+            encryption_key,
+            symmetric,
+            symmetric_hs256,
+            oaep,
+        ]));
         assert!(keys.lookup(Some("enc")).is_none());
         assert!(keys.lookup(Some("sym")).is_none());
         assert!(keys.lookup(Some("sym-hs")).is_none());
+        assert!(keys.lookup(Some("oaep")).is_none());
         assert!(keys.lookup(None).is_none());
     }
 }

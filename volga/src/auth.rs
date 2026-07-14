@@ -377,17 +377,35 @@ where
         }
         let bts: BearerTokenService = ctx.extract()?;
         let resp = match resolve_bearer(&ctx) {
-            // RFC 6750 §3: no credentials were presented — challenge with
-            // a bare scheme (no error code) so clients can discover the
-            // resource metadata and start an authorization flow
             Err(_) => {
                 let mut challenge = oauth::BearerChallenge::new();
                 if let Some(url) = bts.resource_metadata_url.as_deref() {
                     challenge = challenge.with_resource_metadata(url);
                 }
-                status!(401; [
-                    (WWW_AUTHENTICATE, challenge.to_string())
-                ])
+                if ctx
+                    .request()
+                    .headers()
+                    .contains_key(crate::headers::AUTHORIZATION)
+                {
+                    // RFC 6750 §3.1: credentials were presented but are not
+                    // a well-formed Bearer value (wrong scheme, empty token)
+                    // — the client should fix the header, not start a flow
+                    let challenge = challenge
+                        .with_error(oauth::OAuthErrorCode::InvalidRequest)
+                        .with_description("Authorization header is not a valid Bearer credential");
+
+                    status!(400; [
+                        (WWW_AUTHENTICATE, challenge.to_string())
+                    ])
+                } else {
+                    // RFC 6750 §3: no credentials were presented — challenge
+                    // with a bare scheme (no error code) so clients can
+                    // discover the resource metadata and start an
+                    // authorization flow
+                    status!(401; [
+                        (WWW_AUTHENTICATE, challenge.to_string())
+                    ])
+                }
             }
             Ok(bearer) => {
                 #[cfg(feature = "oauth-client")]
