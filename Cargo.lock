@@ -1678,6 +1678,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oauth_flow"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "jsonwebtoken",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "volga",
+ "volga-oauth-client",
+]
+
+[[package]]
 name = "oauth_metadata"
 version = "0.1.0"
 dependencies = [
@@ -3229,6 +3243,7 @@ dependencies = [
  "volga-dev-cert",
  "volga-di",
  "volga-macros",
+ "volga-oauth-client",
  "volga-oauth-core",
  "volga-open-api",
  "volga-rate-limiter",

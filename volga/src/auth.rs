@@ -52,8 +52,13 @@ pub mod decoding_key;
 pub mod encoding_key;
 #[cfg(feature = "oauth")]
 pub mod oauth;
+#[cfg(feature = "oauth-client")]
+pub mod oauth_client;
 #[cfg(feature = "jwt-auth")]
 pub(crate) mod pem;
+
+#[cfg(feature = "oauth-client")]
+pub use oauth_client::{DEFAULT_REFRESH_COOLDOWN, OAuthConfig};
 
 #[cfg(feature = "jwt-auth")]
 impl Error {
@@ -141,6 +146,51 @@ impl App {
         self
     }
 
+    /// Describes the OAuth 2.1/OIDC issuer whose keys validate bearer
+    /// tokens — activate it explicitly with [`use_oauth`](App::use_oauth)
+    ///
+    /// The issuer metadata and its JSON Web Key Set are fetched lazily on
+    /// the first request and refreshed on key rotation; see
+    /// [`OAuthConfig`] for the knobs. Token checks other than the key and
+    /// `iss` (audience, expiry, …) stay on
+    /// [`with_bearer_auth`](App::with_bearer_auth).
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// let mut app = App::new()
+    ///     .with_oauth(|oauth| oauth.with_issuer("https://auth.example.com"));
+    ///
+    /// app.use_oauth();
+    /// ```
+    #[cfg(feature = "oauth-client")]
+    pub fn with_oauth<F>(mut self, config: F) -> Self
+    where
+        F: FnOnce(OAuthConfig) -> OAuthConfig,
+    {
+        self.oauth_client_config = Some(config(Default::default()));
+        self
+    }
+
+    /// Explicitly enables validation of bearer tokens against the OAuth
+    /// issuer configured with [`with_oauth`](App::with_oauth)
+    ///
+    /// # Panics
+    /// Panics when [`with_oauth`](App::with_oauth) was not called or did
+    /// not configure an issuer.
+    #[cfg(feature = "oauth-client")]
+    pub fn use_oauth(&mut self) -> &mut Self {
+        match &self.oauth_client_config {
+            Some(config) if config.issuer.is_some() => self.oauth_client_enabled = true,
+            Some(_) => panic!(
+                "OAuth issuer is not configured; call `with_oauth(|oauth| oauth.with_issuer(..))` first"
+            ),
+            None => panic!("OAuth is not configured; call `with_oauth(..)` first"),
+        }
+        self
+    }
+
     /// Adds authorization middleware for all routes
     ///
     /// # Example
@@ -175,6 +225,18 @@ impl App {
     }
 
     fn ensure_bearer_auth_configured(&self) {
+        // issuer-based validation resolves keys at runtime — no static
+        // decoding key required (activation order with `use_oauth` is
+        // checked at startup)
+        #[cfg(feature = "oauth-client")]
+        if self
+            .oauth_client_config
+            .as_ref()
+            .is_some_and(|config| config.issuer.is_some())
+        {
+            return;
+        }
+
         let config = match &self.auth_config {
             Some(config) => config,
             _ => panic!("Bearer Auth is not configured"),
@@ -309,38 +371,65 @@ where
                 (WWW_AUTHENTICATE, r#"Bearer error="invalid_request", error_description="HTTPS required""#)
             ]);
         }
-        let bearer = resolve_bearer(&ctx)?;
         let bts: BearerTokenService = ctx.extract()?;
-        let resp = match bts.decode(bearer.clone()) {
-            Ok(claims) if authorizer.validate(&claims) => {
-                if bts.strip_token_from_request {
-                    stash_bearer(&mut ctx, bearer);
-                    ctx.request_mut()
-                        .headers_mut()
-                        .remove(crate::headers::AUTHORIZATION);
+        let resp = match resolve_bearer(&ctx) {
+            // RFC 6750 §3: no credentials were presented — challenge with
+            // a bare scheme (no error code) so clients can discover the
+            // resource metadata and start an authorization flow
+            Err(_) => {
+                let mut challenge = oauth::BearerChallenge::new();
+                if let Some(url) = bts.resource_metadata_url.as_deref() {
+                    challenge = challenge.with_resource_metadata(url);
                 }
-                ctx.request_mut()
-                    .extensions_mut()
-                    .insert(Authenticated(claims));
+                status!(401; [
+                    (WWW_AUTHENTICATE, challenge.to_string())
+                ])
+            }
+            Ok(bearer) => {
+                #[cfg(feature = "oauth-client")]
+                let decoded = bts.decode_async(bearer.clone()).await;
+                #[cfg(not(feature = "oauth-client"))]
+                let decoded = bts.decode(bearer.clone());
+                match decoded {
+                    Ok(claims) if authorizer.validate(&claims) => {
+                        if bts.strip_token_from_request {
+                            stash_bearer(&mut ctx, bearer);
+                            ctx.request_mut()
+                                .headers_mut()
+                                .remove(crate::headers::AUTHORIZATION);
+                        }
+                        ctx.request_mut()
+                            .extensions_mut()
+                            .insert(Authenticated(claims));
 
-                next(ctx).await
-            }
-            Ok(_) => {
-                let metadata_url = bts.resource_metadata_url.as_deref();
-                status!(403; [
-                    (WWW_AUTHENTICATE, authorizer::default_error_msg(metadata_url))
-                ])
-            }
-            Err(err) => {
-                let metadata_url = bts.resource_metadata_url.as_deref();
-                let www_authenticate = err
-                    .into_inner()
-                    .downcast_ref::<JwtError>()
-                    .map(|e| build_www_authenticate(e.kind(), metadata_url))
-                    .unwrap_or_else(|| authorizer::default_error_msg(metadata_url));
-                status!(403; [
-                    (WWW_AUTHENTICATE, www_authenticate)
-                ])
+                        next(ctx).await
+                    }
+                    Ok(_) => {
+                        let metadata_url = bts.resource_metadata_url.as_deref();
+
+                        status!(403; [
+                            (WWW_AUTHENTICATE, authorizer::default_error_msg(metadata_url))
+                        ])
+                    }
+                    // a server-side failure (unreachable OAuth issuer,
+                    // missing security key) is not the client's token
+                    // being at fault — no invalid_token challenge
+                    Err(err) if err.status().is_server_error() => {
+                        status!(503, "Token validation is temporarily unavailable")
+                    }
+                    Err(err) => {
+                        let metadata_url = bts.resource_metadata_url.as_deref();
+                        let www_authenticate = err
+                            .into_inner()
+                            .downcast_ref::<JwtError>()
+                            .map(|e| build_www_authenticate(e.kind(), metadata_url))
+                            .unwrap_or_else(|| authorizer::default_error_msg(metadata_url));
+
+                        status!(403; [
+                            (WWW_AUTHENTICATE, www_authenticate)
+                        ])
+                    }
+                }
             }
         };
         resp.map(|mut resp| {
