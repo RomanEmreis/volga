@@ -1,0 +1,18 @@
+[package]
+name = "oauth_flow"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+volga = { path = "../../volga", features = ["oauth-client"] }
+volga-oauth-client = { path = "../../volga-oauth-client" }
+jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.150"
+sha2 = "0.10.9"
+base64 = "0.22.1"
+tokio = { version = "1.46.1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+
+[lints]
+workspace = true

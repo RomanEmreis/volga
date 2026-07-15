@@ -343,6 +343,38 @@ async fn it_caches_only_validated_documents() {
 }
 
 #[tokio::test]
+async fn it_fetches_jwks_bypassing_the_cache() {
+    let port = free_port();
+    let issuer = format!("http://127.0.0.1:{port}");
+
+    let mut app = App::new().with_oauth_server_metadata(|m| {
+        m.with_issuer(&issuer)
+            .with_jwks_uri(format!("{issuer}/jwks"))
+    });
+    app.use_oauth_server_metadata();
+    app.map_get("/jwks", || async {
+        volga::ok!({ "keys": [{ "kty": "RSA", "kid": "key-1", "n": "abc", "e": "AQAB" }] })
+    });
+    let server = serve(port, app).await;
+
+    let cache = Arc::new(ToyCache::default());
+    let client = DiscoveryClient::with_config(ClientConfig::new().require_https(false))
+        .with_cache(cache.clone());
+
+    let metadata = client.fetch_server_metadata(&issuer).await.unwrap();
+    let jwks = client.fetch_jwks(&metadata).await.unwrap();
+    assert_eq!(jwks["keys"][0]["kid"], "key-1");
+
+    // the metadata went through the cache, the rotating key set did not
+    let cached: Vec<String> = cache.documents.lock().unwrap().keys().cloned().collect();
+    assert_eq!(
+        cached,
+        [format!("{issuer}/.well-known/oauth-authorization-server")]
+    );
+    server.abort();
+}
+
+#[tokio::test]
 async fn it_serves_documents_from_the_cache() {
     let port = free_port();
     let issuer = format!("http://127.0.0.1:{port}");

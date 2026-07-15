@@ -336,6 +336,22 @@ impl BearerAuthConfig {
         self
     }
 
+    /// Constrains `iss` to the OAuth issuer unless the application already
+    /// configured acceptable issuers itself; either way the claim becomes
+    /// required - issuer validation is the point of the OAuth integration.
+    #[cfg(feature = "oauth-client")]
+    pub(crate) fn set_default_issuer(&mut self, issuer: &str) {
+        if self.validation.iss.is_none() {
+            self.validation.set_issuer(&[issuer]);
+        }
+        // jsonwebtoken only compares `iss` when the claim is present - a
+        // token that omits it must not bypass the issuer constraint, no
+        // matter whether the accepted set was defaulted or app-configured
+        self.validation
+            .required_spec_claims
+            .insert("iss".to_owned());
+    }
+
     /// Synchronizes the `aud` entry in `required_spec_claims` with the
     /// configured audience set and the user's `strict_aud` preference.
     ///
@@ -364,6 +380,8 @@ pub struct BearerTokenService {
     validation: Arc<Validation>,
     encoding: Option<Arc<EncodingKey>>,
     decoding: Option<Arc<DecodingKey>>,
+    #[cfg(feature = "oauth-client")]
+    jwks: Option<Arc<crate::auth::oauth_client::JwksStore>>,
     pub(crate) strip_token_from_request: bool,
     pub(crate) resource_metadata_url: Option<Arc<str>>,
     pub(crate) require_https: bool,
@@ -414,6 +432,8 @@ impl BearerTokenService {
             validation: Arc::new(cfg.validation),
             encoding: cfg.encoding.map(Arc::new),
             decoding: cfg.decoding.map(Arc::new),
+            #[cfg(feature = "oauth-client")]
+            jwks: None,
             strip_token_from_request: cfg.strip_token_from_request,
             resource_metadata_url: cfg
                 .resource_metadata_url
@@ -422,6 +442,17 @@ impl BearerTokenService {
             require_https: cfg.require_https,
             tls_enabled,
         }
+    }
+
+    /// Attaches the OAuth issuer key store; incoming tokens are then
+    /// validated against the issuer's JWKS instead of a static key.
+    #[cfg(feature = "oauth-client")]
+    pub(crate) fn with_jwks_store(
+        mut self,
+        store: Arc<crate::auth::oauth_client::JwksStore>,
+    ) -> Self {
+        self.jwks = Some(store);
+        self
     }
 
     /// Returns a secret key for decoding JWT
@@ -456,6 +487,37 @@ impl BearerTokenService {
             .map_err(Error::from_jwt_error)
             .map(|t| t.claims)
     }
+
+    /// Decodes and validates a JSON Web Token, resolving the verification
+    /// key from the OAuth issuer's JWKS when one is configured via
+    /// [`App::use_oauth`](crate::App::use_oauth), and falling back to
+    /// [`decode`](Self::decode) with the static key otherwise
+    ///
+    /// The key is selected by the token's `kid`; an unknown `kid` triggers
+    /// a rate-limited JWKS refresh. The accepted algorithm is pinned to the
+    /// resolved key's algorithm — the rest of the validation policy comes
+    /// from [`BearerAuthConfig`].
+    #[cfg(feature = "oauth-client")]
+    pub async fn decode_async<C: DeserializeOwned + Clone>(
+        &self,
+        bearer: Bearer,
+    ) -> Result<C, Error> {
+        let Some(store) = &self.jwks else {
+            return self.decode(bearer);
+        };
+        let header =
+            jsonwebtoken::decode_header(bearer.0.as_bytes()).map_err(Error::from_jwt_error)?;
+        let entry = store.key_for(header.kid.as_deref()).await?;
+
+        // pin the algorithm to the resolved key: a token must not talk the
+        // key into a different scheme than the JWKS advertises for it
+        let mut validation = (*self.validation).clone();
+        validation.algorithms = vec![entry.alg];
+
+        jsonwebtoken::decode(&*bearer.0, &entry.key, &validation)
+            .map_err(Error::from_jwt_error)
+            .map(|t| t.claims)
+    }
 }
 
 /// Wraps a bearer token string
@@ -478,6 +540,9 @@ impl TryFrom<&HeaderValue> for Bearer {
         let token = token
             .strip_prefix(SCHEME)
             .map(str::trim)
+            // a scheme with nothing (or only whitespace) after it is not
+            // a credential
+            .filter(|token| !token.is_empty())
             .ok_or_else(|| Error::client_error("Header: Missing Credentials"))?;
         Ok(Self(token.into()))
     }
@@ -611,6 +676,22 @@ mod tests {
     }
 
     const SECRET: &[u8] = b"test_secret_key";
+
+    #[test]
+    fn it_parses_a_bearer_header() {
+        let header = HeaderValue::from_static("Bearer abc.def.ghi");
+        let bearer = Bearer::try_from(&header).unwrap();
+        assert_eq!(&*bearer.0, "abc.def.ghi");
+    }
+
+    #[test]
+    fn it_rejects_bearer_headers_without_a_token() {
+        // the scheme alone (or padded with whitespace) is not a credential
+        for value in ["Bearer ", "Bearer   ", "Bearer"] {
+            let header = HeaderValue::from_static(value);
+            assert!(Bearer::try_from(&header).is_err(), "accepted: {value:?}");
+        }
+    }
 
     #[tokio::test]
     async fn it_tests_bearer_auth_config_default() {

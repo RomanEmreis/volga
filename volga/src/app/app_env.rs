@@ -6,7 +6,12 @@ use crate::{Limit, headers::HeaderValue, http::request::request_body_limit::Requ
 use hyper_util::server::graceful::GracefulShutdown;
 use std::io::Error;
 
-#[cfg(any(feature = "tls", feature = "rate-limiting", feature = "config"))]
+#[cfg(any(
+    feature = "tls",
+    feature = "rate-limiting",
+    feature = "config",
+    feature = "oauth-client"
+))]
 use std::sync::Arc;
 
 #[cfg(feature = "config")]
@@ -152,8 +157,53 @@ impl TryFrom<App> for AppEnv {
         #[cfg(feature = "jwt-auth")]
         let bearer_token_service = {
             let derived_metadata_url = app.oauth_resource_metadata_url;
-            app.auth_config.map(|cfg| {
-                crate::auth::BearerTokenService::from_config(cfg, tls_enabled, derived_metadata_url)
+
+            #[cfg(feature = "oauth-client")]
+            let mut auth_config = app.auth_config;
+            #[cfg(not(feature = "oauth-client"))]
+            let auth_config = app.auth_config;
+
+            #[cfg(feature = "oauth-client")]
+            let oauth_store = match (app.oauth_client_enabled, app.oauth_client_config) {
+                (true, Some(oauth)) => {
+                    let issuer = oauth
+                        .issuer
+                        .clone()
+                        .expect("`use_oauth` verified the issuer is present");
+                    // issuer-based validation works without an explicit
+                    // bearer config; the defaults apply
+                    let cfg = auth_config.get_or_insert_with(Default::default);
+                    if cfg.decoding_key().is_some() {
+                        return Err(Error::other(
+                            "Bearer auth is ambiguous: both a static decoding key and an \
+                             OAuth issuer are configured — pick one",
+                        ));
+                    }
+                    // tokens must come from the configured issuer unless
+                    // the application constrained `iss` itself
+                    cfg.set_default_issuer(&issuer);
+                    Some(Arc::new(oauth.into_store()))
+                }
+                (false, Some(oauth)) if oauth.issuer.is_some() => {
+                    return Err(Error::other(
+                        "OAuth issuer is configured but not active; call `use_oauth()` to enable it",
+                    ));
+                }
+                _ => None,
+            };
+
+            auth_config.map(|cfg| {
+                let service = crate::auth::BearerTokenService::from_config(
+                    cfg,
+                    tls_enabled,
+                    derived_metadata_url,
+                );
+                #[cfg(feature = "oauth-client")]
+                let service = match oauth_store {
+                    Some(store) => service.with_jwks_store(store),
+                    None => service,
+                };
+                service
             })
         };
 

@@ -57,6 +57,7 @@ uuid = { version = "1.23.3", features = ["v4"], optional = true }
 volga-dev-cert     = { workspace = true, optional = true }
 volga-di           = { workspace = true, optional = true }
 volga-macros       = { workspace = true, optional = true }
+volga-oauth-client = { workspace = true, optional = true, default-features = false }
 volga-oauth-core   = { workspace = true, optional = true }
 volga-open-api     = { workspace = true, optional = true }
 volga-rate-limiter = { workspace = true, optional = true }
@@ -83,6 +84,7 @@ full = [
     "config",
     "middleware",
     "di",
+    "oauth-client",
     "tls",
     "cookie-full",
     "tracing",
@@ -98,8 +100,8 @@ full = [
 
 config = ["dep:arc-swap", "dep:toml", "serde/derive"]
 
-http1 = ["dep:hyper", "hyper?/http1", "dep:hyper-util", "hyper-util?/http1", "dep:httpdate"]
-http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2", "dep:httpdate"]
+http1 = ["dep:hyper", "hyper?/http1", "dep:hyper-util", "hyper-util?/http1", "dep:httpdate", "volga-oauth-client?/http1"]
+http2 = ["dep:hyper", "hyper?/http2", "dep:hyper-util", "hyper-util?/http2", "dep:httpdate", "volga-oauth-client?/http2"]
 
 auth = ["basic-auth", "jwt-auth"]
 auth-full = ["auth", "jwt-derive"]
@@ -108,6 +110,7 @@ jwt-auth-full = ["jwt-auth", "jwt-derive"]
 jwt-auth = ["dep:jsonwebtoken", "middleware", "oauth"]
 jwt-derive = ["dep:volga-macros", "volga-macros?/jwt-auth-derive"]
 oauth = ["dep:volga-oauth-core", "serde/derive"]
+oauth-client = ["jwt-auth", "dep:volga-oauth-client"]
 
 dev-cert = ["dep:volga-dev-cert"]
 di = ["dep:volga-di"]

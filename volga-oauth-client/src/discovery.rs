@@ -188,6 +188,35 @@ impl DiscoveryClient {
         }
     }
 
+    /// Fetches the JSON Web Key Set advertised by `metadata` via `jwks_uri`
+    /// (RFC 8414 §2)
+    ///
+    /// Fails with [`ClientError::Validation`] when the metadata declares no
+    /// `jwks_uri`. See [`fetch_jwks_from_url`](Self::fetch_jwks_from_url)
+    /// for the caching semantics.
+    pub async fn fetch_jwks(
+        &self,
+        metadata: &AuthorizationServerMetadata,
+    ) -> Result<serde_json::Value, ClientError> {
+        let url = metadata
+            .jwks_uri
+            .as_deref()
+            .ok_or_else(|| ClientError::validation("server metadata declares no jwks_uri"))?;
+        self.fetch_jwks_from_url(url).await
+    }
+
+    /// Fetches a JSON Web Key Set from an explicit URL
+    ///
+    /// The document is returned as raw JSON — this crate does not interpret
+    /// keys. Unlike the metadata fetches, a configured [`MetadataCache`] is
+    /// deliberately **bypassed** in both directions: signing keys rotate,
+    /// and a cache hit would keep serving retired keys — freshness policy
+    /// belongs to the caller. The transport policy (HTTPS enforcement,
+    /// timeout, body size limit) still applies.
+    pub async fn fetch_jwks_from_url(&self, url: &str) -> Result<serde_json::Value, ClientError> {
+        self.transport.get_json(url).await
+    }
+
     /// Fetches and deserializes a document, going through the cache when
     /// one is configured; `validate` runs the caller's semantic checks on
     /// both fresh and cached documents.
@@ -291,6 +320,32 @@ mod tests {
             .with_cache(cache);
         let metadata = relaxed.fetch_resource_metadata(resource).await.unwrap();
         assert_eq!(metadata.resource, resource);
+    }
+
+    #[tokio::test]
+    async fn it_requires_a_jwks_uri_in_metadata() {
+        let metadata = AuthorizationServerMetadata::new("https://auth.example.com");
+        let err = DiscoveryClient::new()
+            .fetch_jwks(&metadata)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Validation(reason) if reason.contains("jwks_uri")),
+            "error was: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_enforces_https_for_jwks_urls() {
+        // no server involved — the URL is rejected before any I/O
+        let err = DiscoveryClient::new()
+            .fetch_jwks_from_url("http://auth.example.com/jwks")
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ClientError::InsecureUrl(_)),
+            "error was: {err}"
+        );
     }
 
     #[test]

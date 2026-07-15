@@ -151,6 +151,15 @@ pub struct App {
     #[cfg(feature = "oauth")]
     pub(super) oauth_server_metadata: Option<crate::auth::oauth::AuthorizationServerMetadata>,
 
+    /// OAuth 2.1/OIDC issuer configuration set by [`App::with_oauth`]
+    #[cfg(feature = "oauth-client")]
+    pub(super) oauth_client_config: Option<crate::auth::OAuthConfig>,
+
+    /// Whether [`App::use_oauth`] explicitly enabled issuer-based token
+    /// validation
+    #[cfg(feature = "oauth-client")]
+    pub(super) oauth_client_enabled: bool,
+
     /// Global rate limiter
     #[cfg(feature = "rate-limiting")]
     pub(super) rate_limiter: Option<GlobalRateLimiter>,
@@ -278,6 +287,10 @@ impl App {
             oauth_resource_metadata: None,
             #[cfg(feature = "oauth")]
             oauth_server_metadata: None,
+            #[cfg(feature = "oauth-client")]
+            oauth_client_config: None,
+            #[cfg(feature = "oauth-client")]
+            oauth_client_enabled: false,
             #[cfg(feature = "rate-limiting")]
             rate_limiter: None,
             #[cfg(feature = "rate-limiting")]
