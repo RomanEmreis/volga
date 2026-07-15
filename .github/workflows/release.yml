@@ -58,4 +58,6 @@ jobs:
           publish volga-dev-cert/Cargo.toml
           publish volga-rate-limiter/Cargo.toml
           publish volga-open-api/Cargo.toml
+          publish volga-oauth-core/Cargo.toml
+          publish volga-oauth-client/Cargo.toml
           publish volga/Cargo.toml
