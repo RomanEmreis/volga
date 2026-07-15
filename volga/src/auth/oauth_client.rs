@@ -22,7 +22,10 @@
 //! Keys are fetched lazily on the first request and refreshed when a token
 //! arrives with an unknown `kid` (key rotation), rate-limited by
 //! [`with_refresh_cooldown`](OAuthConfig::with_refresh_cooldown); concurrent
-//! misses share a single refresh. While the issuer is unreachable and no
+//! misses share a single refresh. Known `kid`s are also re-checked once the
+//! cached set is older than
+//! [`with_max_key_age`](OAuthConfig::with_max_key_age), so revoked keys do
+//! not stay trusted indefinitely. While the issuer is unreachable and no
 //! keys have been loaded yet, protected routes answer `503`.
 //!
 //! With the `config` feature the same knobs can be described in the
@@ -34,6 +37,7 @@
 //! [oauth.client]
 //! issuer = "https://auth.example.com"
 //! refresh_cooldown_secs = 60   # optional
+//! max_key_age_secs = 900       # optional
 //! require_https = true         # optional
 //! timeout_secs = 30            # optional
 //! max_redirects = 5            # optional
@@ -59,6 +63,10 @@ use crate::error::Error;
 /// Default minimum interval between two JWKS refresh attempts
 pub const DEFAULT_REFRESH_COOLDOWN: Duration = Duration::from_secs(60);
 
+/// Default age after which a cached key set is re-fetched even for known
+/// `kid`s, so revoked or re-keyed entries do not stay trusted indefinitely
+pub const DEFAULT_MAX_KEY_AGE: Duration = Duration::from_secs(15 * 60);
+
 /// Configuration of the OAuth 2.1/OIDC issuer whose keys validate bearer
 /// tokens
 ///
@@ -71,6 +79,7 @@ pub struct OAuthConfig {
     pub(crate) issuer: Option<String>,
     client_config: ClientConfig,
     refresh_cooldown: Duration,
+    max_key_age: Duration,
 }
 
 impl Default for OAuthConfig {
@@ -80,6 +89,7 @@ impl Default for OAuthConfig {
             issuer: None,
             client_config: ClientConfig::new(),
             refresh_cooldown: DEFAULT_REFRESH_COOLDOWN,
+            max_key_age: DEFAULT_MAX_KEY_AGE,
         }
     }
 }
@@ -90,6 +100,7 @@ impl Debug for OAuthConfig {
             .field("issuer", &self.issuer)
             .field("client_config", &self.client_config)
             .field("refresh_cooldown", &self.refresh_cooldown)
+            .field("max_key_age", &self.max_key_age)
             .finish()
     }
 }
@@ -137,14 +148,32 @@ impl OAuthConfig {
         self
     }
 
+    /// Sets the age after which the cached key set is re-fetched even when
+    /// a token's `kid` is already known (default: 15 minutes)
+    ///
+    /// Without it a key the issuer has revoked or re-keyed under the same
+    /// `kid` would stay trusted until an unrelated unknown-`kid` token
+    /// happened to trigger a refresh. While the issuer is unreachable the
+    /// stale set keeps serving.
+    pub fn with_max_key_age(mut self, max_age: Duration) -> Self {
+        self.max_key_age = max_age;
+        self
+    }
+
     /// The configured minimum interval between two JWKS refresh attempts
-    #[cfg(test)]
+    #[cfg(all(test, feature = "config"))]
     pub(crate) fn refresh_cooldown(&self) -> Duration {
         self.refresh_cooldown
     }
 
+    /// The configured age after which cached keys are re-fetched
+    #[cfg(all(test, feature = "config"))]
+    pub(crate) fn max_key_age(&self) -> Duration {
+        self.max_key_age
+    }
+
     /// The transport policy used for discovery and JWKS requests
-    #[cfg(test)]
+    #[cfg(all(test, feature = "config"))]
     pub(crate) fn client_config(&self) -> &ClientConfig {
         &self.client_config
     }
@@ -156,6 +185,7 @@ impl OAuthConfig {
             issuer: self.issuer.expect("OAuth issuer is not configured"),
             client: DiscoveryClient::with_config(self.client_config),
             refresh_cooldown: self.refresh_cooldown,
+            max_key_age: self.max_key_age,
             keys: RwLock::new(None),
             refresh: Mutex::new(None),
         }
@@ -174,6 +204,9 @@ struct Keys {
     by_kid: HashMap<String, KeyEntry>,
     /// The only key of a single-key set, used when a token carries no `kid`
     single: Option<KeyEntry>,
+    /// When this set was fetched; past `max_key_age` even known kids
+    /// trigger a refresh before the key is trusted again
+    fetched_at: Instant,
 }
 
 impl Keys {
@@ -192,7 +225,11 @@ impl Keys {
             .into_iter()
             .filter_map(|(kid, entry)| kid.map(|kid| (kid, entry)))
             .collect();
-        Self { by_kid, single }
+        Self {
+            by_kid,
+            single,
+            fetched_at: Instant::now(),
+        }
     }
 
     fn lookup(&self, kid: Option<&str>) -> Option<KeyEntry> {
@@ -286,6 +323,7 @@ pub(crate) struct JwksStore {
     issuer: String,
     client: DiscoveryClient,
     refresh_cooldown: Duration,
+    max_key_age: Duration,
     keys: RwLock<Option<Arc<Keys>>>,
     /// Time of the last refresh attempt; the lock also single-flights
     /// concurrent refreshes
@@ -318,7 +356,27 @@ impl JwksStore {
         if let Some(keys) = self.current()
             && let Some(entry) = keys.lookup(kid)
         {
-            return Ok(entry);
+            if keys.fetched_at.elapsed() < self.max_key_age {
+                return Ok(entry);
+            }
+            // a stale hit gives the issuer a chance to revoke or re-key
+            // this kid before it is trusted again; when the refresh fails
+            // (or the cooldown suppresses it) the stale set keeps serving —
+            // an issuer outage must not take token validation down with it
+            if let Err(_err) = self.refresh().await {
+                #[cfg(feature = "tracing")]
+                tracing::warn!(
+                    issuer = %self.issuer,
+                    "JWKS refresh failed; serving keys older than the configured max age: {_err:#}"
+                );
+            }
+            return self
+                .current()
+                .and_then(|keys| keys.lookup(kid))
+                .ok_or_else(|| {
+                    // the refreshed set no longer advertises this key
+                    Error::from_jwt_error(jsonwebtoken::errors::ErrorKind::InvalidToken.into())
+                });
         }
 
         self.refresh().await?;
@@ -426,13 +484,16 @@ mod tests {
         let config = OAuthConfig::default();
         assert!(config.issuer.is_none());
         assert_eq!(config.refresh_cooldown, DEFAULT_REFRESH_COOLDOWN);
+        assert_eq!(config.max_key_age, DEFAULT_MAX_KEY_AGE);
 
         let config = OAuthConfig::default()
             .with_issuer("https://auth.example.com")
             .with_client_config(|client| client.require_https(false))
-            .with_refresh_cooldown(Duration::from_secs(5));
+            .with_refresh_cooldown(Duration::from_secs(5))
+            .with_max_key_age(Duration::from_secs(120));
         assert_eq!(config.issuer.as_deref(), Some("https://auth.example.com"));
         assert_eq!(config.refresh_cooldown, Duration::from_secs(5));
+        assert_eq!(config.max_key_age, Duration::from_secs(120));
 
         let store = config.into_store();
         assert_eq!(store.issuer(), "https://auth.example.com");

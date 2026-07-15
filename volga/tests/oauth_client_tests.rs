@@ -100,6 +100,19 @@ fn sign_token(kid: &str, issuer: &str, role: &str) -> String {
     jsonwebtoken::encode(&header, &claims, &signing_key()).unwrap()
 }
 
+/// A token signed with the issuer's key but carrying no `iss` claim at all.
+fn sign_token_without_iss(kid: &str, role: &str) -> String {
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = Some(kid.to_owned());
+    let exp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600;
+    let claims = json!({ "sub": "test-user", "role": role, "exp": exp });
+    jsonwebtoken::encode(&header, &claims, &signing_key()).unwrap()
+}
+
 /// The public JWK of the test signing key, under the given `kid`.
 fn jwk(kid: &str) -> serde_json::Value {
     let mut jwk = Jwk::from_encoding_key(&signing_key(), Algorithm::RS256).unwrap();
@@ -182,7 +195,11 @@ async fn spawn_issuer(initial_kid: &str) -> Issuer {
 
 /// Spawns the protected resource app validating tokens against `issuer`,
 /// deserializing them into the given claims type.
-async fn spawn_resource_for<C>(issuer: String, cooldown: Duration) -> TestServer
+async fn spawn_resource_for<C>(
+    issuer: String,
+    cooldown: Duration,
+    max_key_age: Duration,
+) -> TestServer
 where
     C: AuthClaims + Send + Sync + 'static,
 {
@@ -193,6 +210,7 @@ where
                     .with_issuer(&issuer)
                     .with_client_config(|client| client.require_https(false))
                     .with_refresh_cooldown(cooldown)
+                    .with_max_key_age(max_key_age)
             })
         })
         .setup(|app: &mut App| {
@@ -206,7 +224,7 @@ where
 
 /// Spawns the protected resource app validating tokens against `issuer`.
 async fn spawn_resource(issuer: String, cooldown: Duration) -> TestServer {
-    spawn_resource_for::<Claims>(issuer, cooldown).await
+    spawn_resource_for::<Claims>(issuer, cooldown, volga::auth::DEFAULT_MAX_KEY_AGE).await
 }
 
 #[tokio::test]
@@ -370,19 +388,16 @@ async fn it_answers_503_while_the_issuer_is_unreachable() {
 async fn it_requires_the_iss_claim_by_default() {
     let issuer = spawn_issuer("key-1").await;
     // the resource's claims type does not ask for `iss` at all
-    let resource = spawn_resource_for::<LaxClaims>(issuer.url(), Duration::from_secs(60)).await;
+    let resource = spawn_resource_for::<LaxClaims>(
+        issuer.url(),
+        Duration::from_secs(60),
+        volga::auth::DEFAULT_MAX_KEY_AGE,
+    )
+    .await;
 
     // a token that omits `iss` entirely must not bypass the issuer
     // constraint, even though it is signed by the issuer's own key
-    let mut header = Header::new(Algorithm::RS256);
-    header.kid = Some("key-1".to_owned());
-    let exp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-        + 3600;
-    let no_iss = json!({ "sub": "test-user", "role": "admin", "exp": exp });
-    let token = jsonwebtoken::encode(&header, &no_iss, &signing_key()).unwrap();
+    let token = sign_token_without_iss("key-1", "admin");
     let res = resource
         .client()
         .get(resource.url("/protected"))
@@ -396,6 +411,126 @@ async fn it_requires_the_iss_claim_by_default() {
 
     // the same claims carrying the right `iss` pass
     let token = sign_token("key-1", &issuer.url(), "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    resource.shutdown().await;
+    issuer.server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_requires_the_iss_claim_with_custom_issuers() {
+    let issuer = spawn_issuer("key-1").await;
+
+    // the app pins its own accepted issuers via `with_iss`; the claim must
+    // still be required — a token omitting `iss` matches no issuer at all
+    let accepted = issuer.url();
+    let oauth_issuer = accepted.clone();
+    let resource = TestServer::builder()
+        .configure(move |app| {
+            app.with_bearer_auth(|auth| auth.with_iss([accepted.as_str()]))
+                .with_oauth(|oauth| {
+                    oauth
+                        .with_issuer(&oauth_issuer)
+                        .with_client_config(|client| client.require_https(false))
+                })
+        })
+        .setup(|app: &mut App| {
+            app.use_oauth();
+            app.map_get("/protected", || async { volga::ok!("secret") })
+                .authorize::<LaxClaims>(roles(["admin"]));
+        })
+        .build()
+        .await;
+
+    let token = sign_token_without_iss("key-1", "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 403);
+    let challenge = res.headers()["www-authenticate"].to_str().unwrap();
+    assert!(challenge.contains("invalid_token"), "was: {challenge}");
+
+    // the same claims carrying the accepted `iss` pass
+    let token = sign_token("key-1", &issuer.url(), "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    resource.shutdown().await;
+    issuer.server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_rechecks_known_kids_once_keys_go_stale() {
+    let issuer = spawn_issuer("key-1").await;
+    // zero max key age: every cached hit is stale and re-checked
+    let resource = spawn_resource_for::<Claims>(issuer.url(), Duration::ZERO, Duration::ZERO).await;
+
+    let token = sign_token("key-1", &issuer.url(), "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(issuer.jwks_hits.load(Ordering::SeqCst), 1);
+
+    // the issuer revokes key-1 and publishes a replacement; the old token
+    // must stop validating without waiting for unknown-kid traffic or a
+    // process restart
+    issuer.rotate_to("key-2");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 403);
+    let challenge = res.headers()["www-authenticate"].to_str().unwrap();
+    assert!(challenge.contains("invalid_token"), "was: {challenge}");
+    assert_eq!(issuer.jwks_hits.load(Ordering::SeqCst), 2);
+
+    resource.shutdown().await;
+    issuer.server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_serves_stale_keys_while_the_issuer_is_down() {
+    let issuer = spawn_issuer("key-1").await;
+    let resource = spawn_resource_for::<Claims>(issuer.url(), Duration::ZERO, Duration::ZERO).await;
+
+    let token = sign_token("key-1", &issuer.url(), "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    // the issuer goes down; the stale set keeps serving known kids — an
+    // issuer outage must not take token validation down with it
+    issuer.set_available(false);
     let res = resource
         .client()
         .get(resource.url("/protected"))

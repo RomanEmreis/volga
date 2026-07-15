@@ -58,7 +58,7 @@ pub mod oauth_client;
 pub(crate) mod pem;
 
 #[cfg(feature = "oauth-client")]
-pub use oauth_client::{DEFAULT_REFRESH_COOLDOWN, OAuthConfig};
+pub use oauth_client::{DEFAULT_MAX_KEY_AGE, DEFAULT_REFRESH_COOLDOWN, OAuthConfig};
 
 #[cfg(feature = "jwt-auth")]
 impl Error {

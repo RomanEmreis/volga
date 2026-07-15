@@ -209,6 +209,7 @@ impl App {
         struct OAuthClientSection {
             issuer: Option<String>,
             refresh_cooldown_secs: Option<u64>,
+            max_key_age_secs: Option<u64>,
             require_https: Option<bool>,
             timeout_secs: Option<u64>,
             max_redirects: Option<u8>,
@@ -222,6 +223,9 @@ impl App {
         }
         if let Some(secs) = s.refresh_cooldown_secs {
             oauth = oauth.with_refresh_cooldown(Duration::from_secs(secs));
+        }
+        if let Some(secs) = s.max_key_age_secs {
+            oauth = oauth.with_max_key_age(Duration::from_secs(secs));
         }
         oauth = oauth.with_client_config(|mut client| {
             if let Some(required) = s.require_https {
@@ -551,6 +555,7 @@ mod tests {
             "[oauth.client]\n\
              issuer = \"https://auth.example.com\"\n\
              refresh_cooldown_secs = 5\n\
+             max_key_age_secs = 120\n\
              require_https = false\n\
              timeout_secs = 10\n\
              max_redirects = 2\n",
@@ -562,6 +567,7 @@ mod tests {
         let oauth = app.oauth_client_config.as_ref().unwrap();
         assert_eq!(oauth.issuer.as_deref(), Some("https://auth.example.com"));
         assert_eq!(oauth.refresh_cooldown(), Duration::from_secs(5));
+        assert_eq!(oauth.max_key_age(), Duration::from_secs(120));
         assert!(!oauth.client_config().enforce_https());
         assert_eq!(oauth.client_config().timeout(), Duration::from_secs(10));
         assert_eq!(oauth.client_config().max_redirects(), 2);

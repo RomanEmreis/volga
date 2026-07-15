@@ -337,17 +337,19 @@ impl BearerAuthConfig {
     }
 
     /// Constrains `iss` to the OAuth issuer unless the application already
-    /// configured acceptable issuers itself.
+    /// configured acceptable issuers itself; either way the claim becomes
+    /// required - issuer validation is the point of the OAuth integration.
     #[cfg(feature = "oauth-client")]
     pub(crate) fn set_default_issuer(&mut self, issuer: &str) {
         if self.validation.iss.is_none() {
             self.validation.set_issuer(&[issuer]);
-            // jsonwebtoken only compares `iss` when the claim is present —
-            // a token that omits it must not bypass the issuer constraint
-            self.validation
-                .required_spec_claims
-                .insert("iss".to_owned());
         }
+        // jsonwebtoken only compares `iss` when the claim is present - a
+        // token that omits it must not bypass the issuer constraint, no
+        // matter whether the accepted set was defaulted or app-configured
+        self.validation
+            .required_spec_claims
+            .insert("iss".to_owned());
     }
 
     /// Synchronizes the `aud` entry in `required_spec_claims` with the
