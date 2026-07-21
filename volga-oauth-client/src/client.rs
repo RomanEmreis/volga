@@ -820,7 +820,9 @@ mod tests {
         let err = request
             .validate_callback(&metadata, &state, Some("https://evil.example.com"))
             .unwrap_err();
-        assert!(matches!(err, ClientError::Validation(reason) if reason.contains("`iss` mismatch")));
+        assert!(
+            matches!(err, ClientError::Validation(reason) if reason.contains("`iss` mismatch"))
+        );
 
         // ...and it is mandatory once the server advertises RFC 9207
         let advertised = metadata.with_authorization_response_iss_parameter(true);
