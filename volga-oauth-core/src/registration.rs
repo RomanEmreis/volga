@@ -25,6 +25,17 @@ pub struct ClientMetadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redirect_uris: Vec<String>,
 
+    /// Kind of application the client is: `web` (the default when absent)
+    /// or `native`
+    ///
+    /// Defined by OpenID Connect Dynamic Client Registration §2 and widely
+    /// honored by OAuth 2.0 registration endpoints: a `native` client is
+    /// what allows the loopback redirect URIs (`http://127.0.0.1:{port}/…`)
+    /// desktop and CLI applications rely on — servers reject those for
+    /// `web` clients.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub application_type: Option<String>,
+
     /// Requested token endpoint authentication method
     /// (e.g. `client_secret_basic`, `client_secret_post`, `none`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -113,6 +124,13 @@ impl ClientMetadata {
         S: Into<String>,
     {
         self.redirect_uris = uris.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Sets the application type — `web` (the server-side default) or
+    /// `native` for a desktop/CLI client with a loopback redirect URI
+    pub fn with_application_type(mut self, application_type: impl Into<String>) -> Self {
+        self.application_type = Some(application_type.into());
         self
     }
 
@@ -371,16 +389,39 @@ mod tests {
             "redirect_uris": ["https://app.example.com/callback"],
             "client_name": "My App",
             "client_name#ja-JP": "マイアプリ",
-            "application_type": "web"
+            "backchannel_logout_uri": "https://app.example.com/logout"
         });
         let metadata: ClientMetadata = serde_json::from_value(document.clone()).unwrap();
         assert_eq!(
             metadata.additional_fields["client_name#ja-JP"],
             json!("マイアプリ")
         );
-        assert_eq!(metadata.additional_fields["application_type"], json!("web"));
+        assert_eq!(
+            metadata.additional_fields["backchannel_logout_uri"],
+            json!("https://app.example.com/logout")
+        );
         // lossless round-trip
         assert_eq!(serde_json::to_value(&metadata).unwrap(), document);
+    }
+
+    #[test]
+    fn it_round_trips_the_application_type() {
+        let metadata = ClientMetadata::new()
+            .with_redirect_uris(["http://127.0.0.1:8080/callback"])
+            .with_application_type("native");
+        assert_eq!(metadata.application_type.as_deref(), Some("native"));
+
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(json["application_type"], json!("native"));
+        // typed, not swept into the extension bag
+        assert!(!metadata.additional_fields.contains_key("application_type"));
+
+        let parsed: ClientMetadata = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, metadata);
+
+        // absent by default — servers assume `web`
+        let json = serde_json::to_value(ClientMetadata::new()).unwrap();
+        assert!(json.get("application_type").is_none());
     }
 
     #[test]

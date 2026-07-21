@@ -5,7 +5,7 @@ Fast, simple, and high-performance web framework for Rust, built on top of
 Volga is designed to make building HTTP services straightforward and explicit,
 while keeping performance predictable and overhead minimal.
 
-[![latest](https://img.shields.io/badge/latest-0.9.5-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.9.6-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://releases.rs/docs/1.90.0/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
@@ -47,7 +47,7 @@ Volga is a good fit if you:
 ### Dependencies
 ```toml
 [dependencies]
-volga = "0.9.5"
+volga = "0.9.6"
 tokio = { version = "1", features = ["full"] }
 ```
 ### Simple request handler
@@ -75,23 +75,30 @@ More advanced examples (middleware, DI, auth, rate limiting) can be found in the
 [documentation](https://romanemreis.github.io/volga-docs/) and [here](https://github.com/RomanEmreis/volga/tree/main/examples).
 
 ## Performance
-Tested on a single instance with 4 threads and 500 concurrent connections:
+Volga is benchmarked using a minimal plaintext endpoint to measure raw request handling to measure baseline HTTP throughput.
 
+The benchmark harness is available here:
+https://github.com/RomanEmreis/volga-benchmark
+
+### Benchmark environment
+
+Tested on a single machine:
 ```
-OS: Arch Linux
-CPU: Intel i7-8665U (8) @ 4.800GHz
-RAM: 31686MiB
+Platform: Apple Silicon MacBook Pro
+Runtime: Linux containers (Colima)
 ```
+
 ### Results
 ```
-Running 10s test @ http://0.0.0.0:7878/plaintext
-  4 threads and 500 connections
+Running 30s test @ http://volga:7878/plaintext
+  8 threads and 512 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency     1.30ms    1.06ms  16.75ms   84.52%
-    Req/Sec    97.79k    18.43k  133.87k    61.50%
-  3902819 requests in 10.07s, 483.86MB read
-Requests/sec: 387433.91
-Transfer/sec:     48.03MB
+    Latency   539.89us    3.00ms 213.60ms   99.94%
+    Req/Sec   131.04k    14.14k 296.06k    95.76%
+  31080913 requests in 29.83s, 3.76GB read
+  Socket errors: connect 0, read 0, write 0, timeout 987
+Requests/sec: 1,041,952.40
+Transfer/sec: 129.18MB
 ```
 
 > ⚠️ Benchmark results are provided for reference only.
