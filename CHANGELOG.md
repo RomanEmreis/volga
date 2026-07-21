@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.6
+
+## Added
+* `ClientMetadata::application_type` (`volga-oauth-core`, RFC 7591 / OIDC Dynamic Client Registration §2) with the `with_application_type` builder — first-class instead of an `additional_fields` entry. Desktop and CLI clients register as `"native"`, which is what makes loopback redirect URIs (`http://127.0.0.1:{port}/…`) acceptable to authorization servers.
+* `AuthorizationServerMetadata::authorization_response_iss_parameter_supported` (`volga-oauth-core`, RFC 9207 §3) with the `with_authorization_response_iss_parameter` builder — likewise typed; it is also accepted in the `[oauth.server]` config file section.
+* `AuthorizationRequest::validate_callback` (`volga-oauth-client`) — validates the authorization callback before the code is exchanged: the `state` (CSRF) plus the RFC 9207 `iss`, which must match the issuer whenever present and is required once the server advertises it. Without the `iss` check a callback can be replayed from a different authorization server (mix-up attack); `matches_state` remains for the `state`-only check.
+
+## Fixed
+* `OAuthClient::exchange_code`, `refresh` and `token` returned `!Send` futures: the non-`Sync` form serializer was held across the token-endpoint `await`, so the calls could not be spawned onto a multi-thread runtime (callers had to bridge them through a current-thread runtime). The serializer is now dropped before the request; the futures are `Send`, which a test now pins down.
+
 # 0.9.5
 
 ## Added

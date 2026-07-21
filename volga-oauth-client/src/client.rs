@@ -217,23 +217,28 @@ impl OAuthClient {
         request: &AuthorizationRequest,
     ) -> Result<TokenSet, ClientError> {
         let endpoint = token_endpoint(metadata)?;
-        let mut form = form_urlencoded::Serializer::new(String::new());
+        // the serializer is not `Sync`: scoping it keeps it out of the
+        // future's state, so this future stays `Send` (see `refresh`)
+        let (body, authorization) = {
+            let mut form = form_urlencoded::Serializer::new(String::new());
 
-        form.append_pair("grant_type", "authorization_code")
-            .append_pair("code", code)
-            .append_pair("code_verifier", request.pkce.verifier());
+            form.append_pair("grant_type", "authorization_code")
+                .append_pair("code", code)
+                .append_pair("code_verifier", request.pkce.verifier());
 
-        if let Some(redirect_uri) = &self.redirect_uri {
-            form.append_pair("redirect_uri", redirect_uri);
-        }
+            if let Some(redirect_uri) = &self.redirect_uri {
+                form.append_pair("redirect_uri", redirect_uri);
+            }
 
-        for resource in &request.resources {
-            form.append_pair("resource", resource);
-        }
+            for resource in &request.resources {
+                form.append_pair("resource", resource);
+            }
 
-        let authorization = self.apply_client_auth(&mut form);
-        self.request_tokens(endpoint, form.finish(), authorization)
-            .await
+            let authorization = self.apply_client_auth(&mut form);
+            (form.finish(), authorization)
+        };
+
+        self.request_tokens(endpoint, body, authorization).await
     }
 
     /// Obtains fresh tokens with a refresh token (RFC 6749 §6)
@@ -247,14 +252,19 @@ impl OAuthClient {
         refresh_token: &str,
     ) -> Result<TokenSet, ClientError> {
         let endpoint = token_endpoint(metadata)?;
-        let mut form = form_urlencoded::Serializer::new(String::new());
+        // scoped so the non-`Sync` serializer is dropped before the await:
+        // a future holding it would be `!Send` and could not be spawned
+        let (body, authorization) = {
+            let mut form = form_urlencoded::Serializer::new(String::new());
 
-        form.append_pair("grant_type", "refresh_token")
-            .append_pair("refresh_token", refresh_token);
+            form.append_pair("grant_type", "refresh_token")
+                .append_pair("refresh_token", refresh_token);
 
-        let authorization = self.apply_client_auth(&mut form);
-        self.request_tokens(endpoint, form.finish(), authorization)
-            .await
+            let authorization = self.apply_client_auth(&mut form);
+            (form.finish(), authorization)
+        };
+
+        self.request_tokens(endpoint, body, authorization).await
     }
 
     /// Returns valid tokens stored under `key`, refreshing a stale access
@@ -519,6 +529,57 @@ impl AuthorizationRequest {
     pub fn matches_state(&self, state: &str) -> bool {
         self.state == state
     }
+
+    /// Validates the parameters of the authorization callback before the
+    /// code is exchanged: the `state` (CSRF) and the RFC 9207 `iss`
+    /// (authorization server mix-up).
+    ///
+    /// `iss` is the callback's `iss` query parameter, `None` when the
+    /// response carried none. It must match the issuer whenever it is
+    /// present, and it is *required* when the metadata advertises
+    /// [`authorization_response_iss_parameter_supported`] — a response
+    /// missing it there may come from a different, possibly malicious,
+    /// authorization server.
+    ///
+    /// ```no_run
+    /// # use volga_oauth_client::{
+    /// #     AuthorizationRequest, AuthorizationServerMetadata, ClientError,
+    /// # };
+    /// # fn check(
+    /// #     request: &AuthorizationRequest,
+    /// #     metadata: &AuthorizationServerMetadata,
+    /// #     state: &str,
+    /// #     iss: Option<&str>,
+    /// # ) -> Result<(), ClientError> {
+    /// request.validate_callback(metadata, state, iss)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`authorization_response_iss_parameter_supported`]: AuthorizationServerMetadata::authorization_response_iss_parameter_supported
+    pub fn validate_callback(
+        &self,
+        metadata: &AuthorizationServerMetadata,
+        state: &str,
+        iss: Option<&str>,
+    ) -> Result<(), ClientError> {
+        if !self.matches_state(state) {
+            return Err(ClientError::validation(
+                "authorization response `state` does not match the request",
+            ));
+        }
+
+        match (iss, metadata.authorization_response_iss_parameter_supported) {
+            (Some(iss), _) if iss != metadata.issuer => Err(ClientError::validation(format!(
+                "authorization response `iss` mismatch: expected {}, got {iss}",
+                metadata.issuer
+            ))),
+            (None, true) => Err(ClientError::validation(
+                "authorization server advertises RFC 9207 but the response carries no `iss`",
+            )),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Builds an RFC 6749 §2.3.1 HTTP Basic authorization header: identifier
@@ -715,6 +776,63 @@ mod tests {
             err,
             ClientError::Validation(reason) if reason.contains("client_secret_jwt")
         ));
+    }
+
+    #[test]
+    fn it_returns_send_token_endpoint_futures() {
+        // the token-endpoint futures must be spawnable onto a multi-thread
+        // runtime: nothing non-`Sync` (the form serializer) may be held
+        // across their awaits
+        fn assert_send(_: impl Send) {}
+
+        let client = OAuthClient::new("my-client")
+            .with_token_store(Arc::new(crate::InMemoryTokenStore::default()));
+        let metadata = metadata();
+        let request = client.authorization_request(&metadata).build().unwrap();
+
+        assert_send(client.exchange_code(&metadata, "the-code", &request));
+        assert_send(client.refresh(&metadata, "the-refresh-token"));
+        assert_send(client.token("alice", &metadata));
+    }
+
+    #[test]
+    fn it_validates_the_authorization_callback() {
+        let client = OAuthClient::new("my-client");
+        let metadata = metadata();
+        let request = client.authorization_request(&metadata).build().unwrap();
+        let state = request.state.clone();
+
+        // no `iss` and no advertisement — nothing more to check
+        assert!(request.validate_callback(&metadata, &state, None).is_ok());
+        assert!(
+            request
+                .validate_callback(&metadata, &state, Some(&metadata.issuer))
+                .is_ok()
+        );
+
+        // CSRF: a foreign `state` never reaches the token endpoint
+        let err = request
+            .validate_callback(&metadata, "forged", None)
+            .unwrap_err();
+        assert!(matches!(err, ClientError::Validation(reason) if reason.contains("state")));
+
+        // mix-up: a present `iss` must match the issuer, advertised or not
+        let err = request
+            .validate_callback(&metadata, &state, Some("https://evil.example.com"))
+            .unwrap_err();
+        assert!(matches!(err, ClientError::Validation(reason) if reason.contains("`iss` mismatch")));
+
+        // ...and it is mandatory once the server advertises RFC 9207
+        let advertised = metadata.with_authorization_response_iss_parameter(true);
+        assert!(
+            request
+                .validate_callback(&advertised, &state, Some(&advertised.issuer))
+                .is_ok()
+        );
+        let err = request
+            .validate_callback(&advertised, &state, None)
+            .unwrap_err();
+        assert!(matches!(err, ClientError::Validation(reason) if reason.contains("RFC 9207")));
     }
 
     #[test]

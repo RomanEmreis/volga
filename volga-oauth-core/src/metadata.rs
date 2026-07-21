@@ -136,6 +136,16 @@ pub struct AuthorizationServerMetadata {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub code_challenge_methods_supported: Vec<String>,
 
+    /// Whether the authorization response carries the `iss` parameter
+    /// ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207) §3)
+    ///
+    /// Defaults to `false` — the RFC 9207 §3 default — and is then omitted
+    /// from the serialized document. When `true`, clients must reject a
+    /// callback that carries no `iss` (see
+    /// `AuthorizationRequest::validate_callback` in `volga-oauth-client`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub authorization_response_iss_parameter_supported: bool,
+
     /// Extension and OIDC-specific fields not modeled above
     #[serde(flatten)]
     pub additional_fields: HashMap<String, serde_json::Value>,
@@ -351,6 +361,16 @@ impl AuthorizationServerMetadata {
         self
     }
 
+    /// Advertises that authorization responses carry the `iss` parameter
+    /// (RFC 9207 §3)
+    ///
+    /// Clients then treat a callback without `iss` as an error, which is
+    /// what closes the mix-up attack the parameter exists to prevent.
+    pub fn with_authorization_response_iss_parameter(mut self, supported: bool) -> Self {
+        self.authorization_response_iss_parameter_supported = supported;
+        self
+    }
+
     /// Adds an extension or OIDC-specific field not modeled by the typed fields
     pub fn with_additional_field(
         mut self,
@@ -392,6 +412,13 @@ fn default_grant_types() -> Vec<String> {
 #[inline]
 fn default_client_auth_methods() -> Vec<String> {
     vec!["client_secret_basic".into()]
+}
+
+/// Keeps `false` — the spec default for the boolean metadata fields —
+/// out of the serialized document
+#[inline]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// OAuth 2.0 Protected Resource Metadata per RFC 9728 §2
@@ -667,6 +694,32 @@ mod tests {
                 "grant_types_supported": ["authorization_code"],
                 "code_challenge_methods_supported": ["S256"]
             })
+        );
+    }
+
+    #[test]
+    fn it_round_trips_the_iss_parameter_flag() {
+        let metadata = AuthorizationServerMetadata::new("https://auth.example.com")
+            .with_authorization_response_iss_parameter(true);
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert_eq!(json["authorization_response_iss_parameter_supported"], true);
+
+        let parsed: AuthorizationServerMetadata = serde_json::from_value(json).unwrap();
+        assert!(parsed.authorization_response_iss_parameter_supported);
+        // typed, not swept into the extension bag
+        assert!(
+            !parsed
+                .additional_fields
+                .contains_key("authorization_response_iss_parameter_supported")
+        );
+
+        // the RFC 9207 §3 default is `false`, and stays off the wire
+        let metadata = AuthorizationServerMetadata::new("https://auth.example.com");
+        assert!(!metadata.authorization_response_iss_parameter_supported);
+        let json = serde_json::to_value(&metadata).unwrap();
+        assert!(
+            json.get("authorization_response_iss_parameter_supported")
+                .is_none()
         );
     }
 
