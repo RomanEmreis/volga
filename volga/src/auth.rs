@@ -513,6 +513,18 @@ mod tests {
     use crate::http::StatusCode;
     use jsonwebtoken::errors::{Error as JwtError, ErrorKind};
 
+    /// Produces a genuine `ErrorKind::Base64` error.
+    ///
+    /// The variant wraps `jsonwebtoken`'s own `base64` version, which the crate
+    /// does not re-export, so it cannot be constructed here directly - decoding a
+    /// header with a non-base64 segment makes `jsonwebtoken` build it for us.
+    fn base64_jwt_error() -> JwtError {
+        let err = jsonwebtoken::decode_header("!!!!.eyJzdWIiOiIxIn0.sig")
+            .expect_err("a non-base64 header segment must fail to decode");
+        assert!(matches!(err.kind(), ErrorKind::Base64(_)));
+        err
+    }
+
     #[test]
     fn it_maps_expired_signature_to_unauthorized() {
         let status = map_jwt_error_to_status(&ErrorKind::ExpiredSignature);
@@ -575,8 +587,7 @@ mod tests {
 
     #[test]
     fn it_maps_base64_error_to_bad_request() {
-        let status =
-            map_jwt_error_to_status(&ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)));
+        let status = map_jwt_error_to_status(base64_jwt_error().kind());
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
@@ -697,10 +708,7 @@ mod tests {
 
     #[test]
     fn it_maps_base64_error_to_www_authenticate() {
-        let www_auth = build_www_authenticate(
-            &ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)),
-            None,
-        );
+        let www_auth = build_www_authenticate(base64_jwt_error().kind(), None);
         assert_eq!(
             www_auth,
             r#"Bearer error="invalid_request", error_description="Token is not properly base64-encoded""#
@@ -790,8 +798,7 @@ mod tests {
 
     #[test]
     fn it_converts_jwt_error_to_error_with_base64_error() {
-        let jwt_error = JwtError::from(ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)));
-        let error = Error::from_jwt_error(jwt_error);
+        let error = Error::from_jwt_error(base64_jwt_error());
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(error.instance.is_none());

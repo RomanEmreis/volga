@@ -315,6 +315,9 @@ fn default_alg(params: &AlgorithmParameters) -> Option<Algorithm> {
             _ => None,
         },
         AlgorithmParameters::OctetKey(_) => None,
+        // `AlgorithmParameters` is `#[non_exhaustive]`: key types added by future
+        // `jsonwebtoken` releases are treated as "cannot infer" rather than guessed.
+        _ => None,
     }
 }
 
