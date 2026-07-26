@@ -25,7 +25,7 @@ mime = "0.3.17"
 mime_guess = "2.0.5"
 pin-project-lite = "0.2.17"
 tokio = { version = "1.53.1", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time"] }
-tokio-util = "0.7.18"
+tokio-util = "0.7.19"
 serde = "1.0.229"
 serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"
@@ -35,9 +35,9 @@ smallvec = "1.15.1"
 arc-swap = { version = "1.9.2", optional = true }
 toml = { version = "1.1.2",   optional = true }
 async-compression = { version = "0.4.42", features = ["tokio"], optional = true }
-base64 = { version = "0.22.1", optional = true }
+base64 = { version = "0.23.0", optional = true }
 cookie = { version = "0.18.1", features = ["percent-encode"], optional = true }
-jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"], optional = true }
+jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"], optional = true }
 httpdate = { version = "1.0.3", optional = true }
 hyper = { version = "1.11.0", features = ["server"], optional = true }
 hyper-util = { version = "0.1.20", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
@@ -63,8 +63,8 @@ volga-open-api     = { workspace = true, optional = true }
 volga-rate-limiter = { workspace = true, optional = true }
 
 [dev-dependencies]
-base64 = { version = "0.22.1" }
-jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"] }
+base64 = { version = "0.23.0" }
+jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 hyper = { version = "1.10.1", features = ["client"] }
 reqwest = { version = "0.13.4", features = ["rustls-no-provider"] }
 serde = { version = "1.0.228", features = ["derive"] }
