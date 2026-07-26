@@ -11,7 +11,7 @@ env:
   # Pinned nightly for reproducible fuzz builds (cargo-fuzz needs nightly for -Z sanitizer).
   # Bump policy: bump deliberately, ~monthly, never float to `nightly`.
   # The `bump-fuzz-nightly` workflow opens a PR on the 1st of each month; merge only after
-  # its fuzz build is green. Do NOT regenerate fuzz/Cargo.lock from scratch on a bump —
+  # its fuzz build is green. Do NOT regenerate fuzz/Cargo.lock from scratch on a bump -
   # a fresh resolve reintroduces the alloc-no-stdlib 2.0.4/3.0.0 split that breaks brotli;
   # keep the committed lock and just rebuild against it.
   RUST_NIGHTLY: nightly-2026-07-01

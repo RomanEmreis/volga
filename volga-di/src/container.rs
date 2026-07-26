@@ -221,7 +221,7 @@ impl Container {
     /// Creates a new child dependency-injection scope that inherits all service
     /// registrations from its parent:
     ///
-    /// - **Singleton** services are shared: the child scope reuses the parent’s
+    /// - **Singleton** services are shared: the child scope reuses the parent's
     ///   singleton instances.
     /// - **Scoped** services are isolated: they are not instantiated upfront and
     ///   will be lazily created the first time they are resolved within this scope.

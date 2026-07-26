@@ -146,7 +146,7 @@ async fn shutdown_on_remaining_triggers_release_after_shutdown() {
 
     let port = pick_free_port();
     let (tx_a, rx_a) = tokio::sync::oneshot::channel::<()>();
-    // The second trigger never resolves on its own — it's a watchdog future.
+    // The second trigger never resolves on its own - it's a watchdog future.
     // The trigger task wraps it in a `select!` against the shared token,
     // so when trigger A cancels, this future is *dropped*, which fires
     // `dropped` via the `Drop` impl below.

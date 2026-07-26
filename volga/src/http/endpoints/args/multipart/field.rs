@@ -1,4 +1,4 @@
-//! Multipart field — represents a single part of an incoming multipart stream.
+//! Multipart field - represents a single part of an incoming multipart stream.
 
 use bytes::Bytes;
 use std::{

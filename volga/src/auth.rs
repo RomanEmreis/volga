@@ -147,16 +147,16 @@ impl App {
     }
 
     /// Describes the OAuth 2.1/OIDC issuer whose keys validate bearer
-    /// tokens — activate it explicitly with [`use_oauth`](App::use_oauth)
+    /// tokens - activate it explicitly with [`use_oauth`](App::use_oauth)
     ///
     /// The issuer metadata and its JSON Web Key Set are fetched lazily on
     /// the first request and refreshed on key rotation; see
     /// [`OAuthConfig`] for the knobs. Token checks other than the key and
-    /// `iss` (audience, expiry, …) stay on
+    /// `iss` (audience, expiry, ...) stay on
     /// [`with_bearer_auth`](App::with_bearer_auth).
     ///
     /// With the `config` feature the same knobs can come from the
-    /// `[oauth.client]` section of the configuration file instead —
+    /// `[oauth.client]` section of the configuration file instead -
     /// [`use_oauth`](App::use_oauth) remains a code-only call either way.
     ///
     /// # Example
@@ -229,7 +229,7 @@ impl App {
     }
 
     fn ensure_bearer_auth_configured(&self) {
-        // issuer-based validation resolves keys at runtime — no static
+        // issuer-based validation resolves keys at runtime - no static
         // decoding key required (activation order with `use_oauth` is
         // checked at startup)
         #[cfg(feature = "oauth-client")]
@@ -387,9 +387,9 @@ where
                     .headers()
                     .contains_key(crate::headers::AUTHORIZATION)
                 {
-                    // RFC 6750 §3.1: credentials were presented but are not
+                    // RFC 6750 Section 3.1: credentials were presented but are not
                     // a well-formed Bearer value (wrong scheme, empty token)
-                    // — the client should fix the header, not start a flow
+                    // - the client should fix the header, not start a flow
                     let challenge = challenge
                         .with_error(oauth::OAuthErrorCode::InvalidRequest)
                         .with_description("Authorization header is not a valid Bearer credential");
@@ -398,7 +398,7 @@ where
                         (WWW_AUTHENTICATE, challenge.to_string())
                     ])
                 } else {
-                    // RFC 6750 §3: no credentials were presented — challenge
+                    // RFC 6750 Section 3: no credentials were presented - challenge
                     // with a bare scheme (no error code) so clients can
                     // discover the resource metadata and start an
                     // authorization flow
@@ -435,7 +435,7 @@ where
                     }
                     // a server-side failure (unreachable OAuth issuer,
                     // missing security key) is not the client's token
-                    // being at fault — no invalid_token challenge
+                    // being at fault - no invalid_token challenge
                     Err(err) if err.status().is_server_error() => {
                         status!(503, "Token validation is temporarily unavailable")
                     }

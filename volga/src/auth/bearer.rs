@@ -495,7 +495,7 @@ impl BearerTokenService {
     ///
     /// The key is selected by the token's `kid`; an unknown `kid` triggers
     /// a rate-limited JWKS refresh. The accepted algorithm is pinned to the
-    /// resolved key's algorithm — the rest of the validation policy comes
+    /// resolved key's algorithm - the rest of the validation policy comes
     /// from [`BearerAuthConfig`].
     #[cfg(feature = "oauth-client")]
     pub async fn decode_async<C: DeserializeOwned + Clone>(

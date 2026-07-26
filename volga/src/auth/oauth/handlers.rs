@@ -4,12 +4,12 @@
 //! (whole value, including the `&str` identifier shorthand) and served by
 //! the parameterless `use_*` methods:
 //!
-//! * [`App::use_oauth_resource_metadata`] — Protected Resource Metadata
-//!   per [RFC 9728 §3](https://www.rfc-editor.org/rfc/rfc9728#section-3)
-//! * [`App::use_oauth_server_metadata`] — Authorization Server Metadata
-//!   per [RFC 8414 §3](https://www.rfc-editor.org/rfc/rfc8414#section-3)
-//! * [`App::use_oidc_metadata`] — the same document at the OpenID Connect
-//!   Discovery path per [OIDC Discovery 1.0 §4](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig)
+//! * [`App::use_oauth_resource_metadata`] - Protected Resource Metadata
+//!   per [RFC 9728 Section 3](https://www.rfc-editor.org/rfc/rfc9728#section-3)
+//! * [`App::use_oauth_server_metadata`] - Authorization Server Metadata
+//!   per [RFC 8414 Section 3](https://www.rfc-editor.org/rfc/rfc8414#section-3)
+//! * [`App::use_oidc_metadata`] - the same document at the OpenID Connect
+//!   Discovery path per [OIDC Discovery 1.0 Section 4](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig)
 //!
 //! With the `config` feature, both documents can also be provided by the
 //! `[oauth.resource]` and `[oauth.server]` sections of the configuration
@@ -154,23 +154,23 @@ impl App {
         self
     }
 
-    /// Serves the configured OAuth 2.0 Protected Resource Metadata (RFC 9728 §3)
+    /// Serves the configured OAuth 2.0 Protected Resource Metadata (RFC 9728 Section 3)
     ///
     /// Mounts a `GET` route returning the document as `application/json` at
     /// the well-known path derived from the `resource` identifier per
-    /// RFC 9728 §3.1: `/.well-known/oauth-protected-resource`, with the
+    /// RFC 9728 Section 3.1: `/.well-known/oauth-protected-resource`, with the
     /// resource's path appended (e.g. `/.well-known/oauth-protected-resource/v1`
     /// for `https://api.example.com/v1`).
     ///
     /// When bearer authentication is configured and no explicit
     /// [`with_resource_metadata_url`] is set, the derived metadata URL is
     /// advertised automatically in `WWW-Authenticate` challenges
-    /// (RFC 9728 §5.1).
+    /// (RFC 9728 Section 5.1).
     ///
     /// Panics when no document is configured (via
     /// [`with_oauth_resource_metadata`], [`set_oauth_resource_metadata`] or
     /// the `[oauth.resource]` config file section), or when the `resource`
-    /// identifier is not a valid `http`/`https` URI or contains a query —
+    /// identifier is not a valid `http`/`https` URI or contains a query -
     /// these are startup misconfigurations.
     ///
     /// [`with_resource_metadata_url`]: crate::auth::BearerAuthConfig::with_resource_metadata_url
@@ -208,11 +208,11 @@ impl App {
         self
     }
 
-    /// Serves the configured OAuth 2.0 Authorization Server Metadata (RFC 8414 §3)
+    /// Serves the configured OAuth 2.0 Authorization Server Metadata (RFC 8414 Section 3)
     ///
     /// Mounts a `GET` route returning the document as `application/json` at
     /// the well-known path derived from the `issuer` identifier per
-    /// RFC 8414 §3.1: `/.well-known/oauth-authorization-server`, with the
+    /// RFC 8414 Section 3.1: `/.well-known/oauth-authorization-server`, with the
     /// issuer's path appended (e.g.
     /// `/.well-known/oauth-authorization-server/tenant1` for
     /// `https://auth.example.com/tenant1`).
@@ -220,7 +220,7 @@ impl App {
     /// Panics when no document is configured (via
     /// [`with_oauth_server_metadata`], [`set_oauth_server_metadata`] or the
     /// `[oauth.server]` config file section), or when the `issuer`
-    /// identifier is not a valid `http`/`https` URI or contains a query —
+    /// identifier is not a valid `http`/`https` URI or contains a query -
     /// these are startup misconfigurations.
     ///
     /// [`with_oauth_server_metadata`]: App::with_oauth_server_metadata
@@ -256,7 +256,7 @@ impl App {
     /// Mounts a `GET` route returning the same document configured for
     /// [`use_oauth_server_metadata`] as `application/json` at the path
     /// derived from the `issuer` identifier per
-    /// [OIDC Discovery 1.0 §4](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig):
+    /// [OIDC Discovery 1.0 Section 4](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig):
     /// unlike RFC 8414, `/.well-known/openid-configuration` is appended
     /// **after** the issuer's path (e.g.
     /// `/tenant1/.well-known/openid-configuration` for
@@ -264,10 +264,10 @@ impl App {
     ///
     /// OIDC-specific fields required by a compliant provider document
     /// (`subject_types_supported`, `id_token_signing_alg_values_supported`,
-    /// `userinfo_endpoint`, …) can be supplied through
+    /// `userinfo_endpoint`, ...) can be supplied through
     /// [`with_additional_field`](AuthorizationServerMetadata::with_additional_field).
     /// Authorization servers commonly publish the same document at both
-    /// discovery paths — chain this with [`use_oauth_server_metadata`]:
+    /// discovery paths - chain this with [`use_oauth_server_metadata`]:
     ///
     /// [`use_oauth_server_metadata`]: App::use_oauth_server_metadata
     ///
@@ -275,7 +275,7 @@ impl App {
     /// [`with_oauth_server_metadata`](App::with_oauth_server_metadata),
     /// [`set_oauth_server_metadata`](App::set_oauth_server_metadata) or the
     /// `[oauth.server]` config file section), or when the `issuer`
-    /// identifier is not a valid `http`/`https` URI or contains a query —
+    /// identifier is not a valid `http`/`https` URI or contains a query -
     /// these are startup misconfigurations.
     ///
     /// # Example
@@ -305,7 +305,7 @@ impl App {
 }
 
 /// Extracts the absolute-path part of a derived metadata URL to mount the
-/// route at (`https://host/.well-known/…` → `/.well-known/…`).
+/// route at (`https://host/.well-known/...` -> `/.well-known/...`).
 fn well_known_route(metadata_url: &str) -> &str {
     let after_scheme = metadata_url.find("://").expect("derived URL is absolute") + 3;
     let path_start = metadata_url[after_scheme..]

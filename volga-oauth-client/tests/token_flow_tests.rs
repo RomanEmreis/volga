@@ -194,7 +194,7 @@ async fn it_serves_and_refreshes_tokens_through_the_store() {
                 "expires_in": 3600,
                 "refresh_token": "r2"
             }),
-            // no rotation — the old refresh token stays valid
+            // no rotation - the old refresh token stays valid
             Some("r-keep") => volga::ok!({
                 "access_token": "fresh-2",
                 "token_type": "Bearer",
@@ -212,15 +212,15 @@ async fn it_serves_and_refreshes_tokens_through_the_store() {
     let expired = SystemTime::now() - Duration::from_secs(3600);
     let valid = SystemTime::now() + Duration::from_secs(3600);
 
-    // nothing stored — interactive authorization required
+    // nothing stored - interactive authorization required
     assert!(client.token("nobody", &metadata).await.unwrap().is_none());
 
-    // still valid — served from the store without touching the server
+    // still valid - served from the store without touching the server
     client.store_tokens("alice", &stored("a1", Some("r1"), valid));
     let tokens = client.token("alice", &metadata).await.unwrap().unwrap();
     assert_eq!(tokens.access_token, "a1");
 
-    // expired — refreshed transparently, rotated refresh token persisted
+    // expired - refreshed transparently, rotated refresh token persisted
     client.store_tokens("bob", &stored("b1", Some("r1"), expired));
     let tokens = client.token("bob", &metadata).await.unwrap().unwrap();
     assert_eq!(tokens.access_token, "fresh-1");
@@ -229,7 +229,7 @@ async fn it_serves_and_refreshes_tokens_through_the_store() {
         Some("r2")
     );
 
-    // no rotation in the response — the old refresh token is carried over
+    // no rotation in the response - the old refresh token is carried over
     client.store_tokens("carol", &stored("c1", Some("r-keep"), expired));
     let tokens = client.token("carol", &metadata).await.unwrap().unwrap();
     assert_eq!(tokens.access_token, "fresh-2");
@@ -238,12 +238,12 @@ async fn it_serves_and_refreshes_tokens_through_the_store() {
         Some("r-keep")
     );
 
-    // rejected refresh token — dead entry removed, authorization required
+    // rejected refresh token - dead entry removed, authorization required
     client.store_tokens("dave", &stored("d1", Some("revoked"), expired));
     assert!(client.token("dave", &metadata).await.unwrap().is_none());
     assert!(store.get("dave").is_none());
 
-    // expired without a refresh token — same outcome, no server round-trip
+    // expired without a refresh token - same outcome, no server round-trip
     client.store_tokens("erin", &stored("e1", None, expired));
     assert!(client.token("erin", &metadata).await.unwrap().is_none());
     assert!(store.get("erin").is_none());

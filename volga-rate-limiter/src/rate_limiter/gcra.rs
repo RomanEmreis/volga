@@ -188,7 +188,7 @@ impl GcraRateLimiter {
     ///
     /// Panics if:
     ///
-    /// - `rate_per_second` is not finite (`NaN` or ±∞).
+    /// - `rate_per_second` is not finite (`NaN` or +/-infinity).
     /// - `rate_per_second` is not positive (`<= 0.0`).
     /// - `burst` is `0` (must be at least `1`).
     #[inline]

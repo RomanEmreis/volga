@@ -19,7 +19,7 @@ pub const WELL_KNOWN_OPENID_CONFIGURATION: &str = "/.well-known/openid-configura
 /// Well-known path for OAuth 2.0 Protected Resource Metadata (RFC 9728)
 pub const WELL_KNOWN_PROTECTED_RESOURCE: &str = "/.well-known/oauth-protected-resource";
 
-/// OAuth 2.0 Authorization Server Metadata per RFC 8414 §2
+/// OAuth 2.0 Authorization Server Metadata per RFC 8414 Section 2
 ///
 /// Also covers the OpenID Connect Discovery document, which shares this
 /// format; OIDC-specific and other extension fields are preserved in
@@ -51,13 +51,13 @@ pub struct AuthorizationServerMetadata {
 
     /// `response_type` values supported by this server
     ///
-    /// REQUIRED per RFC 8414 §2: always serialized and must be present when
+    /// REQUIRED per RFC 8414 Section 2: always serialized and must be present when
     /// deserializing a metadata document.
     pub response_types_supported: Vec<String>,
 
     /// `response_mode` values supported by this server
     ///
-    /// When absent in a deserialized document, set to the RFC 8414 §2
+    /// When absent in a deserialized document, set to the RFC 8414 Section 2
     /// default `["query", "fragment"]`.
     #[serde(
         default = "default_response_modes",
@@ -67,14 +67,14 @@ pub struct AuthorizationServerMetadata {
 
     /// Grant type values supported by this server
     ///
-    /// When absent in a deserialized document, set to the RFC 8414 §2
+    /// When absent in a deserialized document, set to the RFC 8414 Section 2
     /// default `["authorization_code", "implicit"]`.
     #[serde(default = "default_grant_types", skip_serializing_if = "Vec::is_empty")]
     pub grant_types_supported: Vec<String>,
 
     /// Client authentication methods supported by the token endpoint
     ///
-    /// When absent in a deserialized document, set to the RFC 8414 §2
+    /// When absent in a deserialized document, set to the RFC 8414 Section 2
     /// default `["client_secret_basic"]`.
     #[serde(
         default = "default_client_auth_methods",
@@ -108,7 +108,7 @@ pub struct AuthorizationServerMetadata {
 
     /// Client authentication methods supported by the revocation endpoint
     ///
-    /// When absent in a deserialized document, set to the RFC 8414 §2
+    /// When absent in a deserialized document, set to the RFC 8414 Section 2
     /// default `["client_secret_basic"]`.
     #[serde(
         default = "default_client_auth_methods",
@@ -137,9 +137,9 @@ pub struct AuthorizationServerMetadata {
     pub code_challenge_methods_supported: Vec<String>,
 
     /// Whether the authorization response carries the `iss` parameter
-    /// ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207) §3)
+    /// ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207) Section 3)
     ///
-    /// Defaults to `false` — the RFC 9207 §3 default — and is then omitted
+    /// Defaults to `false` - the RFC 9207 Section 3 default - and is then omitted
     /// from the serialized document. When `true`, clients must reject a
     /// callback that carries no `iss` (see
     /// `AuthorizationRequest::validate_callback` in `volga-oauth-client`).
@@ -154,8 +154,8 @@ pub struct AuthorizationServerMetadata {
 impl AuthorizationServerMetadata {
     /// Creates a new metadata document for the given issuer identifier
     ///
-    /// `response_types_supported` (REQUIRED per RFC 8414 §2) is prefilled
-    /// with `["code"]` — the authorization code flow is the only
+    /// `response_types_supported` (REQUIRED per RFC 8414 Section 2) is prefilled
+    /// with `["code"]` - the authorization code flow is the only
     /// redirect-based flow retained in OAuth 2.1. `grant_types_supported`
     /// is prefilled with `["authorization_code"]` to match: when this field
     /// is omitted, RFC 8414 clients assume the default
@@ -362,7 +362,7 @@ impl AuthorizationServerMetadata {
     }
 
     /// Advertises that authorization responses carry the `iss` parameter
-    /// (RFC 9207 §3)
+    /// (RFC 9207 Section 3)
     ///
     /// Clients then treat a callback without `iss` as an error, which is
     /// what closes the mix-up attack the parameter exists to prevent.
@@ -396,32 +396,32 @@ impl From<String> for AuthorizationServerMetadata {
     }
 }
 
-/// RFC 8414 §2 default for an omitted `response_modes_supported`
+/// RFC 8414 Section 2 default for an omitted `response_modes_supported`
 #[inline]
 fn default_response_modes() -> Vec<String> {
     vec!["query".into(), "fragment".into()]
 }
 
-/// RFC 8414 §2 default for an omitted `grant_types_supported`
+/// RFC 8414 Section 2 default for an omitted `grant_types_supported`
 #[inline]
 fn default_grant_types() -> Vec<String> {
     vec!["authorization_code".into(), "implicit".into()]
 }
 
-/// RFC 8414 §2 default for omitted token/revocation endpoint auth methods
+/// RFC 8414 Section 2 default for omitted token/revocation endpoint auth methods
 #[inline]
 fn default_client_auth_methods() -> Vec<String> {
     vec!["client_secret_basic".into()]
 }
 
-/// Keeps `false` — the spec default for the boolean metadata fields —
+/// Keeps `false` - the spec default for the boolean metadata fields -
 /// out of the serialized document
 #[inline]
 fn is_false(value: &bool) -> bool {
     !*value
 }
 
-/// OAuth 2.0 Protected Resource Metadata per RFC 9728 §2
+/// OAuth 2.0 Protected Resource Metadata per RFC 9728 Section 2
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProtectedResourceMetadata {
     /// The protected resource's resource identifier URL
@@ -713,7 +713,7 @@ mod tests {
                 .contains_key("authorization_response_iss_parameter_supported")
         );
 
-        // the RFC 9207 §3 default is `false`, and stays off the wire
+        // the RFC 9207 Section 3 default is `false`, and stays off the wire
         let metadata = AuthorizationServerMetadata::new("https://auth.example.com");
         assert!(!metadata.authorization_response_iss_parameter_supported);
         let json = serde_json::to_value(&metadata).unwrap();
@@ -745,7 +745,7 @@ mod tests {
         );
 
         // Omitted RFC-defaulted fields are materialized on the way out;
-        // the result is semantically equivalent per RFC 8414 §2.
+        // the result is semantically equivalent per RFC 8414 Section 2.
         let mut expected = doc;
         expected["response_modes_supported"] = json!(["query", "fragment"]);
         expected["grant_types_supported"] = json!(["authorization_code", "implicit"]);

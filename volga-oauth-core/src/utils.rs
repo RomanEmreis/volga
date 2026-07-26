@@ -1,10 +1,10 @@
 //! Shared OAuth utilities
 //!
-//! * [`BearerChallenge`] — builder and parser for `WWW-Authenticate: Bearer ...`
-//!   challenges per [RFC 6750 §3](https://www.rfc-editor.org/rfc/rfc6750#section-3)
-//!   and [RFC 9728 §5.1](https://www.rfc-editor.org/rfc/rfc9728#section-5.1)
-//! * [`canonicalize_resource_uri`] — resource indicator normalization per
-//!   [RFC 8707 §2](https://www.rfc-editor.org/rfc/rfc8707#section-2)
+//! * [`BearerChallenge`] - builder and parser for `WWW-Authenticate: Bearer ...`
+//!   challenges per [RFC 6750 Section 3](https://www.rfc-editor.org/rfc/rfc6750#section-3)
+//!   and [RFC 9728 Section 5.1](https://www.rfc-editor.org/rfc/rfc9728#section-5.1)
+//! * [`canonicalize_resource_uri`] - resource indicator normalization per
+//!   [RFC 8707 Section 2](https://www.rfc-editor.org/rfc/rfc8707#section-2)
 
 use crate::error::{OAuthError, OAuthErrorCode};
 use crate::metadata::{
@@ -21,8 +21,8 @@ use std::str::FromStr;
 /// quoted; embedded `"` and `\` are escaped and control characters are
 /// replaced with spaces so the result is always a valid header value.
 ///
-/// The inverse operation — extracting a `Bearer` challenge from a received
-/// `WWW-Authenticate` header value — is available via
+/// The inverse operation - extracting a `Bearer` challenge from a received
+/// `WWW-Authenticate` header value - is available via
 /// [`BearerChallenge::parse`] (also exposed through [`FromStr`]).
 ///
 /// # Example
@@ -60,7 +60,7 @@ impl BearerChallenge {
         self
     }
 
-    /// Sets the `error` parameter (RFC 6750 §3.1)
+    /// Sets the `error` parameter (RFC 6750 Section 3.1)
     pub fn with_error(mut self, error: OAuthErrorCode) -> Self {
         self.error = Some(error);
         self
@@ -79,7 +79,7 @@ impl BearerChallenge {
     }
 
     /// Sets the `resource_metadata` parameter pointing to the protected
-    /// resource metadata document (RFC 9728 §5.1)
+    /// resource metadata document (RFC 9728 Section 5.1)
     pub fn with_resource_metadata(mut self, url: impl Into<String>) -> Self {
         self.resource_metadata = Some(url.into());
         self
@@ -119,7 +119,7 @@ impl BearerChallenge {
     /// challenge from it
     ///
     /// The header may carry several comma-separated challenges
-    /// ([RFC 9110 §11.6.1](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.1));
+    /// ([RFC 9110 Section 11.6.1](https://www.rfc-editor.org/rfc/rfc9110#section-11.6.1));
     /// the first `Bearer` challenge is used and the auth scheme is matched
     /// case-insensitively. Parameter names are matched case-insensitively
     /// as well, values may be given as tokens or quoted strings
@@ -131,7 +131,7 @@ impl BearerChallenge {
     /// parameter name, a value that is neither a token nor a quoted string,
     /// an unterminated quoted string, a control character, a duplicated
     /// recognized parameter, or a `token68` payload, which the Bearer scheme
-    /// does not use ([RFC 6750 §3](https://www.rfc-editor.org/rfc/rfc6750#section-3)).
+    /// does not use ([RFC 6750 Section 3](https://www.rfc-editor.org/rfc/rfc6750#section-3)).
     ///
     /// # Example
     /// ```
@@ -148,7 +148,7 @@ impl BearerChallenge {
         let mut bearer: Option<Self> = None;
         let mut seen_scheme = false;
         for element in split_list_elements(header)? {
-            // Empty list elements (`Bearer, , Basic`) are legal per RFC 9110 §5.6.1
+            // Empty list elements (`Bearer, , Basic`) are legal per RFC 9110 Section 5.6.1
             if element.is_empty() {
                 continue;
             }
@@ -193,7 +193,7 @@ impl BearerChallenge {
 
     /// Stores a parsed auth parameter; `name` must already be lowercased.
     /// Unknown parameters are ignored for forward compatibility, duplicates
-    /// of recognized ones are rejected (RFC 7235 §2.1).
+    /// of recognized ones are rejected (RFC 7235 Section 2.1).
     fn set_param(&mut self, name: &str, value: String) -> Result<(), OAuthError> {
         let slot = match name {
             "realm" => &mut self.realm,
@@ -289,7 +289,7 @@ enum Element<'a> {
 /// Classifies a non-empty, trimmed list element. An element starts a new
 /// challenge when it is a bare token or a token separated from the rest by
 /// whitespace; `name=value` pairs (with optional bad whitespace around `=`,
-/// RFC 9110 §5.6.3) are parameters of the current challenge.
+/// RFC 9110 Section 5.6.3) are parameters of the current challenge.
 fn classify_element(element: &str) -> Element<'_> {
     match element.split_once([' ', '\t']) {
         None if !element.contains('=') => Element::Scheme {
@@ -308,7 +308,7 @@ fn classify_element(element: &str) -> Element<'_> {
 
 /// Splits a header value at top-level commas, leaving commas inside quoted
 /// strings (including escaped quotes) intact. Elements are trimmed but may
-/// be empty — the `#challenge` list grammar allows empty elements.
+/// be empty - the `#challenge` list grammar allows empty elements.
 fn split_list_elements(header: &str) -> Result<Vec<&str>, OAuthError> {
     let bytes = header.as_bytes();
     let mut elements = Vec::new();
@@ -334,7 +334,7 @@ fn split_list_elements(header: &str) -> Result<Vec<&str>, OAuthError> {
     Ok(elements)
 }
 
-/// Parses a single `name=value` auth parameter (RFC 9110 §11.2): the name
+/// Parses a single `name=value` auth parameter (RFC 9110 Section 11.2): the name
 /// is lowercased, the value is either a token or a quoted string with
 /// quoted-pair escapes decoded. Bad whitespace around `=` is tolerated.
 fn parse_auth_param(element: &str) -> Result<(String, String), OAuthError> {
@@ -394,7 +394,7 @@ fn unquote(quoted: &str) -> Result<String, OAuthError> {
     Err(invalid_challenge("quoted string is not terminated"))
 }
 
-/// Checks the RFC 9110 §5.6.2 `tchar` grammar (token characters)
+/// Checks the RFC 9110 Section 5.6.2 `tchar` grammar (token characters)
 fn is_tchar(byte: u8) -> bool {
     byte.is_ascii_alphanumeric()
         || matches!(
@@ -428,10 +428,10 @@ fn invalid_challenge(description: &str) -> OAuthError {
 /// * the scheme and host are lowercased;
 /// * default ports are removed (`http`/`ws`: 80, `https`/`wss`: 443);
 /// * for web schemes (`http`, `https`, `ws`, `wss`) a lone root path is
-///   dropped, both bare (`https://example.com/` → `https://example.com`)
-///   and before a query (`…/?q=1` → `…?q=1`); for other schemes the path is
+///   dropped, both bare (`https://example.com/` -> `https://example.com`)
+///   and before a query (`.../?q=1` -> `...?q=1`); for other schemes the path is
 ///   preserved verbatim, as the empty-path/`/` equivalence is
-///   scheme-specific (RFC 3986 §6.2.3). Non-root paths and query strings
+///   scheme-specific (RFC 3986 Section 6.2.3). Non-root paths and query strings
 ///   are always preserved.
 ///
 /// Returns an [`OAuthError`] with code `invalid_target` when the URI is not
@@ -491,9 +491,9 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
         if is_web_scheme {
             return Err(invalid_target("resource URI must have an authority"));
         }
-        // No authority component (e.g. `urn:example:resource`) — the
+        // No authority component (e.g. `urn:example:resource`) - the
         // scheme-specific part is pchar-based too (`hier-part [ "?" query ]`,
-        // RFC 3986 §3.3), and only the scheme is subject to normalization
+        // RFC 3986 Section 3.3), and only the scheme is subject to normalization
         if !is_valid_uri_component(rest, b":@/?") {
             return Err(invalid_target("resource URI contains invalid characters"));
         }
@@ -505,7 +505,7 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
     if authority.contains('@') {
         return Err(invalid_target("resource URI must not contain userinfo"));
     }
-    // `pchar` plus the `/` and `?` delimiters (RFC 3986 §3.3–3.4); `#` was
+    // `pchar` plus the `/` and `?` delimiters (RFC 3986 Section 3.3-3.4); `#` was
     // already rejected above, so everything after the first `?` is the query
     if !is_valid_uri_component(path_and_query, b":@/?") {
         return Err(invalid_target(
@@ -540,7 +540,7 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
         result.push_str(port);
     }
     // Empty-path/`/` equivalence is scheme-based normalization
-    // (RFC 3986 §6.2.3) — only apply it to schemes we know. The lone root
+    // (RFC 3986 Section 6.2.3) - only apply it to schemes we know. The lone root
     // slash is dropped both bare (`/`) and before a query (`/?q=1`)
     if is_web_scheme && (path_and_query == "/" || path_and_query.starts_with("/?")) {
         result.push_str(&path_and_query[1..]);
@@ -552,7 +552,7 @@ pub fn canonicalize_resource_uri(uri: &str) -> Result<String, OAuthError> {
 }
 
 /// Derives the Protected Resource Metadata URL for a resource identifier
-/// per [RFC 9728 §3.1](https://www.rfc-editor.org/rfc/rfc9728#section-3.1):
+/// per [RFC 9728 Section 3.1](https://www.rfc-editor.org/rfc/rfc9728#section-3.1):
 /// the well-known path is inserted between the host and the path components
 /// of the canonicalized resource identifier.
 ///
@@ -574,13 +574,13 @@ pub fn protected_resource_metadata_url(resource: &str) -> Result<String, OAuthEr
 }
 
 /// Derives the Authorization Server Metadata URL for an issuer identifier
-/// per [RFC 8414 §3.1](https://www.rfc-editor.org/rfc/rfc8414#section-3.1):
+/// per [RFC 8414 Section 3.1](https://www.rfc-editor.org/rfc/rfc8414#section-3.1):
 /// the well-known path is inserted between the host and the path components
 /// of the canonicalized issuer identifier.
 ///
 /// Returns an [`OAuthError`] with code `invalid_target` when the issuer
 /// identifier is not a valid `http`/`https` URI or contains a query
-/// (RFC 8414 §2 forbids query and fragment components in the issuer).
+/// (RFC 8414 Section 2 forbids query and fragment components in the issuer).
 ///
 /// # Example
 /// ```
@@ -594,7 +594,7 @@ pub fn authorization_server_metadata_url(issuer: &str) -> Result<String, OAuthEr
 }
 
 /// Derives the OpenID Connect Discovery metadata URL for an issuer identifier
-/// per [OpenID Connect Discovery 1.0 §4](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig):
+/// per [OpenID Connect Discovery 1.0 Section 4](https://openid.net/specs/openid-connect-discovery-1_0.html#ProviderConfig):
 /// unlike the RFC 8414 rule, the well-known path is appended **after** the
 /// issuer's path component (a trailing slash in the issuer is dropped first).
 ///
@@ -641,7 +641,7 @@ fn canonical_metadata_base(uri: &str) -> Result<String, OAuthError> {
 
 /// Inserts a well-known path between the authority and the path of a
 /// canonicalized `http`/`https` URI (the insertion rule shared by
-/// RFC 8414 §3.1 and RFC 9728 §3.1).
+/// RFC 8414 Section 3.1 and RFC 9728 Section 3.1).
 fn insert_well_known_path(uri: &str, well_known: &str) -> Result<String, OAuthError> {
     let canonical = canonical_metadata_base(uri)?;
     let after_scheme = canonical.find("://").expect("scheme checked above") + 3;
@@ -691,7 +691,7 @@ fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> 
             Some((host, port)) => (host, Some(port)),
             None => (authority, None),
         };
-        // `reg-name = *( unreserved / pct-encoded / sub-delims )` (§3.2.2)
+        // `reg-name = *( unreserved / pct-encoded / sub-delims )` (Section 3.2.2)
         if !is_valid_uri_component(host, b"") {
             return Err(invalid_target(
                 "resource URI host contains invalid characters",
@@ -705,8 +705,8 @@ fn split_host_port(authority: &str) -> Result<(&str, Option<&str>), OAuthError> 
 /// characters, complete percent-escapes (`%` followed by two hex digits;
 /// their decoding is not performed) and the given extra delimiter bytes.
 ///
-/// With no extras this is exactly the `reg-name` grammar (§3.2.2); with
-/// `b":@/?"` it covers a path with an optional query (§3.3–3.4).
+/// With no extras this is exactly the `reg-name` grammar (Section 3.2.2); with
+/// `b":@/?"` it covers a path with an optional query (Section 3.3-3.4).
 fn is_valid_uri_component(component: &str, extra: &[u8]) -> bool {
     let mut bytes = component.bytes();
 
@@ -732,7 +732,7 @@ fn is_valid_uri_component(component: &str, extra: &[u8]) -> bool {
 }
 
 /// Checks that the content of a bracketed host is an IP literal per
-/// RFC 3986 §3.2.2: an IPv6 address or an IPvFuture
+/// RFC 3986 Section 3.2.2: an IPv6 address or an IPvFuture
 /// (`"v" 1*HEXDIG "." 1*(unreserved / sub-delims / ":")`).
 ///
 /// Zone identifiers (RFC 6874, `[fe80::1%25eth0]`) are rejected: link-local
@@ -1013,7 +1013,7 @@ mod tests {
             canonicalize_resource_uri("https://example.com?q=1").unwrap(),
             "https://example.com?q=1"
         );
-        // Not scheme-equivalent for custom schemes — both forms are kept
+        // Not scheme-equivalent for custom schemes - both forms are kept
         assert_eq!(
             canonicalize_resource_uri("foo://api/?q=1").unwrap(),
             "foo://api/?q=1"

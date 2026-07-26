@@ -17,7 +17,7 @@ use serde_json::Value;
 /// short-circuits the HTTP request entirely; the cached document still goes
 /// through the same deserialization and semantic validation as a fresh
 /// response, so a stale or corrupted entry fails loudly rather than
-/// silently. `put` only ever receives documents that passed those checks —
+/// silently. `put` only ever receives documents that passed those checks -
 /// a malformed or lying response is rejected without touching the cache.
 ///
 /// Implementations must be thread-safe; both methods take `&self`, so

@@ -14,16 +14,16 @@ latest released version**.
 
 In practice, security fixes are published as part of the next release.  
 If a fix is important, we may ship a quick patch release - but we typically
-won’t maintain intermediate versions once a newer release is available.
+won't maintain intermediate versions once a newer release is available.
 
 ## Reporting a Vulnerability
 
-If you believe you’ve found a security issue, please **do not open a public issue**
+If you believe you've found a security issue, please **do not open a public issue**
 right away.
 
 Instead, report it privately:
 - Open a **GitHub Security Advisory** (preferred), or
-- Contact the maintainer via the repository’s listed contact channels.
+- Contact the maintainer via the repository's listed contact channels.
 
 Please include:
 - A clear description of the issue

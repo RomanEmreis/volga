@@ -1,14 +1,14 @@
 //! Token models
 //!
 //! [`TokenResponse`] is the wire shape of a successful token endpoint
-//! response (RFC 6749 §5.1); [`TokenSet`] is what the application holds
-//! on to — the same fields with `expires_in` resolved into an absolute
+//! response (RFC 6749 Section 5.1); [`TokenSet`] is what the application holds
+//! on to - the same fields with `expires_in` resolved into an absolute
 //! [`SystemTime`] captured when the response was received.
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 
-/// A successful token endpoint response (RFC 6749 §5.1)
+/// A successful token endpoint response (RFC 6749 Section 5.1)
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenResponse {
     /// The issued access token
@@ -104,7 +104,7 @@ impl From<TokenResponse> for TokenSet {
 
 impl std::fmt::Debug for TokenResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // tokens are credentials — never expose them in debug output
+        // tokens are credentials - never expose them in debug output
         f.debug_struct("TokenResponse")
             .field("access_token", &"[redacted]")
             .field("token_type", &self.token_type)
@@ -169,7 +169,7 @@ mod tests {
         assert!(!tokens.is_expired());
         assert!(tokens.expires_within(Duration::from_secs(3601)));
 
-        // no reported lifetime — never expired
+        // no reported lifetime - never expired
         let tokens = TokenSet::from(response(None));
         assert!(!tokens.is_expired());
         assert!(!tokens.expires_within(Duration::from_secs(3600)));
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn it_survives_unrepresentable_lifetimes() {
-        // an overflowing `expires_in` must not panic — it degrades to
+        // an overflowing `expires_in` must not panic - it degrades to
         // "no reported lifetime"
         let tokens = TokenSet::from(response(Some(u64::MAX)));
         assert_eq!(tokens.expires_at, None);

@@ -224,7 +224,7 @@ impl<T: TimeSource> SlidingWindowRateLimiter<T> {
     ///
     /// This is primarily useful for testing and deterministic scenarios.
     ///
-    /// Note: the previous `T: Clone` bound has been dropped — it was never required
+    /// Note: the previous `T: Clone` bound has been dropped - it was never required
     /// by the algorithm and was an unnecessary constraint.
     ///
     /// # Panics

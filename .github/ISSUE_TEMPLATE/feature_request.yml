@@ -6,7 +6,7 @@ body:
     id: problem
     attributes:
       label: What problem are you trying to solve?
-      placeholder: "I’m trying to..., but currently..."
+      placeholder: "I'm trying to..., but currently..."
     validations:
       required: true
   - type: textarea

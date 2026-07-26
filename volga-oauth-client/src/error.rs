@@ -1,7 +1,7 @@
 //! Client-side error model
 //!
 //! [`ClientError`] separates transport failures from protocol-level OAuth
-//! errors: an OAuth error response body (RFC 6749 §5.2) surfaces as
+//! errors: an OAuth error response body (RFC 6749 Section 5.2) surfaces as
 //! [`ClientError::Protocol`] with the parsed [`OAuthError`], everything
 //! below it (connection, TLS, timeout, malformed body) as the other
 //! variants.
@@ -14,7 +14,7 @@ use volga_oauth_core::OAuthError;
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ClientError {
-    /// The server returned an OAuth 2.0 error response (RFC 6749 §5.2)
+    /// The server returned an OAuth 2.0 error response (RFC 6749 Section 5.2)
     Protocol(OAuthError),
 
     /// The server returned an unexpected HTTP status without a parseable
@@ -33,7 +33,7 @@ pub enum ClientError {
 
     /// The response failed semantic validation required by the spec
     /// (e.g. the `issuer` in a discovered document does not match the
-    /// requested issuer, RFC 8414 §3.3)
+    /// requested issuer, RFC 8414 Section 3.3)
     Validation(String),
 }
 

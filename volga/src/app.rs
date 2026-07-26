@@ -137,7 +137,7 @@ pub struct App {
     pub(super) auth_config: Option<BearerAuthConfig>,
 
     /// Metadata URL derived by [`App::use_oauth_resource_metadata`], used as
-    /// the default `resource_metadata` challenge parameter (RFC 9728 §5.1)
+    /// the default `resource_metadata` challenge parameter (RFC 9728 Section 5.1)
     #[cfg(feature = "jwt-auth")]
     pub(super) oauth_resource_metadata_url: Option<String>,
 
@@ -353,7 +353,7 @@ impl App {
     /// Registers an external shutdown signal.
     ///
     /// The handle is composed with the built-in OS signal handler
-    /// (Ctrl+C, SIGTERM on Unix, or the equivalents on Windows) —
+    /// (Ctrl+C, SIGTERM on Unix, or the equivalents on Windows) -
     /// whichever fires first triggers a graceful shutdown.
     ///
     /// # Example
@@ -375,7 +375,7 @@ impl App {
     /// Registers an async trigger that fires a graceful shutdown when
     /// the given future resolves.
     ///
-    /// Multiple `shutdown_on` calls compose — any of the registered
+    /// Multiple `shutdown_on` calls compose - any of the registered
     /// futures resolving will trigger shutdown. The trigger composes
     /// with both the OS signal handler and any [`ShutdownHandle`]
     /// registered via [`App::with_shutdown`] or
@@ -436,9 +436,9 @@ impl App {
     /// Sets a specific HTTP request body limit (in bytes)
     ///
     /// # Parameters
-    /// - `Limit::Default` — use the framework default (5 MB)
-    /// - `Limit::Limited(n)` — enforce an explicit limit
-    /// - `Limit::Unlimited` — disables the body size check completely
+    /// - `Limit::Default` - use the framework default (5 MB)
+    /// - `Limit::Limited(n)` - enforce an explicit limit
+    /// - `Limit::Unlimited` - disables the body size check completely
     ///
     /// Default: 5 MB
     pub fn with_body_limit(mut self, limit: Limit<usize>) -> Self {
@@ -502,10 +502,10 @@ impl App {
     /// This limit controls the total size (in bytes) of all headers for a single HTTP/2 request.
     ///
     /// # Parameters
-    /// - `limit` — a [`Limit<u32>`]:
-    ///   - `Limit::Default` — uses the framework default (recommended)
-    ///   - `Limit::Limited(n)` — enforces an explicit upper bound
-    ///   - `Limit::Unlimited` — **panics** to catch misconfiguration early.
+    /// - `limit` - a [`Limit<u32>`]:
+    ///   - `Limit::Default` - uses the framework default (recommended)
+    ///   - `Limit::Limited(n)` - enforces an explicit upper bound
+    ///   - `Limit::Unlimited` - **panics** to catch misconfiguration early.
     pub fn with_max_header_list_size(mut self, size: Limit<usize>) -> Self {
         self.max_header_size = match size {
             Limit::Limited(size) => {
@@ -860,7 +860,7 @@ impl App {
 
         // Spawn any async triggers registered via `App::shutdown_on`.
         // Each trigger cancels the handle's token when it resolves, and
-        // exits early if another arm cancels the token first — otherwise
+        // exits early if another arm cancels the token first - otherwise
         // an unresolved watchdog future would leak its task after shutdown.
         if !self.shutdown_triggers.0.is_empty() {
             let handle = self.shutdown_handle.get_or_insert_with(ShutdownHandle::new);
@@ -958,7 +958,7 @@ impl App {
     fn shutdown_signal(shutdown_rx: watch::Receiver<()>, handle: Option<ShutdownHandle>) {
         let token = handle.map(|h| h.token()).unwrap_or_default();
 
-        // OS signal listener — spawned as its own task so it lives
+        // OS signal listener - spawned as its own task so it lives
         // independently of the manual-shutdown path. Tokio's process-wide
         // signal handlers are installed on first poll and never removed
         // (see `tokio::signal::ctrl_c` docs), so dropping the polled

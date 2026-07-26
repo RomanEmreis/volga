@@ -2,7 +2,7 @@
 
 /// Produces a response with the specified HTTP status code.
 ///
-/// The macro supports three “modes”:
+/// The macro supports three "modes":
 ///
 /// - **Empty response**: `status!(404)`
 /// - **Plain text (UTF-8)**:

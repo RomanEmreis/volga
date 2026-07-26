@@ -37,7 +37,7 @@ impl TokenBucket {
     /// Panics if:
     ///
     /// - `capacity * scale` overflows `u64` when computing the internal fixed-point capacity.
-    /// - `refill_rate` is not finite (`NaN` or ±∞).
+    /// - `refill_rate` is not finite (`NaN` or +/-infinity).
     /// - `refill_rate` is negative.
     /// - `refill_rate * scale` exceeds `u64::MAX` when computing the internal fixed-point refill rate.
     #[inline]

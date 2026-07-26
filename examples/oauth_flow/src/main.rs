@@ -5,10 +5,10 @@
 //!   and a JWKS, with toy `/authorize` and `/token` endpoints issuing
 //!   RS256-signed access tokens;
 //! * A **resource server** (port 7878) that validates those tokens against
-//!   the issuer's keys — no shared secret, just
+//!   the issuer's keys - no shared secret, just
 //!   `with_oauth(..)` + `use_oauth()`;
 //! * A **client** (this binary) driving the flow with `volga-oauth-client`:
-//!   discovery → authorization request → code exchange → protected call.
+//!   discovery -> authorization request -> code exchange -> protected call.
 //!
 //! Run with:
 //!
@@ -39,7 +39,7 @@ const ISSUER: &str = "http://127.0.0.1:7979";
 const RESOURCE: &str = "http://127.0.0.1:7878";
 const KEY_ID: &str = "demo-key";
 
-// Throwaway RSA private key generated for this example only — never ship
+// Throwaway RSA private key generated for this example only - never ship
 // a real private key inside a binary.
 const RSA_PRIVATE_PEM: &[u8] = b"-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAwm6oskwz03jgyPI0dYWNmkJwaiKLL6jjedSH5VK0A5W9No6J
@@ -84,7 +84,7 @@ impl AuthClaims for Claims {
     }
 }
 
-/// Query parameters of the `/authorize` endpoint (RFC 6749 §4.1.1).
+/// Query parameters of the `/authorize` endpoint (RFC 6749 Section 4.1.1).
 #[derive(Deserialize)]
 struct AuthorizeParams {
     response_type: String,
@@ -96,7 +96,7 @@ struct AuthorizeParams {
     code_challenge_method: String,
 }
 
-/// Form body of the `/token` endpoint (RFC 6749 §4.1.3).
+/// Form body of the `/token` endpoint (RFC 6749 Section 4.1.3).
 #[derive(Deserialize)]
 struct TokenForm {
     grant_type: String,
@@ -128,7 +128,7 @@ fn authorization_server() -> App {
     // GET /.well-known/oauth-authorization-server
     app.use_oauth_server_metadata();
 
-    // The verification keys, published as a JWKS — the resource server
+    // The verification keys, published as a JWKS - the resource server
     // fetches them through discovery, no key material is shared manually
     app.map_get("/jwks", || async {
         let jwk = jsonwebtoken::jwk::Jwk::from_encoding_key(
@@ -141,7 +141,7 @@ fn authorization_server() -> App {
     });
 
     // A wildly simplified authorization endpoint: every request is
-    // "approved" instantly — a real server authenticates the user and asks
+    // "approved" instantly - a real server authenticates the user and asks
     // for consent here
     let codes = pending.clone();
     app.map_get("/authorize", move |params: Query<AuthorizeParams>| {
@@ -202,7 +202,7 @@ fn authorization_server() -> App {
 }
 
 /// The protected resource server: token validation is wired to the
-/// issuer's published keys — no secret is configured anywhere.
+/// issuer's published keys - no secret is configured anywhere.
 fn resource_server() -> App {
     let mut app = App::new()
         .bind("127.0.0.1:7878")
@@ -231,7 +231,7 @@ fn resource_server() -> App {
     app
 }
 
-/// PKCE S256: BASE64URL-ENCODE(SHA256(verifier)) (RFC 7636 §4.2).
+/// PKCE S256: BASE64URL-ENCODE(SHA256(verifier)) (RFC 7636 Section 4.2).
 fn s256(verifier: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
@@ -246,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---- the client side ----------------------------------------------
 
     // 1. an unauthenticated probe: the resource answers 401 with a
-    //    challenge pointing at its metadata (RFC 6750 §3 / RFC 9728 §5.1)
+    //    challenge pointing at its metadata (RFC 6750 Section 3 / RFC 9728 Section 5.1)
     let (status, headers, _) = http_get(&format!("{RESOURCE}/protected"), None).await?;
     let challenge = header(&headers, "www-authenticate").unwrap_or_default();
     println!("without a token   : {status} / WWW-Authenticate: {challenge}");
@@ -274,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = query_param(&location, "state").expect("redirect carries the state");
     assert!(
         request.matches_state(&state),
-        "state mismatch — possible CSRF"
+        "state mismatch - possible CSRF"
     );
     println!("authorization code: {code}");
 
@@ -326,7 +326,7 @@ async fn http_get(
         .filter_map(|line| line.split_once(": "))
         .map(|(name, value)| (name.to_ascii_lowercase(), value.to_owned()))
         .collect();
-    // ignore transfer-encoding details — the body is only printed
+    // ignore transfer-encoding details - the body is only printed
     Ok((status, headers, body.trim().to_owned()))
 }
 

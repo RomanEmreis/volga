@@ -1,4 +1,4 @@
-//! Multipart response encoder — boundary helpers and streaming body builder.
+//! Multipart response encoder - boundary helpers and streaming body builder.
 
 use crate::error::Error;
 use rand::RngExt;
@@ -8,7 +8,7 @@ const BOUNDARY_PREFIX: &str = "volga-";
 const BOUNDARY_SUFFIX_LEN: usize = 32;
 const BOUNDARY_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-/// Generates a random RFC 2046 §5.1.1-compliant boundary in the form `volga-<32 alnum>`.
+/// Generates a random RFC 2046 Section 5.1.1-compliant boundary in the form `volga-<32 alnum>`.
 pub(super) fn generate_boundary() -> Arc<str> {
     let mut rng = rand::rng();
     let mut s = String::with_capacity(BOUNDARY_PREFIX.len() + BOUNDARY_SUFFIX_LEN);
@@ -20,7 +20,7 @@ pub(super) fn generate_boundary() -> Arc<str> {
     Arc::from(s)
 }
 
-/// Validates a boundary string per RFC 2046 §5.1.1:
+/// Validates a boundary string per RFC 2046 Section 5.1.1:
 /// - Length 1..=70
 /// - Each char is `bcharsnospace` (alnum + `'()+_,-./:=?`) or space
 /// - Last char is not a space

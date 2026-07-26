@@ -1,8 +1,8 @@
 //! OAuth 2.1 / OpenID Connect support
 //!
 //! Foundation types for building OAuth 2.1 resource servers and clients:
-//! * Error models per [RFC 6749 §5.2](https://www.rfc-editor.org/rfc/rfc6749#section-5.2)
-//!   and [RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1)
+//! * Error models per [RFC 6749 Section 5.2](https://www.rfc-editor.org/rfc/rfc6749#section-5.2)
+//!   and [RFC 6750 Section 3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1)
 //! * Authorization Server Metadata per [RFC 8414](https://www.rfc-editor.org/rfc/rfc8414)
 //! * Protected Resource Metadata per [RFC 9728](https://www.rfc-editor.org/rfc/rfc9728)
 //! * Dynamic Client Registration models per [RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)

@@ -28,7 +28,7 @@ use crate::http::endpoints::{
 /// This extractor operates on a snapshot of the matched path arguments.
 /// The original path state remains available to other extractors.
 ///
-/// ⚠️ This extractor must not be mixed with [`NamedPath<T>`] or
+/// **Warning:** This extractor must not be mixed with [`NamedPath<T>`] or
 /// positional path parameters (e.g. `x: i32`) within the same handler.
 ///
 /// # Example
@@ -51,7 +51,7 @@ pub struct Path<T>(pub T);
 /// This extractor operates on a snapshot of the matched path arguments.
 /// The original path state remains available to other extractors.
 ///
-/// ⚠️ This extractor must not be mixed with [`Path<T>`] or
+/// **Warning:** This extractor must not be mixed with [`Path<T>`] or
 /// positional path parameters (e.g. `x: i32`) within the same handler.
 ///
 /// # Example

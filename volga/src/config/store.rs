@@ -56,7 +56,7 @@ impl<T: DeserializeOwned + Send + Sync + 'static> ErasedSection for SectionStore
                 if self.kind == SectionKind::Optional {
                     self.swap.store(Arc::new(None));
                 } else {
-                    // Required section disappeared — keep old value.
+                    // Required section disappeared - keep old value.
                     #[cfg(feature = "tracing")]
                     tracing::error!(
                         "config reload: required section '{}' is missing; keeping previous value",
@@ -71,9 +71,9 @@ impl<T: DeserializeOwned + Send + Sync + 'static> ErasedSection for SectionStore
 /// Holds all pre-deserialized user config sections.
 ///
 /// Stored as `Arc<ConfigStore>` in `AppEnv` and cloned into request extensions.
-/// `Config<T>` reads from it via `get::<T>()` — one atomic load + `Arc::clone` per request.
+/// `Config<T>` reads from it via `get::<T>()` - one atomic load + `Arc::clone` per request.
 pub struct ConfigStore {
-    /// Keyed by TypeId — used by `reload_sections()` to update all sections.
+    /// Keyed by TypeId - used by `reload_sections()` to update all sections.
     sections: HashMap<TypeId, Box<dyn ErasedSection>>,
     /// Parallel map for type-safe downcast in `get<T>()` via `Any`.
     ///
@@ -297,7 +297,7 @@ mod tests {
             .register::<MyConfig>("my", SectionKind::Required, &json)
             .unwrap();
 
-        // Reload with no section — required section disappears; old value kept.
+        // Reload with no section - required section disappears; old value kept.
         store.reload_sections(&serde_json::json!({}));
 
         let arc = store.get::<MyConfig>().unwrap();
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn malformed_section_returns_err() {
         let mut store = ConfigStore::new();
-        // "value" must be u32 but is a string — register must return Err.
+        // "value" must be u32 but is a string - register must return Err.
         let json = serde_json::json!({ "my": { "value": "bad" } });
         let result = store.register::<MyConfig>("my", SectionKind::Required, &json);
         assert!(result.is_err());

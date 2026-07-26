@@ -64,7 +64,7 @@ impl AuthClaims for Claims {
     }
 }
 
-/// Claims that do not ask for `iss` — the middleware must still enforce
+/// Claims that do not ask for `iss` - the middleware must still enforce
 /// the issuer constraint at the validation level.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct LaxClaims {
@@ -378,7 +378,7 @@ async fn it_answers_503_while_the_issuer_is_unreachable() {
         .await
         .unwrap();
     assert_eq!(res.status(), 503);
-    // an unreachable issuer is not the client's fault — no challenge
+    // an unreachable issuer is not the client's fault - no challenge
     assert!(res.headers().get("www-authenticate").is_none());
 
     resource.shutdown().await;
@@ -429,7 +429,7 @@ async fn it_requires_the_iss_claim_with_custom_issuers() {
     let issuer = spawn_issuer("key-1").await;
 
     // the app pins its own accepted issuers via `with_iss`; the claim must
-    // still be required — a token omitting `iss` matches no issuer at all
+    // still be required - a token omitting `iss` matches no issuer at all
     let accepted = issuer.url();
     let oauth_issuer = accepted.clone();
     let resource = TestServer::builder()
@@ -528,7 +528,7 @@ async fn it_serves_stale_keys_while_the_issuer_is_down() {
         .unwrap();
     assert_eq!(res.status(), 200);
 
-    // the issuer goes down; the stale set keeps serving known kids — an
+    // the issuer goes down; the stale set keeps serving known kids - an
     // issuer outage must not take token validation down with it
     issuer.set_available(false);
     let res = resource
@@ -550,7 +550,7 @@ async fn it_recovers_immediately_after_a_failed_initial_load() {
     // a long cooldown that must NOT apply to failed initial loads
     let resource = spawn_resource(issuer.url(), Duration::from_secs(3600)).await;
 
-    // the issuer is down for the very first request — 503, no keys cached
+    // the issuer is down for the very first request - 503, no keys cached
     issuer.set_available(false);
     let token = sign_token("key-1", &issuer.url(), "admin");
     let res = resource
@@ -583,7 +583,7 @@ async fn it_challenges_missing_credentials_with_401() {
     let issuer = spawn_issuer("key-1").await;
     let resource = spawn_resource(issuer.url(), Duration::from_secs(60)).await;
 
-    // RFC 6750 §3: no credentials — 401 with a bare Bearer challenge
+    // RFC 6750 Section 3: no credentials - 401 with a bare Bearer challenge
     let res = resource
         .client()
         .get(resource.url("/protected"))
@@ -595,7 +595,7 @@ async fn it_challenges_missing_credentials_with_401() {
     assert!(challenge.starts_with("Bearer"), "was: {challenge}");
     assert!(!challenge.contains("error"), "was: {challenge}");
 
-    // RFC 6750 §3.1: credentials were presented but are malformed — the
+    // RFC 6750 Section 3.1: credentials were presented but are malformed - the
     // client should fix the header, not start an authorization flow;
     // an empty token after the scheme is just as malformed as a foreign one
     for malformed in ["Basic dXNlcjpwYXNz", "Bearer ", "Bearer"] {

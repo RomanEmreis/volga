@@ -16,9 +16,9 @@ impl App {
     /// bindings.
     ///
     /// Precedence:
-    /// - Built-in section missing from file → no change to `App` fields.
-    /// - Built-in section present and valid → applied (**overrides** prior builder calls).
-    /// - Built-in section present but invalid → startup error.
+    /// - Built-in section missing from file -> no change to `App` fields.
+    /// - Built-in section present and valid -> applied (**overrides** prior builder calls).
+    /// - Built-in section present but invalid -> startup error.
     pub(crate) fn process_config(mut self, builder: ConfigBuilder) -> Result<Self, io::Error> {
         if builder.reload_interval.is_some() && builder.file_path.is_none() {
             return Err(io::Error::new(
@@ -174,7 +174,7 @@ impl App {
             let mut server = server.clone();
             // Mirror the `AuthorizationServerMetadata::new()` prefills so a
             // minimal `[oauth.server]` section behaves like the builder DSL:
-            // `response_types_supported` is REQUIRED per RFC 8414 §2, and
+            // `response_types_supported` is REQUIRED per RFC 8414 Section 2, and
             // leaving `grant_types_supported` absent would make clients
             // assume the implicit grant is supported
             if let Some(obj) = server.as_object_mut() {
@@ -414,7 +414,7 @@ mod tests {
     fn server_section_body_limit_zero_removes_limit() {
         let file = write_toml("[server]\nbody_limit_bytes = 0\n");
         let path = file.path().to_str().unwrap().to_owned();
-        // should not panic — body_limit = 0 → Unlimited
+        // should not panic - body_limit = 0 -> Unlimited
         App::new().with_config(|cfg| cfg.with_file(&path));
     }
 
@@ -443,13 +443,13 @@ mod tests {
     fn server_section_max_connections_zero_is_unlimited() {
         let file = write_toml("[server]\nmax_connections = 0\n");
         let path = file.path().to_str().unwrap().to_owned();
-        // max_connections = 0 → Unlimited; must not panic.
+        // max_connections = 0 -> Unlimited; must not panic.
         App::new().with_config(|cfg| cfg.with_file(&path));
     }
 
     #[test]
     fn no_file_configured_uses_empty_config() {
-        // with_config without from_file: no file → empty object → no panic.
+        // with_config without from_file: no file -> empty object -> no panic.
         App::new().with_config(|cfg| cfg);
     }
 
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "config:")]
     fn invalid_tracing_section_panics_at_startup() {
-        // include_header must be bool, not a string → parse_section must return Err
+        // include_header must be bool, not a string -> parse_section must return Err
         let file = write_toml("[tracing]\ninclude_header = \"yes\"\n");
         let path = file.path().to_str().unwrap().to_owned();
         App::new().with_config(|cfg| cfg.with_file(&path));
@@ -571,7 +571,7 @@ mod tests {
         assert!(!oauth.client_config().enforce_https());
         assert_eq!(oauth.client_config().timeout(), Duration::from_secs(10));
         assert_eq!(oauth.client_config().max_redirects(), 2);
-        // the file only describes the issuer — activation stays in code
+        // the file only describes the issuer - activation stays in code
         assert!(!app.oauth_client_enabled);
     }
 

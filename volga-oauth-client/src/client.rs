@@ -2,7 +2,7 @@
 //!
 //! [`OAuthClient`] implements the Authorization Code flow with mandatory
 //! PKCE, refresh tokens and resource indicators (RFC 8707) on top of
-//! server metadata — typically discovered with
+//! server metadata - typically discovered with
 //! [`DiscoveryClient`](crate::DiscoveryClient).
 
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -29,12 +29,12 @@ const TOKEN_STORE_NOT_CONFIGURED: &str =
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ClientAuthMethod {
-    /// `client_secret_basic` — HTTP Basic authentication (RFC 6749
-    /// §2.3.1), the default and the method servers are required to support
+    /// `client_secret_basic` - HTTP Basic authentication (RFC 6749
+    /// Section 2.3.1), the default and the method servers are required to support
     #[default]
     Basic,
 
-    /// `client_secret_post` — credentials in the request body, for
+    /// `client_secret_post` - credentials in the request body, for
     /// servers that do not accept HTTP Basic authentication
     Post,
 }
@@ -71,7 +71,7 @@ pub enum ClientAuthMethod {
 /// let tokens = client.exchange_code(&metadata, code, &auth).await?;
 /// client.store_tokens("alice", &tokens);
 ///
-/// // later — served from the store, transparently refreshed when stale:
+/// // later - served from the store, transparently refreshed when stale:
 /// let tokens = client.token("alice", &metadata).await?;
 /// # Ok(())
 /// # }
@@ -104,11 +104,11 @@ impl OAuthClient {
     ///
     /// The registered `token_endpoint_auth_method` selects the
     /// [`ClientAuthMethod`] (`client_secret_basic` when omitted, per
-    /// RFC 7591 §2) and, when exactly one `redirect_uri` was registered,
+    /// RFC 7591 Section 2) and, when exactly one `redirect_uri` was registered,
     /// it becomes the client's redirect URI.
     ///
     /// Fails with [`ClientError::Validation`] when the registered method
-    /// is one this client cannot perform (e.g. `client_secret_jwt`) —
+    /// is one this client cannot perform (e.g. `client_secret_jwt`) -
     /// authenticating differently from the registration would only yield
     /// `invalid_client` at the token endpoint. A registration with `none`
     /// produces a public client; a secret issued alongside it is ignored,
@@ -118,7 +118,7 @@ impl OAuthClient {
     ) -> Result<Self, ClientError> {
         let mut client = Self::new(response.client_id.clone());
 
-        // an omitted method defaults to client_secret_basic (RFC 7591 §2)
+        // an omitted method defaults to client_secret_basic (RFC 7591 Section 2)
         match response
             .metadata
             .token_endpoint_auth_method
@@ -204,7 +204,7 @@ impl OAuthClient {
         }
     }
 
-    /// Exchanges an authorization `code` for tokens (RFC 6749 §4.1.3)
+    /// Exchanges an authorization `code` for tokens (RFC 6749 Section 4.1.3)
     ///
     /// `request` is the [`AuthorizationRequest`] the code was obtained
     /// with: it supplies the PKCE verifier and repeats the requested
@@ -241,10 +241,10 @@ impl OAuthClient {
         self.request_tokens(endpoint, body, authorization).await
     }
 
-    /// Obtains fresh tokens with a refresh token (RFC 6749 §6)
+    /// Obtains fresh tokens with a refresh token (RFC 6749 Section 6)
     ///
     /// The server may rotate the refresh token; when the response carries
-    /// none, the one passed in remains valid — [`token`](Self::token)
+    /// none, the one passed in remains valid - [`token`](Self::token)
     /// handles that carry-over automatically.
     pub async fn refresh(
         &self,
@@ -272,7 +272,7 @@ impl OAuthClient {
     ///
     /// `Ok(None)` means interactive authorization is required: nothing is
     /// stored, the stored entry has no refresh token to renew it with, or
-    /// the server rejected the refresh token (`invalid_grant`) — in the
+    /// the server rejected the refresh token (`invalid_grant`) - in the
     /// latter cases the dead entry is removed from the store.
     ///
     /// # Panics
@@ -299,7 +299,7 @@ impl OAuthClient {
 
         match self.refresh(metadata, &refresh_token).await {
             Ok(mut fresh) => {
-                // no rotation in the response — the old token stays valid
+                // no rotation in the response - the old token stays valid
                 if fresh.refresh_token.is_none() {
                     fresh.refresh_token = Some(refresh_token);
                 }
@@ -314,7 +314,7 @@ impl OAuthClient {
         }
     }
 
-    /// Stores `tokens` under `key` — typically right after
+    /// Stores `tokens` under `key` - typically right after
     /// [`exchange_code`](Self::exchange_code)
     ///
     /// # Panics
@@ -523,7 +523,7 @@ pub struct AuthorizationRequest {
 
 impl AuthorizationRequest {
     /// Returns `true` when the `state` returned by the callback matches
-    /// the one this request was built with — always verify it before
+    /// the one this request was built with - always verify it before
     /// exchanging the code (CSRF protection)
     #[inline]
     pub fn matches_state(&self, state: &str) -> bool {
@@ -537,7 +537,7 @@ impl AuthorizationRequest {
     /// `iss` is the callback's `iss` query parameter, `None` when the
     /// response carried none. It must match the issuer whenever it is
     /// present, and it is *required* when the metadata advertises
-    /// [`authorization_response_iss_parameter_supported`] — a response
+    /// [`authorization_response_iss_parameter_supported`] - a response
     /// missing it there may come from a different, possibly malicious,
     /// authorization server.
     ///
@@ -582,7 +582,7 @@ impl AuthorizationRequest {
     }
 }
 
-/// Builds an RFC 6749 §2.3.1 HTTP Basic authorization header: identifier
+/// Builds an RFC 6749 Section 2.3.1 HTTP Basic authorization header: identifier
 /// and secret are form-urlencoded before being joined and base64-encoded.
 fn basic_credentials(client_id: &str, client_secret: &str) -> HeaderValue {
     let encode =
@@ -702,7 +702,7 @@ mod tests {
 
     #[test]
     fn it_encodes_basic_credentials_per_rfc6749() {
-        // RFC 6749 §2.3.1: form-urlencode the id and secret first
+        // RFC 6749 Section 2.3.1: form-urlencode the id and secret first
         let header = basic_credentials("client with space", "s&cret");
         let encoded = header
             .to_str()
@@ -763,7 +763,7 @@ mod tests {
         assert_eq!(client.auth_method, ClientAuthMethod::Post);
         assert_eq!(client.client_secret.as_deref(), Some("generated-secret"));
 
-        // `none` sends no credentials — the client stays public even
+        // `none` sends no credentials - the client stays public even
         // though the server issued a secret
         let client = OAuthClient::from_registration(&registration("none".into())).unwrap();
         assert_eq!(client.client_secret, None);
@@ -802,7 +802,7 @@ mod tests {
         let request = client.authorization_request(&metadata).build().unwrap();
         let state = request.state.clone();
 
-        // no `iss` and no advertisement — nothing more to check
+        // no `iss` and no advertisement - nothing more to check
         assert!(request.validate_callback(&metadata, &state, None).is_ok());
         assert!(
             request

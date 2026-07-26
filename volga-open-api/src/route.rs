@@ -987,7 +987,7 @@ mod tests {
         cfg.apply_to_operation(&mut op, &mut BTreeMap::new());
         let op_json = serde_json::to_value(op).expect("serialize");
 
-        // The default "200" must be gone — only "201" remains
+        // The default "200" must be gone - only "201" remains
         assert!(op_json["responses"].get("200").is_none());
         assert!(
             op_json["responses"]["201"]["content"]

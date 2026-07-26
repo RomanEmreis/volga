@@ -61,7 +61,7 @@ use crate::headers::{ContentDisposition, ContentType, FromHeaders, Header, Heade
 
 const INVALID_HEADER_BYTES_MSG: &str = "invalid bytes in part name or filename (e.g. CR/LF); use the corresponding `try_*` constructor for untrusted input";
 
-/// An outgoing multipart part — either form-data, byteranges, or any RFC 2046 subtype.
+/// An outgoing multipart part - either form-data, byteranges, or any RFC 2046 subtype.
 ///
 /// Construct with [`Part::new`] (bare) or one of the form-data convenience constructors:
 /// [`Part::text`], [`Part::bytes`], [`Part::file`], [`Part::stream`]. Use the `with_*`
@@ -75,7 +75,7 @@ pub struct Part {
 }
 
 impl Part {
-    /// Constructs a bare part with no headers — for `multipart/byteranges`,
+    /// Constructs a bare part with no headers - for `multipart/byteranges`,
     /// `multipart/mixed`, or any subtype where Content-Disposition is not appropriate.
     pub fn new(body: impl Into<PartBody>) -> Self {
         Self {
@@ -220,7 +220,7 @@ impl Part {
         Ok(self.with_disposition_raw(make_form_disposition(name, filename)?))
     }
 
-    /// Sets the Content-Disposition header verbatim — for cases not covered by the
+    /// Sets the Content-Disposition header verbatim - for cases not covered by the
     /// form-data builder (RFC 5987 encoding, alternative dispositions, etc).
     pub fn with_disposition_raw(mut self, cd: Header<ContentDisposition>) -> Self {
         self.content_disposition = Some(cd);
@@ -235,7 +235,7 @@ impl Part {
         self
     }
 
-    /// Appends a raw header — escape hatch for one-off headers that don't have
+    /// Appends a raw header - escape hatch for one-off headers that don't have
     /// a dedicated marker type.
     pub fn with_header_raw(
         mut self,

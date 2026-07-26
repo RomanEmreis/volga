@@ -12,9 +12,9 @@ so please keep that in mind when interacting or proposing changes.
 Before opening an issue:
 - Please check if a similar issue already exists.
 - Include clear steps to reproduce (if applicable).
-- For feature requests, describe the problem you’re trying to solve.
+- For feature requests, describe the problem you're trying to solve.
 
-If you’re unsure, feel free to open a discussion first.
+If you're unsure, feel free to open a discussion first.
 
 ## Pull Requests
 

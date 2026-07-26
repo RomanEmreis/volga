@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 /// A handle that triggers a graceful shutdown of running [`crate::App`].
 ///
-/// Clones share the same shutdown signal — any clone calling
+/// Clones share the same shutdown signal - any clone calling
 /// [`ShutdownHandle::shutdown`] cancels the shared token.
 #[derive(Debug, Clone, Default)]
 pub struct ShutdownHandle {
@@ -34,7 +34,7 @@ impl ShutdownHandle {
 
     /// Triggers a graceful shutdown of the associated server.
     ///
-    /// Idempotent — repeated calls are no-ops. The server will stop
+    /// Idempotent - repeated calls are no-ops. The server will stop
     /// accepting new connections and drain in-flight requests up to
     /// the configured graceful-shutdown timeout.
     pub fn shutdown(&self) {
@@ -43,7 +43,7 @@ impl ShutdownHandle {
 
     /// Returns `true` if a shutdown has been requested.
     ///
-    /// Note this reports only that the trigger fired — the server may
+    /// Note this reports only that the trigger fired - the server may
     /// still be draining in-flight requests.
     pub fn is_shutdown_requested(&self) -> bool {
         self.token.is_cancelled()
