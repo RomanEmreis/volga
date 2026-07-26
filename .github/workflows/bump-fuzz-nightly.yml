@@ -2,7 +2,7 @@ name: Bump fuzz nightly
 
 # Opens a PR bumping the pinned nightly used by the Fuzz workflow.
 # Runs on the 1st of each month (and on demand). The bump is verified by building the
-# fuzz targets against the *committed* fuzz/Cargo.lock — the lockfile is intentionally NOT
+# fuzz targets against the *committed* fuzz/Cargo.lock - the lockfile is intentionally NOT
 # regenerated (a fresh resolve reintroduces the alloc-no-stdlib 2.0.4/3.0.0 split that
 # breaks brotli). If the new nightly can't build the locked graph, the job fails and no PR
 # is opened, leaving the current pin in place. Merge the PR only after its Fuzz run is green.

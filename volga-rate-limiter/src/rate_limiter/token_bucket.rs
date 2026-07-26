@@ -241,11 +241,11 @@ impl TokenBucketRateLimiter {
     /// Panics if:
     ///
     /// - `capacity * scale` overflows `u64` when computing the internal fixed-point capacity.
-    /// - `refill_rate` is not finite (`NaN` or ±∞).
+    /// - `refill_rate` is not finite (`NaN` or +/-infinity).
     /// - `refill_rate` is negative.
     /// - `refill_rate * scale` exceeds `u64::MAX` when computing the internal fixed-point refill rate.
     ///
-    /// A `refill_rate` of `0.0` is **valid** — it means a one-time burst up to
+    /// A `refill_rate` of `0.0` is **valid** - it means a one-time burst up to
     /// `capacity` with no subsequent refill.
     #[inline]
     pub fn new(capacity: u64, refill_rate: f64) -> Self {
@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn token_bucket_zero_refill_rate_is_valid() {
-        // refill_rate=0.0 is explicitly permitted — it means one burst up to capacity,
+        // refill_rate=0.0 is explicitly permitted - it means one burst up to capacity,
         // with no ongoing refill. This is pre-existing behaviour: the constructor allows
         // any finite non-negative rate, and the refill loop short-circuits when
         // refill_rate_scaled_per_sec == 0. This test confirms the behaviour is
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn token_bucket_tiny_refill_rate_rounds_to_zero_scaled() {
-        // 1e-10 * 1_000_000 = 0.0001, rounds to 0 — treated same as zero refill.
+        // 1e-10 * 1_000_000 = 0.0001, rounds to 0 - treated same as zero refill.
         // Pre-existing behaviour; test confirms the delegation path preserves it.
         let limiter = TokenBucketRateLimiter::new(1, 1e-10);
         assert!(limiter.check(1));

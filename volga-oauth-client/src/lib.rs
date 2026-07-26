@@ -1,18 +1,18 @@
 //! OAuth 2.1 / OpenID Connect client for Volga
 //!
 //! Built on the shared protocol types from [`volga-oauth-core`](volga_oauth_core)
-//! (re-exported here) and independent of the `volga` server crate — usable
+//! (re-exported here) and independent of the `volga` server crate - usable
 //! from any Tokio application.
 //!
 //! Provides:
-//! * [`DiscoveryClient`] — Authorization Server Metadata (RFC 8414),
+//! * [`DiscoveryClient`] - Authorization Server Metadata (RFC 8414),
 //!   Protected Resource Metadata (RFC 9728) and OpenID Connect provider
 //!   configuration, with the validation the specs require.
-//! * [`OAuthClient`] — the OAuth 2.1 Authorization Code flow with
+//! * [`OAuthClient`] - the OAuth 2.1 Authorization Code flow with
 //!   mandatory PKCE ([`Pkce`], S256 only), refresh tokens and resource
 //!   indicators (RFC 8707), plus token persistence through the
 //!   [`TokenStore`] abstraction.
-//! * [`RegistrationClient`] — Dynamic Client Registration (RFC 7591).
+//! * [`RegistrationClient`] - Dynamic Client Registration (RFC 7591).
 //!
 //! All of them share the transport policy of [`ClientConfig`] and the
 //! error model of [`ClientError`].

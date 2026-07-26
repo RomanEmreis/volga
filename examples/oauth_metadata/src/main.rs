@@ -36,7 +36,7 @@ impl AuthClaims for Claims {
 fn main() {
     let mut app = App::new()
         // The derived metadata URL is advertised automatically as
-        // `resource_metadata` in WWW-Authenticate challenges (RFC 9728 §5.1)
+        // `resource_metadata` in WWW-Authenticate challenges (RFC 9728 Section 5.1)
         .with_bearer_auth(|auth| {
             auth.set_decoding_key(DecodingKey::from_secret(b"secret"))
                 .require_https(false)
@@ -49,7 +49,7 @@ fn main() {
                 .with_scopes(["read", "write"])
                 .with_bearer_methods(["header"])
         })
-        // Authorization Server Metadata (RFC 8414) — only when the
+        // Authorization Server Metadata (RFC 8414) - only when the
         // application is also an authorization server; the identifier
         // string alone configures the minimal document. Both documents can
         // also come from the `[oauth.resource]`/`[oauth.server]` sections

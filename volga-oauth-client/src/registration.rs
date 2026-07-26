@@ -7,7 +7,7 @@
 //! [`with_initial_access_token`](RegistrationClient::with_initial_access_token).
 //!
 //! Limitations: the RFC 7592 management protocol (reading, updating and
-//! deleting a registration) is not implemented — the
+//! deleting a registration) is not implemented - the
 //! `registration_access_token` / `registration_client_uri` pair from the
 //! response is surfaced for applications that need it. A
 //! `software_statement` is passed through as-is; validating it is the
@@ -83,7 +83,7 @@ impl RegistrationClient {
     }
 
     /// Attaches the initial access token sent as a `Bearer` credential
-    /// with the registration request (RFC 7591 §3), for servers that do
+    /// with the registration request (RFC 7591 Section 3), for servers that do
     /// not allow open registration
     pub fn with_initial_access_token(mut self, token: impl Into<String>) -> Self {
         self.initial_access_token = Some(token.into());
@@ -91,7 +91,7 @@ impl RegistrationClient {
     }
 
     /// Registers a client at the `registration_endpoint` declared in
-    /// `metadata` (RFC 7591 §3.1)
+    /// `metadata` (RFC 7591 Section 3.1)
     pub async fn register(
         &self,
         metadata: &AuthorizationServerMetadata,
@@ -127,12 +127,12 @@ impl RegistrationClient {
     }
 }
 
-/// Client-side sanity checks per RFC 7591 §2 before any I/O.
+/// Client-side sanity checks per RFC 7591 Section 2 before any I/O.
 fn validate_request(request: &ClientMetadata) -> Result<(), ClientError> {
     // a software statement is passed through opaquely and may itself
-    // carry redirect_uris and grant_types (RFC 7591 §2.3), so the
+    // carry redirect_uris and grant_types (RFC 7591 Section 2.3), so the
     // redirect-based check below cannot be decided from the top-level
-    // values alone — the server validates the signed metadata
+    // values alone - the server validates the signed metadata
     if request.software_statement.is_none() {
         // redirect_uris is REQUIRED for redirect-based grants; any declared
         // response type implies one too, since response types are delivered
@@ -141,7 +141,7 @@ fn validate_request(request: &ClientMetadata) -> Result<(), ClientError> {
             .grant_types
             .iter()
             .any(|grant| grant == "authorization_code" || grant == "implicit")
-            // omitted grant_types default to authorization_code (§2)
+            // omitted grant_types default to authorization_code (Section 2)
             || request.grant_types.is_empty()
             || !request.response_types.is_empty();
 
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn it_validates_requests_before_any_io() {
-        // default grant is authorization_code — redirect_uris required
+        // default grant is authorization_code - redirect_uris required
         assert!(matches!(
             validate_request(&ClientMetadata::new()),
             Err(ClientError::Validation(reason)) if reason.contains("redirect_uris")
@@ -191,7 +191,7 @@ mod tests {
         assert!(client_credentials.response_types.is_empty());
         assert!(validate_request(&client_credentials).is_ok());
 
-        // an explicitly declared response type still demands redirect_uris —
+        // an explicitly declared response type still demands redirect_uris -
         // response types are delivered via the redirection endpoint
         let inconsistent = ClientMetadata::new()
             .with_grant_types(["client_credentials"])
@@ -202,7 +202,7 @@ mod tests {
         ));
 
         // a software statement may carry redirect_uris/grant_types inside
-        // the signed JWT — the redirect-based check must not pre-reject it
+        // the signed JWT - the redirect-based check must not pre-reject it
         let signed_only = ClientMetadata::new().with_software_statement("a.b.c");
         assert!(validate_request(&signed_only).is_ok());
 

@@ -1,5 +1,5 @@
 name: Bug report
-description: Something isn’t working as expected
+description: Something isn't working as expected
 labels: ["bug", "needs-triage"]
 body:
   - type: markdown

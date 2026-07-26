@@ -132,7 +132,7 @@ async fn it_falls_back_to_oidc_path_on_a_json_404() {
     let base = format!("http://127.0.0.1:{port}");
     let resource = format!("{base}/api");
 
-    // the RFC 8414 path 404s with a framework-style JSON error body —
+    // the RFC 8414 path 404s with a framework-style JSON error body -
     // still "not served", not an OAuth protocol error
     let mut app = App::new()
         .with_oauth_resource_metadata(|m| {
@@ -184,7 +184,7 @@ async fn it_rejects_issuer_mismatch() {
 
 #[tokio::test]
 async fn it_rejects_plain_http_by_default() {
-    // no server involved — the URL is rejected before any I/O
+    // no server involved - the URL is rejected before any I/O
     let err = DiscoveryClient::new()
         .fetch_server_metadata("http://auth.example.com")
         .await
@@ -390,7 +390,7 @@ async fn it_serves_documents_from_the_cache() {
     let first = client.fetch_server_metadata(&issuer).await.unwrap();
     assert_eq!(cache.documents.lock().unwrap().len(), 1);
 
-    // the server is gone — the second fetch can only succeed from the cache
+    // the server is gone - the second fetch can only succeed from the cache
     server.abort();
     let second = client.fetch_server_metadata(&issuer).await.unwrap();
     assert_eq!(first, second);

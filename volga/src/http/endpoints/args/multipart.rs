@@ -17,7 +17,7 @@ mod error;
 mod field;
 mod part;
 
-/// Multipart content — extractor on the request side, response on the outgoing side.
+/// Multipart content - extractor on the request side, response on the outgoing side.
 ///
 /// # Inbound (extractor)
 /// ```no_run
@@ -84,11 +84,11 @@ pub(crate) enum MultipartInner {
 /// RFC 2046 multipart subtype. Defaults to `FormData` for outbound.
 #[derive(Debug, Clone)]
 pub enum MultipartSubtype {
-    /// `multipart/form-data` — the canonical form / file upload subtype.
+    /// `multipart/form-data` - the canonical form / file upload subtype.
     FormData,
-    /// `multipart/mixed` — heterogeneous parts.
+    /// `multipart/mixed` - heterogeneous parts.
     Mixed,
-    /// `multipart/byteranges` — partial-content responses for HTTP `Range` requests.
+    /// `multipart/byteranges` - partial-content responses for HTTP `Range` requests.
     ByteRanges,
     /// Any other subtype, e.g. `alternative`, `related`.
     Custom(Cow<'static, str>),
@@ -156,12 +156,12 @@ impl Multipart {
     }
 
     /// Extracts the `boundary` parameter from a `multipart/*` Content-Type header.
-    /// Subtype-agnostic — accepts any `multipart/<subtype>`, not just form-data —
+    /// Subtype-agnostic - accepts any `multipart/<subtype>`, not just form-data -
     /// because volga supports forwarding `byteranges`, `mixed`, etc.
     ///
-    /// Walks parameters as `(name, value)` pairs (RFC 7231 §3.1.1.1) so a quoted
+    /// Walks parameters as `(name, value)` pairs (RFC 7231 Section 3.1.1.1) so a quoted
     /// value containing the substring `boundary=` (e.g. `foo="xboundary=y"`) does
-    /// not confuse the match — the parameter name lookup is structural, not textual.
+    /// not confuse the match - the parameter name lookup is structural, not textual.
     fn parse_boundary(headers: &HeaderMap) -> Option<String> {
         let content_type = headers.get(CONTENT_TYPE)?.to_str().ok()?;
         let trimmed = content_type.trim_start();
@@ -213,7 +213,7 @@ impl Multipart {
         Self::from_stream(futures_util::stream::iter(parts))
     }
 
-    /// Builds an outgoing multipart from a streaming source of [`Part`]s — useful when
+    /// Builds an outgoing multipart from a streaming source of [`Part`]s - useful when
     /// parts are produced lazily (e.g. enumerating files, computing byte ranges).
     pub fn from_stream<S>(parts: S) -> Self
     where
@@ -264,7 +264,7 @@ impl Multipart {
         })
     }
 
-    /// Overrides the auto-generated boundary. Validates per RFC 2046 §5.1.1.
+    /// Overrides the auto-generated boundary. Validates per RFC 2046 Section 5.1.1.
     /// Errors if the boundary is malformed; no-op on incoming multiparts.
     pub fn with_boundary(mut self, new_boundary: impl Into<Arc<str>>) -> Result<Self, Error> {
         let new_boundary = new_boundary.into();
@@ -369,9 +369,9 @@ impl FromPayload for Multipart {
 /// Converts a single [`multer::Field`] into a [`Part`] whose body is a stream that
 /// drains chunks lazily from the field. No buffering.
 ///
-/// Forwards every per-part header verbatim — `Content-Type`, `Content-Disposition`
+/// Forwards every per-part header verbatim - `Content-Type`, `Content-Disposition`
 /// (preserving `filename*` and other parameters), `Content-Range`, plus any custom
-/// header — so proxy / forwarding flows produce a semantically-equivalent body.
+/// header - so proxy / forwarding flows produce a semantically-equivalent body.
 /// Strips RFC 7230 OWS (optional whitespace: SP / HTAB) from the front of `s`.
 #[inline]
 fn trim_ows(s: &str) -> &str {
@@ -762,7 +762,7 @@ mod tests {
         use http_body_util::BodyExt;
 
         // Source part has Content-Range, a filename* parameter on Content-Disposition,
-        // and a custom header — none of which the form-data builder API would set.
+        // and a custom header - none of which the form-data builder API would set.
         // All must survive the proxy round-trip.
         let body = "--BNDRY\r\n\
             Content-Disposition: form-data; name=\"upload\"; filename=\"plain.txt\"; filename*=UTF-8''r%C3%A9sum%C3%A9.txt\r\n\

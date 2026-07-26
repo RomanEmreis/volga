@@ -372,8 +372,8 @@ impl HttpRequestMut {
 ///
 /// # Supported return types
 ///
-/// * [`HttpRequestMut`] — returned as-is
-/// * `Result<HttpRequestMut, Error>` — propagated without modification
+/// * [`HttpRequestMut`] - returned as-is
+/// * `Result<HttpRequestMut, Error>` - propagated without modification
 ///
 /// # Examples
 ///

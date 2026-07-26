@@ -141,7 +141,7 @@ impl OAuthConfig {
     /// Sets the minimum interval between two JWKS refresh attempts
     /// (default: 60 seconds)
     ///
-    /// A token with an unknown `kid` triggers a refresh — the cooldown
+    /// A token with an unknown `kid` triggers a refresh - the cooldown
     /// keeps a flood of such tokens from hammering the issuer.
     pub fn with_refresh_cooldown(mut self, cooldown: Duration) -> Self {
         self.refresh_cooldown = cooldown;
@@ -239,7 +239,7 @@ impl Keys {
                 .get(kid)
                 .cloned()
                 // a single-key set without kids still serves tokens that
-                // name a kid — there is nothing else the kid could select
+                // name a kid - there is nothing else the kid could select
                 .or_else(|| {
                     self.by_kid
                         .is_empty()
@@ -271,7 +271,7 @@ fn entry_from_jwk(jwk: &Jwk) -> Option<KeyEntry> {
     if matches!(jwk.algorithm, AlgorithmParameters::OctetKey(_)) {
         return None;
     }
-    // an explicit non-signing or unknown `alg` disqualifies the key — the
+    // an explicit non-signing or unknown `alg` disqualifies the key - the
     // inferred default is only for keys that don't declare one at all
     let alg = match jwk.common.key_algorithm {
         Some(alg) => signing_algorithm(alg)?,
@@ -282,7 +282,7 @@ fn entry_from_jwk(jwk: &Jwk) -> Option<KeyEntry> {
 }
 
 /// Maps a JWK `alg` to an asymmetric JWS signing algorithm; encryption
-/// algorithms (`RSA-OAEP`, …) have no place in signature verification, and
+/// algorithms (`RSA-OAEP`, ...) have no place in signature verification, and
 /// symmetric ones (`HS*`) must never be driven by a public JWKS.
 fn signing_algorithm(alg: KeyAlgorithm) -> Option<Algorithm> {
     match alg {
@@ -300,7 +300,7 @@ fn signing_algorithm(alg: KeyAlgorithm) -> Option<Algorithm> {
 }
 
 /// Infers the signing algorithm for JWKs that omit `alg`, from the key
-/// material itself; symmetric keys are never inferred — a public JWKS has
+/// material itself; symmetric keys are never inferred - a public JWKS has
 /// no business serving them.
 fn default_alg(params: &AlgorithmParameters) -> Option<Algorithm> {
     match params {
@@ -315,6 +315,9 @@ fn default_alg(params: &AlgorithmParameters) -> Option<Algorithm> {
             _ => None,
         },
         AlgorithmParameters::OctetKey(_) => None,
+        // `AlgorithmParameters` is `#[non_exhaustive]`: key types added by future
+        // `jsonwebtoken` releases are treated as "cannot infer" rather than guessed.
+        _ => None,
     }
 }
 
@@ -361,7 +364,7 @@ impl JwksStore {
             }
             // a stale hit gives the issuer a chance to revoke or re-key
             // this kid before it is trusted again; when the refresh fails
-            // (or the cooldown suppresses it) the stale set keeps serving —
+            // (or the cooldown suppresses it) the stale set keeps serving -
             // an issuer outage must not take token validation down with it
             if let Err(_err) = self.refresh().await {
                 #[cfg(feature = "tracing")]
@@ -384,7 +387,7 @@ impl JwksStore {
         match self.current() {
             Some(keys) => keys.lookup(kid).ok_or_else(|| {
                 // the freshest view the cooldown allows does not know this
-                // kid — the token is signed with a key the issuer does not
+                // kid - the token is signed with a key the issuer does not
                 // (or no longer does) advertise
                 Error::from_jwt_error(jsonwebtoken::errors::ErrorKind::InvalidToken.into())
             }),
@@ -414,7 +417,7 @@ impl JwksStore {
         let result = self.fetch_latest().await;
         if result.is_err() && self.current().is_none() {
             // the cooldown protects an existing key set from unknown-kid
-            // floods; a failed initial load has nothing to protect — the
+            // floods; a failed initial load has nothing to protect - the
             // next request should retry instead of serving 503 for the
             // whole window (still one attempt at a time via the lock)
             *last_attempt = None;
@@ -516,7 +519,7 @@ mod tests {
         assert_eq!(keys.lookup(Some("a")).unwrap().alg, Algorithm::RS256);
         assert_eq!(keys.lookup(Some("b")).unwrap().alg, Algorithm::RS384);
         assert!(keys.lookup(Some("c")).is_none());
-        // several keys — a token without kid cannot pick one
+        // several keys - a token without kid cannot pick one
         assert!(keys.lookup(None).is_none());
     }
 
@@ -539,14 +542,14 @@ mod tests {
     fn it_skips_unusable_keys() {
         let mut encryption_key = rsa_jwk(Some("enc"), Some("RS256"));
         encryption_key["use"] = "enc".into();
-        // symmetric keys are never accepted from a public JWKS — with or
+        // symmetric keys are never accepted from a public JWKS - with or
         // without an explicit `alg`, the published `k` would hand every
         // reader the HMAC signing secret
         let symmetric = json!({ "kty": "oct", "kid": "sym", "k": "c2VjcmV0" });
         let symmetric_hs256 =
             json!({ "kty": "oct", "kid": "sym-hs", "k": "c2VjcmV0", "alg": "HS256" });
         // an explicit non-signing alg must not fall back to the inferred
-        // default — the issuer did not advertise this key for signing
+        // default - the issuer did not advertise this key for signing
         let oaep = rsa_jwk(Some("oaep"), Some("RSA-OAEP"));
         // `key_ops` without `verify` is the issuer restricting the key
         // away from signature checks, same as `use: enc`

@@ -6,10 +6,10 @@ use std::time::Duration;
 /// Configuration for a **sliding window** rate limiting policy.
 ///
 /// This struct defines the policy parameters:
-/// - `max_requests` — maximum number of requests allowed per window
-/// - `window_size` — duration of a single sliding window
-/// - `eviction` — optional duration after which the data for inactive clients is cleaned up
-/// - `name` — optional name to identify a named policy
+/// - `max_requests` - maximum number of requests allowed per window
+/// - `window_size` - duration of a single sliding window
+/// - `eviction` - optional duration after which the data for inactive clients is cleaned up
+/// - `name` - optional name to identify a named policy
 #[derive(Debug, Clone)]
 pub struct SlidingWindow {
     /// Optional name of the policy

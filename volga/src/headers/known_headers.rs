@@ -80,11 +80,11 @@ impl ContentType {
     }
 
     /// Creates a `multipart/<subtype>; boundary=...` [`Header<ContentType>`].
-    /// Boundary must already be RFC 2046 §5.1.1 compliant; use `Multipart::with_boundary`
+    /// Boundary must already be RFC 2046 Section 5.1.1 compliant; use `Multipart::with_boundary`
     /// for validation. RFC 2045 tspecials in the boundary (e.g. `:` or space) trigger
     /// quoting of the parameter value so downstream parsers can extract it.
     /// Returns `Err` if `subtype` contains bytes that are invalid in an HTTP header
-    /// value (e.g. CR/LF) — the `subtype` is generally caller-controlled runtime input.
+    /// value (e.g. CR/LF) - the `subtype` is generally caller-controlled runtime input.
     pub fn multipart_custom(
         subtype: &str,
         boundary: &str,
@@ -281,7 +281,7 @@ mod multipart_content_type_tests {
 
     #[test]
     fn boundary_with_tspecials_is_quoted() {
-        // ':' is a tspecial — must be wrapped in quotes per RFC 2045.
+        // ':' is a tspecial - must be wrapped in quotes per RFC 2045.
         let h = ContentType::multipart_form_data("a:b");
         assert_eq!(h.as_ref(), "multipart/form-data; boundary=\"a:b\"");
     }

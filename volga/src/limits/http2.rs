@@ -72,10 +72,10 @@ impl Http2Limits {
     /// under high load.
     ///
     /// # Parameters
-    /// - `limit` — a [`Limit<u32>`] specifying how the limit is applied:
+    /// - `limit` - a [`Limit<u32>`] specifying how the limit is applied:
     ///   - `Limit::Default`: uses framework default (recommended)
     ///   - `Limit::Limited(n)`: enforces an explicit upper bound
-    ///   - `Limit::Unlimited`: disables the limit entirely (⚠️ may allow unbounded concurrency)
+    ///   - `Limit::Unlimited`: disables the limit entirely (warning: may allow unbounded concurrency)
     ///
     /// # Example
     /// ```no_run
@@ -95,10 +95,10 @@ impl Http2Limits {
     /// Limits frame size to prevent memory blow-up from very large frames.
     ///
     /// # Parameters
-    /// - `limit` — a [`Limit<u32>`]:
+    /// - `limit` - a [`Limit<u32>`]:
     ///   - `Limit::Default`: uses framework default
     ///   - `Limit::Limited(n)`: enforces an explicit upper bound
-    ///   - `Limit::Unlimited`: disables the limit (⚠️ may increase memory usage)
+    ///   - `Limit::Unlimited`: disables the limit (warning: may increase memory usage)
     ///
     /// # Example
     /// ```no_run
@@ -119,10 +119,10 @@ impl Http2Limits {
     /// Helps manage memory and backpressure for badly-behaved clients.
     ///
     /// # Parameters
-    /// - `limit` — a [`Limit<usize>`]:
+    /// - `limit` - a [`Limit<usize>`]:
     ///   - `Limit::Default`: uses framework default
     ///   - `Limit::Limited(n)`: enforces an explicit upper bound
-    ///   - `Limit::Unlimited`: disables the limit (⚠️ may increase memory usage)
+    ///   - `Limit::Unlimited`: disables the limit (warning: may increase memory usage)
     ///
     /// # Example
     /// ```no_run
@@ -144,10 +144,10 @@ impl Http2Limits {
     /// the server from badly-behaved clients.
     ///
     /// # Parameters
-    /// - `limit` — a [`Limit<usize>`]:
+    /// - `limit` - a [`Limit<usize>`]:
     ///   - `Limit::Default`: uses framework default
     ///   - `Limit::Limited(n)`: enforces an explicit upper bound
-    ///   - `Limit::Unlimited`: disables the limit (⚠️ may increase memory usage)
+    ///   - `Limit::Unlimited`: disables the limit (warning: may increase memory usage)
     ///
     /// # Example
     /// ```no_run

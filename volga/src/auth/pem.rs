@@ -8,7 +8,7 @@ pub(crate) enum PemKind {
     Rsa,
     /// `-----BEGIN EC PRIVATE KEY-----`.
     Ec,
-    /// `-----BEGIN PRIVATE KEY-----` or `-----BEGIN PUBLIC KEY-----` — ambiguous
+    /// `-----BEGIN PRIVATE KEY-----` or `-----BEGIN PUBLIC KEY-----` - ambiguous
     /// between RSA, EC, and Ed. Caller should try each constructor in order.
     Ambiguous,
     /// Header was not recognized.
@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn it_stops_at_first_non_empty_line() {
         // A garbage first line should yield Unknown even if a valid header
-        // appears later — we only inspect the first non-blank line.
+        // appears later - we only inspect the first non-blank line.
         assert_eq!(
             detect(b"garbage\n-----BEGIN RSA PRIVATE KEY-----\n"),
             PemKind::Unknown

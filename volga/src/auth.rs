@@ -147,16 +147,16 @@ impl App {
     }
 
     /// Describes the OAuth 2.1/OIDC issuer whose keys validate bearer
-    /// tokens — activate it explicitly with [`use_oauth`](App::use_oauth)
+    /// tokens - activate it explicitly with [`use_oauth`](App::use_oauth)
     ///
     /// The issuer metadata and its JSON Web Key Set are fetched lazily on
     /// the first request and refreshed on key rotation; see
     /// [`OAuthConfig`] for the knobs. Token checks other than the key and
-    /// `iss` (audience, expiry, …) stay on
+    /// `iss` (audience, expiry, ...) stay on
     /// [`with_bearer_auth`](App::with_bearer_auth).
     ///
     /// With the `config` feature the same knobs can come from the
-    /// `[oauth.client]` section of the configuration file instead —
+    /// `[oauth.client]` section of the configuration file instead -
     /// [`use_oauth`](App::use_oauth) remains a code-only call either way.
     ///
     /// # Example
@@ -229,7 +229,7 @@ impl App {
     }
 
     fn ensure_bearer_auth_configured(&self) {
-        // issuer-based validation resolves keys at runtime — no static
+        // issuer-based validation resolves keys at runtime - no static
         // decoding key required (activation order with `use_oauth` is
         // checked at startup)
         #[cfg(feature = "oauth-client")]
@@ -387,9 +387,9 @@ where
                     .headers()
                     .contains_key(crate::headers::AUTHORIZATION)
                 {
-                    // RFC 6750 §3.1: credentials were presented but are not
+                    // RFC 6750 Section 3.1: credentials were presented but are not
                     // a well-formed Bearer value (wrong scheme, empty token)
-                    // — the client should fix the header, not start a flow
+                    // - the client should fix the header, not start a flow
                     let challenge = challenge
                         .with_error(oauth::OAuthErrorCode::InvalidRequest)
                         .with_description("Authorization header is not a valid Bearer credential");
@@ -398,7 +398,7 @@ where
                         (WWW_AUTHENTICATE, challenge.to_string())
                     ])
                 } else {
-                    // RFC 6750 §3: no credentials were presented — challenge
+                    // RFC 6750 Section 3: no credentials were presented - challenge
                     // with a bare scheme (no error code) so clients can
                     // discover the resource metadata and start an
                     // authorization flow
@@ -435,7 +435,7 @@ where
                     }
                     // a server-side failure (unreachable OAuth issuer,
                     // missing security key) is not the client's token
-                    // being at fault — no invalid_token challenge
+                    // being at fault - no invalid_token challenge
                     Err(err) if err.status().is_server_error() => {
                         status!(503, "Token validation is temporarily unavailable")
                     }
@@ -513,6 +513,18 @@ mod tests {
     use crate::http::StatusCode;
     use jsonwebtoken::errors::{Error as JwtError, ErrorKind};
 
+    /// Produces a genuine `ErrorKind::Base64` error.
+    ///
+    /// The variant wraps `jsonwebtoken`'s own `base64` version, which the crate
+    /// does not re-export, so it cannot be constructed here directly - decoding a
+    /// header with a non-base64 segment makes `jsonwebtoken` build it for us.
+    fn base64_jwt_error() -> JwtError {
+        let err = jsonwebtoken::decode_header("!!!!.eyJzdWIiOiIxIn0.sig")
+            .expect_err("a non-base64 header segment must fail to decode");
+        assert!(matches!(err.kind(), ErrorKind::Base64(_)));
+        err
+    }
+
     #[test]
     fn it_maps_expired_signature_to_unauthorized() {
         let status = map_jwt_error_to_status(&ErrorKind::ExpiredSignature);
@@ -575,8 +587,7 @@ mod tests {
 
     #[test]
     fn it_maps_base64_error_to_bad_request() {
-        let status =
-            map_jwt_error_to_status(&ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)));
+        let status = map_jwt_error_to_status(base64_jwt_error().kind());
         assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
@@ -697,10 +708,7 @@ mod tests {
 
     #[test]
     fn it_maps_base64_error_to_www_authenticate() {
-        let www_auth = build_www_authenticate(
-            &ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)),
-            None,
-        );
+        let www_auth = build_www_authenticate(base64_jwt_error().kind(), None);
         assert_eq!(
             www_auth,
             r#"Bearer error="invalid_request", error_description="Token is not properly base64-encoded""#
@@ -790,8 +798,7 @@ mod tests {
 
     #[test]
     fn it_converts_jwt_error_to_error_with_base64_error() {
-        let jwt_error = JwtError::from(ErrorKind::Base64(base64::DecodeError::InvalidByte(0, 0)));
-        let error = Error::from_jwt_error(jwt_error);
+        let error = Error::from_jwt_error(base64_jwt_error());
 
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
         assert!(error.instance.is_none());

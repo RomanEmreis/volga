@@ -1,7 +1,7 @@
 //! PKCE support (RFC 7636)
 //!
 //! OAuth 2.1 requires every Authorization Code request to carry a PKCE
-//! challenge. Only the `S256` method is provided — `plain` was removed
+//! challenge. Only the `S256` method is provided - `plain` was removed
 //! from OAuth 2.1 and offers no protection worth keeping.
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -11,11 +11,11 @@ use serde::{Deserialize, Serialize};
 /// OAuth 2.1 permits only `S256`
 pub const PKCE_METHOD: &str = "S256";
 
-/// A PKCE code verifier and its `S256` code challenge (RFC 7636 §4.1–4.2)
+/// A PKCE code verifier and its `S256` code challenge (RFC 7636 Section 4.1-4.2)
 ///
 /// Created by [`Pkce::new`] with a fresh 256-bit random verifier. The
 /// challenge goes into the authorization request, the verifier into the
-/// subsequent token request — [`OAuthClient`](crate::OAuthClient) wires
+/// subsequent token request - [`OAuthClient`](crate::OAuthClient) wires
 /// both automatically.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pkce {
@@ -61,7 +61,7 @@ impl Pkce {
 
 impl std::fmt::Debug for Pkce {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // the verifier is a credential — never expose it in debug output
+        // the verifier is a credential - never expose it in debug output
         f.debug_struct("Pkce")
             .field("verifier", &"[redacted]")
             .field("challenge", &self.challenge)
@@ -94,7 +94,7 @@ mod tests {
     fn it_generates_unique_spec_compliant_verifiers() {
         let (a, b) = (Pkce::new(), Pkce::new());
         assert_ne!(a.verifier(), b.verifier());
-        // RFC 7636 §4.1: 43–128 characters from the unreserved set
+        // RFC 7636 Section 4.1: 43-128 characters from the unreserved set
         assert_eq!(a.verifier().len(), 43);
         assert!(
             a.verifier()

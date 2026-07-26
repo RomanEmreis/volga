@@ -163,7 +163,7 @@ pub(crate) fn parse_config_file(path: &Path) -> Result<Value, String> {
             .parse()
             .map_err(|e| format!("config: TOML parse error in '{}': {e}", path.display()))?;
         serde_json::to_value(table)
-            .map_err(|e| format!("config: TOML → JSON conversion error: {e}"))
+            .map_err(|e| format!("config: TOML -> JSON conversion error: {e}"))
     } else if path.extension().is_some_and(|ext| ext == "json") {
         serde_json::from_str(&contents)
             .map_err(|e| format!("config: JSON parse error in '{}': {e}", path.display()))

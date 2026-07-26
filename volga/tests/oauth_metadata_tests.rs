@@ -1,5 +1,5 @@
-//! Verifies the built-in OAuth metadata handlers (RFC 8414 §3, RFC 9728 §3,
-//! OIDC Discovery 1.0 §4).
+//! Verifies the built-in OAuth metadata handlers (RFC 8414 Section 3, RFC 9728 Section 3,
+//! OIDC Discovery 1.0 Section 4).
 
 #![cfg(all(feature = "oauth", feature = "test"))]
 
@@ -60,7 +60,7 @@ async fn it_serves_resource_metadata() {
 async fn it_serves_resource_metadata_for_path_resources() {
     let server = TestServer::builder()
         .configure(|app: App| {
-            // The well-known path is inserted between host and path (RFC 9728 §3.1)
+            // The well-known path is inserted between host and path (RFC 9728 Section 3.1)
             app.set_oauth_resource_metadata("https://api.example.com/api/v1")
         })
         .setup(|app: &mut App| {

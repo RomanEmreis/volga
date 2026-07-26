@@ -1,6 +1,6 @@
 //! Test utilities for working with WebSocket connections.
 //!
-//! This module provides [`TestWebSocket`] — a small abstraction used in tests
+//! This module provides [`TestWebSocket`] - a small abstraction used in tests
 //! to interact with WebSocket endpoints regardless of the underlying HTTP
 //! protocol (HTTP/1.1 or HTTP/2).
 //!

@@ -20,7 +20,7 @@ use crate::{ClientConfig, ClientError, MetadataCache, transport::Transport};
 /// default, requests carry a total timeout, redirects are followed up to a
 /// configurable limit and response bodies above 1 MiB are rejected. Every
 /// fetched document is validated against the identifier it was requested
-/// for (RFC 8414 §3.3 / RFC 9728 §3.3) — including documents served from a
+/// for (RFC 8414 Section 3.3 / RFC 9728 Section 3.3) - including documents served from a
 /// configured [`MetadataCache`].
 ///
 /// # Example
@@ -85,12 +85,12 @@ impl DiscoveryClient {
         self
     }
 
-    /// Fetches Authorization Server Metadata (RFC 8414 §3) for `issuer`
+    /// Fetches Authorization Server Metadata (RFC 8414 Section 3) for `issuer`
     ///
-    /// The metadata URL is derived per RFC 8414 §3.1
+    /// The metadata URL is derived per RFC 8414 Section 3.1
     /// (`/.well-known/oauth-authorization-server` inserted between host and
     /// path). The `issuer` in the returned document must match the
-    /// requested one (RFC 8414 §3.3); a mismatch fails with
+    /// requested one (RFC 8414 Section 3.3); a mismatch fails with
     /// [`ClientError::Validation`].
     pub async fn fetch_server_metadata(
         &self,
@@ -124,10 +124,10 @@ impl DiscoveryClient {
         .await
     }
 
-    /// Fetches Protected Resource Metadata (RFC 9728 §3) for `resource`
+    /// Fetches Protected Resource Metadata (RFC 9728 Section 3) for `resource`
     ///
-    /// The metadata URL is derived per RFC 9728 §3.1. The `resource` in the
-    /// returned document must match the requested one (RFC 9728 §3.3).
+    /// The metadata URL is derived per RFC 9728 Section 3.1. The `resource` in the
+    /// returned document must match the requested one (RFC 9728 Section 3.3).
     pub async fn fetch_resource_metadata(
         &self,
         resource: &str,
@@ -141,9 +141,9 @@ impl DiscoveryClient {
         .await
     }
 
-    /// Fetches Protected Resource Metadata from an explicit URL — typically
+    /// Fetches Protected Resource Metadata from an explicit URL - typically
     /// the `resource_metadata` parameter of a `WWW-Authenticate` challenge
-    /// (RFC 9728 §5.1)
+    /// (RFC 9728 Section 5.1)
     ///
     /// When `expected_resource` is given, the document's `resource` must
     /// match it; pass `None` when the resource identifier is not known
@@ -165,7 +165,7 @@ impl DiscoveryClient {
     ///
     /// Takes the first advertised `authorization_servers` entry and fetches
     /// its metadata from the RFC 8414 path, falling back to the OIDC
-    /// Discovery path when the former is not served (`404`) — authorization
+    /// Discovery path when the former is not served (`404`) - authorization
     /// servers commonly publish only one of the two.
     pub async fn discover_authorization_server(
         &self,
@@ -189,7 +189,7 @@ impl DiscoveryClient {
     }
 
     /// Fetches the JSON Web Key Set advertised by `metadata` via `jwks_uri`
-    /// (RFC 8414 §2)
+    /// (RFC 8414 Section 2)
     ///
     /// Fails with [`ClientError::Validation`] when the metadata declares no
     /// `jwks_uri`. See [`fetch_jwks_from_url`](Self::fetch_jwks_from_url)
@@ -207,10 +207,10 @@ impl DiscoveryClient {
 
     /// Fetches a JSON Web Key Set from an explicit URL
     ///
-    /// The document is returned as raw JSON — this crate does not interpret
+    /// The document is returned as raw JSON - this crate does not interpret
     /// keys. Unlike the metadata fetches, a configured [`MetadataCache`] is
     /// deliberately **bypassed** in both directions: signing keys rotate,
-    /// and a cache hit would keep serving retired keys — freshness policy
+    /// and a cache hit would keep serving retired keys - freshness policy
     /// belongs to the caller. The transport policy (HTTPS enforcement,
     /// timeout, body size limit) still applies.
     pub async fn fetch_jwks_from_url(&self, url: &str) -> Result<serde_json::Value, ClientError> {
@@ -225,7 +225,7 @@ impl DiscoveryClient {
         url: &str,
         validate: impl FnOnce(&T) -> Result<(), ClientError>,
     ) -> Result<T, ClientError> {
-        // the HTTPS policy applies to cached documents too — a cache hit
+        // the HTTPS policy applies to cached documents too - a cache hit
         // must not resolve a URL the transport would refuse to fetch
         self.transport.check_scheme(url)?;
 
@@ -241,7 +241,7 @@ impl DiscoveryClient {
         if let Some(cache) = &self.cache {
             let document: T = serde_json::from_value(raw.clone())?;
             validate(&document)?;
-            // only an accepted document is stored — one malformed or
+            // only an accepted document is stored - one malformed or
             // lying response must not poison the cache
             cache.put(url, &raw);
             Ok(document)
@@ -254,8 +254,8 @@ impl DiscoveryClient {
 }
 
 /// Compares a returned identifier against the requested one; RFC 8414
-/// §3.3 / RFC 9728 §3.3 require the returned value to be **identical** to
-/// the identifier used for discovery, so no normalization is applied — a
+/// Section 3.3 / RFC 9728 Section 3.3 require the returned value to be **identical** to
+/// the identifier used for discovery, so no normalization is applied - a
 /// value differing only in case, default port or trailing slash still
 /// binds to a distinct identifier and is rejected.
 fn validate_identifier(field: &str, returned: &str, requested: &str) -> Result<(), ClientError> {
@@ -337,7 +337,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_enforces_https_for_jwks_urls() {
-        // no server involved — the URL is rejected before any I/O
+        // no server involved - the URL is rejected before any I/O
         let err = DiscoveryClient::new()
             .fetch_jwks_from_url("http://auth.example.com/jwks")
             .await

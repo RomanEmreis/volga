@@ -33,11 +33,11 @@
 //! # Limit semantics
 //!
 //! The [`Limit`] type supports:
-//! - `Default`   — use the module default
-//! - `Limited(n)`— enforce the provided value
-//! - `Unlimited` — disable the check
+//! - `Default`   - use the module default
+//! - `Limited(n)` - enforce the provided value
+//! - `Unlimited` - disable the check
 //!
-//! ⚠️ Setting limits to `Unlimited` removes safety rails and may allow memory / CPU exhaustion.
+//! **Warning:** Setting limits to `Unlimited` removes safety rails and may allow memory / CPU exhaustion.
 //! Use with care and only when the surrounding system provides other protections.
 
 use crate::Limit;

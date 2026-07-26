@@ -176,7 +176,7 @@ impl TryFrom<App> for AppEnv {
                     if cfg.decoding_key().is_some() {
                         return Err(Error::other(
                             "Bearer auth is ambiguous: both a static decoding key and an \
-                             OAuth issuer are configured — pick one",
+                             OAuth issuer are configured - pick one",
                         ));
                     }
                     // tokens must come from the configured issuer unless

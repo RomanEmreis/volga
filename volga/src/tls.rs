@@ -768,7 +768,7 @@ impl App {
 }
 
 /// Normalizes a host name for comparison: trims whitespace, strips a default
-/// `:443`/`:80` port and trailing dots. Borrow-only — case is preserved, so
+/// `:443`/`:80` port and trailing dots. Borrow-only - case is preserved, so
 /// compare results with [`str::eq_ignore_ascii_case`] (or lowercase once when
 /// storing, as [`HstsConfig::with_exclude_hosts`] does).
 #[inline]

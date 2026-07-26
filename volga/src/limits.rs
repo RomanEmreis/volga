@@ -28,7 +28,7 @@
 //! Some limits may also be applied at a more granular level,
 //! such as per-route or per-protocol configuration.
 //!
-//! ⚠️ **Warning**
+//! **Warning**
 //!
 //! Disabling limits (`Limit::Unlimited`) removes built-in safety guarantees
 //! and should only be used in trusted environments or when external
@@ -50,11 +50,11 @@ mod http2;
 ///
 /// # Variants
 ///
-/// - [`Limit::Default`] — Uses the framework or transport default (recommended).
-/// - [`Limit::Limited`] — Enforces an explicit upper bound.
-/// - [`Limit::Unlimited`] — Disables the limit entirely.
+/// - [`Limit::Default`] - Uses the framework or transport default (recommended).
+/// - [`Limit::Limited`] - Enforces an explicit upper bound.
+/// - [`Limit::Unlimited`] - Disables the limit entirely.
 ///
-/// ⚠️ Disabling limits may expose the server to resource exhaustion and
+/// **Warning:** Disabling limits may expose the server to resource exhaustion and
 /// should only be done in trusted environments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Limit<T> {

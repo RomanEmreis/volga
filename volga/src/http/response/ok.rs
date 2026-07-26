@@ -2,7 +2,7 @@
 
 /// Creates a `200 OK` response.
 ///
-/// The macro provides three “modes”:
+/// The macro provides three "modes":
 ///
 /// - **Empty response**: `ok!()`
 /// - **Plain text (UTF-8)**:

@@ -55,7 +55,7 @@ pub trait ErasedErrorArgs: Send {
 /// is stored in that case; the full pre-extraction path is taken only when a
 /// user-configured handler is present.
 pub(crate) enum ErrorArgsSlot {
-    /// Default handler: only the request URI is stored — no box allocation.
+    /// Default handler: only the request URI is stored - no box allocation.
     Uri(Uri),
     /// Custom handler: args were pre-extracted from parts before consumption.
     Custom(Box<dyn ErasedErrorArgs + Send>),

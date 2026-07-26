@@ -441,20 +441,20 @@ impl App {
     ///
     /// This setting is **required** for [`by::ip()`] and [`ClientIp`] to honor
     /// `Forwarded` (RFC 7239) or `X-Forwarded-For` headers. Without it, volga
-    /// uses the direct TCP peer address and ignores forwarded headers entirely —
+    /// uses the direct TCP peer address and ignores forwarded headers entirely -
     /// this prevents IP-spoofing attacks where an attacker could bypass IP-based
     /// rate limiting by setting `X-Forwarded-For: <arbitrary>`.
     ///
     /// When configured, volga walks the forwarded chain **right-to-left** and
     /// returns the first hop whose address is **not** in this list. Headers are
-    /// only consulted if the direct peer is itself a trusted proxy — forwarded
+    /// only consulted if the direct peer is itself a trusted proxy - forwarded
     /// values from untrusted peers are discarded.
     ///
     /// # When to set
     ///
-    /// - Behind a reverse proxy (nginx, Caddy, Cloudflare, ALB) — configure
+    /// - Behind a reverse proxy (nginx, Caddy, Cloudflare, ALB) - configure
     ///   the proxy's internal/egress IPs here.
-    /// - Direct-to-internet deployment — leave unset.
+    /// - Direct-to-internet deployment - leave unset.
     ///
     /// Passing an empty iterator is equivalent to leaving it unset.
     ///
@@ -473,8 +473,8 @@ impl App {
     ///
     /// ## See also
     ///
-    /// - [`by::ip`] — rate-limiting partition by client IP
-    /// - [`ClientIp`] — extractor that uses the same resolution logic
+    /// - [`by::ip`] - rate-limiting partition by client IP
+    /// - [`ClientIp`] - extractor that uses the same resolution logic
     pub fn with_trusted_proxies<I, T>(mut self, proxies: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -559,9 +559,9 @@ impl App {
     ///
     /// ## See also
     ///
-    /// - [`FixedWindow`] — fixed window policy definition
-    /// - [`App::with_fixed_window`] — registering fixed-window policies
-    /// - [`RateLimitKeyExt`] — binding partition keys to policies
+    /// - [`FixedWindow`] - fixed window policy definition
+    /// - [`App::with_fixed_window`] - registering fixed-window policies
+    /// - [`RateLimitKeyExt`] - binding partition keys to policies
     pub fn use_fixed_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         self.attach(RateLimiting::<FixedWindow>::new(source))
     }
@@ -636,9 +636,9 @@ impl App {
     ///
     /// ## See also
     ///
-    /// - [`SlidingWindow`] — sliding window policy definition
-    /// - [`App::with_sliding_window`] — registering sliding-window policies
-    /// - [`RateLimitKeyExt`] — binding partition keys to policies
+    /// - [`SlidingWindow`] - sliding window policy definition
+    /// - [`App::with_sliding_window`] - registering sliding-window policies
+    /// - [`RateLimitKeyExt`] - binding partition keys to policies
     pub fn use_sliding_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         self.attach(RateLimiting::<SlidingWindow>::new(source))
     }
@@ -713,9 +713,9 @@ impl App {
     ///
     /// ## See also
     ///
-    /// - [`TokenBucket`] — token bucket policy definition
-    /// - [`App::with_token_bucket`] — registering token bucket policies
-    /// - [`RateLimitKeyExt`] — binding partition keys to policies
+    /// - [`TokenBucket`] - token bucket policy definition
+    /// - [`App::with_token_bucket`] - registering token bucket policies
+    /// - [`RateLimitKeyExt`] - binding partition keys to policies
     pub fn use_token_bucket<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         self.attach(RateLimiting::<TokenBucket>::new(source))
     }
@@ -790,9 +790,9 @@ impl App {
     ///
     /// ## See also
     ///
-    /// - [`Gcra`] — GCRA policy definition
-    /// - [`App::with_gcra`] — registering GCRA policies
-    /// - [`RateLimitKeyExt`] — binding partition keys to policies
+    /// - [`Gcra`] - GCRA policy definition
+    /// - [`App::with_gcra`] - registering GCRA policies
+    /// - [`RateLimitKeyExt`] - binding partition keys to policies
     pub fn use_gcra<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
         self.attach(RateLimiting::<Gcra>::new(source))
     }

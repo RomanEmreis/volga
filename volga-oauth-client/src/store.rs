@@ -3,7 +3,7 @@
 //! [`TokenStore`] lets [`OAuthClient`](crate::OAuthClient) persist and
 //! reuse tokens across requests: [`token`](crate::OAuthClient::token)
 //! reads through it and refreshes expired entries transparently. The key
-//! is chosen by the application — typically a user or session identifier,
+//! is chosen by the application - typically a user or session identifier,
 //! combined with the resource when one client serves several audiences.
 //!
 //! [`InMemoryTokenStore`] is the built-in process-local implementation;

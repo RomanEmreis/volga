@@ -53,7 +53,7 @@ impl Transport {
 
         let client = Client::builder(TokioExecutor::new());
         // Plaintext connections have no ALPN; in the HTTP/2-only build the
-        // client must use prior knowledge (RFC 9113 §3.3) instead of
+        // client must use prior knowledge (RFC 9113 Section 3.3) instead of
         // silently requiring TLS
         #[cfg(all(feature = "http2", not(feature = "http1")))]
         let client = {
@@ -76,7 +76,7 @@ impl Transport {
 
     /// Submits an `application/x-www-form-urlencoded` body to `url` with
     /// `POST` and parses the response body as JSON. Redirects are treated
-    /// as errors — token-style endpoints have no business issuing them.
+    /// as errors - token-style endpoints have no business issuing them.
     pub(crate) async fn post_form(
         &self,
         url: &str,
@@ -236,7 +236,7 @@ impl std::fmt::Debug for Transport {
 }
 
 /// Reads a non-redirect response into JSON: a success body is parsed
-/// as-is, an error body is parsed as an OAuth error (RFC 6749 §5.2) when
+/// as-is, an error body is parsed as an OAuth error (RFC 6749 Section 5.2) when
 /// possible and surfaced as the bare status otherwise.
 async fn read_json(res: http::Response<Incoming>) -> Result<Value, ClientError> {
     let status = res.status();
@@ -247,7 +247,7 @@ async fn read_json(res: http::Response<Incoming>) -> Result<Value, ClientError> 
         .to_bytes();
 
     if !status.is_success() {
-        // an OAuth error body (RFC 6749 §5.2) beats the bare status —
+        // an OAuth error body (RFC 6749 Section 5.2) beats the bare status -
         // except on 404, which means the endpoint is not served at all:
         // no OAuth flow defines protocol errors for it, discovery keys
         // its OIDC fallback off that status, and frameworks commonly
@@ -266,7 +266,7 @@ async fn read_json(res: http::Response<Incoming>) -> Result<Value, ClientError> 
 /// Resolves a `Location` header value against the URI being fetched;
 /// absolute URLs are taken as-is, scheme-relative URLs (`//host/path`)
 /// inherit the scheme, absolute paths inherit scheme and authority. Other
-/// relative forms are rejected — metadata endpoints have no business
+/// relative forms are rejected - metadata endpoints have no business
 /// issuing them.
 fn resolve_redirect(current: &Uri, location: &str) -> Result<String, ClientError> {
     if location.starts_with("https://") || location.starts_with("http://") {
@@ -274,7 +274,7 @@ fn resolve_redirect(current: &Uri, location: &str) -> Result<String, ClientError
     }
 
     // a scheme-relative location designates its own authority (RFC 3986
-    // §4.2) — it must not be mistaken for an absolute path below
+    // Section 4.2) - it must not be mistaken for an absolute path below
     if let Some(authority_and_path) = location.strip_prefix("//") {
         return match current.scheme_str() {
             Some(scheme) => Ok(format!("{scheme}://{authority_and_path}")),
@@ -311,7 +311,7 @@ mod tests {
             "https://auth.example.com/x/y"
         );
         // scheme-relative: the advertised authority wins, the scheme is
-        // inherited — not glued onto the current authority as a path
+        // inherited - not glued onto the current authority as a path
         assert_eq!(
             resolve_redirect(&current, "//other.example.com/x").unwrap(),
             "https://other.example.com/x"

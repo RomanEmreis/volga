@@ -9,7 +9,7 @@ Provides:
 * Discovery client fetching Authorization Server Metadata ([RFC 8414](https://www.rfc-editor.org/rfc/rfc8414)) and Protected Resource Metadata ([RFC 9728](https://www.rfc-editor.org/rfc/rfc9728))
 * Authorization Code flow with mandatory PKCE (S256, [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636)), refresh tokens and resource indicators ([RFC 8707](https://www.rfc-editor.org/rfc/rfc8707))
 * Token persistence and transparent refresh through the `TokenStore` abstraction
-* Dynamic Client Registration ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) — the RFC 7592 management protocol is not implemented, but the `registration_access_token` / `registration_client_uri` pair is surfaced for applications that need it
+* Dynamic Client Registration ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) - the RFC 7592 management protocol is not implemented, but the `registration_access_token` / `registration_client_uri` pair is surfaced for applications that need it
 
 ## Example
 
@@ -38,7 +38,7 @@ async fn authorize() -> Result<(), ClientError> {
     let tokens = client.exchange_code(&metadata, code, &auth).await?;
     client.store_tokens("alice", &tokens);
 
-    // later — served from the store, transparently refreshed when stale:
+    // later - served from the store, transparently refreshed when stale:
     let tokens = client.token("alice", &metadata).await?;
     Ok(())
 }

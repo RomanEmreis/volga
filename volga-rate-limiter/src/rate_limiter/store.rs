@@ -47,14 +47,14 @@ pub struct FixedWindowParams {
 /// A pluggable storage backend for the fixed-window algorithm.
 ///
 /// The single `check_and_count` operation must atomically:
-/// 1. Evict stale entries (optional — a TTL-based store may skip this).
+/// 1. Evict stale entries (optional - a TTL-based store may skip this).
 /// 2. Reset the counter if the stored window differs from `params.window`.
 /// 3. Increment the counter.
 /// 4. Return `true` if the pre-increment counter was below `params.max_requests`.
 ///
 /// # Atomicity and eviction
 ///
-/// The entire operation — check, reset, and increment — must be atomic per key
+/// The entire operation - check, reset, and increment - must be atomic per key
 /// to avoid TOCTOU races under concurrent access. For distributed backends with
 /// TTL support (e.g. Redis), eviction can be delegated to the backend's TTL
 /// mechanism; the explicit eviction step in the algorithm above may then be omitted.
@@ -164,7 +164,7 @@ pub struct GcraParams {
     pub key: u64,
     /// Current time in microseconds.
     pub now_us: u64,
-    /// Emission interval (τ) in microseconds: `ceil(1_000_000 / rate_per_second)`.
+    /// Emission interval (tau) in microseconds: `ceil(1_000_000 / rate_per_second)`.
     pub emission_interval_us: u64,
     /// Burst allowance in microseconds: `emission_interval_us * (burst - 1)`.
     pub burst_allowance_us: u64,

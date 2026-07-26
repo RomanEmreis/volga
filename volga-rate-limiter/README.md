@@ -55,10 +55,10 @@ the rate limiting logic.
 
 Each rate limiter provides constructors for all combinations:
 
-- `::new()` — system clock + default in-memory store
-- `::with_time_source()` — custom clock + in-memory store
-- `::with_store()` — system clock + custom store
-- `::with_time_source_and_store()` — both custom
+- `::new()` - system clock + default in-memory store
+- `::with_time_source()` - custom clock + in-memory store
+- `::with_store()` - system clock + custom store
+- `::with_time_source_and_store()` - both custom
 
 The default in-memory stores are backed by `DashMap` and use lock-free
 atomic operations on the hot path.
@@ -66,7 +66,7 @@ atomic operations on the hot path.
 ### Implementing a custom store
 
 Store traits require a single atomic operation. Parameter structs are
-`#[non_exhaustive]` for forward compatibility — access fields by name:
+`#[non_exhaustive]` for forward compatibility - access fields by name:
 
 ```rust
 use volga_rate_limiter::store::{TokenBucketParams, TokenBucketStore};
@@ -84,7 +84,7 @@ impl TokenBucketStore for MyRedisStore {
 ```
 
 > **Note:** Backends with built-in TTL support (like Redis) can skip manual
-> eviction — the eviction grace parameters are designed for in-memory stores
+> eviction - the eviction grace parameters are designed for in-memory stores
 > that perform lazy cleanup.
 
 ## Time Source Abstraction

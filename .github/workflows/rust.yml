@@ -26,6 +26,37 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
+  msrv_check:
+    runs-on: ubuntu-latest
+    needs: format_check
+
+    # Every other job runs on the runner's default stable toolchain, so the MSRV
+    # advertised by `rust-version` in the workspace manifest (and by the README
+    # badge) is otherwise never exercised. `--all-targets` pulls in dev-dependencies,
+    # which is where an MSRV regression is most likely to sneak in.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read MSRV from the workspace manifest
+        id: msrv
+        run: echo "version=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - name: Check the published crates on MSRV
+        run: cargo check --locked --all-features --all-targets
+
+  workspace_check:
+    runs-on: ubuntu-latest
+    needs: format_check
+
+    # `default-members` excludes `examples/*`, so no other job ever compiles them
+    # and a dependency bump can leave an example behind without failing CI.
+    # `--workspace` overrides `default-members` and covers every member.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the entire workspace, examples included
+        run: cargo check --locked --workspace --all-features --all-targets
+
   audit:
     runs-on: ubuntu-latest
     needs: format_check

@@ -168,7 +168,7 @@ impl<C: AuthClaims> Authorizer<C> {
     /// Combines the current authorizer with another one via logical **AND** (And).
     ///
     /// If both operands are already `And`, then their contents are combined into one list.
-    /// This avoids unnecessary nesting: `And([And([a]), And([b])]) → And([a, b])`
+    /// This avoids unnecessary nesting: `And([And([a]), And([b])]) -> And([a, b])`
     pub fn and(self, other: Authorizer<C>) -> Self {
         match (self, other) {
             (Authorizer::And(mut a), Authorizer::And(mut b)) => {

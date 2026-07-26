@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 # 0.9.6
 
 ## Added
-* `ClientMetadata::application_type` (`volga-oauth-core`, RFC 7591 / OIDC Dynamic Client Registration §2) with the `with_application_type` builder — first-class instead of an `additional_fields` entry. Desktop and CLI clients register as `"native"`, which is what makes loopback redirect URIs (`http://127.0.0.1:{port}/…`) acceptable to authorization servers.
-* `AuthorizationServerMetadata::authorization_response_iss_parameter_supported` (`volga-oauth-core`, RFC 9207 §3) with the `with_authorization_response_iss_parameter` builder — likewise typed; it is also accepted in the `[oauth.server]` config file section.
-* `AuthorizationRequest::validate_callback` (`volga-oauth-client`) — validates the authorization callback before the code is exchanged: the `state` (CSRF) plus the RFC 9207 `iss`, which must match the issuer whenever present and is required once the server advertises it. Without the `iss` check a callback can be replayed from a different authorization server (mix-up attack); `matches_state` remains for the `state`-only check.
+* `ClientMetadata::application_type` (`volga-oauth-core`, RFC 7591 / OIDC Dynamic Client Registration Section 2) with the `with_application_type` builder - first-class instead of an `additional_fields` entry. Desktop and CLI clients register as `"native"`, which is what makes loopback redirect URIs (`http://127.0.0.1:{port}/...`) acceptable to authorization servers.
+* `AuthorizationServerMetadata::authorization_response_iss_parameter_supported` (`volga-oauth-core`, RFC 9207 Section 3) with the `with_authorization_response_iss_parameter` builder - likewise typed; it is also accepted in the `[oauth.server]` config file section.
+* `AuthorizationRequest::validate_callback` (`volga-oauth-client`) - validates the authorization callback before the code is exchanged: the `state` (CSRF) plus the RFC 9207 `iss`, which must match the issuer whenever present and is required once the server advertises it. Without the `iss` check a callback can be replayed from a different authorization server (mix-up attack); `matches_state` remains for the `state`-only check.
 
 ## Fixed
 * `OAuthClient::exchange_code`, `refresh` and `token` returned `!Send` futures: the non-`Sync` form serializer was held across the token-endpoint `await`, so the calls could not be spawned onto a multi-thread runtime (callers had to bridge them through a current-thread runtime). The serializer is now dropped before the request; the futures are `Send`, which a test now pins down.
@@ -18,30 +18,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 # 0.9.5
 
 ## Added
-* `oauth-client` feature — issuer-based bearer authentication: `App::with_oauth(|oauth| oauth.with_issuer(..))` plus the explicit `App::use_oauth()` opt-in validate incoming JWTs against the OAuth 2.1/OIDC issuer's published JWKS instead of a static decoding key. Server metadata is discovered per RFC 8414 (with an OIDC Discovery fallback), keys are fetched lazily on the first request and refreshed on `kid` misses (key rotation) behind a configurable cooldown with single-flight; cached keys are re-checked with the issuer once older than a configurable max age (default 15 minutes, `with_max_key_age`), so a revoked or re-keyed `kid` stops validating without a restart while an issuer outage keeps serving the last known set; the `iss` claim is constrained to the configured issuer automatically and made required, so tokens omitting it are rejected. While the issuer is unreachable and no keys are loaded, protected routes answer `503` instead of blaming the token. Everything else (`aud`, expiry, scopes/roles) keeps coming from `with_bearer_auth`.
-* `[oauth.client]` config file section (features `oauth-client` + `config`) — describes the issuer (`issuer`, `refresh_cooldown_secs`, `max_key_age_secs`, `require_https`, `timeout_secs`, `max_redirects`) from the configuration file; fields present in the file override `with_oauth` builder calls, unknown keys fail startup, and activation still requires the explicit `App::use_oauth()` call in code.
-* `DiscoveryClient::fetch_jwks` / `fetch_jwks_from_url` in `volga-oauth-client` — fetches the issuer's JSON Web Key Set under the shared transport policy; deliberately bypasses the `MetadataCache` (signing keys rotate — freshness policy belongs to the caller).
-* New example `oauth_flow` — a complete Authorization Code + PKCE flow between two volga apps: a toy authorization server (metadata, JWKS, `/authorize`, `/token` issuing RS256 tokens) and a resource server protected purely through `use_oauth()`, driven by a `volga-oauth-client` client.
-* `oauth` feature (implied by `jwt-auth`) — OAuth 2.1/OIDC foundation at `volga::auth::oauth`: error models (`OAuthError` / `OAuthErrorCode`, covering the registered codes from RFC 6749, 6750, 7591 and 8707), the `WWW-Authenticate` Bearer challenge builder and parser (`BearerChallenge`), resource URI canonicalization and well-known metadata URL derivation.
+* `oauth-client` feature - issuer-based bearer authentication: `App::with_oauth(|oauth| oauth.with_issuer(..))` plus the explicit `App::use_oauth()` opt-in validate incoming JWTs against the OAuth 2.1/OIDC issuer's published JWKS instead of a static decoding key. Server metadata is discovered per RFC 8414 (with an OIDC Discovery fallback), keys are fetched lazily on the first request and refreshed on `kid` misses (key rotation) behind a configurable cooldown with single-flight; cached keys are re-checked with the issuer once older than a configurable max age (default 15 minutes, `with_max_key_age`), so a revoked or re-keyed `kid` stops validating without a restart while an issuer outage keeps serving the last known set; the `iss` claim is constrained to the configured issuer automatically and made required, so tokens omitting it are rejected. While the issuer is unreachable and no keys are loaded, protected routes answer `503` instead of blaming the token. Everything else (`aud`, expiry, scopes/roles) keeps coming from `with_bearer_auth`.
+* `[oauth.client]` config file section (features `oauth-client` + `config`) - describes the issuer (`issuer`, `refresh_cooldown_secs`, `max_key_age_secs`, `require_https`, `timeout_secs`, `max_redirects`) from the configuration file; fields present in the file override `with_oauth` builder calls, unknown keys fail startup, and activation still requires the explicit `App::use_oauth()` call in code.
+* `DiscoveryClient::fetch_jwks` / `fetch_jwks_from_url` in `volga-oauth-client` - fetches the issuer's JSON Web Key Set under the shared transport policy; deliberately bypasses the `MetadataCache` (signing keys rotate - freshness policy belongs to the caller).
+* New example `oauth_flow` - a complete Authorization Code + PKCE flow between two volga apps: a toy authorization server (metadata, JWKS, `/authorize`, `/token` issuing RS256 tokens) and a resource server protected purely through `use_oauth()`, driven by a `volga-oauth-client` client.
+* `oauth` feature (implied by `jwt-auth`) - OAuth 2.1/OIDC foundation at `volga::auth::oauth`: error models (`OAuthError` / `OAuthErrorCode`, covering the registered codes from RFC 6749, 6750, 7591 and 8707), the `WWW-Authenticate` Bearer challenge builder and parser (`BearerChallenge`), resource URI canonicalization and well-known metadata URL derivation.
 * OAuth metadata documents and serving: `AuthorizationServerMetadata` (RFC 8414 / OIDC Discovery) and `ProtectedResourceMetadata` (RFC 9728) with builder DSLs. Configure via `App::with_oauth_server_metadata` / `App::with_oauth_resource_metadata` (or the `set_*` counterparts, or the `[oauth.server]` / `[oauth.resource]` config file sections); serve via `App::use_oauth_server_metadata`, `App::use_oauth_resource_metadata` and `App::use_oidc_metadata`.
 * Dynamic Client Registration models (RFC 7591): `ClientMetadata` and `ClientRegistrationResponse`.
-* New crate `volga-oauth-core` — the protocol-type layer behind `volga::auth::oauth` (no HTTP I/O), shared with the client crate; public `volga` paths are unchanged.
-* New crate `volga-oauth-client` — OAuth 2.1/OIDC client independent of the `volga` server crate, usable from any Tokio application (feature flags `http1` (default) / `http2`):
-  * `DiscoveryClient` — fetches Authorization Server Metadata (RFC 8414), Protected Resource Metadata (RFC 9728) and the OIDC provider configuration, with the identifier validation the specs require and a `MetadataCache` hook.
-  * `OAuthClient` — Authorization Code flow with mandatory PKCE (S256 only), refresh tokens and resource indicators (RFC 8707); token persistence and transparent refresh through the `TokenStore` trait (`InMemoryTokenStore` built in).
-  * `RegistrationClient` — Dynamic Client Registration (RFC 7591), including initial access tokens; `OAuthClient::from_registration` adopts the issued credentials.
+* New crate `volga-oauth-core` - the protocol-type layer behind `volga::auth::oauth` (no HTTP I/O), shared with the client crate; public `volga` paths are unchanged.
+* New crate `volga-oauth-client` - OAuth 2.1/OIDC client independent of the `volga` server crate, usable from any Tokio application (feature flags `http1` (default) / `http2`):
+  * `DiscoveryClient` - fetches Authorization Server Metadata (RFC 8414), Protected Resource Metadata (RFC 9728) and the OIDC provider configuration, with the identifier validation the specs require and a `MetadataCache` hook.
+  * `OAuthClient` - Authorization Code flow with mandatory PKCE (S256 only), refresh tokens and resource indicators (RFC 8707); token persistence and transparent refresh through the `TokenStore` trait (`InMemoryTokenStore` built in).
+  * `RegistrationClient` - Dynamic Client Registration (RFC 7591), including initial access tokens; `OAuthClient::from_registration` adopts the issued credentials.
   * `ClientConfig` transport policy (HTTPS enforcement, total timeouts, redirect limits) and the `ClientError` model shared by all three clients.
 
 ## Fixed
-* Requests without `Authorization` credentials on a route guarded by `authorize` now answer `401` with a bare `Bearer` challenge (plus `resource_metadata` when configured) per RFC 6750 §3, instead of a plain `400` without a challenge — clients can now discover the resource metadata and start an authorization flow. A present but malformed `Authorization` header (wrong scheme, empty token) answers `400` with an `invalid_request` challenge per RFC 6750 §3.1; present-but-invalid tokens keep answering `403` with the detailed challenge as before.
+* Requests without `Authorization` credentials on a route guarded by `authorize` now answer `401` with a bare `Bearer` challenge (plus `resource_metadata` when configured) per RFC 6750 Section 3, instead of a plain `400` without a challenge - clients can now discover the resource metadata and start an authorization flow. A present but malformed `Authorization` header (wrong scheme, empty token) answers `400` with an `invalid_request` challenge per RFC 6750 Section 3.1; present-but-invalid tokens keep answering `403` with the detailed challenge as before.
 * A server built with both `http1` and `http2` (without `ws`) served HTTP/2 exclusively, rejecting HTTP/1 clients even though TLS ALPN advertised `http/1.1`. Such builds now auto-detect the protocol per connection and serve both, matching the `ws` behavior; `http2`-only builds still serve pure HTTP/2.
 
 # 0.9.4
 
 ## Added
 * HTTP `QUERY` method support: `App::map_query` / `RouteGroup::map_query` register routes for the new verb (#195).
-* Generic `App::map` / `RouteGroup::map` — register a route for any HTTP method; accepts anything `TryInto<Method>` (including string verbs like `"QUERY"`) and an owned or borrowed pattern. The named `map_*` helpers are unchanged (#195).
-* `HttpBody` is now an extractor — take it directly as a handler argument to access the raw request body (#194).
+* Generic `App::map` / `RouteGroup::map` - register a route for any HTTP method; accepts anything `TryInto<Method>` (including string verbs like `"QUERY"`) and an owned or borrowed pattern. The named `map_*` helpers are unchanged (#195).
+* `HttpBody` is now an extractor - take it directly as a handler argument to access the raw request body (#194).
 
 ## Security
 * Added a `cargo audit` CI pipeline (#196).
@@ -50,21 +50,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 # 0.9.3
 
 ## Added
-* `ShutdownHandle` — programmatic graceful shutdown that composes with the built-in OS signal handler. Construct via `ShutdownHandle::new()` or `ShutdownHandle::from_token(token)` / `From<CancellationToken>`. Trigger with `handle.shutdown()`; observe with `handle.is_shutdown_requested()` and `handle.cancelled()`.
-* `App::with_shutdown()` — returns `(App, ShutdownHandle)` for the common case where the framework owns the handle.
-* `App::with_shutdown_signal(handle)` — registers an externally-owned `ShutdownHandle` on an existing `App`.
-* `App::shutdown_on(future)` — chains async triggers (e.g. an external watchdog future) that fire a graceful shutdown when they resolve. Composes with the OS signal handler and any `ShutdownHandle` already registered, and is safe to call before a Tokio runtime exists.
+* `ShutdownHandle` - programmatic graceful shutdown that composes with the built-in OS signal handler. Construct via `ShutdownHandle::new()` or `ShutdownHandle::from_token(token)` / `From<CancellationToken>`. Trigger with `handle.shutdown()`; observe with `handle.is_shutdown_requested()` and `handle.cancelled()`.
+* `App::with_shutdown()` - returns `(App, ShutdownHandle)` for the common case where the framework owns the handle.
+* `App::with_shutdown_signal(handle)` - registers an externally-owned `ShutdownHandle` on an existing `App`.
+* `App::shutdown_on(future)` - chains async triggers (e.g. an external watchdog future) that fire a graceful shutdown when they resolve. Composes with the OS signal handler and any `ShutdownHandle` already registered, and is safe to call before a Tokio runtime exists.
 
 # 0.9.2
 
 ## Added
-* `Multipart` is now bidirectional — in addition to acting as a request extractor, it implements `IntoResponse` and can be returned from handlers to produce a `multipart/*` response.
-* `Multipart::from_parts(iter)` / `Multipart::from_stream(stream)` — build an outgoing multipart from any `IntoIterator<Item = Part>` or `Stream<Item = Part>`.
-* `Multipart::with_subtype(MultipartSubtype)` — switch between `form-data`, `mixed`, `byteranges`, or a `Custom(...)` subtype on outgoing responses.
-* `Multipart::with_boundary(...)` — override the auto-generated boundary; validated per RFC 2046 §5.1.1.
-* `Multipart::into_outgoing()` — re-encode an incoming multipart as a streaming outgoing one for proxy / forwarding scenarios.
+* `Multipart` is now bidirectional - in addition to acting as a request extractor, it implements `IntoResponse` and can be returned from handlers to produce a `multipart/*` response.
+* `Multipart::from_parts(iter)` / `Multipart::from_stream(stream)` - build an outgoing multipart from any `IntoIterator<Item = Part>` or `Stream<Item = Part>`.
+* `Multipart::with_subtype(MultipartSubtype)` - switch between `form-data`, `mixed`, `byteranges`, or a `Custom(...)` subtype on outgoing responses.
+* `Multipart::with_boundary(...)` - override the auto-generated boundary; validated per RFC 2046 Section 5.1.1.
+* `Multipart::into_outgoing()` - re-encode an incoming multipart as a streaming outgoing one for proxy / forwarding scenarios.
 * `Part` builder API: `Part::text`, `Part::bytes`, `Part::file`, `Part::stream`, `Part::new`, plus `with_content_type`, `with_disposition`, `with_header_raw`. `Content-Type` is auto-inferred from filename via `mime_guess`. The static-input constructors panic on invalid header bytes; fallible `try_text` / `try_bytes` / `try_file` / `try_stream` / `try_with_disposition` counterparts are provided for untrusted input.
-* `OpenApiRouteConfig::produces_multipart(status)` — describe `multipart/form-data` responses in OpenAPI specs.
+* `OpenApiRouteConfig::produces_multipart(status)` - describe `multipart/form-data` responses in OpenAPI specs.
 
 ## Changed
 * HSTS default `max_age` is now 1 year (31,536,000 s); previously 30 days. Aligns with the [HSTS preload list](https://hstspreload.org/) requirement (#190).
@@ -80,15 +80,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 # 0.9.1
 
 ## Added
-* `EncodingKey::{from_env, try_from_env, from_env_base64, try_from_env_base64, from_file, try_from_file, from_pem_file, try_from_pem_file}` and identical siblings on `DecodingKey` — ergonomic startup-time constructors. Panicking variants expect to be called once at startup; `try_*` variants return `Result<_, volga::Error>`.
-* `BearerAuthConfig::with_resource(uri)` / `with_resources(iter)` — OAuth 2.0 resource indicators (RFC 8707).
-* `BearerAuthConfig::with_resource_metadata_url(url)` — advertises the OAuth 2.0 Protected Resource Metadata URL (RFC 9728) in `WWW-Authenticate` challenges.
-* `BearerAuthConfig::with_strict_aud()` / `BearerAuthConfig::without_strict_aud()` — explicit control over whether `aud` is required when audiences are configured.
-* `BearerAuthConfig::strip_token_from_request(bool)` — controls stripping of the `Authorization` header after successful bearer auth.
-* `BearerAuthConfig::require_https(bool)` — controls HTTPS enforcement (with loopback exception).
-* `CorsConfig::without_credentials()` / `without_vary_header()` — explicit "off" builders paired with the existing `with_*` setters.
-* `HstsConfig::without_preload()` / `without_sub_domains()` — explicit "off" builders paired with the existing `with_*` setters.
-* `WebSocketConnection::without_accept_unmasked_frames()` — explicit opt-out paired with `with_accept_unmasked_frames()`.
+* `EncodingKey::{from_env, try_from_env, from_env_base64, try_from_env_base64, from_file, try_from_file, from_pem_file, try_from_pem_file}` and identical siblings on `DecodingKey` - ergonomic startup-time constructors. Panicking variants expect to be called once at startup; `try_*` variants return `Result<_, volga::Error>`.
+* `BearerAuthConfig::with_resource(uri)` / `with_resources(iter)` - OAuth 2.0 resource indicators (RFC 8707).
+* `BearerAuthConfig::with_resource_metadata_url(url)` - advertises the OAuth 2.0 Protected Resource Metadata URL (RFC 9728) in `WWW-Authenticate` challenges.
+* `BearerAuthConfig::with_strict_aud()` / `BearerAuthConfig::without_strict_aud()` - explicit control over whether `aud` is required when audiences are configured.
+* `BearerAuthConfig::strip_token_from_request(bool)` - controls stripping of the `Authorization` header after successful bearer auth.
+* `BearerAuthConfig::require_https(bool)` - controls HTTPS enforcement (with loopback exception).
+* `CorsConfig::without_credentials()` / `without_vary_header()` - explicit "off" builders paired with the existing `with_*` setters.
+* `HstsConfig::without_preload()` / `without_sub_domains()` - explicit "off" builders paired with the existing `with_*` setters.
+* `WebSocketConnection::without_accept_unmasked_frames()` - explicit opt-out paired with `with_accept_unmasked_frames()`.
 
 ## Breaking Changes
 * `volga::auth` no longer re-exports `jsonwebtoken::Algorithm`, `DecodingKey`, `EncodingKey`, `JwtError`, or `ErrorKind`. Replaced by volga-owned `Algorithm`, `DecodingKey`, and `EncodingKey` at the same paths. User code that imports these by name continues to compile; code using `ErrorKind` for pattern-matching JWT errors or calling `EncodingKey::from_rsa_der` / `from_ec_der` / `from_ed_der` / `DecodingKey::from_jwk` / `from_rsa_components` will break. Use the dedicated PEM / base64 / secret / env / file constructors instead.

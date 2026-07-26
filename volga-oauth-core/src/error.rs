@@ -1,8 +1,8 @@
 //! OAuth 2.0/2.1 error models
 //!
-//! See [RFC 6749 §5.2](https://www.rfc-editor.org/rfc/rfc6749#section-5.2),
-//! [RFC 6750 §3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1) and
-//! [RFC 8707 §2](https://www.rfc-editor.org/rfc/rfc8707#section-2).
+//! See [RFC 6749 Section 5.2](https://www.rfc-editor.org/rfc/rfc6749#section-5.2),
+//! [RFC 6750 Section 3.1](https://www.rfc-editor.org/rfc/rfc6750#section-3.1) and
+//! [RFC 8707 Section 2](https://www.rfc-editor.org/rfc/rfc8707#section-2).
 
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -94,9 +94,9 @@ impl OAuthErrorCode {
 
     /// Returns the HTTP status code conventionally paired with this error code
     ///
-    /// Bearer-usage codes follow RFC 6750 §3.1 (`invalid_token` → 401,
-    /// `insufficient_scope` → 403); `invalid_client` maps to 401 and the
-    /// remaining token/authorization endpoint codes to 400 per RFC 6749 §5.2,
+    /// Bearer-usage codes follow RFC 6750 Section 3.1 (`invalid_token` -> 401,
+    /// `insufficient_scope` -> 403); `invalid_client` maps to 401 and the
+    /// remaining token/authorization endpoint codes to 400 per RFC 6749 Section 5.2,
     /// except `server_error` (500) and `temporarily_unavailable` (503).
     /// Extension codes default to 400.
     pub fn status(&self) -> StatusCode {
@@ -170,7 +170,7 @@ impl Display for OAuthErrorCode {
     }
 }
 
-/// OAuth 2.0 error response per RFC 6749 §5.2
+/// OAuth 2.0 error response per RFC 6749 Section 5.2
 ///
 /// Serializes to the standard JSON error body returned by token and other
 /// OAuth endpoints:

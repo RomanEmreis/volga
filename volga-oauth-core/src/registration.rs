@@ -2,8 +2,8 @@
 //!
 //! Serde models for OAuth 2.0 Dynamic Client Registration
 //! ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)): the client
-//! metadata sent to the registration endpoint (§2) and the client
-//! information response returned by it (§3.2.1).
+//! metadata sent to the registration endpoint (Section 2) and the client
+//! information response returned by it (Section 3.2.1).
 //!
 //! These are plain data types: submitting them (registration client) and
 //! serving them (a registration endpoint) are built on top separately.
@@ -11,12 +11,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Client metadata submitted for registration per RFC 7591 §2
+/// Client metadata submitted for registration per RFC 7591 Section 2
 ///
 /// [`ClientMetadata::new`] prefills the OAuth 2.1 client profile
 /// (`authorization_code` grant, `code` response type); extension and
-/// OIDC-specific fields — including localized variants such as
-/// `client_name#ja-JP` — are preserved in
+/// OIDC-specific fields - including localized variants such as
+/// `client_name#ja-JP` - are preserved in
 /// [`additional_fields`](Self::additional_fields).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ClientMetadata {
@@ -28,10 +28,10 @@ pub struct ClientMetadata {
     /// Kind of application the client is: `web` (the default when absent)
     /// or `native`
     ///
-    /// Defined by OpenID Connect Dynamic Client Registration §2 and widely
+    /// Defined by OpenID Connect Dynamic Client Registration Section 2 and widely
     /// honored by OAuth 2.0 registration endpoints: a `native` client is
-    /// what allows the loopback redirect URIs (`http://127.0.0.1:{port}/…`)
-    /// desktop and CLI applications rely on — servers reject those for
+    /// what allows the loopback redirect URIs (`http://127.0.0.1:{port}/...`)
+    /// desktop and CLI applications rely on - servers reject those for
     /// `web` clients.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub application_type: Option<String>,
@@ -95,7 +95,7 @@ pub struct ClientMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub software_version: Option<String>,
 
-    /// Software statement JWT asserting client metadata values (§2.3);
+    /// Software statement JWT asserting client metadata values (Section 2.3);
     /// issued by a third party and passed through as-is, not validated
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub software_statement: Option<String>,
@@ -127,7 +127,7 @@ impl ClientMetadata {
         self
     }
 
-    /// Sets the application type — `web` (the server-side default) or
+    /// Sets the application type - `web` (the server-side default) or
     /// `native` for a desktop/CLI client with a loopback redirect URI
     pub fn with_application_type(mut self, application_type: impl Into<String>) -> Self {
         self.application_type = Some(application_type.into());
@@ -146,7 +146,7 @@ impl ClientMetadata {
     /// the given grants is redirect-based (`authorization_code` or
     /// `implicit`), the response types are cleared so the profile default
     /// `code` does not leak into e.g. a `client_credentials` registration
-    /// (RFC 7591 §2 requires the two fields to be consistent). Set
+    /// (RFC 7591 Section 2 requires the two fields to be consistent). Set
     /// response types after grant types when an extension grant needs them.
     pub fn with_grant_types<I, S>(mut self, grant_types: I) -> Self
     where
@@ -250,7 +250,7 @@ impl ClientMetadata {
         self
     }
 
-    /// Sets the software statement JWT (§2.3)
+    /// Sets the software statement JWT (Section 2.3)
     pub fn with_software_statement(mut self, jwt: impl Into<String>) -> Self {
         self.software_statement = Some(jwt.into());
         self
@@ -267,11 +267,11 @@ impl ClientMetadata {
     }
 }
 
-/// Client information response per RFC 7591 §3.2.1
+/// Client information response per RFC 7591 Section 3.2.1
 ///
 /// Returned by the registration endpoint on success: the issued client
 /// credentials plus all registered metadata (the server may have replaced
-/// or extended the requested values — read them back from
+/// or extended the requested values - read them back from
 /// [`metadata`](Self::metadata) rather than assuming the request was
 /// stored verbatim). The `registration_access_token` /
 /// `registration_client_uri` pair is issued by servers implementing the
@@ -309,7 +309,7 @@ pub struct ClientRegistrationResponse {
 
 impl std::fmt::Debug for ClientRegistrationResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // the secret and the management token are credentials — never
+        // the secret and the management token are credentials - never
         // expose them in debug output
         f.debug_struct("ClientRegistrationResponse")
             .field("client_id", &self.client_id)
@@ -419,7 +419,7 @@ mod tests {
         let parsed: ClientMetadata = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, metadata);
 
-        // absent by default — servers assume `web`
+        // absent by default - servers assume `web`
         let json = serde_json::to_value(ClientMetadata::new()).unwrap();
         assert!(json.get("application_type").is_none());
     }

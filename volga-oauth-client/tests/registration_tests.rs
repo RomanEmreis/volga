@@ -29,7 +29,7 @@ async fn it_registers_a_client_and_builds_an_oauth_client_from_it() {
     let base = format!("http://127.0.0.1:{port}");
 
     // the endpoint echoes the registered metadata back with credentials,
-    // per RFC 7591 §3.2.1
+    // per RFC 7591 Section 3.2.1
     let mut app = App::new();
     app.map_post("/register", |request: Json<ClientMetadata>| async move {
         if request.redirect_uris.is_empty() {
