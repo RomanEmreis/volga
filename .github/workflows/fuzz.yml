@@ -8,23 +8,40 @@ on:
   workflow_dispatch:
 
 env:
-  # Pinned nightly for reproducible fuzz builds (cargo-fuzz needs nightly for -Z sanitizer).
-  # Bump policy: bump deliberately, ~monthly, never float to `nightly`.
-  # The `bump-fuzz-nightly` workflow opens a PR on the 1st of each month; merge only after
-  # its fuzz build is green. Do NOT regenerate fuzz/Cargo.lock from scratch on a bump -
-  # a fresh resolve reintroduces the alloc-no-stdlib 2.0.4/3.0.0 split that breaks brotli;
-  # keep the committed lock and just rebuild against it.
-  RUST_NIGHTLY: nightly-2026-07-01
   CARGO_TERM_COLOR: always
   ASAN_OPTIONS: quarantine_size_mb=1:malloc_context_size=0
 
 jobs:
+  # The pinned nightly lives in .github/fuzz-nightly rather than in this file's `env:`
+  # block. GITHUB_TOKEN has no `workflows` permission scope, so the bump-fuzz-nightly bot
+  # cannot push an edit to a file under .github/workflows/; keeping the pin in a plain
+  # file lets the monthly bump PR be opened with the default token.
+  pin:
+    runs-on: ubuntu-latest
+    outputs:
+      toolchain: ${{ steps.read.outputs.toolchain }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the pinned nightly
+        id: read
+        run: |
+          toolchain="$(grep -vE '^[[:space:]]*(#|$)' .github/fuzz-nightly | head -n1 | tr -d '[:space:]')"
+          if [ -z "$toolchain" ]; then
+            echo "::error::.github/fuzz-nightly contains no toolchain line"
+            exit 1
+          fi
+          echo "toolchain=$toolchain" >> "$GITHUB_OUTPUT"
+          echo "Pinned nightly: $toolchain"
+
   fuzz_build:
     runs-on: ubuntu-latest
+    needs: pin
+    env:
+      RUST_NIGHTLY: ${{ needs.pin.outputs.toolchain }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
-        with: 
+        with:
           toolchain: ${{ env.RUST_NIGHTLY }}
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked
@@ -42,7 +59,9 @@ jobs:
   fuzz_smoke:
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    needs: fuzz_build
+    needs: [pin, fuzz_build]
+    env:
+      RUST_NIGHTLY: ${{ needs.pin.outputs.toolchain }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -58,7 +77,9 @@ jobs:
   fuzz_nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    needs: fuzz_build
+    needs: [pin, fuzz_build]
+    env:
+      RUST_NIGHTLY: ${{ needs.pin.outputs.toolchain }}
     strategy:
       fail-fast: false
       matrix:
