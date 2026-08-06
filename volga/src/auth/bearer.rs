@@ -15,6 +15,8 @@ use futures_util::future::{Ready, ready};
 use hyper::http::request::Parts;
 use jsonwebtoken::{Header as JwtHeader, Validation};
 use serde::{Serialize, de::DeserializeOwned};
+#[cfg(feature = "oauth-client")]
+use std::{collections::HashMap, sync::RwLock};
 use std::{
     collections::HashSet,
     fmt::{Display, Formatter},
@@ -382,6 +384,10 @@ pub struct BearerTokenService {
     decoding: Option<Arc<DecodingKey>>,
     #[cfg(feature = "oauth-client")]
     jwks: Option<Arc<crate::auth::oauth_client::JwksStore>>,
+    /// Memoized copies of `validation` pinned to a single algorithm, keyed
+    /// by it. See [`validation_for`](Self::validation_for).
+    #[cfg(feature = "oauth-client")]
+    validation_by_alg: Arc<RwLock<HashMap<jsonwebtoken::Algorithm, Arc<Validation>>>>,
     pub(crate) strip_token_from_request: bool,
     pub(crate) resource_metadata_url: Option<Arc<str>>,
     pub(crate) require_https: bool,
@@ -434,6 +440,8 @@ impl BearerTokenService {
             decoding: cfg.decoding.map(Arc::new),
             #[cfg(feature = "oauth-client")]
             jwks: None,
+            #[cfg(feature = "oauth-client")]
+            validation_by_alg: Arc::new(RwLock::new(HashMap::new())),
             strip_token_from_request: cfg.strip_token_from_request,
             resource_metadata_url: cfg
                 .resource_metadata_url
@@ -511,12 +519,46 @@ impl BearerTokenService {
 
         // pin the algorithm to the resolved key: a token must not talk the
         // key into a different scheme than the JWKS advertises for it
-        let mut validation = (*self.validation).clone();
-        validation.algorithms = vec![entry.alg];
+        let validation = self.validation_for(entry.alg);
 
         jsonwebtoken::decode(&*bearer.0, &entry.key, &validation)
             .map_err(Error::from_jwt_error)
             .map(|t| t.claims)
+    }
+
+    /// Returns the configured validation policy pinned to `alg`, building it
+    /// on first use and memoizing it afterwards.
+    ///
+    /// The pinned policy differs from the configured one only in
+    /// `algorithms`, but building it means cloning a [`Validation`] - three
+    /// `HashSet`s plus every audience and issuer string in them. A JWKS
+    /// advertises a handful of algorithms at most, so the cache is filled
+    /// within the first few requests and stays that size; every later
+    /// request just clones an [`Arc`].
+    #[cfg(feature = "oauth-client")]
+    fn validation_for(&self, alg: jsonwebtoken::Algorithm) -> Arc<Validation> {
+        let cached = self
+            .validation_by_alg
+            .read()
+            .expect("validation cache lock poisoned")
+            .get(&alg)
+            .cloned();
+        if let Some(validation) = cached {
+            return validation;
+        }
+
+        let mut validation = (*self.validation).clone();
+        validation.algorithms = vec![alg];
+        let validation = Arc::new(validation);
+
+        // a concurrent builder for the same alg produces an equal value, so
+        // whichever insert lands last is fine
+        self.validation_by_alg
+            .write()
+            .expect("validation cache lock poisoned")
+            .insert(alg, Arc::clone(&validation));
+
+        validation
     }
 }
 
@@ -805,6 +847,53 @@ mod tests {
 
         assert!(service.encoding_key().is_some());
         assert!(service.decoding_key().is_some());
+    }
+
+    #[cfg(feature = "oauth-client")]
+    #[test]
+    fn it_pins_the_algorithm_and_memoizes_the_validation() {
+        let service: BearerTokenService = BearerAuthConfig::default()
+            .with_aud(["https://api.example.com"])
+            .with_iss(["https://auth.example.com"])
+            .into();
+
+        let rs256 = service.validation_for(jsonwebtoken::Algorithm::RS256);
+        // only `algorithms` is pinned - the rest of the policy carries over
+        assert_eq!(rs256.algorithms, vec![jsonwebtoken::Algorithm::RS256]);
+        assert!(
+            rs256
+                .aud
+                .as_ref()
+                .unwrap()
+                .contains("https://api.example.com")
+        );
+        assert!(
+            rs256
+                .iss
+                .as_ref()
+                .unwrap()
+                .contains("https://auth.example.com")
+        );
+        assert!(rs256.required_spec_claims.contains("aud"));
+
+        // a second lookup for the same alg reuses the cached value instead
+        // of cloning the policy again
+        assert!(Arc::ptr_eq(
+            &rs256,
+            &service.validation_for(jsonwebtoken::Algorithm::RS256)
+        ));
+
+        let es256 = service.validation_for(jsonwebtoken::Algorithm::ES256);
+        assert_eq!(es256.algorithms, vec![jsonwebtoken::Algorithm::ES256]);
+        assert!(!Arc::ptr_eq(&rs256, &es256));
+
+        // clones share the cache - the service is cloned per request
+        assert!(Arc::ptr_eq(
+            &rs256,
+            &service
+                .clone()
+                .validation_for(jsonwebtoken::Algorithm::RS256)
+        ));
     }
 
     #[tokio::test]

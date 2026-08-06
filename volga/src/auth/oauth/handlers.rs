@@ -15,8 +15,8 @@
 //! `[oauth.resource]` and `[oauth.server]` sections of the configuration
 //! file; the file overrides prior builder calls.
 
+use bytes::Bytes;
 use serde::Serialize;
-use std::sync::Arc;
 
 use crate::{
     App,
@@ -316,16 +316,29 @@ fn well_known_route(metadata_url: &str) -> &str {
 
 /// Mounts a `GET` route serving the document as JSON; metadata documents
 /// are immutable, so responses carry a public one-hour cache policy.
+///
+/// The document is serialized once at mount time rather than on every
+/// request: it cannot change afterwards, and `Bytes` hands each response a
+/// refcounted view of the same buffer.
 fn serve_metadata<T>(app: &mut App, path: &str, metadata: T)
 where
     T: Serialize + Send + Sync + 'static,
 {
     let cache_control = metadata_cache_control();
-    let metadata = Arc::new(metadata);
+    let body = Bytes::from(
+        serde_json::to_vec(&metadata).expect("OAuth metadata document is serializable"),
+    );
+
     app.map_get(path, move || {
-        let metadata = Arc::clone(&metadata);
+        let body = body.clone();
         let cache_control = cache_control.clone();
-        async move { crate::ok!(metadata.as_ref(); [cache_control]) }
+        async move {
+            crate::response!(
+                crate::http::StatusCode::OK,
+                crate::HttpBody::full(body);
+                [crate::headers::ContentType::json(), cache_control]
+            )
+        }
     });
 }
 
