@@ -1,10 +1,11 @@
 # Pinned nightly toolchain for the Fuzz workflow (cargo-fuzz needs nightly for -Z sanitizer).
 #
 # Bump policy: bump deliberately, ~monthly, never float to plain `nightly`.
-# The `bump-fuzz-nightly` workflow opens a PR on the 1st of each month; merge only after
-# its Fuzz run is green. Do NOT regenerate fuzz/Cargo.lock from scratch on a bump -
-# a fresh resolve reintroduces the alloc-no-stdlib 2.0.4/3.0.0 split that breaks brotli;
-# keep the committed lock and just rebuild against it.
+# The `bump-fuzz-nightly` workflow opens a PR on the 1st of each month, having already
+# built and smoke-run the fuzz targets on the new nightly - that PR carries no Fuzz check
+# of its own (see the note in that workflow). Do NOT regenerate fuzz/Cargo.lock from
+# scratch on a bump - a fresh resolve reintroduces the alloc-no-stdlib 2.0.4/3.0.0 split
+# that breaks brotli; keep the committed lock and just rebuild against it.
 #
 # This pin lives outside .github/workflows/ on purpose: GITHUB_TOKEN has no `workflows`
 # permission scope, so the bump bot cannot push edits to a workflow file. Keeping the

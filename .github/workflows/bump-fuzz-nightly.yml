@@ -1,11 +1,15 @@
 name: Bump fuzz nightly
 
 # Opens a PR bumping the pinned nightly used by the Fuzz workflow.
-# Runs on the 1st of each month (and on demand). The bump is verified by building the
-# fuzz targets against the *committed* fuzz/Cargo.lock - the lockfile is intentionally NOT
-# regenerated (a fresh resolve reintroduces the alloc-no-stdlib 2.0.4/3.0.0 split that
-# breaks brotli). If the new nightly can't build the locked graph, the job fails and no PR
-# is opened, leaving the current pin in place. Merge the PR only after its Fuzz run is green.
+# Runs on the 1st of each month (and on demand). The bump is verified by building and
+# smoke-running the fuzz targets against the *committed* fuzz/Cargo.lock - the lockfile is
+# intentionally NOT regenerated (a fresh resolve reintroduces the alloc-no-stdlib
+# 2.0.4/3.0.0 split that breaks brotli). If the new nightly can't build or run the locked
+# graph, the job fails and no PR is opened, leaving the current pin in place.
+#
+# The verification happens here rather than on the PR because a PR opened with the implicit
+# GITHUB_TOKEN raises no `pull_request` event, so fuzz.yml never runs against the bump
+# branch and the PR shows no Fuzz check.
 #
 # The pin is read from and written to .github/fuzz-nightly, NOT fuzz.yml's `env:` block.
 # GITHUB_TOKEN has no `workflows` permission scope (it is not one of the scopes the
@@ -69,6 +73,20 @@ jobs:
         if: steps.pin.outputs.changed == 'true'
         run: cargo +nightly fuzz build
 
+      # A PR opened with the implicit GITHUB_TOKEN does not raise a
+      # `pull_request` event, so fuzz.yml never runs on the bump branch and the
+      # PR carries no Fuzz check. Mirror fuzz.yml's `fuzz_smoke` job here (same
+      # targets, same budgets) so the bump gets that coverage anyway - and gets
+      # it *before* the PR exists, leaving the current pin in place when the new
+      # nightly cannot actually run the fuzzers. Keep in sync with fuzz.yml.
+      - name: Smoke run router
+        if: steps.pin.outputs.changed == 'true'
+        run: cargo +nightly fuzz run fuzz_router_match -- -max_len=512 -max_total_time=45 -rss_limit_mb=512
+
+      - name: Smoke run query
+        if: steps.pin.outputs.changed == 'true'
+        run: cargo +nightly fuzz run fuzz_query_decode -- -max_len=1024 -max_total_time=45 -rss_limit_mb=512
+
       - name: Open bump PR
         if: steps.pin.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v7
@@ -79,8 +97,15 @@ jobs:
           body: |
             Automated monthly bump of the pinned nightly used by the Fuzz workflow.
 
-            Verified locally in this run: `cargo +nightly fuzz build` succeeds against the
-            committed `fuzz/Cargo.lock` (lockfile intentionally not regenerated).
+            Verified in the bump run that produced this PR, against the committed
+            `fuzz/Cargo.lock` (lockfile intentionally not regenerated):
 
-            Merge only after the Fuzz workflow on this PR is green.
+            * `cargo +nightly fuzz build` - all targets build on the new nightly
+            * `fuzz_router_match` and `fuzz_query_decode` smoke runs (45s each)
+
+            That is the same coverage the `Fuzz` workflow gives a pull request. It is
+            reproduced here because this PR is opened with the implicit `GITHUB_TOKEN`,
+            and events raised by that token do not start new workflow runs - so no Fuzz
+            check will appear below. To exercise the full nightly matrix before merging,
+            dispatch the `Fuzz` workflow manually against this branch.
           add-paths: .github/fuzz-nightly
