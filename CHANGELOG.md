@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# Unreleased
+
+## Changed
+* Bearer authentication against an OAuth issuer (feature `oauth-client`) no longer rebuilds per-request state on every authenticated request. The JWKS key is handed out behind an `Arc` instead of copying (and zeroizing) its key material; the validation policy pinned to the resolved key's algorithm is memoized per algorithm instead of cloning the whole `Validation` (three `HashSet`s plus every audience and issuer string) each time; and the `authorize` middleware resolves the `BearerTokenService` once per request rather than twice. Behavior is unchanged.
+* OAuth metadata documents (`use_oauth_resource_metadata`, `use_oauth_server_metadata`, `use_oidc_metadata`) are serialized once when the route is mounted instead of on every request - the documents are immutable, so each response now shares the same buffer.
+
+## Fixed
+* The `bump-fuzz-nightly` workflow could never open its monthly PR: `GITHUB_TOKEN` has no `workflows` permission scope, so pushing a branch that edits `.github/workflows/fuzz.yml` was rejected. The pinned nightly moved to `.github/fuzz-nightly`, which the Fuzz workflow reads at run time.
+
 # 0.9.6
 
 ## Added

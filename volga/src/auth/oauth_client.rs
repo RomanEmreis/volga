@@ -193,9 +193,15 @@ impl OAuthConfig {
 }
 
 /// A verification key resolved from the issuer's JWKS
+///
+/// The key is behind an [`Arc`]: `lookup` hands out a clone on every
+/// authenticated request, and `jsonwebtoken::DecodingKey` owns its key
+/// material in `Vec<u8>`s that are additionally zeroized on drop - copying
+/// and wiping them per request is pure overhead for a value that never
+/// changes between JWKS refreshes.
 #[derive(Clone)]
 pub(crate) struct KeyEntry {
-    pub(crate) key: jsonwebtoken::DecodingKey,
+    pub(crate) key: Arc<jsonwebtoken::DecodingKey>,
     pub(crate) alg: Algorithm,
 }
 
@@ -277,7 +283,7 @@ fn entry_from_jwk(jwk: &Jwk) -> Option<KeyEntry> {
         Some(alg) => signing_algorithm(alg)?,
         None => default_alg(&jwk.algorithm)?,
     };
-    let key = jsonwebtoken::DecodingKey::from_jwk(jwk).ok()?;
+    let key = Arc::new(jsonwebtoken::DecodingKey::from_jwk(jwk).ok()?);
     Some(KeyEntry { key, alg })
 }
 

@@ -360,106 +360,103 @@ where
 }
 
 #[cfg(feature = "jwt-auth")]
-fn authorize_impl<C>(
+async fn authorize_impl<C>(
     authorizer: Arc<Authorizer<C>>,
     mut ctx: HttpContext,
     next: NextFn,
-) -> impl Future<Output = HttpResult>
+) -> HttpResult
 where
     C: AuthClaims + Send + Sync + 'static,
 {
-    let authorizer = authorizer.clone();
-    async move {
-        if should_reject_for_https(&ctx)? {
-            return status!(400; [
-                (WWW_AUTHENTICATE, r#"Bearer error="invalid_request", error_description="HTTPS required""#)
-            ]);
-        }
-        let bts: BearerTokenService = ctx.extract()?;
-        let resp = match resolve_bearer(&ctx) {
-            Err(_) => {
-                let mut challenge = oauth::BearerChallenge::new();
-                if let Some(url) = bts.resource_metadata_url.as_deref() {
-                    challenge = challenge.with_resource_metadata(url);
-                }
-                if ctx
-                    .request()
-                    .headers()
-                    .contains_key(crate::headers::AUTHORIZATION)
-                {
-                    // RFC 6750 Section 3.1: credentials were presented but are not
-                    // a well-formed Bearer value (wrong scheme, empty token)
-                    // - the client should fix the header, not start a flow
-                    let challenge = challenge
-                        .with_error(oauth::OAuthErrorCode::InvalidRequest)
-                        .with_description("Authorization header is not a valid Bearer credential");
-
-                    status!(400; [
-                        (WWW_AUTHENTICATE, challenge.to_string())
-                    ])
-                } else {
-                    // RFC 6750 Section 3: no credentials were presented - challenge
-                    // with a bare scheme (no error code) so clients can
-                    // discover the resource metadata and start an
-                    // authorization flow
-                    status!(401; [
-                        (WWW_AUTHENTICATE, challenge.to_string())
-                    ])
-                }
-            }
-            Ok(bearer) => {
-                #[cfg(feature = "oauth-client")]
-                let decoded = bts.decode_async(bearer.clone()).await;
-                #[cfg(not(feature = "oauth-client"))]
-                let decoded = bts.decode(bearer.clone());
-                match decoded {
-                    Ok(claims) if authorizer.validate(&claims) => {
-                        if bts.strip_token_from_request {
-                            stash_bearer(&mut ctx, bearer);
-                            ctx.request_mut()
-                                .headers_mut()
-                                .remove(crate::headers::AUTHORIZATION);
-                        }
-                        ctx.request_mut()
-                            .extensions_mut()
-                            .insert(Authenticated(claims));
-
-                        next(ctx).await
-                    }
-                    Ok(_) => {
-                        let metadata_url = bts.resource_metadata_url.as_deref();
-
-                        status!(403; [
-                            (WWW_AUTHENTICATE, authorizer::default_error_msg(metadata_url))
-                        ])
-                    }
-                    // a server-side failure (unreachable OAuth issuer,
-                    // missing security key) is not the client's token
-                    // being at fault - no invalid_token challenge
-                    Err(err) if err.status().is_server_error() => {
-                        status!(503, "Token validation is temporarily unavailable")
-                    }
-                    Err(err) => {
-                        let metadata_url = bts.resource_metadata_url.as_deref();
-                        let www_authenticate = err
-                            .into_inner()
-                            .downcast_ref::<JwtError>()
-                            .map(|e| build_www_authenticate(e.kind(), metadata_url))
-                            .unwrap_or_else(|| authorizer::default_error_msg(metadata_url));
-
-                        status!(403; [
-                            (WWW_AUTHENTICATE, www_authenticate)
-                        ])
-                    }
-                }
-            }
-        };
-        resp.map(|mut resp| {
-            resp.headers_mut()
-                .insert(CACHE_CONTROL, HeaderValue::from_static(NO_STORE));
-            resp
-        })
+    let bts: BearerTokenService = ctx.extract()?;
+    if should_reject_for_https(&ctx, &bts)? {
+        return status!(400; [
+            (WWW_AUTHENTICATE, r#"Bearer error="invalid_request", error_description="HTTPS required""#)
+        ]);
     }
+    let resp = match resolve_bearer(&ctx) {
+        Err(_) => {
+            let mut challenge = oauth::BearerChallenge::new();
+            if let Some(url) = bts.resource_metadata_url.as_deref() {
+                challenge = challenge.with_resource_metadata(url);
+            }
+            if ctx
+                .request()
+                .headers()
+                .contains_key(crate::headers::AUTHORIZATION)
+            {
+                // RFC 6750 Section 3.1: credentials were presented but are not
+                // a well-formed Bearer value (wrong scheme, empty token)
+                // - the client should fix the header, not start a flow
+                let challenge = challenge
+                    .with_error(oauth::OAuthErrorCode::InvalidRequest)
+                    .with_description("Authorization header is not a valid Bearer credential");
+
+                status!(400; [
+                    (WWW_AUTHENTICATE, challenge.to_string())
+                ])
+            } else {
+                // RFC 6750 Section 3: no credentials were presented - challenge
+                // with a bare scheme (no error code) so clients can
+                // discover the resource metadata and start an
+                // authorization flow
+                status!(401; [
+                    (WWW_AUTHENTICATE, challenge.to_string())
+                ])
+            }
+        }
+        Ok(bearer) => {
+            #[cfg(feature = "oauth-client")]
+            let decoded = bts.decode_async(bearer.clone()).await;
+            #[cfg(not(feature = "oauth-client"))]
+            let decoded = bts.decode(bearer.clone());
+            match decoded {
+                Ok(claims) if authorizer.validate(&claims) => {
+                    if bts.strip_token_from_request {
+                        stash_bearer(&mut ctx, bearer);
+                        ctx.request_mut()
+                            .headers_mut()
+                            .remove(crate::headers::AUTHORIZATION);
+                    }
+                    ctx.request_mut()
+                        .extensions_mut()
+                        .insert(Authenticated(claims));
+
+                    next(ctx).await
+                }
+                Ok(_) => {
+                    let metadata_url = bts.resource_metadata_url.as_deref();
+
+                    status!(403; [
+                        (WWW_AUTHENTICATE, authorizer::default_error_msg(metadata_url))
+                    ])
+                }
+                // a server-side failure (unreachable OAuth issuer,
+                // missing security key) is not the client's token
+                // being at fault - no invalid_token challenge
+                Err(err) if err.status().is_server_error() => {
+                    status!(503, "Token validation is temporarily unavailable")
+                }
+                Err(err) => {
+                    let metadata_url = bts.resource_metadata_url.as_deref();
+                    let www_authenticate = err
+                        .into_inner()
+                        .downcast_ref::<JwtError>()
+                        .map(|e| build_www_authenticate(e.kind(), metadata_url))
+                        .unwrap_or_else(|| authorizer::default_error_msg(metadata_url));
+
+                    status!(403; [
+                        (WWW_AUTHENTICATE, www_authenticate)
+                    ])
+                }
+            }
+        }
+    };
+    resp.map(|mut resp| {
+        resp.headers_mut()
+            .insert(CACHE_CONTROL, HeaderValue::from_static(NO_STORE));
+        resp
+    })
 }
 
 /// Returns the bearer token for this request, preferring the value stashed
@@ -498,8 +495,7 @@ fn stash_bearer(ctx: &mut HttpContext, bearer: Bearer) {
 /// `require_https` is enabled, the server isn't accepting TLS, and the
 /// peer is not a loopback address.
 #[cfg(feature = "jwt-auth")]
-fn should_reject_for_https(ctx: &HttpContext) -> Result<bool, Error> {
-    let bts: BearerTokenService = ctx.extract()?;
+fn should_reject_for_https(ctx: &HttpContext, bts: &BearerTokenService) -> Result<bool, Error> {
     if !bts.require_https || bts.tls_enabled {
         return Ok(false);
     }
