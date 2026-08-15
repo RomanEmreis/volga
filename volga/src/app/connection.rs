@@ -45,8 +45,19 @@ enum Target {
     Addr(SocketAddr),
     /// A host name that is resolved when the server starts.
     Named { host: Box<str>, port: u16 },
-    /// An address that could not be understood; reported when the server starts.
-    Invalid { input: Box<str>, error: AddrError },
+    /// An address that could not be understood; reported when the server starts. Carries the
+    /// port when that half parsed, so a config file replacing the host keeps it.
+    Invalid {
+        input: Box<str>,
+        error: AddrError,
+        port: Option<u16>,
+    },
+}
+
+/// An address that could not be understood, with the port if that half parsed.
+struct Rejection {
+    error: AddrError,
+    port: Option<u16>,
 }
 
 /// Wraps a socket
@@ -125,23 +136,26 @@ impl Connection {
     fn parse(s: &str) -> Self {
         let target = match parse_target(s) {
             Ok(target) => target,
-            Err(error) => Target::Invalid {
+            Err(Rejection { error, port }) => Target::Invalid {
                 input: s.into(),
                 error,
+                port,
             },
         };
 
         Self { target }
     }
 
-    /// Returns the port the server was asked to listen on.
+    /// Returns the port the server was asked to listen on, if it named one.
     #[inline]
     #[cfg(feature = "config")]
-    fn port(&self) -> u16 {
+    fn port(&self) -> Option<u16> {
         match &self.target {
-            Target::Addr(addr) => addr.port(),
-            Target::Named { port, .. } => *port,
-            Target::Invalid { .. } => DEFAULT_PORT,
+            Target::Addr(addr) => Some(addr.port()),
+            Target::Named { port, .. } => Some(*port),
+            // An address is rejected for its host alone often enough - the port it carried
+            // still stands, and a config file replacing the host must not lose it.
+            Target::Invalid { port, .. } => *port,
         }
     }
 
@@ -153,7 +167,11 @@ impl Connection {
     #[cfg(feature = "config")]
     pub(crate) fn rebind(self, host: Option<&str>, port: Option<u16>) -> Result<Self> {
         let connection = match (host, port) {
-            (Some(host), port) => Self::from_parts(host, port.unwrap_or(self.port())),
+            // The port the file omits comes from the address the builder named; only an
+            // address that never carried one falls back to the default.
+            (Some(host), port) => {
+                Self::from_parts(host, port.or_else(|| self.port()).unwrap_or(DEFAULT_PORT))
+            }
             (None, Some(port)) => self.with_port(port),
             (None, None) => self,
         };
@@ -168,6 +186,7 @@ impl Connection {
         let target = parse_host(host, port).unwrap_or_else(|error| Target::Invalid {
             input: host.into(),
             error,
+            port: Some(port),
         });
 
         Self { target }
@@ -193,7 +212,7 @@ impl Connection {
     #[cfg(feature = "config")]
     fn validate(&self) -> Result<()> {
         match &self.target {
-            Target::Invalid { input, error } => Err(invalid_addr(input, *error)),
+            Target::Invalid { input, error, .. } => Err(invalid_addr(input, *error)),
             _ => Ok(()),
         }
     }
@@ -211,7 +230,7 @@ impl Connection {
         let listener = match &self.target {
             Target::Addr(addr) => TcpListener::bind(addr).await,
             Target::Named { host, port } => TcpListener::bind((host.as_ref(), *port)).await,
-            Target::Invalid { input, error } => return Err(invalid_addr(input, *error)),
+            Target::Invalid { input, error, .. } => return Err(invalid_addr(input, *error)),
         };
 
         listener.map_err(|err| match err.raw_os_error() {
@@ -238,15 +257,26 @@ fn invalid_addr(input: &str, error: AddrError) -> Error {
 ///
 /// Mirrors the socket address grammar of [`std::net::ToSocketAddrs`]: an address literal first,
 /// then a split at the last `:` so that unbracketed IPv6 literals and host names are accepted.
-fn parse_target(s: &str) -> std::result::Result<Target, AddrError> {
+fn parse_target(s: &str) -> std::result::Result<Target, Rejection> {
     if let Ok(addr) = s.parse::<SocketAddr>() {
         return Ok(Target::Addr(addr));
     }
 
-    let (host, port) = s.rsplit_once(':').ok_or(AddrError::MissingPort)?;
-    let port = port.parse::<u16>().map_err(|_| AddrError::InvalidPort)?;
+    let rejected = |error| Rejection { error, port: None };
 
-    parse_host(host, port)
+    let (host, port) = s
+        .rsplit_once(':')
+        .ok_or_else(|| rejected(AddrError::MissingPort))?;
+
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| rejected(AddrError::InvalidPort))?;
+
+    // The host alone is at fault from here on, so the port is worth keeping.
+    parse_host(host, port).map_err(|error| Rejection {
+        error,
+        port: Some(port),
+    })
 }
 
 /// Parses a host - an IP literal, bracketed or not, or a name - against a known port.
@@ -307,7 +337,7 @@ mod tests {
     /// Returns the error a rejected address is reported with, panicking if it was accepted.
     fn rejection(connection: &Connection) -> Error {
         match &connection.target {
-            Target::Invalid { input, error } => invalid_addr(input, *error),
+            Target::Invalid { input, error, .. } => invalid_addr(input, *error),
             other => panic!("expected a rejected address, got {other:?}"),
         }
     }
@@ -570,11 +600,17 @@ mod tests {
     fn it_returns_port() {
         let socket: Connection = "127.0.0.1:3000".into();
         let named: Connection = "localhost:4000".into();
-        let invalid: Connection = "invalid_ip".into();
+        let invalid_host: Connection = "not a host:9000".into();
+        let portless: Connection = "invalid_ip".into();
 
-        assert_eq!(socket.port(), 3000);
-        assert_eq!(named.port(), 4000);
-        assert_eq!(invalid.port(), DEFAULT_PORT);
+        assert_eq!(socket.port(), Some(3000));
+        assert_eq!(named.port(), Some(4000));
+        assert_eq!(
+            invalid_host.port(),
+            Some(9000),
+            "a port that parsed survives a rejected host"
+        );
+        assert_eq!(portless.port(), None);
     }
 
     #[cfg(feature = "config")]
@@ -682,6 +718,30 @@ mod tests {
         let connection = connection.rebind(Some("localhost"), Some(9090)).unwrap();
 
         assert_eq!(connection.to_string(), "localhost:9090");
+    }
+
+    #[cfg(feature = "config")]
+    #[test]
+    fn it_keeps_a_parsed_port_when_rebinding_over_an_invalid_host() {
+        let connection: Connection = "not a host:9000".into();
+
+        let connection = connection.rebind(Some("localhost"), None).unwrap();
+
+        assert_eq!(
+            connection.to_string(),
+            "localhost:9000",
+            "a config file naming only the host must not drop the port the builder asked for"
+        );
+    }
+
+    #[cfg(feature = "config")]
+    #[test]
+    fn it_falls_back_to_the_default_port_when_no_address_named_one() {
+        let connection: Connection = "invalid_ip".into();
+
+        let connection = connection.rebind(Some("localhost"), None).unwrap();
+
+        assert_eq!(connection.to_string(), format!("localhost:{DEFAULT_PORT}"));
     }
 
     #[cfg(feature = "config")]

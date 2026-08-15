@@ -364,6 +364,22 @@ mod tests {
     }
 
     #[test]
+    fn host_only_section_preserves_a_port_the_builder_address_named() {
+        let file = write_toml("[server]\nhost = \"localhost\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new()
+            .bind("not a host:9000")
+            .with_config(|cfg| cfg.with_file(&path));
+
+        assert_eq!(
+            app.connection().to_string(),
+            "localhost:9000",
+            "the host the file names replaces a broken one without taking the port with it"
+        );
+    }
+
+    #[test]
     fn host_name_section_is_resolved_at_startup() {
         let file = write_toml("[server]\nhost = \"localhost\"\nport = 9090\n");
         let path = file.path().to_str().unwrap().to_owned();
