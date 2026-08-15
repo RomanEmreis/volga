@@ -257,7 +257,7 @@ fn parse_host(host: &str, port: u16) -> std::result::Result<Target, AddrError> {
     if host.is_empty() {
         return Err(AddrError::MissingHost);
     }
-    
+
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Ok(Target::Addr(SocketAddr::from((ip, port))));
     }
