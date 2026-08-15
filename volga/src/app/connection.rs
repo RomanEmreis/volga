@@ -1,11 +1,11 @@
 //! Types and utilities for working with TCP connections.
 
-use tokio::net::TcpListener;
 use std::{
     fmt,
     io::{Error, ErrorKind, Result},
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
 };
+use tokio::net::TcpListener;
 
 const DEFAULT_PORT: u16 = 7878;
 
@@ -14,6 +14,10 @@ const MAX_HOST_LEN: usize = 253;
 
 /// Maximum length of a single host name label, in bytes (RFC 1035, Section 2.3.4).
 const MAX_LABEL_LEN: usize = 63;
+
+/// Maximum length of an IPv6 zone id, in bytes - covers both interface names
+/// (`IF_NAMESIZE` is 16 on Unix) and numeric interface indexes.
+const MAX_ZONE_LEN: usize = 64;
 
 /// Describes why a bind address could not be understood.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,8 +58,9 @@ enum Target {
 /// Wraps a socket
 ///
 /// Addresses are accepted in the same grammar [`tokio::net::TcpListener::bind`] accepts:
-/// `127.0.0.1:7878`, `[::1]:7878`, the unbracketed `::1:7878`, and host names such as
-/// `localhost:7878`. Host names are resolved when the server starts, never at bind time,
+/// `127.0.0.1:7878`, `[::1]:7878`, the unbracketed `::1:7878`, zone-scoped IPv6 literals such
+/// as `[fe80::1%eth0]:7878`, and host names such as `localhost:7878`. Names - a zone-scoped
+/// literal counts as one - are resolved when the server starts, never at bind time,
 /// and an address that cannot be understood or resolved is reported as an error from
 /// [`crate::App::run`] instead of being silently replaced by a different one.
 #[derive(Debug)]
@@ -80,6 +85,9 @@ impl fmt::Display for Connection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.target {
             Target::Addr(addr) => write!(f, "{addr}"),
+            // A zone-scoped literal is the only name that carries `:` - bracket it, the way
+            // `SocketAddr` renders IPv6.
+            Target::Named { host, port } if host.contains(':') => write!(f, "[{host}]:{port}"),
             Target::Named { host, port } => write!(f, "{host}:{port}"),
             Target::Invalid { input, .. } => f.write_str(input),
         }
@@ -151,13 +159,24 @@ impl Connection {
     #[cfg(feature = "config")]
     pub(crate) fn rebind(self, host: Option<&str>, port: Option<u16>) -> Result<Self> {
         let connection = match (host, port) {
-            (Some(host), port) => Self::parse(&join_host_port(host, port.unwrap_or(self.port()))),
+            (Some(host), port) => Self::from_parts(host, port.unwrap_or(self.port())),
             (None, Some(port)) => self.with_port(port),
             (None, None) => self,
         };
 
         connection.validate()?;
         Ok(connection)
+    }
+
+    /// Parses a host and a port given separately, without joining them into an address first.
+    #[cfg(feature = "config")]
+    fn from_parts(host: &str, port: u16) -> Self {
+        let target = parse_host(host, port).unwrap_or_else(|error| Target::Invalid {
+            input: host.into(),
+            error,
+        });
+
+        Self { target }
     }
 
     /// Returns the same connection listening on a different `port`.
@@ -224,6 +243,12 @@ fn parse_target(s: &str) -> std::result::Result<Target, AddrError> {
 
     let (host, port) = s.rsplit_once(':').ok_or(AddrError::MissingPort)?;
     let port = port.parse::<u16>().map_err(|_| AddrError::InvalidPort)?;
+
+    parse_host(host, port)
+}
+
+/// Parses a host - an IP literal, bracketed or not, or a name - against a known port.
+fn parse_host(host: &str, port: u16) -> std::result::Result<Target, AddrError> {
     let host = host
         .strip_prefix('[')
         .and_then(|host| host.strip_suffix(']'))
@@ -232,11 +257,13 @@ fn parse_target(s: &str) -> std::result::Result<Target, AddrError> {
     if host.is_empty() {
         return Err(AddrError::MissingHost);
     }
+    
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Ok(Target::Addr(SocketAddr::from((ip, port))));
     }
 
-    if is_host_name(host) {
+    // Both a zone-scoped literal and a name are handed to the resolver as they are.
+    if is_scoped_ipv6(host) || is_host_name(host) {
         Ok(Target::Named {
             host: host.into(),
             port,
@@ -244,6 +271,25 @@ fn parse_target(s: &str) -> std::result::Result<Target, AddrError> {
     } else {
         Err(AddrError::InvalidHost)
     }
+}
+
+/// Checks whether `host` is an IPv6 literal carrying a zone id (`fe80::1%eth0`).
+///
+/// [`std::net::Ipv6Addr`] has no zone id to parse into, but the resolver understands one and
+/// reports it back as the scope id of the bound [`SocketAddr`], so such an address is resolved
+/// rather than parsed. The bracketed form of a *numeric* zone (`[fe80::1%3]:7878`) never
+/// reaches here - [`SocketAddr`] parses that one itself.
+fn is_scoped_ipv6(host: &str) -> bool {
+    let Some((addr, zone)) = host.split_once('%') else {
+        return false;
+    };
+
+    addr.parse::<Ipv6Addr>().is_ok()
+        && !zone.is_empty()
+        && zone.len() <= MAX_ZONE_LEN
+        && zone
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
 }
 
 /// Checks whether `host` is shaped like a host name that a resolver could look up.
@@ -260,16 +306,6 @@ fn is_host_name(host: &str) -> bool {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         })
-}
-
-/// Joins a host and a port, bracketing IPv6 literals so the result parses back.
-#[cfg(feature = "config")]
-fn join_host_port(host: &str, port: u16) -> String {
-    if host.contains(':') && !host.starts_with('[') {
-        format!("[{host}]:{port}")
-    } else {
-        format!("{host}:{port}")
-    }
 }
 
 #[cfg(test)]
@@ -347,6 +383,89 @@ mod tests {
         let connection: Connection = "::1:3000".into();
 
         assert_eq!(addr(&connection).to_string(), "[::1]:3000");
+    }
+
+    #[test]
+    fn it_creates_connection_from_zone_scoped_ipv6() {
+        let connection: Connection = "fe80::1%eth0:8080".into();
+
+        assert!(matches!(
+            connection.target,
+            Target::Named { ref host, port: 8080 } if host.as_ref() == "fe80::1%eth0"
+        ));
+    }
+
+    #[test]
+    fn it_creates_connection_from_bracketed_zone_scoped_ipv6() {
+        let connection: Connection = "[fe80::1%eth0]:8080".into();
+
+        assert!(
+            matches!(
+                connection.target,
+                Target::Named { ref host, port: 8080 } if host.as_ref() == "fe80::1%eth0"
+            ),
+            "the brackets must be stripped - the resolver takes the bare literal"
+        );
+    }
+
+    #[test]
+    fn it_creates_connection_from_bracketed_numeric_zone_scoped_ipv6() {
+        let connection: Connection = "[::1%1]:8080".into();
+
+        assert_eq!(
+            addr(&connection).to_string(),
+            "[::1%1]:8080",
+            "a bracketed numeric scope id is an address literal - it needs no resolution"
+        );
+    }
+
+    #[test]
+    fn it_creates_connection_from_unbracketed_numeric_zone_scoped_ipv6() {
+        let connection: Connection = "::1%1:8080".into();
+
+        assert!(matches!(
+            connection.target,
+            Target::Named { ref host, port: 8080 } if host.as_ref() == "::1%1"
+        ));
+    }
+
+    #[test]
+    fn it_displays_zone_scoped_ipv6_bracketed() {
+        let connection: Connection = "fe80::1%eth0:8080".into();
+
+        assert_eq!(connection.to_string(), "[fe80::1%eth0]:8080");
+    }
+
+    #[test]
+    fn it_rejects_zone_on_ipv4() {
+        let connection: Connection = "127.0.0.1%eth0:8080".into();
+
+        assert_eq!(
+            rejection(&connection).to_string(),
+            "invalid bind address '127.0.0.1%eth0:8080': host is neither an IP address nor a host name"
+        );
+    }
+
+    #[test]
+    fn it_rejects_empty_zone() {
+        let connection: Connection = "fe80::1%:8080".into();
+
+        assert_eq!(rejection(&connection).kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn it_rejects_invalid_zone() {
+        let connection: Connection = "fe80::1%bad zone:8080".into();
+
+        assert_eq!(rejection(&connection).kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn it_rejects_too_long_zone() {
+        let zone = "a".repeat(MAX_ZONE_LEN + 1);
+        let connection: Connection = format!("fe80::1%{zone}:8080").as_str().into();
+
+        assert_eq!(rejection(&connection).kind(), ErrorKind::InvalidInput);
     }
 
     #[test]
@@ -619,16 +738,41 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(
             err.to_string(),
-            "invalid bind address 'not a host:9090': host is neither an IP address nor a host name"
+            "invalid bind address 'not a host': host is neither an IP address nor a host name",
+            "a config host is reported on its own, without a port glued to it"
         );
     }
 
     #[cfg(feature = "config")]
     #[test]
-    fn it_joins_host_and_port() {
-        assert_eq!(join_host_port("localhost", 80), "localhost:80");
-        assert_eq!(join_host_port("127.0.0.1", 80), "127.0.0.1:80");
-        assert_eq!(join_host_port("::1", 80), "[::1]:80");
-        assert_eq!(join_host_port("[::1]", 80), "[::1]:80");
+    fn it_rebinds_bracketed_and_zone_scoped_hosts() {
+        let connection: Connection = "127.0.0.1:3000".into();
+        assert_eq!(
+            connection
+                .rebind(Some("[::1]"), Some(80))
+                .unwrap()
+                .to_string(),
+            "[::1]:80"
+        );
+
+        let connection: Connection = "127.0.0.1:3000".into();
+        assert_eq!(
+            connection
+                .rebind(Some("fe80::1%eth0"), Some(80))
+                .unwrap()
+                .to_string(),
+            "[fe80::1%eth0]:80"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_binds_a_zone_scoped_loopback_when_the_platform_has_one() {
+        // Interface index 1 is the loopback on the platforms CI runs on, but that is a
+        // convention rather than a guarantee - only assert once the bind succeeds.
+        let connection: Connection = "::1%1:0".into();
+
+        if let Ok(listener) = connection.bind().await {
+            assert!(listener.local_addr().unwrap().ip().is_loopback());
+        }
     }
 }
