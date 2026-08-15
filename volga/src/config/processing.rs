@@ -76,20 +76,10 @@ impl App {
             return Ok(self);
         };
 
-        match (&s.host, s.port) {
-            (Some(host), Some(port)) => {
-                self = self.bind((parse_host(host)?, port));
-            }
-            (Some(host), None) => {
-                let port = self.socket_addr().port();
-                self = self.bind((parse_host(host)?, port));
-            }
-            (None, Some(port)) => {
-                let ip = self.socket_addr().ip();
-                self = self.bind((ip, port));
-            }
-            (None, None) => {}
-        }
+        self = self
+            .rebind(s.host.as_deref(), s.port)
+            .map_err(|e| io::Error::new(e.kind(), format!("config: [server] {e}")))?;
+
         if let Some(bytes) = s.body_limit_bytes {
             self = if bytes == 0 {
                 self.without_body_limit()
@@ -288,17 +278,6 @@ pub(crate) fn spawn_reload(
     });
 }
 
-/// Parses a host string as a [`std::net::IpAddr`], returning a descriptive startup error
-/// if the value is not a valid IP address (hostname, unbracketed IPv6, etc.).
-fn parse_host(host: &str) -> Result<std::net::IpAddr, io::Error> {
-    host.parse().map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("config: [server] invalid host address '{host}' (must be a valid IP address)"),
-        )
-    })
-}
-
 /// Parses a config file into a `serde_json::Value`, or returns an empty object
 /// when the path is empty (no file configured).
 fn load_value(file_path: &Path) -> Result<Value, io::Error> {
@@ -349,16 +328,10 @@ mod tests {
             .bind("127.0.0.1:7878")
             .with_config(|cfg| cfg.with_file(&path));
 
-        let addr = app.socket_addr();
         assert_eq!(
-            addr.port(),
-            7878,
-            "port must be preserved when only host is set"
-        );
-        assert_eq!(
-            addr.ip().to_string(),
-            "0.0.0.0",
-            "host must be updated from config"
+            app.connection().to_string(),
+            "0.0.0.0:7878",
+            "host must be updated from config, port must be preserved"
         );
     }
 
@@ -371,12 +344,10 @@ mod tests {
             .bind("127.0.0.1:7878")
             .with_config(|cfg| cfg.with_file(&path));
 
-        let addr = app.socket_addr();
-        assert_eq!(addr.port(), 9090, "port must be updated from config");
         assert_eq!(
-            addr.ip().to_string(),
-            "127.0.0.1",
-            "host must be preserved when only port is set"
+            app.connection().to_string(),
+            "127.0.0.1:9090",
+            "port must be updated from config, host must be preserved"
         );
     }
 
@@ -389,23 +360,57 @@ mod tests {
             .bind("127.0.0.1:7878")
             .with_config(|cfg| cfg.with_file(&path));
 
-        let addr = app.socket_addr();
-        assert_eq!(addr.port(), 9090);
-        assert_eq!(addr.ip().to_string(), "0.0.0.0");
+        assert_eq!(app.connection().to_string(), "0.0.0.0:9090");
     }
 
     #[test]
-    #[should_panic(expected = "config:")]
-    fn invalid_host_panics_at_startup() {
+    fn host_only_section_preserves_a_port_the_builder_address_named() {
         let file = write_toml("[server]\nhost = \"localhost\"\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new()
+            .bind("not a host:9000")
+            .with_config(|cfg| cfg.with_file(&path));
+
+        assert_eq!(
+            app.connection().to_string(),
+            "localhost:9000",
+            "the host the file names replaces a broken one without taking the port with it"
+        );
+    }
+
+    #[test]
+    fn host_name_section_is_resolved_at_startup() {
+        let file = write_toml("[server]\nhost = \"localhost\"\nport = 9090\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        assert_eq!(app.connection().to_string(), "localhost:9090");
+    }
+
+    #[test]
+    fn ipv6_host_section_is_bracketed() {
+        let file = write_toml("[server]\nhost = \"::1\"\nport = 9090\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        assert_eq!(app.connection().to_string(), "[::1]:9090");
+    }
+
+    #[test]
+    #[should_panic(expected = "config: [server] invalid bind address")]
+    fn invalid_host_panics_at_startup() {
+        let file = write_toml("[server]\nhost = \"not a host\"\n");
         let path = file.path().to_str().unwrap().to_owned();
         App::new().with_config(|cfg| cfg.with_file(&path));
     }
 
     #[test]
-    #[should_panic(expected = "config:")]
+    #[should_panic(expected = "config: [server] invalid bind address")]
     fn invalid_host_with_port_panics_at_startup() {
-        let file = write_toml("[server]\nhost = \"not-an-ip\"\nport = 8080\n");
+        let file = write_toml("[server]\nhost = \"not an ip\"\nport = 8080\n");
         let path = file.path().to_str().unwrap().to_owned();
         App::new().with_config(|cfg| cfg.with_file(&path));
     }
@@ -427,9 +432,7 @@ mod tests {
 
         let app = App::new().with_config(|cfg| cfg.with_file(&path));
 
-        let addr = app.socket_addr();
-        assert_eq!(addr.port(), 8181);
-        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+        assert_eq!(app.connection().to_string(), "127.0.0.1:8181");
     }
 
     #[test]

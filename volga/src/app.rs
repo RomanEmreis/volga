@@ -72,7 +72,7 @@ use crate::app::shutdown::ShutdownHandle;
 pub(crate) use app_env::AppEnv;
 
 mod app_env;
-mod connection;
+pub(crate) mod connection;
 mod greeter;
 #[cfg(feature = "static-files")]
 mod host_env;
@@ -259,7 +259,10 @@ impl Default for App {
 
 /// General impl
 impl App {
-    /// Initializes a new instance of the [`App`] which will be bound to the 127.0.0.1:7878 socket by default.
+    /// Initializes a new instance of the [`App`].
+    ///
+    /// Unless [`App::bind`] says otherwise, the app listens on `127.0.0.1:7878` on Windows
+    /// and on `0.0.0.0:7878` - every interface - everywhere else.
     ///
     ///# Examples
     /// ```no_run
@@ -413,19 +416,42 @@ impl App {
         self
     }
 
-    /// Returns the current bound socket address.
+    /// Returns the address the `App` was asked to listen on.
+    #[cfg(all(test, feature = "config"))]
+    pub(crate) fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
+    /// Replaces the host and/or the port of the current address, keeping whichever half
+    /// is [`None`].
+    ///
+    /// # Errors
+    /// Returns an `io::Error` if the resulting address cannot be understood.
     #[cfg(feature = "config")]
-    pub(crate) fn socket_addr(&self) -> std::net::SocketAddr {
-        self.connection.socket
+    pub(crate) fn rebind(mut self, host: Option<&str>, port: Option<u16>) -> io::Result<Self> {
+        self.connection = std::mem::take(&mut self.connection).rebind(host, port)?;
+        Ok(self)
     }
 
     /// Binds the `App` to the specified `socket` address.
+    ///
+    /// The address is accepted in the same grammar [`tokio::net::TcpListener::bind`] accepts:
+    /// an IPv4 or IPv6 socket address literal, or a host name and a port. Host names are
+    /// resolved when the server starts; if a name resolves to several addresses, the first
+    /// one that can be bound is used.
+    ///
+    /// An address that cannot be understood or resolved is **not** replaced by a default one -
+    /// it is reported as an `io::Error` from [`App::run`]; [`App::run_blocking`] logs it and
+    /// starts no server.
     ///
     ///# Examples
     /// ```no_run
     ///use volga::App;
     ///
     ///let app = App::new().bind("127.0.0.1:7878");
+    ///let app = App::new().bind("[::1]:7878");
+    ///let app = App::new().bind("::1:7878");
+    ///let app = App::new().bind("localhost:7878");
     ///let app = App::new().bind(([127,0,0,1], 7878));
     /// ```
     pub fn bind<S: Into<Connection>>(mut self, socket: S) -> Self {
@@ -651,7 +677,7 @@ impl App {
     pub async fn run(mut self) -> io::Result<()> {
         self.use_endpoints();
 
-        let tcp_listener = TcpListener::bind(self.connection.socket).await?;
+        let tcp_listener = self.connection.bind().await?;
         self.run_internal(tcp_listener).await
     }
 
@@ -679,7 +705,7 @@ impl App {
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
     #[cfg(not(feature = "middleware"))]
     pub async fn run(self) -> io::Result<()> {
-        let tcp_listener = TcpListener::bind(self.connection.socket).await?;
+        let tcp_listener = self.connection.bind().await?;
         self.run_internal(tcp_listener).await
     }
 
@@ -1085,32 +1111,29 @@ fn create_tokio_runtime() -> Option<tokio::runtime::Runtime> {
 mod tests {
     use crate::http::request::request_body_limit::RequestBodyLimit;
     use crate::{App, Limit};
-    use std::net::SocketAddr;
 
     #[test]
     fn it_creates_app_with_default_socket() {
         let app = App::new();
 
         #[cfg(target_os = "windows")]
-        assert_eq!(
-            app.connection.socket,
-            SocketAddr::from(([127, 0, 0, 1], 7878))
-        );
+        assert_eq!(app.connection.to_string(), "127.0.0.1:7878");
         #[cfg(not(target_os = "windows"))]
-        assert_eq!(
-            app.connection.socket,
-            SocketAddr::from(([0, 0, 0, 0], 7878))
-        );
+        assert_eq!(app.connection.to_string(), "0.0.0.0:7878");
     }
 
     #[test]
     fn it_binds_app_to_socket() {
         let app = App::new().bind("127.0.0.1:5001");
 
-        assert_eq!(
-            app.connection.socket,
-            SocketAddr::from(([127, 0, 0, 1], 5001))
-        );
+        assert_eq!(app.connection.to_string(), "127.0.0.1:5001");
+    }
+
+    #[test]
+    fn it_binds_app_to_host_name() {
+        let app = App::new().bind("localhost:5001");
+
+        assert_eq!(app.connection.to_string(), "localhost:5001");
     }
 
     #[test]
