@@ -211,7 +211,8 @@ impl Connection {
     ///
     /// # Errors
     /// Returns an error if the address cannot be understood, cannot be resolved,
-    /// or cannot be bound.
+    /// or cannot be bound. An error the OS reported is passed through as it is, so
+    /// [`Error::raw_os_error`] and its source survive.
     pub(super) async fn bind(&self) -> Result<TcpListener> {
         let listener = match &self.target {
             Target::Addr(addr) => TcpListener::bind(addr).await,
@@ -219,7 +220,14 @@ impl Connection {
             Target::Invalid { input, error } => return Err(invalid_addr(input, *error)),
         };
 
-        listener.map_err(|err| Error::new(err.kind(), format!("failed to bind '{self}': {err}")))
+        listener.map_err(|err| match err.raw_os_error() {
+            // Wrapping an OS error would drop its code and its source, and the caller already
+            // knows which address it asked for - hand it back untouched.
+            Some(_) => err,
+            // A resolution failure names neither the host nor an OS code, so it is the one
+            // worth the address it failed on.
+            None => Error::new(err.kind(), format!("failed to bind '{self}': {err}")),
+        })
     }
 }
 
@@ -654,25 +662,26 @@ mod tests {
 
         let err = connection.bind().await.unwrap_err();
 
+        // A resolver error carries no OS code and does not name the host, so it is annotated;
+        // a platform that reports resolution failures as OS errors keeps its own error.
         assert!(
-            err.to_string()
-                .starts_with("failed to bind 'volga.invalid:0'"),
-            "unexpected error: {err}"
+            err.raw_os_error().is_some() || err.to_string().contains("volga.invalid:0"),
+            "an unresolvable name must be reported as an OS error or with the address: {err}"
         );
     }
 
     #[tokio::test]
-    async fn it_reports_address_in_use_with_the_address() {
+    async fn it_preserves_the_os_error_when_the_address_is_in_use() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
 
         let connection: Connection = format!("127.0.0.1:{port}").into();
         let err = connection.bind().await.unwrap_err();
 
+        assert_eq!(err.kind(), ErrorKind::AddrInUse);
         assert!(
-            err.to_string()
-                .starts_with(&format!("failed to bind '127.0.0.1:{port}'")),
-            "unexpected error: {err}"
+            err.raw_os_error().is_some(),
+            "the OS error code must survive, so callers can tell platform failures apart: {err}"
         );
     }
 

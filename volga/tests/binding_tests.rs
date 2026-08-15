@@ -138,9 +138,10 @@ async fn it_does_not_listen_when_the_host_name_cannot_be_resolved() {
         .await
         .expect_err("an unresolvable host name must not start a server");
 
+    // A resolver error carries no OS code and does not name the host, so it is annotated with
+    // the address; a platform that reports resolution failures as OS errors keeps its own error.
     assert!(
-        err.to_string()
-            .starts_with("failed to bind 'volga.invalid:7878'"),
-        "unexpected error: {err}"
+        err.raw_os_error().is_some() || err.to_string().contains("volga.invalid:7878"),
+        "an unresolvable name must be reported as an OS error or with the address: {err}"
     );
 }
