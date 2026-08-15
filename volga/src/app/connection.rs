@@ -3,7 +3,7 @@
 use std::{
     fmt,
     io::{Error, ErrorKind, Result},
-    net::{IpAddr, Ipv6Addr, SocketAddr},
+    net::{IpAddr, SocketAddr},
 };
 use tokio::net::TcpListener;
 
@@ -11,13 +11,6 @@ const DEFAULT_PORT: u16 = 7878;
 
 /// Maximum length of a host name, in bytes (RFC 1035, Section 2.3.4).
 const MAX_HOST_LEN: usize = 253;
-
-/// Maximum length of a single host name label, in bytes (RFC 1035, Section 2.3.4).
-const MAX_LABEL_LEN: usize = 63;
-
-/// Maximum length of an IPv6 zone id, in bytes - covers both interface names
-/// (`IF_NAMESIZE` is 16 on Unix) and numeric interface indexes.
-const MAX_ZONE_LEN: usize = 64;
 
 /// Describes why a bind address could not be understood.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,7 +21,8 @@ enum AddrError {
     InvalidPort,
     /// The part before the port is empty.
     MissingHost,
-    /// The part before the port is neither an IP literal nor a host name.
+    /// The part before the port is neither an IP literal nor anything a resolver could
+    /// look up.
     InvalidHost,
 }
 
@@ -38,7 +32,7 @@ impl fmt::Display for AddrError {
             Self::MissingPort => "missing ':port' suffix",
             Self::InvalidPort => "port must be a number in the 0..=65535 range",
             Self::MissingHost => "missing host",
-            Self::InvalidHost => "host is neither an IP address nor a host name",
+            Self::InvalidHost => "host is neither an IP address nor a name a resolver could take",
         };
         f.write_str(msg)
     }
@@ -270,8 +264,9 @@ fn parse_host(host: &str, port: u16) -> std::result::Result<Target, AddrError> {
         return Ok(Target::Addr(SocketAddr::from((ip, port))));
     }
 
-    // Both a zone-scoped literal and a name are handed to the resolver as they are.
-    if is_scoped_ipv6(host) || is_host_name(host) {
+    // Anything else - a name, or an IPv6 literal carrying a zone id, which `Ipv6Addr` has
+    // nowhere to parse into - is handed to the resolver as it is.
+    if is_resolvable_host(host) {
         Ok(Target::Named {
             host: host.into(),
             port,
@@ -281,39 +276,20 @@ fn parse_host(host: &str, port: u16) -> std::result::Result<Target, AddrError> {
     }
 }
 
-/// Checks whether `host` is an IPv6 literal carrying a zone id (`fe80::1%eth0`).
+/// Checks whether `host` is shaped like something a resolver could be asked to look up.
 ///
-/// [`std::net::Ipv6Addr`] has no zone id to parse into, but the resolver understands one and
-/// reports it back as the scope id of the bound [`SocketAddr`], so such an address is resolved
-/// rather than parsed. The bracketed form of a *numeric* zone (`[fe80::1%3]:7878`) never
-/// reaches here - [`SocketAddr`] parses that one itself.
-fn is_scoped_ipv6(host: &str) -> bool {
-    let Some((addr, zone)) = host.split_once('%') else {
-        return false;
-    };
-
-    addr.parse::<Ipv6Addr>().is_ok()
-        && !zone.is_empty()
-        && zone.len() <= MAX_ZONE_LEN
-        && zone
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
-}
-
-/// Checks whether `host` is shaped like a host name that a resolver could look up.
-fn is_host_name(host: &str) -> bool {
-    // A trailing dot marks a fully qualified name and carries no label of its own.
-    let host = host.strip_suffix('.').unwrap_or(host);
-
+/// Whether the name *exists* is the resolver's call, not this function's: `/etc/hosts` and
+/// other NSS sources define names outside the RFC 1035 preferred syntax (`api+blue`), and
+/// [`crate::App::bind`] promises the reach of [`std::net::ToSocketAddrs`]. Only what no
+/// resolver could look up is rejected here - an empty host, one longer than a DNS name may be
+/// (RFC 1035, Section 2.3.4), or one carrying whitespace or control characters, which marks a
+/// typo rather than a name.
+fn is_resolvable_host(host: &str) -> bool {
     !host.is_empty()
         && host.len() <= MAX_HOST_LEN
-        && host.split('.').all(|label| {
-            !label.is_empty()
-                && label.len() <= MAX_LABEL_LEN
-                && label
-                    .bytes()
-                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        })
+        && !host
+            .bytes()
+            .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
 }
 
 #[cfg(test)]
@@ -445,33 +421,22 @@ mod tests {
     }
 
     #[test]
-    fn it_rejects_zone_on_ipv4() {
-        let connection: Connection = "127.0.0.1%eth0:8080".into();
+    fn it_leaves_an_unusual_zone_to_the_resolver() {
+        // Neither a zone on IPv4 nor an empty one is an address this crate can rule out - the
+        // resolver owns that call, and reports it as a bind error at startup.
+        for input in ["127.0.0.1%eth0:8080", "fe80::1%:8080"] {
+            let connection: Connection = input.into();
 
-        assert_eq!(
-            rejection(&connection).to_string(),
-            "invalid bind address '127.0.0.1%eth0:8080': host is neither an IP address nor a host name"
-        );
+            assert!(
+                matches!(connection.target, Target::Named { .. }),
+                "'{input}' must be handed to the resolver"
+            );
+        }
     }
 
     #[test]
-    fn it_rejects_empty_zone() {
-        let connection: Connection = "fe80::1%:8080".into();
-
-        assert_eq!(rejection(&connection).kind(), ErrorKind::InvalidInput);
-    }
-
-    #[test]
-    fn it_rejects_invalid_zone() {
+    fn it_rejects_a_zone_with_whitespace() {
         let connection: Connection = "fe80::1%bad zone:8080".into();
-
-        assert_eq!(rejection(&connection).kind(), ErrorKind::InvalidInput);
-    }
-
-    #[test]
-    fn it_rejects_too_long_zone() {
-        let zone = "a".repeat(MAX_ZONE_LEN + 1);
-        let connection: Connection = format!("fe80::1%{zone}:8080").as_str().into();
 
         assert_eq!(rejection(&connection).kind(), ErrorKind::InvalidInput);
     }
@@ -567,22 +532,26 @@ mod tests {
 
         assert_eq!(
             rejection(&connection).to_string(),
-            "invalid bind address 'not a host:3000': host is neither an IP address nor a host name"
+            "invalid bind address 'not a host:3000': host is neither an IP address nor a name a resolver could take"
         );
+    }
+
+    #[test]
+    fn it_accepts_a_name_outside_the_preferred_syntax() {
+        // `/etc/hosts` and other NSS sources define names RFC 1035 would not - the resolver
+        // decides whether they exist, not the parser.
+        let connection: Connection = "api+blue:3000".into();
+
+        assert!(matches!(
+            connection.target,
+            Target::Named { ref host, port: 3000 } if host.as_ref() == "api+blue"
+        ));
     }
 
     #[test]
     fn it_rejects_too_long_host_name() {
         let host = "a".repeat(MAX_HOST_LEN + 1);
         let connection: Connection = format!("{host}:3000").as_str().into();
-
-        assert_eq!(rejection(&connection).kind(), ErrorKind::InvalidInput);
-    }
-
-    #[test]
-    fn it_rejects_too_long_label() {
-        let label = "a".repeat(MAX_LABEL_LEN + 1);
-        let connection: Connection = format!("{label}.com:3000").as_str().into();
 
         assert_eq!(rejection(&connection).kind(), ErrorKind::InvalidInput);
     }
@@ -747,7 +716,7 @@ mod tests {
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
         assert_eq!(
             err.to_string(),
-            "invalid bind address 'not a host': host is neither an IP address nor a host name",
+            "invalid bind address 'not a host': host is neither an IP address nor a name a resolver could take",
             "a config host is reported on its own, without a port glued to it"
         );
     }
