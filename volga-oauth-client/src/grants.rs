@@ -231,16 +231,20 @@ impl<'a> TokenRequest<'a> {
 
 impl std::fmt::Debug for TokenRequest<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // a token request body is made of credentials: the built-in
+        // parameters carry assertions and subject tokens, and `with_param`
+        // is an escape hatch that can carry anything a server asks for.
+        // Only the names of what was set are shown - a value here has no
+        // business reaching a log
+        let params: Vec<&str> = self.params.iter().map(|(name, _)| *name).collect();
+        let extra: Vec<&str> = self.extra.iter().map(|(name, _)| name.as_str()).collect();
+
         f.debug_struct("TokenRequest")
             .field("grant_type", &self.grant_type)
-            // the parameters carry assertions and subject tokens
-            .field(
-                "params",
-                &self.params.iter().map(|(name, _)| name).collect::<Vec<_>>(),
-            )
+            .field("params", &params)
             .field("scopes", &self.scopes)
             .field("resources", &self.resources)
-            .field("extra", &self.extra)
+            .field("extra", &extra)
             .finish_non_exhaustive()
     }
 }
@@ -879,5 +883,35 @@ mod tests {
         let debug = format!("{:?}", client.jwt_bearer(&metadata, "the.workload.jwt"));
         assert!(!debug.contains("the.workload.jwt"));
         assert!(debug.contains("assertion"));
+    }
+
+    #[test]
+    fn it_shows_only_the_names_of_the_values_a_request_carries() {
+        let client = OAuthClient::new("my-app");
+        let metadata = metadata();
+
+        // `with_param` is an escape hatch, so a server-specific value can
+        // be as sensitive as a built-in one - neither may reach a log
+        let debug = format!(
+            "{:?}",
+            client
+                .exchange_token(&metadata, "the.subject.token", token_type::JWT)
+                .with_actor_token("the.actor.token", token_type::JWT)
+                .with_param("vendor_secret", "s3cr3t-value")
+                .with_scopes(["inventory:read"])
+                .with_resource("https://api.example.com")
+        );
+
+        for value in ["the.subject.token", "the.actor.token", "s3cr3t-value"] {
+            assert!(!debug.contains(value), "{value} leaked into {debug}");
+        }
+
+        // ...while the names stay, so the request is still recognizable
+        for name in ["subject_token", "actor_token", "vendor_secret"] {
+            assert!(debug.contains(name), "{name} is missing from {debug}");
+        }
+
+        // scopes and resource indicators are not credentials and stay whole
+        assert!(debug.contains("inventory:read") && debug.contains("https://api.example.com"));
     }
 }
