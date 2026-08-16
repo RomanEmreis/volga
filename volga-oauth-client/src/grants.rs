@@ -586,7 +586,9 @@ fn ensure_grant_supported(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ClientAuthMethod, assertion::test_key};
+    use crate::ClientAuthMethod;
+    #[cfg(feature = "private-key-jwt")]
+    use crate::assertion::test_key;
     use volga_oauth_core::token_type;
 
     fn metadata() -> AuthorizationServerMetadata {
@@ -690,7 +692,9 @@ mod tests {
 
     #[test]
     fn it_builds_a_token_exchange_request() {
-        let client = OAuthClient::new("my-app").with_private_key_jwt(test_key());
+        let client = OAuthClient::new("my-app")
+            .with_secret("s3cret")
+            .with_auth_method(ClientAuthMethod::Post);
         let metadata = metadata();
 
         let (body, authorization) = client
@@ -731,8 +735,47 @@ mod tests {
             value(&body, "actor_token_type").as_deref(),
             Some(token_type::JWT)
         );
-        // ...authenticated by a freshly signed client assertion
-        assert!(value(&body, "client_assertion").is_some());
+        // ...authenticated by the configured method
+        assert_eq!(value(&body, "client_secret").as_deref(), Some("s3cret"));
+    }
+
+    /// A token request authenticated by a signed assertion rather than a
+    /// secret - the grant assembly above is unchanged by the method.
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_signs_a_client_assertion_for_any_grant() {
+        let client = OAuthClient::new("my-app").with_private_key_jwt(test_key());
+        let metadata = metadata();
+
+        for (body, authorization) in [
+            client
+                .client_credentials(&metadata)
+                .request
+                .build()
+                .unwrap(),
+            client
+                .jwt_bearer(&metadata, "the.jwt")
+                .request
+                .build()
+                .unwrap(),
+            client
+                .exchange_token(&metadata, "the.jwt", token_type::JWT)
+                .request
+                .build()
+                .unwrap(),
+        ] {
+            assert!(authorization.is_none());
+            assert_eq!(value(&body, "client_secret"), None);
+            assert_eq!(
+                value(&body, "client_assertion_type").as_deref(),
+                Some(crate::client_auth::ASSERTION_TYPE_JWT_BEARER)
+            );
+            assert_eq!(
+                value(&body, "client_assertion").unwrap().split('.').count(),
+                3,
+                "the assertion must be a compact JWS"
+            );
+        }
     }
 
     #[test]

@@ -38,7 +38,7 @@ pub enum ClientError {
 
     /// A `private_key_jwt` client assertion could not be produced: the
     /// key failed to load or the signature could not be computed
-    /// (see [`PrivateKeyJwt`](crate::PrivateKeyJwt))
+    /// (see `PrivateKeyJwt`, feature `private-key-jwt`)
     Signing(Box<dyn std::error::Error + Send + Sync>),
 }
 

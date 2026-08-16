@@ -16,18 +16,27 @@
 //!   [`client_credentials`](OAuthClient::client_credentials) (RFC 6749
 //!   Section 4.4), [`jwt_bearer`](OAuthClient::jwt_bearer) (RFC 7523
 //!   Section 2.1) and [`exchange_token`](OAuthClient::exchange_token)
-//!   (RFC 8693) - authenticating with a client secret or a
-//!   [`PrivateKeyJwt`] assertion (RFC 7523 Section 2.2).
+//!   (RFC 8693).
 //! * [`RegistrationClient`] - Dynamic Client Registration (RFC 7591).
 //!
 //! All of them share the transport policy of [`ClientConfig`] and the
 //! error model of [`ClientError`].
+//!
+//! # Feature flags
+//!
+//! `http1` (default) and `http2` select the HTTP version; at least one is
+//! required. `private-key-jwt` adds `private_key_jwt` client authentication
+//! (RFC 7523 Section 2.2) - a client assertion signed with the client's own
+//! key. It is off by default because it is the only part of this crate that
+//! needs a JWS signing backend; the secret-based methods and every grant
+//! work without it.
 
 #[cfg(not(any(feature = "http1", feature = "http2")))]
 compile_error!(
     "volga-oauth-client requires at least one of the `http1` or `http2` features to be enabled"
 );
 
+#[cfg(feature = "private-key-jwt")]
 pub use assertion::{DEFAULT_ASSERTION_LIFETIME, PrivateKeyJwt};
 pub use cache::MetadataCache;
 pub use client::{
@@ -54,6 +63,7 @@ pub use volga_oauth_core::{
     client_auth, grant, jwk, openid_configuration_url, protected_resource_metadata_url, token_type,
 };
 
+#[cfg(feature = "private-key-jwt")]
 mod assertion;
 mod cache;
 mod client;

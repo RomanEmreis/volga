@@ -23,7 +23,7 @@ http-body-util = "0.1.4"
 hyper = { version = "1.10.1", features = ["client"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["tls12", "webpki-tokio", "aws-lc-rs"] }
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "tokio"] }
-jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"], optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["time"] }
@@ -38,6 +38,9 @@ volga = { path = "../volga", features = ["http1", "oauth"] }
 default = ["http1"]
 http1 = ["hyper/http1", "hyper-util/http1", "hyper-rustls/http1"]
 http2 = ["hyper/http2", "hyper-util/http2", "hyper-rustls/http2"]
+# `private_key_jwt` client authentication (RFC 7523 Section 2.2); pulls in a
+# JWS signing backend, which the other client authentication methods do not need
+private-key-jwt = ["dep:jsonwebtoken"]
 
 [package.metadata.docs.rs]
 all-features = true

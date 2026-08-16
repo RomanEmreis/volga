@@ -12,9 +12,10 @@ use std::{sync::Arc, time::Duration};
 use serde::{Deserialize, Serialize};
 use volga_oauth_core::{AuthorizationServerMetadata, OAuthErrorCode};
 
+#[cfg(feature = "private-key-jwt")]
+use crate::PrivateKeyJwt;
 use crate::{
-    ClientConfig, ClientError, Pkce, PrivateKeyJwt, TokenResponse, TokenSet, TokenStore,
-    client_auth, grant,
+    ClientConfig, ClientError, Pkce, TokenResponse, TokenSet, TokenStore, client_auth, grant,
     pkce::{PKCE_METHOD, random_urlsafe},
     transport::Transport,
 };
@@ -46,6 +47,10 @@ pub enum ClientAuthMethod {
     /// [`OAuthClient::with_private_key_jwt`](OAuthClient::with_private_key_jwt);
     /// unlike the two secret-based methods it needs no
     /// [`with_secret`](OAuthClient::with_secret).
+    ///
+    /// Requires the `private-key-jwt` feature, the only part of this crate
+    /// that needs a JWS signing backend.
+    #[cfg(feature = "private-key-jwt")]
     PrivateKeyJwt(PrivateKeyJwt),
 }
 
@@ -126,31 +131,10 @@ impl OAuthClient {
     ///
     /// A registration for `private_key_jwt` is rejected here because this
     /// constructor is given no key to sign assertions with - pass one to
-    /// [`from_registration_with_key`](Self::from_registration_with_key)
-    /// instead.
+    /// `from_registration_with_key` instead, which the `private-key-jwt`
+    /// feature enables.
     pub fn from_registration(
         response: &volga_oauth_core::ClientRegistrationResponse,
-    ) -> Result<Self, ClientError> {
-        Self::adopt_registration(response, None)
-    }
-
-    /// Creates a client from a Dynamic Client Registration response that
-    /// registered `private_key_jwt`, signing its assertions with `key`
-    ///
-    /// Behaves exactly like [`from_registration`](Self::from_registration)
-    /// for every other registered method - `key` is then simply unused,
-    /// since sending an assertion the registration did not announce would
-    /// only yield `invalid_client`.
-    pub fn from_registration_with_key(
-        response: &volga_oauth_core::ClientRegistrationResponse,
-        key: PrivateKeyJwt,
-    ) -> Result<Self, ClientError> {
-        Self::adopt_registration(response, Some(key))
-    }
-
-    fn adopt_registration(
-        response: &volga_oauth_core::ClientRegistrationResponse,
-        key: Option<PrivateKeyJwt>,
     ) -> Result<Self, ClientError> {
         let mut client = Self::new(response.client_id.clone());
 
@@ -175,32 +159,64 @@ impl OAuthClient {
                 }
             }
             // performable only with a key to sign the assertions with
-            client_auth::PRIVATE_KEY_JWT => match key {
-                Some(key) => client = client.with_private_key_jwt(key),
-                None => {
-                    return Err(ClientError::validation(
-                        "registered token_endpoint_auth_method 'private_key_jwt' needs a \
-                         signing key; use OAuthClient::from_registration_with_key",
-                    ));
-                }
-            },
+            #[cfg(feature = "private-key-jwt")]
+            client_auth::PRIVATE_KEY_JWT => {
+                return Err(ClientError::validation(
+                    "registered token_endpoint_auth_method 'private_key_jwt' needs a signing \
+                     key; use OAuthClient::from_registration_with_key",
+                ));
+            }
             unsupported => {
                 return Err(ClientError::validation(format!(
                     "registered token_endpoint_auth_method '{unsupported}' is not supported; \
-                     this client supports {}, {}, {} and {}",
+                     this client supports {}, {} and {}{}",
                     client_auth::CLIENT_SECRET_BASIC,
                     client_auth::CLIENT_SECRET_POST,
-                    client_auth::PRIVATE_KEY_JWT,
                     client_auth::NONE,
+                    if cfg!(feature = "private-key-jwt") {
+                        ", plus private_key_jwt through from_registration_with_key"
+                    } else {
+                        " (private_key_jwt needs the `private-key-jwt` feature)"
+                    },
                 )));
             }
         }
 
-        if let [redirect_uri] = response.metadata.redirect_uris.as_slice() {
-            client = client.with_redirect_uri(redirect_uri.clone());
+        Ok(client.with_registered_redirect_uri(response))
+    }
+
+    /// Creates a client from a Dynamic Client Registration response that
+    /// registered `private_key_jwt`, signing its assertions with `key`
+    ///
+    /// Behaves exactly like [`from_registration`](Self::from_registration)
+    /// for every other registered method - `key` is then simply unused,
+    /// since sending an assertion the registration did not announce would
+    /// only yield `invalid_client`.
+    #[cfg(feature = "private-key-jwt")]
+    pub fn from_registration_with_key(
+        response: &volga_oauth_core::ClientRegistrationResponse,
+        key: PrivateKeyJwt,
+    ) -> Result<Self, ClientError> {
+        if response.metadata.token_endpoint_auth_method.as_deref()
+            != Some(client_auth::PRIVATE_KEY_JWT)
+        {
+            return Self::from_registration(response);
         }
 
-        Ok(client)
+        Ok(Self::new(response.client_id.clone())
+            .with_private_key_jwt(key)
+            .with_registered_redirect_uri(response))
+    }
+
+    /// Adopts the registered redirect URI, when exactly one was registered.
+    fn with_registered_redirect_uri(
+        self,
+        response: &volga_oauth_core::ClientRegistrationResponse,
+    ) -> Self {
+        match response.metadata.redirect_uris.as_slice() {
+            [redirect_uri] => self.with_redirect_uri(redirect_uri.clone()),
+            _ => self,
+        }
     }
 
     /// Replaces the transport configuration
@@ -220,9 +236,9 @@ impl OAuthClient {
     /// [`ClientAuthMethod::Basic`] by default
     ///
     /// The two secret-based methods are ignored without a secret - the
-    /// client then stays public. [`ClientAuthMethod::PrivateKeyJwt`]
-    /// carries its own credential and applies on its own; prefer
-    /// [`with_private_key_jwt`](Self::with_private_key_jwt) for it.
+    /// client then stays public. `ClientAuthMethod::PrivateKeyJwt` carries
+    /// its own credential and applies on its own; prefer
+    /// `with_private_key_jwt` for it (feature `private-key-jwt`).
     pub fn with_auth_method(mut self, method: ClientAuthMethod) -> Self {
         self.auth_method = method;
         self
@@ -233,6 +249,7 @@ impl OAuthClient {
     ///
     /// Supersedes any [`with_secret`](Self::with_secret): the assertion is
     /// the credential, and no secret is sent alongside it.
+    #[cfg(feature = "private-key-jwt")]
     pub fn with_private_key_jwt(mut self, key: PrivateKeyJwt) -> Self {
         self.auth_method = ClientAuthMethod::PrivateKeyJwt(key);
         self
@@ -450,6 +467,7 @@ impl OAuthClient {
         metadata: &AuthorizationServerMetadata,
     ) -> Result<Option<HeaderValue>, ClientError> {
         // the assertion is the credential; a secret, if any, is not sent
+        #[cfg(feature = "private-key-jwt")]
         if let ClientAuthMethod::PrivateKeyJwt(key) = &self.auth_method {
             form.append_pair("client_id", &self.client_id)
                 .append_pair(
@@ -463,6 +481,8 @@ impl OAuthClient {
 
             return Ok(None);
         }
+        #[cfg(not(feature = "private-key-jwt"))]
+        let _ = metadata;
 
         Ok(match (&self.client_secret, &self.auth_method) {
             (Some(secret), ClientAuthMethod::Basic) => {
@@ -855,6 +875,7 @@ mod tests {
         assert_eq!(body, "client_id=my-client&client_secret=s3cret");
     }
 
+    #[cfg(feature = "private-key-jwt")]
     #[test]
     fn it_authenticates_with_a_signed_client_assertion() {
         // a secret set alongside the key is never sent: the assertion is
@@ -891,6 +912,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "private-key-jwt")]
     #[test]
     fn it_reports_a_failing_client_assertion() {
         let mut metadata = metadata();
@@ -948,31 +970,56 @@ mod tests {
             ClientError::Validation(reason) if reason.contains("client_secret_jwt")
         ));
 
-        // private_key_jwt is performable, but only with a key to sign with
+        // private_key_jwt is announced as needing a key when this client can
+        // sign at all, and as needing the feature when it cannot
         let err =
             OAuthClient::from_registration(&registration("private_key_jwt".into())).unwrap_err();
-        assert!(matches!(
-            err,
-            ClientError::Validation(reason) if reason.contains("from_registration_with_key")
-        ));
+        let expected = if cfg!(feature = "private-key-jwt") {
+            "from_registration_with_key"
+        } else {
+            "private-key-jwt"
+        };
+        assert!(
+            matches!(&err, ClientError::Validation(reason) if reason.contains(expected)),
+            "got: {err}"
+        );
+    }
+
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_adopts_a_registration_signing_with_a_key() {
+        let registration = |auth_method: &str| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "client_secret": "generated-secret",
+                    "token_endpoint_auth_method": auth_method,
+                    "redirect_uris": ["https://app.example.com/callback"]
+                }),
+            )
+            .unwrap()
+        };
 
         let key = crate::assertion::test_key();
-        let client = OAuthClient::from_registration_with_key(
-            &registration("private_key_jwt".into()),
-            key.clone(),
-        )
-        .unwrap();
+        let client =
+            OAuthClient::from_registration_with_key(&registration("private_key_jwt"), key.clone())
+                .unwrap();
         assert_eq!(client.auth_method, ClientAuthMethod::PrivateKeyJwt(key));
         assert_eq!(client.client_secret, None);
+        assert_eq!(
+            client.redirect_uri.as_deref(),
+            Some("https://app.example.com/callback")
+        );
 
         // ...and a key handed to a registration that announced something
         // else stays unused
         let client = OAuthClient::from_registration_with_key(
-            &registration("client_secret_post".into()),
+            &registration("client_secret_post"),
             crate::assertion::test_key(),
         )
         .unwrap();
         assert_eq!(client.auth_method, ClientAuthMethod::Post);
+        assert_eq!(client.client_secret.as_deref(), Some("generated-secret"));
     }
 
     #[test]

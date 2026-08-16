@@ -16,6 +16,7 @@ use std::{
 };
 
 use common::{free_port, serve};
+#[cfg(feature = "private-key-jwt")]
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::Deserialize;
 use volga::{
@@ -23,19 +24,22 @@ use volga::{
     headers::{Authorization, Header},
 };
 use volga_oauth_client::{
-    AuthorizationServerMetadata, ClientConfig, ClientError, InMemoryTokenStore, JwsAlgorithm,
-    OAuthClient, OAuthErrorCode, PrivateKeyJwt, TokenSet, TokenStore, client_auth, grant,
-    token_type,
+    AuthorizationServerMetadata, ClientConfig, ClientError, InMemoryTokenStore, OAuthClient,
+    OAuthErrorCode, TokenSet, TokenStore, grant, token_type,
 };
+#[cfg(feature = "private-key-jwt")]
+use volga_oauth_client::{JwsAlgorithm, PrivateKeyJwt, client_auth};
 
 /// A throwaway P-256 key pair; the client signs with the private half,
 /// the test token endpoint verifies with the public one.
+#[cfg(feature = "private-key-jwt")]
 const CLIENT_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
 MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgIeRig+AlqV2rBdgt
 BzEQ28UAk8/d5l2+4PDfsspynmShRANCAATP07xL4i2PpomWJmZSZZMbQqj4Ybbd
 aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
 -----END PRIVATE KEY-----";
 
+#[cfg(feature = "private-key-jwt")]
 const CLIENT_PUBLIC_KEY_PEM: &[u8] = b"-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEz9O8S+Itj6aJliZmUmWTG0Ko+GG2
 3Wi6M3qbdjh5w+ie6TUx5tdjXWhCeJJ86wpKeqYaNhBSEIeXCp6h5voUMA==
@@ -47,9 +51,11 @@ struct TokenForm {
     grant_type: String,
     scope: Option<String>,
     resource: Option<String>,
+    #[cfg_attr(not(feature = "private-key-jwt"), allow(dead_code))]
     client_id: Option<String>,
     client_secret: Option<String>,
     client_assertion: Option<String>,
+    #[cfg_attr(not(feature = "private-key-jwt"), allow(dead_code))]
     client_assertion_type: Option<String>,
     assertion: Option<String>,
     subject_token: Option<String>,
@@ -59,6 +65,7 @@ struct TokenForm {
 }
 
 /// The claims of a `private_key_jwt` client assertion.
+#[cfg(feature = "private-key-jwt")]
 #[derive(Deserialize)]
 struct AssertionClaims {
     sub: String,
@@ -82,10 +89,12 @@ fn server_metadata(base: &str) -> AuthorizationServerMetadata {
     metadata
 }
 
+#[cfg(feature = "private-key-jwt")]
 fn key() -> PrivateKeyJwt {
     PrivateKeyJwt::from_pem(CLIENT_KEY_PEM, JwsAlgorithm::ES256).unwrap()
 }
 
+#[cfg(feature = "private-key-jwt")]
 /// Verifies a client assertion the way an authorization server would:
 /// signature, `iss`/`sub` = the client, `aud` = the issuer, unexpired.
 /// Returns the `jti`, so a caller can check it is fresh.
@@ -234,6 +243,7 @@ async fn it_serves_a_stored_service_token_and_re_requests_it_when_stale() {
     server.abort();
 }
 
+#[cfg(feature = "private-key-jwt")]
 #[tokio::test]
 async fn it_requests_a_token_with_a_private_key_jwt_assertion() {
     let port = free_port();
