@@ -111,6 +111,14 @@ impl BearerAuthConfig {
     ///     .with_bearer_auth(|auth| auth
     ///         .with_alg(Algorithm::RS256));
     /// ```
+    ///
+    /// # Panics
+    /// Panics on an [`Algorithm`] this build cannot map onto its JWT
+    /// backend - every variant that exists today maps, so this reports a
+    /// volga bug rather than anything a caller can do wrong. It fails here
+    /// instead of enabling some other algorithm, which would leave the
+    /// requested one disabled while tokens were verified under a policy
+    /// nobody asked for.
     pub fn with_alg(mut self, alg: Algorithm) -> Self {
         let jwt_alg: jsonwebtoken::Algorithm = crate::auth::algorithm::to_jwt(alg);
         if !self.validation.algorithms.contains(&jwt_alg) {

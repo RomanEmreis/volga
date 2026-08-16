@@ -15,6 +15,15 @@ pub use volga_oauth_core::JwsAlgorithm as Algorithm;
 /// A free function rather than an inherent method: the type itself is
 /// shared through `volga-oauth-core`, which carries no cryptography.
 /// Crate-private to keep `jsonwebtoken` out of volga's public API surface.
+///
+/// # Panics
+/// Panics on an algorithm this mapping does not cover. `JwsAlgorithm` is
+/// `#[non_exhaustive]`, so a variant added to `volga-oauth-core` without a
+/// mapping here cannot be caught at compile time from this side. Every
+/// variant that exists today is covered, so this is unreachable in a
+/// consistent build - and substituting a default instead would be worse
+/// than a crash: the caller's algorithm would stay disabled while a
+/// different one was quietly accepted for verifying tokens.
 #[inline]
 pub(crate) fn to_jwt(alg: Algorithm) -> jsonwebtoken::Algorithm {
     match alg {
@@ -30,10 +39,13 @@ pub(crate) fn to_jwt(alg: Algorithm) -> jsonwebtoken::Algorithm {
         Algorithm::PS384 => jsonwebtoken::Algorithm::PS384,
         Algorithm::PS512 => jsonwebtoken::Algorithm::PS512,
         Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
-        // `JwsAlgorithm` is `#[non_exhaustive]`: an algorithm added there
-        // without a mapping here degrades to the default rather than
-        // failing to compile downstream
-        _ => jsonwebtoken::Algorithm::HS256,
+        // fail closed: an unmapped algorithm is this workspace being
+        // internally inconsistent, and the token validation policy is not
+        // something to guess at
+        unmapped => panic!(
+            "volga has no mapping for the {unmapped} JWS algorithm; this is a volga bug, \
+             please report it"
+        ),
     }
 }
 
