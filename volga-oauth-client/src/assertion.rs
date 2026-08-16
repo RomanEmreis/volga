@@ -221,7 +221,23 @@ impl PrivateKeyJwt {
     /// A `kid` on `jwk` is adopted when this key has none of its own, so
     /// the assertions start naming the key the document publishes. An
     /// explicit [`with_key_id`](Self::with_key_id) wins in either order.
-    pub fn with_public_jwk(mut self, jwk: PublicJwk) -> Self {
+    ///
+    /// Fails with [`ClientError::Signing`] when the material cannot carry
+    /// the algorithm the assertions are signed with - publishing an RSA
+    /// key for an `ES256` signature, or a P-384 key for `ES256`, yields a
+    /// document the authorization server cannot verify anything against.
+    /// This is the half [`PublicJwk`] cannot check on its own: only this
+    /// key knows what the assertions are actually signed with.
+    pub fn with_public_jwk(mut self, jwk: PublicJwk) -> Result<Self, ClientError> {
+        if !jwk.key().supports(self.algorithm) {
+            return Err(ClientError::signing(format!(
+                "the public JWK is {} key material, which cannot carry the {} the \
+                 assertions are signed with",
+                jwk.key().key_type(),
+                self.algorithm
+            )));
+        }
+
         // otherwise the published document would name a `kid` that no
         // assertion carries, and a server selecting the client's key by it
         // would find nothing
@@ -230,7 +246,7 @@ impl PrivateKeyJwt {
         }
 
         self.public_jwk = Some(jwk);
-        self
+        Ok(self)
     }
 
     /// Returns the JWK Set to publish for this key, or `None` when no
@@ -249,7 +265,7 @@ impl PrivateKeyJwt {
     /// # fn run(pem: &[u8], public_jwk: PublicJwk) -> Result<(), ClientError> {
     /// let key = PrivateKeyJwt::from_pem(pem, JwsAlgorithm::ES256)?
     ///     .with_key_id("2026-08")
-    ///     .with_public_jwk(public_jwk);
+    ///     .with_public_jwk(public_jwk)?;
     ///
     /// let published = &key.jwks().unwrap().keys[0];
     /// assert_eq!(published.key_id(), Some("2026-08"));
@@ -258,7 +274,13 @@ impl PrivateKeyJwt {
     /// # }
     /// ```
     pub fn jwks(&self) -> Option<JwkSet> {
-        let mut jwk = self.public_jwk.clone()?.with_algorithm(self.algorithm);
+        // `with_public_jwk` refused any material that cannot carry this
+        // algorithm, so stamping it on cannot contradict the key
+        let mut jwk = self
+            .public_jwk
+            .clone()?
+            .with_algorithm(self.algorithm)
+            .expect("the attached JWK was checked against this algorithm");
         if let Some(key_id) = &self.key_id {
             jwk = jwk.with_key_id(key_id);
         }
@@ -628,7 +650,10 @@ mod tests {
         // no public JWK attached - nothing to publish
         assert!(key().jwks().is_none());
 
-        let key = key().with_key_id("2026-08").with_public_jwk(public_jwk());
+        let key = key()
+            .with_key_id("2026-08")
+            .with_public_jwk(public_jwk())
+            .unwrap();
         let jwks = key.jwks().unwrap();
         let published = &jwks.keys[0];
 
@@ -652,11 +677,35 @@ mod tests {
         jsonwebtoken::decode::<Value>(&assertion, &decoding, &validation)
             .expect("the published JWK must verify the assertion it was published for");
 
-        // an `alg` disagreeing with the signing algorithm is corrected: the
-        // assertions are what the published document has to describe
-        let contradicting = public_jwk().with_algorithm(JwsAlgorithm::RS256);
-        let jwks = key.with_public_jwk(contradicting).jwks().unwrap();
+        // an `alg` left unset on the JWK is filled in from the signing
+        // configuration: the assertions are what the document describes
+        let jwks = key.with_public_jwk(public_jwk()).unwrap().jwks().unwrap();
         assert_eq!(jwks.keys[0].algorithm(), Some(JwsAlgorithm::ES256));
+    }
+
+    #[test]
+    fn it_refuses_a_public_jwk_that_cannot_carry_the_signature() {
+        // an RSA document published for an ES256 signature leaves the
+        // server with nothing it can verify against
+        let rsa = PublicJwk::new(volga_oauth_core::jwk::PublicKey::Rsa {
+            n: "n".into(),
+            e: "AQAB".into(),
+        });
+        let err = key().with_public_jwk(rsa).unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Signing(_))
+                && err.to_string().contains("RSA")
+                && err.to_string().contains("ES256"),
+            "got: {err}"
+        );
+
+        // ...and so does the right key type on the wrong curve
+        let p384 = PublicJwk::new(volga_oauth_core::jwk::PublicKey::Ec {
+            crv: volga_oauth_core::jwk::EcCurve::P384,
+            x: "x".into(),
+            y: "y".into(),
+        });
+        assert!(key().with_public_jwk(p384).is_err());
     }
 
     #[test]
@@ -674,22 +723,26 @@ mod tests {
         };
 
         // neither names one
-        assert_eq!(kid_of(&key().with_public_jwk(public_jwk())), None);
+        assert_eq!(kid_of(&key().with_public_jwk(public_jwk()).unwrap()), None);
 
         // a `kid` on the JWK alone is adopted, so the assertions start
         // naming the key the document publishes
-        let adopted = key().with_public_jwk(public_jwk().with_key_id("from-the-jwk"));
+        let adopted = key()
+            .with_public_jwk(public_jwk().with_key_id("from-the-jwk"))
+            .unwrap();
         assert_eq!(kid_of(&adopted), Some("from-the-jwk".into()));
 
         // an explicit one wins, whichever order the two are set in
         let jwk_first = key()
             .with_public_jwk(public_jwk().with_key_id("from-the-jwk"))
+            .unwrap()
             .with_key_id("explicit");
         assert_eq!(kid_of(&jwk_first), Some("explicit".into()));
 
         let id_first = key()
             .with_key_id("explicit")
-            .with_public_jwk(public_jwk().with_key_id("from-the-jwk"));
+            .with_public_jwk(public_jwk().with_key_id("from-the-jwk"))
+            .unwrap();
         assert_eq!(kid_of(&id_first), Some("explicit".into()));
     }
 

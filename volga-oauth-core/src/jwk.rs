@@ -110,6 +110,92 @@ pub enum PublicKey {
     },
 }
 
+impl PublicKey {
+    /// Returns the `kty` of this key
+    pub const fn key_type(&self) -> &'static str {
+        match self {
+            Self::Ec { .. } => "EC",
+            Self::Rsa { .. } => "RSA",
+            Self::Okp { .. } => "OKP",
+        }
+    }
+
+    /// Returns whether this key material can carry `algorithm`
+    ///
+    /// RFC 7518 Section 3.1 pins each algorithm to one key type, and the
+    /// ECDSA ones to one curve as well: `ES256` is P-256 and nothing else.
+    /// The HMAC algorithms are never carried by a public key - the secret
+    /// that verifies them is the secret that signs.
+    pub const fn supports(&self, algorithm: JwsAlgorithm) -> bool {
+        matches!(
+            (self, algorithm),
+            (
+                Self::Ec {
+                    crv: EcCurve::P256,
+                    ..
+                },
+                JwsAlgorithm::ES256
+            ) | (
+                Self::Ec {
+                    crv: EcCurve::P384,
+                    ..
+                },
+                JwsAlgorithm::ES384
+            ) | (
+                Self::Okp {
+                    crv: OkpCurve::Ed25519,
+                    ..
+                },
+                JwsAlgorithm::EdDSA
+            ) | (
+                Self::Rsa { .. },
+                JwsAlgorithm::RS256
+                    | JwsAlgorithm::RS384
+                    | JwsAlgorithm::RS512
+                    | JwsAlgorithm::PS256
+                    | JwsAlgorithm::PS384
+                    | JwsAlgorithm::PS512
+            )
+        )
+    }
+}
+
+/// A JWS algorithm the key material cannot carry
+///
+/// Returned by [`PublicJwk::with_algorithm`] and by deserialization; see
+/// [`PublicKey::supports`] for the pairings RFC 7518 Section 3.1 allows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsupportedAlgorithm {
+    algorithm: JwsAlgorithm,
+    key_type: &'static str,
+}
+
+impl UnsupportedAlgorithm {
+    /// The algorithm that was rejected
+    #[inline]
+    pub fn algorithm(&self) -> JwsAlgorithm {
+        self.algorithm
+    }
+
+    /// The `kty` of the key that cannot carry it
+    #[inline]
+    pub fn key_type(&self) -> &'static str {
+        self.key_type
+    }
+}
+
+impl std::fmt::Display for UnsupportedAlgorithm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "a {} key cannot carry the {} algorithm",
+            self.key_type, self.algorithm
+        )
+    }
+}
+
+impl std::error::Error for UnsupportedAlgorithm {}
+
 /// A published public key (RFC 7517 Section 4)
 ///
 /// Holds only the members of a *public* signing key: there is no way to
@@ -127,7 +213,8 @@ pub enum PublicKey {
 ///         y: "nuk1MebXY11oQniSfOsKSnqmGjYQUhCHlwqeoeb6FDA".into(),
 ///     })
 ///     .with_key_id("2026-08")
-///     .with_algorithm(JwsAlgorithm::ES256);
+///     .with_algorithm(JwsAlgorithm::ES256)
+///     .unwrap();
 ///
 /// let json = serde_json::to_value(&jwk).unwrap();
 /// assert_eq!(json["kty"], "EC");
@@ -171,9 +258,21 @@ impl PublicJwk {
     }
 
     /// Sets the `alg` this key is used with
-    pub fn with_algorithm(mut self, algorithm: JwsAlgorithm) -> Self {
+    ///
+    /// Fails when the key material cannot carry it - an RSA key declaring
+    /// `ES256`, a P-384 key declaring `ES256`, or any public key declaring
+    /// an HMAC algorithm is a document no verifier can act on. See
+    /// [`PublicKey::supports`].
+    pub fn with_algorithm(mut self, algorithm: JwsAlgorithm) -> Result<Self, UnsupportedAlgorithm> {
+        if !self.key.supports(algorithm) {
+            return Err(UnsupportedAlgorithm {
+                algorithm,
+                key_type: self.key.key_type(),
+            });
+        }
+
         self.algorithm = Some(algorithm);
-        self
+        Ok(self)
     }
 
     /// Returns the public key material
@@ -232,11 +331,19 @@ impl<'de> Deserialize<'de> for PublicJwk {
         }
 
         let public: Public = serde_json::from_value(document).map_err(D::Error::custom)?;
+
+        // a declared `alg` the material cannot carry makes the whole
+        // document unusable, so it is refused rather than round-tripped
+        let jwk = Self::new(public.key);
+        let jwk = match public.algorithm {
+            Some(algorithm) => jwk.with_algorithm(algorithm).map_err(D::Error::custom)?,
+            None => jwk,
+        };
+
         Ok(Self {
-            key: public.key,
             key_id: public.key_id,
-            algorithm: public.algorithm,
             key_use: public.key_use,
+            ..jwk
         })
     }
 }
@@ -293,7 +400,8 @@ mod tests {
     fn it_carries_the_optional_members() {
         let jwk = PublicJwk::new(ec_key())
             .with_key_id("2026-08")
-            .with_algorithm(JwsAlgorithm::ES256);
+            .with_algorithm(JwsAlgorithm::ES256)
+            .unwrap();
         assert_eq!(jwk.key_id(), Some("2026-08"));
         assert_eq!(jwk.algorithm(), Some(JwsAlgorithm::ES256));
         assert!(matches!(jwk.key(), PublicKey::Ec { .. }));
@@ -317,6 +425,100 @@ mod tests {
                 .unwrap_err()
                 .to_string();
             assert!(err.contains(member), "{member} was not refused: {err}");
+        }
+    }
+
+    #[test]
+    fn it_pairs_algorithms_with_the_material_that_carries_them() {
+        let ec384 = PublicKey::Ec {
+            crv: EcCurve::P384,
+            x: "x".into(),
+            y: "y".into(),
+        };
+        let rsa = PublicKey::Rsa {
+            n: "n".into(),
+            e: "AQAB".into(),
+        };
+        let okp = PublicKey::Okp {
+            crv: OkpCurve::Ed25519,
+            x: "x".into(),
+        };
+
+        // RFC 7518 Section 3.1 pins each algorithm to one key type, and the
+        // ECDSA ones to one curve
+        assert!(ec_key().supports(JwsAlgorithm::ES256));
+        assert!(!ec_key().supports(JwsAlgorithm::ES384));
+        assert!(ec384.supports(JwsAlgorithm::ES384));
+        assert!(!ec384.supports(JwsAlgorithm::ES256));
+        assert!(okp.supports(JwsAlgorithm::EdDSA));
+        for rsa_alg in [
+            JwsAlgorithm::RS256,
+            JwsAlgorithm::RS384,
+            JwsAlgorithm::RS512,
+            JwsAlgorithm::PS256,
+            JwsAlgorithm::PS384,
+            JwsAlgorithm::PS512,
+        ] {
+            assert!(rsa.supports(rsa_alg));
+            assert!(!ec_key().supports(rsa_alg));
+        }
+
+        // no public key carries an HMAC algorithm - the secret that
+        // verifies one is the secret that signs it
+        for hmac in [
+            JwsAlgorithm::HS256,
+            JwsAlgorithm::HS384,
+            JwsAlgorithm::HS512,
+        ] {
+            for key in [ec_key(), rsa.clone(), okp.clone()] {
+                assert!(!key.supports(hmac), "{} accepted {hmac}", key.key_type());
+            }
+        }
+
+        // ...and the builder refuses what the material cannot carry
+        let err = PublicJwk::new(rsa.clone())
+            .with_algorithm(JwsAlgorithm::ES256)
+            .unwrap_err();
+        assert_eq!(err.key_type(), "RSA");
+        assert_eq!(err.algorithm(), JwsAlgorithm::ES256);
+        assert_eq!(
+            err.to_string(),
+            "a RSA key cannot carry the ES256 algorithm"
+        );
+        assert!(
+            PublicJwk::new(rsa)
+                .with_algorithm(JwsAlgorithm::RS256)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn it_refuses_a_declared_algorithm_the_key_cannot_carry() {
+        // the same rule on the way in: a document pairing an algorithm with
+        // material that cannot carry it is unusable, whoever wrote it
+        for document in [
+            json!({"kty": "RSA", "n": "n", "e": "AQAB", "alg": "ES256"}),
+            json!({"kty": "EC", "crv": "P-384", "x": "x", "y": "y", "alg": "ES256"}),
+            json!({"kty": "EC", "crv": "P-256", "x": "x", "y": "y", "alg": "HS256"}),
+            json!({"kty": "OKP", "crv": "Ed25519", "x": "x", "alg": "ES256"}),
+        ] {
+            let err = serde_json::from_value::<PublicJwk>(document.clone())
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("cannot carry"), "accepted {document}: {err}");
+        }
+
+        // the matching pairs, and an omitted `alg`, go through
+        for document in [
+            json!({"kty": "RSA", "n": "n", "e": "AQAB", "alg": "PS512"}),
+            json!({"kty": "EC", "crv": "P-384", "x": "x", "y": "y", "alg": "ES384"}),
+            json!({"kty": "OKP", "crv": "Ed25519", "x": "x", "alg": "EdDSA"}),
+            json!({"kty": "EC", "crv": "P-256", "x": "x", "y": "y"}),
+        ] {
+            assert!(
+                serde_json::from_value::<PublicJwk>(document.clone()).is_ok(),
+                "refused {document}"
+            );
         }
     }
 

@@ -36,8 +36,9 @@ pub enum ClientError {
     /// requested issuer, RFC 8414 Section 3.3)
     Validation(String),
 
-    /// A `private_key_jwt` client assertion could not be produced: the
-    /// key failed to load or the signature could not be computed
+    /// The signing configuration cannot produce a `private_key_jwt` client
+    /// assertion: the key failed to load, the key and the algorithm do not
+    /// match, or the signature could not be computed
     /// (see `PrivateKeyJwt`, feature `private-key-jwt`)
     Signing(Box<dyn std::error::Error + Send + Sync>),
 }
@@ -98,6 +99,16 @@ impl From<serde_json::Error> for ClientError {
     }
 }
 
+impl From<volga_oauth_core::jwk::UnsupportedAlgorithm> for ClientError {
+    /// A key that cannot carry the algorithm it declares is a signing
+    /// configuration this client cannot act on, so it joins the other
+    /// [`Signing`](ClientError::Signing) failures and propagates with `?`.
+    #[inline]
+    fn from(err: volga_oauth_core::jwk::UnsupportedAlgorithm) -> Self {
+        Self::signing(err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +153,29 @@ mod tests {
         for (err, expected) in cases {
             assert_eq!(err.to_string(), expected);
         }
+    }
+
+    #[test]
+    fn it_adopts_an_unsupported_algorithm_as_a_signing_failure() {
+        use volga_oauth_core::{
+            JwsAlgorithm,
+            jwk::{PublicJwk, PublicKey},
+        };
+
+        let err = PublicJwk::new(PublicKey::Rsa {
+            n: "n".into(),
+            e: "AQAB".into(),
+        })
+        .with_algorithm(JwsAlgorithm::ES256)
+        .unwrap_err();
+
+        // it propagates with `?` from anything returning a `ClientError`
+        let err: ClientError = err.into();
+        assert!(matches!(err, ClientError::Signing(_)));
+        assert_eq!(
+            err.to_string(),
+            "client assertion signing failed: a RSA key cannot carry the ES256 algorithm"
+        );
     }
 
     #[test]
