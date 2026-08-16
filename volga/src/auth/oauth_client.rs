@@ -58,7 +58,7 @@ use std::{
 use tokio::sync::Mutex;
 use volga_oauth_client::{ClientConfig, ClientError, DiscoveryClient};
 
-use crate::error::Error;
+use crate::{error::Error, http::StatusCode};
 
 /// Default minimum interval between two JWKS refresh attempts
 pub const DEFAULT_REFRESH_COOLDOWN: Duration = Duration::from_secs(60);
@@ -463,6 +463,39 @@ fn discovery_error(err: ClientError) -> Error {
     Error::server_error(format!("OAuth issuer discovery failed: {err}"))
 }
 
+impl From<ClientError> for Error {
+    /// Converts a [`ClientError`] into a [`volga::Error`](crate::error::Error),
+    /// so a handler that talks to an authorization server can propagate the
+    /// failure with `?`.
+    ///
+    /// None of these are the inbound request's fault - this application was
+    /// the *client* of the call that failed - so the status describes where
+    /// the failure sits rather than echoing whatever the authorization
+    /// server answered:
+    ///
+    /// * `503` when the server could not be reached at all;
+    /// * `502` when it answered, but unusably - a protocol error, an
+    ///   unexpected status, or a body that would not parse;
+    /// * `500` for everything else, which is this application's own
+    ///   configuration: an insecure URL, metadata that fails validation, a
+    ///   signing key that cannot produce an assertion.
+    ///
+    /// A handler that wants to surface an authorization server's own error
+    /// code to its caller should match on [`ClientError::Protocol`] instead
+    /// of relying on this.
+    fn from(err: ClientError) -> Self {
+        let status = match &err {
+            ClientError::Transport(_) => StatusCode::SERVICE_UNAVAILABLE,
+            ClientError::Protocol(_) | ClientError::Http(_) | ClientError::Decode(_) => {
+                StatusCode::BAD_GATEWAY
+            }
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+
+        Self::from_parts(status, None, err)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,5 +617,55 @@ mod tests {
 
         let keys = Keys::from_set(&set_from(vec![jwk]));
         assert!(keys.lookup(Some("ops-verify")).is_some());
+    }
+
+    #[test]
+    fn it_converts_client_errors_by_where_the_failure_sits() {
+        use volga_oauth_client::{OAuthError, OAuthErrorCode};
+
+        let cases = [
+            // unreachable
+            (
+                ClientError::transport(std::io::Error::other("connection reset")),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+            // answered, but unusably - never the inbound request's fault,
+            // so the authorization server's own status is not echoed back
+            (
+                ClientError::Protocol(OAuthError::new(OAuthErrorCode::InvalidGrant)),
+                StatusCode::BAD_GATEWAY,
+            ),
+            (
+                ClientError::Http(StatusCode::IM_A_TEAPOT),
+                StatusCode::BAD_GATEWAY,
+            ),
+            (
+                serde_json::from_str::<serde_json::Value>("{")
+                    .unwrap_err()
+                    .into(),
+                StatusCode::BAD_GATEWAY,
+            ),
+            // this application's own configuration
+            (
+                ClientError::InsecureUrl("http://auth.example.com".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                ClientError::validation("issuer mismatch"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (
+                ClientError::signing(std::io::Error::other("unusable key")),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ];
+
+        for (client_error, expected) in cases {
+            let message = client_error.to_string();
+            let err: Error = client_error.into();
+            assert_eq!(err.status(), expected, "{message}");
+            // the cause survives the conversion
+            assert_eq!(err.to_string(), message);
+        }
     }
 }
