@@ -15,7 +15,9 @@
 
 use http::HeaderValue;
 
-use volga_oauth_core::{AuthorizationServerMetadata, ClientMetadata, ClientRegistrationResponse};
+use volga_oauth_core::{
+    AuthorizationServerMetadata, ClientMetadata, ClientRegistrationResponse, grant,
+};
 
 use crate::{ClientConfig, ClientError, transport::Transport};
 
@@ -143,12 +145,11 @@ fn validate_request(request: &ClientMetadata) -> Result<(), ClientError> {
         // redirect_uris is REQUIRED for redirect-based grants; any declared
         // response type implies one too, since response types are delivered
         // via the redirection endpoint
-        let redirect_based = request
-            .grant_types
-            .iter()
-            .any(|grant| grant == "authorization_code" || grant == "implicit")
-            // omitted grant_types default to authorization_code (Section 2)
-            || request.grant_types.is_empty()
+        // `grant::covers` applies the Section 2 default for an omitted
+        // `grant_types`, which is authorization_code - so omitting the
+        // field is redirect-based too
+        let redirect_based = grant::covers(&request.grant_types, grant::AUTHORIZATION_CODE)
+            || grant::covers(&request.grant_types, grant::IMPLICIT)
             || !request.response_types.is_empty();
 
         if redirect_based && request.redirect_uris.is_empty() {

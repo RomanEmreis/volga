@@ -98,10 +98,12 @@ pub struct OAuthClient {
     auth_method: ClientAuthMethod,
     redirect_uri: Option<String>,
     store: Option<Arc<dyn TokenStore>>,
-    /// The grants the registration approved, when this client came from
-    /// one that named any; empty means nothing was recorded and nothing is
-    /// constrained
-    registered_grant_types: Vec<String>,
+    /// The `grant_types` of the registration this client was built from,
+    /// as returned - `None` when it never went through one, which is the
+    /// only case that constrains nothing. An empty list is *not* that: per
+    /// RFC 7591 Section 2 it means `authorization_code` alone, which
+    /// [`grant::covers`] applies.
+    registered_grant_types: Option<Vec<String>>,
 }
 
 impl OAuthClient {
@@ -115,7 +117,7 @@ impl OAuthClient {
             auth_method: ClientAuthMethod::default(),
             redirect_uri: None,
             store: None,
-            registered_grant_types: Vec::new(),
+            registered_grant_types: None,
         }
     }
 
@@ -252,26 +254,35 @@ impl OAuthClient {
             self = self.with_redirect_uri(redirect_uri.clone());
         }
 
-        self.registered_grant_types
-            .clone_from(&response.metadata.grant_types);
+        self.registered_grant_types = Some(response.metadata.grant_types.clone());
         self
     }
 
     /// Refuses a grant this client's registration did not approve.
     ///
     /// The token endpoint answers `unauthorized_client` for one it did not,
-    /// and that is a harder failure to read than this. A registration that
-    /// named no grant types constrains nothing - the server told us
-    /// nothing, so there is nothing to check against.
+    /// and that is a harder failure to read than this. Only a client that
+    /// never went through a registration is unconstrained - an omitted
+    /// `grant_types` is `authorization_code` alone, not carte blanche
+    /// (RFC 7591 Section 2, applied by [`grant::covers`]).
+    ///
+    /// `refresh_token` is exempt. RFC 6749 Section 6 makes it the
+    /// continuation of a grant the client already holds rather than a
+    /// separate authorization, and servers routinely issue refresh tokens
+    /// without naming the grant in a registration - refusing it here would
+    /// break those clients for a check the token endpoint never applies.
     pub(crate) fn ensure_grant_registered(&self, grant_type: &str) -> Result<(), ClientError> {
-        let registered = &self.registered_grant_types;
-        if registered.is_empty() || registered.iter().any(|grant| grant == grant_type) {
+        let Some(registered) = &self.registered_grant_types else {
+            return Ok(());
+        };
+
+        if grant_type == grant::REFRESH_TOKEN || grant::covers(registered, grant_type) {
             return Ok(());
         }
 
         Err(ClientError::validation(format!(
-            "this client is not registered for the '{grant_type}' grant; \
-             its registration approved {registered:?}"
+            "this client is not registered for the '{grant_type}' grant; its registration \
+             approved {registered:?}"
         )))
     }
 
@@ -354,6 +365,8 @@ impl OAuthClient {
         code: &str,
         request: &AuthorizationRequest,
     ) -> Result<TokenSet, ClientError> {
+        self.ensure_grant_registered(grant::AUTHORIZATION_CODE)?;
+
         let endpoint = token_endpoint(metadata)?;
         // the serializer is not `Sync`: scoping it keeps it out of the
         // future's state, so this future stays `Send` (see `refresh`)
@@ -624,6 +637,11 @@ impl AuthorizationRequestBuilder<'_> {
     /// no `authorization_endpoint` or advertises PKCE methods without
     /// `S256` (OAuth 2.1 requires it).
     pub fn build(self) -> Result<AuthorizationRequest, ClientError> {
+        // caught before the URL exists, rather than after a user has been
+        // redirected into a flow this client may not complete
+        self.client
+            .ensure_grant_registered(grant::AUTHORIZATION_CODE)?;
+
         let endpoint = self
             .metadata
             .authorization_endpoint
@@ -1237,17 +1255,40 @@ mod tests {
             "got: {err}"
         );
 
-        // a registration naming no grants constrains nothing - the server
-        // told us nothing to check against
-        let unconstrained =
-            OAuthClient::from_registration(&registration(serde_json::json!([]))).unwrap();
+        // ...the authorization code flow included, which this registration
+        // did not approve either
         assert!(
-            unconstrained
-                .ensure_grant_registered(grant::JWT_BEARER)
-                .is_ok()
+            client
+                .ensure_grant_registered(grant::AUTHORIZATION_CODE)
+                .is_err()
         );
 
-        // ...and neither does a client that never went through registration
+        // an omitted `grant_types` is not carte blanche: RFC 7591 Section 2
+        // makes it authorization_code alone
+        let defaulted =
+            OAuthClient::from_registration(&registration(serde_json::json!([]))).unwrap();
+        assert!(
+            defaulted
+                .ensure_grant_registered(grant::AUTHORIZATION_CODE)
+                .is_ok()
+        );
+        assert!(
+            defaulted
+                .ensure_grant_registered(grant::CLIENT_CREDENTIALS)
+                .is_err()
+        );
+
+        // refresh is the continuation of a grant already held, and servers
+        // routinely omit it from a registration - never refused
+        for approved in [
+            serde_json::json!([]),
+            serde_json::json!(["client_credentials"]),
+        ] {
+            let client = OAuthClient::from_registration(&registration(approved)).unwrap();
+            assert!(client.ensure_grant_registered(grant::REFRESH_TOKEN).is_ok());
+        }
+
+        // a client that never went through a registration is unconstrained
         assert!(
             OAuthClient::new("my-client")
                 .ensure_grant_registered(grant::JWT_BEARER)

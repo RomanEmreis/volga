@@ -34,6 +34,20 @@ pub mod grant {
     /// The token exchange grant (RFC 8693) - one token is traded for
     /// another, possibly of a different type
     pub const TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
+
+    /// Returns whether a registration's `grant_types` covers `grant_type`
+    ///
+    /// An empty list is not "every grant": RFC 7591 Section 2 defines the
+    /// default for an omitted `grant_types` as [`AUTHORIZATION_CODE`]
+    /// alone. Both sides of a registration read the field through here, so
+    /// the client that sends one and the client built from the response
+    /// cannot disagree about what it meant.
+    pub fn covers(registered: &[String], grant_type: &str) -> bool {
+        match registered {
+            [] => grant_type == AUTHORIZATION_CODE,
+            registered => registered.iter().any(|grant| grant == grant_type),
+        }
+    }
 }
 
 /// Client authentication method identifiers (the

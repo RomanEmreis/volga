@@ -240,6 +240,25 @@ async fn it_serves_a_stored_service_token_and_re_requests_it_when_stale() {
             .unwrap()
             .is_none()
     );
+
+    // a stored token whose lifetime the server never stated is no evidence
+    // of freshness, so it is re-requested rather than served forever
+    store.put(
+        "inventory",
+        &TokenSet {
+            access_token: "no-known-lifetime".into(),
+            token_type: "Bearer".into(),
+            refresh_token: None,
+            scope: None,
+            id_token: None,
+            expires_at: None,
+        },
+    );
+    let issued_before = issued.load(Ordering::SeqCst);
+    let tokens = service_token().await.unwrap();
+    assert_ne!(tokens.access_token, "no-known-lifetime");
+    assert_eq!(issued.load(Ordering::SeqCst), issued_before + 1);
+
     server.abort();
 }
 

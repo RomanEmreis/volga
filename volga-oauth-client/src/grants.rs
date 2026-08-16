@@ -345,12 +345,22 @@ impl ClientCredentialsRequest<'_> {
     /// # }
     /// ```
     ///
+    /// A stored token whose lifetime the server never stated is re-requested
+    /// rather than served: `expires_in` is only RECOMMENDED by RFC 6749
+    /// Section 5.1, and an unknown lifetime is no evidence of freshness -
+    /// holding one forever would keep handing out a credential long after
+    /// it died. Against a server that omits `expires_in`, this therefore
+    /// runs the grant on every call; that grant is one request, and a
+    /// caller who would rather cache anyway can hold the [`TokenSet`] from
+    /// [`send`](Self::send) under its own policy.
+    ///
     /// # Panics
     /// Panics when no [`TokenStore`](crate::TokenStore) is attached
     /// (see [`with_token_store`](OAuthClient::with_token_store)).
     pub async fn token(self, key: &str) -> Result<TokenSet, ClientError> {
         let store = self.request.client.token_store();
         if let Some(tokens) = store.get(key)
+            && tokens.expires_at.is_some()
             && !tokens.expires_within(EXPIRY_LEEWAY)
         {
             return Ok(tokens);
