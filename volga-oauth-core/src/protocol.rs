@@ -67,6 +67,18 @@ pub mod client_auth {
         "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 }
 
+/// HTTP authentication scheme names (the `WWW-Authenticate` challenge and
+/// the `Authorization` credential that answers it)
+pub mod auth_scheme {
+    /// The bearer token scheme (RFC 6750) - possession of the token is the
+    /// whole credential
+    pub const BEARER: &str = "Bearer";
+
+    /// The DPoP scheme (RFC 9449) - the token is bound to a key the client
+    /// proves possession of on every request
+    pub const DPOP: &str = "DPoP";
+}
+
 /// Token type identifiers used by token exchange (RFC 8693 Section 3)
 pub mod token_type {
     /// An OAuth 2.0 access token

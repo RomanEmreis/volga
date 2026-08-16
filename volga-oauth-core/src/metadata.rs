@@ -148,6 +148,15 @@ pub struct AuthorizationServerMetadata {
     #[serde(default, skip_serializing_if = "is_false")]
     pub authorization_response_iss_parameter_supported: bool,
 
+    /// JWS algorithms this server accepts for DPoP proof JWTs
+    /// ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449) Section 5.1)
+    ///
+    /// A client binding its tokens to a key picks its proof algorithm from
+    /// here. The resource-side counterpart is
+    /// [`ProtectedResourceMetadata::dpop_signing_alg_values_supported`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dpop_signing_alg_values_supported: Vec<String>,
+
     /// Extension and OIDC-specific fields not modeled above
     #[serde(flatten)]
     pub additional_fields: HashMap<String, serde_json::Value>,
@@ -370,6 +379,16 @@ impl AuthorizationServerMetadata {
     /// what closes the mix-up attack the parameter exists to prevent.
     pub fn with_authorization_response_iss_parameter(mut self, supported: bool) -> Self {
         self.authorization_response_iss_parameter_supported = supported;
+        self
+    }
+
+    /// Sets the JWS algorithms accepted for DPoP proof JWTs (RFC 9449 Section 5.1)
+    pub fn with_dpop_signing_algs<I, S>(mut self, algs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.dpop_signing_alg_values_supported = algs.into_iter().map(Into::into).collect();
         self
     }
 

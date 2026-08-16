@@ -21,7 +21,7 @@ use crate::{
 
 /// How early before its expiration a stored access token is considered
 /// stale by [`OAuthClient::token`] and refreshed
-const EXPIRY_LEEWAY: Duration = Duration::from_secs(30);
+pub(crate) const EXPIRY_LEEWAY: Duration = Duration::from_secs(30);
 
 const TOKEN_STORE_NOT_CONFIGURED: &str =
     "OAuth client: token store is not configured; attach one with with_token_store(..)";
@@ -340,6 +340,11 @@ impl OAuthClient {
     /// the server rejected the refresh token (`invalid_grant`) - in the
     /// latter cases the dead entry is removed from the store.
     ///
+    /// This is the Authorization Code counterpart, where renewal means the
+    /// refresh token. A client acting for itself has none to renew with;
+    /// see [`ClientCredentialsRequest::token`](crate::ClientCredentialsRequest::token),
+    /// which re-runs the grant instead.
+    ///
     /// # Panics
     /// Panics when no [`TokenStore`] is attached
     /// (see [`with_token_store`](Self::with_token_store)).
@@ -348,7 +353,7 @@ impl OAuthClient {
         key: &str,
         metadata: &AuthorizationServerMetadata,
     ) -> Result<Option<TokenSet>, ClientError> {
-        let store = self.store.as_deref().expect(TOKEN_STORE_NOT_CONFIGURED);
+        let store = self.token_store();
         let Some(tokens) = store.get(key) else {
             return Ok(None);
         };
@@ -386,10 +391,16 @@ impl OAuthClient {
     /// Panics when no [`TokenStore`] is attached
     /// (see [`with_token_store`](Self::with_token_store)).
     pub fn store_tokens(&self, key: &str, tokens: &TokenSet) {
-        self.store
-            .as_deref()
-            .expect(TOKEN_STORE_NOT_CONFIGURED)
-            .put(key, tokens);
+        self.token_store().put(key, tokens);
+    }
+
+    /// The attached [`TokenStore`].
+    ///
+    /// # Panics
+    /// Panics when none is attached - the same contract every public
+    /// store-backed method carries.
+    pub(crate) fn token_store(&self) -> &dyn TokenStore {
+        self.store.as_deref().expect(TOKEN_STORE_NOT_CONFIGURED)
     }
 
     pub(crate) async fn request_tokens(
@@ -413,10 +424,16 @@ impl OAuthClient {
         body: String,
         authorization: Option<HeaderValue>,
     ) -> Result<T, ClientError> {
+        let mut headers = http::HeaderMap::new();
+        if let Some(authorization) = authorization {
+            headers.insert(http::header::AUTHORIZATION, authorization);
+        }
+
         let value = self
             .transport
-            .post_form(endpoint, body, authorization)
-            .await?;
+            .post_form(endpoint, body, headers)
+            .await?
+            .into_json()?;
 
         serde_json::from_value(value).map_err(Into::into)
     }

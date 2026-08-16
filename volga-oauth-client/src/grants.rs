@@ -24,7 +24,7 @@ use volga_oauth_core::{AuthorizationServerMetadata, grant};
 
 use crate::{
     ClientError, OAuthClient, TokenSet,
-    client::token_endpoint,
+    client::{EXPIRY_LEEWAY, token_endpoint},
     token::{TokenResponse, expires_at},
 };
 
@@ -304,6 +304,54 @@ impl ClientCredentialsRequest<'_> {
     pub async fn send(self) -> Result<TokenSet, ClientError> {
         let response: TokenResponse = self.request.send().await?;
         Ok(response.into())
+    }
+
+    /// Returns the token stored under `key`, requesting a new one whenever
+    /// the stored one is missing or about to expire
+    ///
+    /// The counterpart of [`OAuthClient::token`] for this grant, and the
+    /// way to hold a service token across a process' lifetime. It cannot
+    /// be served by that method: RFC 6749 Section 4.4.3 issues no refresh
+    /// token here, so there is nothing to renew a stored token *with* -
+    /// re-running the grant is the renewal, and this request carries the
+    /// scopes and resource indicators to run it the same way again.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use std::sync::Arc;
+    /// # use volga_oauth_client::{
+    /// #     AuthorizationServerMetadata, ClientError, InMemoryTokenStore, OAuthClient,
+    /// # };
+    /// # async fn run(metadata: &AuthorizationServerMetadata) -> Result<(), ClientError> {
+    /// let client = OAuthClient::new("my-service")
+    ///     .with_secret("s3cret")
+    ///     .with_token_store(Arc::new(InMemoryTokenStore::new()));
+    ///
+    /// // the first call requests, the rest are served from the store
+    /// // until the token nears its expiry
+    /// let tokens = client
+    ///     .client_credentials(metadata)
+    ///     .with_scopes(["inventory:read"])
+    ///     .token("inventory")
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Panics
+    /// Panics when no [`TokenStore`](crate::TokenStore) is attached
+    /// (see [`with_token_store`](OAuthClient::with_token_store)).
+    pub async fn token(self, key: &str) -> Result<TokenSet, ClientError> {
+        let store = self.request.client.token_store();
+        if let Some(tokens) = store.get(key)
+            && !tokens.expires_within(EXPIRY_LEEWAY)
+        {
+            return Ok(tokens);
+        }
+
+        let tokens = self.send().await?;
+        store.put(key, &tokens);
+        Ok(tokens)
     }
 }
 

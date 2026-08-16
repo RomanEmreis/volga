@@ -8,8 +8,8 @@
 
 use bytes::Bytes;
 use http::{
-    HeaderValue, Method, Uri,
-    header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, LOCATION, USER_AGENT},
+    HeaderMap, Method, StatusCode, Uri,
+    header::{ACCEPT, CONTENT_TYPE, LOCATION, USER_AGENT},
 };
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
@@ -75,34 +75,38 @@ impl Transport {
     }
 
     /// Submits an `application/x-www-form-urlencoded` body to `url` with
-    /// `POST` and parses the response body as JSON. Redirects are treated
-    /// as errors - token-style endpoints have no business issuing them.
+    /// `POST` and returns the response for the caller to judge. Redirects
+    /// are treated as errors - token-style endpoints have no business
+    /// issuing them.
+    ///
+    /// `headers` are sent as given, which is how a request carries client
+    /// authentication (`Authorization`) and any scheme-specific header
+    /// alongside it.
     pub(crate) async fn post_form(
         &self,
         url: &str,
         body: String,
-        authorization: Option<HeaderValue>,
-    ) -> Result<Value, ClientError> {
+        headers: HeaderMap,
+    ) -> Result<EndpointResponse, ClientError> {
         tokio::time::timeout(
             self.config.timeout(),
-            self.post_inner(url, FORM_CONTENT_TYPE, body, authorization),
+            self.post_inner(url, FORM_CONTENT_TYPE, body, headers),
         )
         .await
         .map_err(|_| self.timeout_error())?
     }
 
-    /// Submits an `application/json` body to `url` with `POST` and parses
-    /// the response body as JSON, under the same policy as
-    /// [`post_form`](Self::post_form).
+    /// Submits an `application/json` body to `url` with `POST`, under the
+    /// same policy as [`post_form`](Self::post_form).
     pub(crate) async fn post_json(
         &self,
         url: &str,
         body: String,
-        authorization: Option<HeaderValue>,
-    ) -> Result<Value, ClientError> {
+        headers: HeaderMap,
+    ) -> Result<EndpointResponse, ClientError> {
         tokio::time::timeout(
             self.config.timeout(),
-            self.post_inner(url, "application/json", body, authorization),
+            self.post_inner(url, "application/json", body, headers),
         )
         .await
         .map_err(|_| self.timeout_error())?
@@ -155,7 +159,7 @@ impl Transport {
                 continue;
             }
 
-            return read_json(res).await;
+            return EndpointResponse::read(res).await?.into_json();
         }
     }
 
@@ -164,8 +168,8 @@ impl Transport {
         url: &str,
         content_type: &'static str,
         body: String,
-        authorization: Option<HeaderValue>,
-    ) -> Result<Value, ClientError> {
+        headers: HeaderMap,
+    ) -> Result<EndpointResponse, ClientError> {
         self.check_scheme(url)?;
 
         let uri: Uri = url
@@ -179,8 +183,8 @@ impl Transport {
             .header(CONTENT_TYPE, content_type)
             .header(USER_AGENT, USER_AGENT_VALUE);
 
-        if let Some(authorization) = authorization {
-            builder = builder.header(AUTHORIZATION, authorization);
+        if let Some(request_headers) = builder.headers_mut() {
+            request_headers.extend(headers);
         }
 
         let req = builder
@@ -200,7 +204,7 @@ impl Transport {
             )));
         }
 
-        read_json(res).await
+        EndpointResponse::read(res).await
     }
 
     pub(crate) fn check_scheme(&self, url: &str) -> Result<(), ClientError> {
@@ -235,32 +239,67 @@ impl std::fmt::Debug for Transport {
     }
 }
 
-/// Reads a non-redirect response into JSON: a success body is parsed
-/// as-is, an error body is parsed as an OAuth error (RFC 6749 Section 5.2) when
-/// possible and surfaced as the bare status otherwise.
-async fn read_json(res: http::Response<Incoming>) -> Result<Value, ClientError> {
-    let status = res.status();
-    let bytes = Limited::new(res.into_body(), MAX_BODY_BYTES)
-        .collect()
-        .await
-        .map_err(ClientError::transport)?
-        .to_bytes();
+/// A response received from an OAuth endpoint, before its status is judged
+///
+/// [`into_json`](Self::into_json) applies the crate's usual rule and is
+/// what every caller wants. The response is handed over whole because some
+/// flows have to read a header off a *failed* response - RFC 9449
+/// Section 8.2 answers `use_dpop_nonce` with the nonce to retry with in the
+/// `DPoP-Nonce` header - which the error alone cannot carry.
+pub(crate) struct EndpointResponse {
+    status: StatusCode,
+    headers: HeaderMap,
+    body: Bytes,
+}
 
-    if !status.is_success() {
-        // an OAuth error body (RFC 6749 Section 5.2) beats the bare status -
-        // except on 404, which means the endpoint is not served at all:
-        // no OAuth flow defines protocol errors for it, discovery keys
-        // its OIDC fallback off that status, and frameworks commonly
-        // attach JSON bodies to their catch-all 404
-        if status != http::StatusCode::NOT_FOUND
-            && let Ok(err) = serde_json::from_slice::<OAuthError>(&bytes)
-        {
-            return Err(err.into());
-        }
-        return Err(ClientError::Http(status));
+impl EndpointResponse {
+    /// The response headers, available whatever the status says.
+    #[allow(
+        dead_code,
+        reason = "the seam DPoP nonce handling needs; see RomanEmreis/volga#213"
+    )]
+    pub(crate) fn headers(&self) -> &HeaderMap {
+        &self.headers
     }
 
-    serde_json::from_slice(&bytes).map_err(Into::into)
+    /// Reads a non-redirect response, capturing the body up to
+    /// [`MAX_BODY_BYTES`].
+    async fn read(res: http::Response<Incoming>) -> Result<Self, ClientError> {
+        let status = res.status();
+        let headers = res.headers().clone();
+        let body = Limited::new(res.into_body(), MAX_BODY_BYTES)
+            .collect()
+            .await
+            .map_err(ClientError::transport)?
+            .to_bytes();
+
+        Ok(Self {
+            status,
+            headers,
+            body,
+        })
+    }
+
+    /// Turns the response into JSON: a success body is parsed as-is, an
+    /// error body is parsed as an OAuth error (RFC 6749 Section 5.2) when
+    /// possible and surfaced as the bare status otherwise.
+    pub(crate) fn into_json(self) -> Result<Value, ClientError> {
+        if !self.status.is_success() {
+            // an OAuth error body (RFC 6749 Section 5.2) beats the bare status -
+            // except on 404, which means the endpoint is not served at all:
+            // no OAuth flow defines protocol errors for it, discovery keys
+            // its OIDC fallback off that status, and frameworks commonly
+            // attach JSON bodies to their catch-all 404
+            if self.status != StatusCode::NOT_FOUND
+                && let Ok(err) = serde_json::from_slice::<OAuthError>(&self.body)
+            {
+                return Err(err.into());
+            }
+            return Err(ClientError::Http(self.status));
+        }
+
+        serde_json::from_slice(&self.body).map_err(Into::into)
+    }
 }
 
 /// Resolves a `Location` header value against the URI being fetched;
@@ -298,6 +337,55 @@ fn resolve_redirect(current: &Uri, location: &str) -> Result<String, ClientError
 #[cfg(test)]
 mod tests {
     use super::*;
+    use volga_oauth_core::OAuthErrorCode;
+
+    fn response(status: u16, body: &str) -> EndpointResponse {
+        let mut headers = HeaderMap::new();
+        headers.insert("dpop-nonce", "the-nonce".parse().unwrap());
+        EndpointResponse {
+            status: StatusCode::from_u16(status).unwrap(),
+            headers,
+            body: Bytes::from(body.to_owned()),
+        }
+    }
+
+    #[test]
+    fn it_judges_a_response_by_status_and_body() {
+        let ok = response(200, r#"{"access_token": "at"}"#);
+        assert_eq!(ok.into_json().unwrap()["access_token"], "at");
+
+        // an OAuth error body beats the bare status...
+        let err = response(400, r#"{"error": "invalid_grant"}"#)
+            .into_json()
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            ClientError::Protocol(err) if err.error == OAuthErrorCode::InvalidGrant
+        ));
+
+        // ...except on 404, where the endpoint is simply not served
+        let err = response(404, r#"{"error": "invalid_grant"}"#)
+            .into_json()
+            .unwrap_err();
+        assert!(matches!(err, ClientError::Http(StatusCode::NOT_FOUND)));
+
+        // a failure without a parseable OAuth body is the bare status,
+        // and a success that is not JSON is a decode error
+        let err = response(502, "<html></html>").into_json().unwrap_err();
+        assert!(matches!(err, ClientError::Http(StatusCode::BAD_GATEWAY)));
+        let err = response(200, "<html></html>").into_json().unwrap_err();
+        assert!(matches!(err, ClientError::Decode(_)));
+    }
+
+    #[test]
+    fn it_keeps_the_headers_of_a_failed_response() {
+        // the nonce a `use_dpop_nonce` refusal carries lives in a header,
+        // so the headers must survive a status the body would turn into an
+        // error (RFC 9449 Section 8.2)
+        let failed = response(400, r#"{"error": "use_dpop_nonce"}"#);
+        assert_eq!(failed.headers().get("dpop-nonce").unwrap(), "the-nonce");
+        assert!(failed.into_json().is_err());
+    }
 
     #[test]
     fn it_resolves_redirect_locations() {

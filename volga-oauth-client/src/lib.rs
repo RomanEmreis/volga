@@ -48,10 +48,10 @@ pub use token::{TokenResponse, TokenSet};
 // Shared protocol types (`volga::auth::oauth` re-exports the same set)
 pub use volga_oauth_core::{
     AuthorizationServerMetadata, BearerChallenge, ClientMetadata, ClientRegistrationResponse,
-    JwsAlgorithm, OAuthError, OAuthErrorCode, ProtectedResourceMetadata,
+    JwkSet, JwsAlgorithm, OAuthError, OAuthErrorCode, ProtectedResourceMetadata, PublicJwk,
     WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION,
     WELL_KNOWN_PROTECTED_RESOURCE, authorization_server_metadata_url, canonicalize_resource_uri,
-    client_auth, grant, openid_configuration_url, protected_resource_metadata_url, token_type,
+    client_auth, grant, jwk, openid_configuration_url, protected_resource_metadata_url, token_type,
 };
 
 mod assertion;

@@ -13,7 +13,7 @@ use std::{
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::Serialize;
-use volga_oauth_core::{AuthorizationServerMetadata, pem::PemKind};
+use volga_oauth_core::{AuthorizationServerMetadata, JwkSet, PublicJwk, pem::PemKind};
 
 use crate::{ClientError, JwsAlgorithm, pkce::random_urlsafe};
 
@@ -113,6 +113,7 @@ pub struct PrivateKeyJwt {
     key_id: Option<String>,
     lifetime: Duration,
     audiences: Vec<String>,
+    public_jwk: Option<PublicJwk>,
 }
 
 impl PrivateKeyJwt {
@@ -201,7 +202,56 @@ impl PrivateKeyJwt {
             key_id: None,
             lifetime: DEFAULT_ASSERTION_LIFETIME,
             audiences: Vec::new(),
+            public_jwk: None,
         }
+    }
+
+    /// Attaches the public half of this key, so it can be published for the
+    /// authorization server to verify assertions with
+    ///
+    /// Supply the *public* key only - this crate signs, it does not derive
+    /// public keys from private ones. [`PublicJwk`] holds public material
+    /// exclusively, so there is no way to publish the signing key by
+    /// accident through it.
+    ///
+    /// [`jwks`](Self::jwks) then renders the JWK Set to serve, whether as
+    /// the `jwks` member of a Dynamic Client Registration request, or as
+    /// the document a `jwks_uri` points at.
+    pub fn with_public_jwk(mut self, jwk: PublicJwk) -> Self {
+        self.public_jwk = Some(jwk);
+        self
+    }
+
+    /// Returns the JWK Set to publish for this key, or `None` when no
+    /// public JWK was attached with
+    /// [`with_public_jwk`](Self::with_public_jwk)
+    ///
+    /// `kid` and `alg` are taken from this key's configuration so the
+    /// published document agrees with what the assertions actually carry -
+    /// a `kid` mismatch is what makes a server unable to find the key it
+    /// should verify with.
+    ///
+    /// # Example
+    /// ```
+    /// # use volga_oauth_client::{ClientError, JwsAlgorithm, PrivateKeyJwt, PublicJwk};
+    /// # fn run(pem: &[u8], public_jwk: PublicJwk) -> Result<(), ClientError> {
+    /// let key = PrivateKeyJwt::from_pem(pem, JwsAlgorithm::ES256)?
+    ///     .with_key_id("2026-08")
+    ///     .with_public_jwk(public_jwk);
+    ///
+    /// let published = &key.jwks().unwrap().keys[0];
+    /// assert_eq!(published.key_id(), Some("2026-08"));
+    /// assert_eq!(published.algorithm(), Some(JwsAlgorithm::ES256));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn jwks(&self) -> Option<JwkSet> {
+        let mut jwk = self.public_jwk.clone()?.with_algorithm(self.algorithm);
+        if let Some(key_id) = &self.key_id {
+            jwk = jwk.with_key_id(key_id);
+        }
+
+        Some(JwkSet::new([jwk]))
     }
 
     /// Sets the `kid` header identifying this key among the ones published
@@ -306,6 +356,7 @@ impl PartialEq for PrivateKeyJwt {
             && self.key_id == other.key_id
             && self.lifetime == other.lifetime
             && self.audiences == other.audiences
+            && self.public_jwk == other.public_jwk
     }
 }
 
@@ -320,6 +371,8 @@ impl std::fmt::Debug for PrivateKeyJwt {
             .field("key_id", &self.key_id)
             .field("lifetime", &self.lifetime)
             .field("audiences", &self.audiences)
+            // the public half is not a secret - it is meant to be published
+            .field("public_jwk", &self.public_jwk)
             .finish()
     }
 }
@@ -547,6 +600,51 @@ mod tests {
         assert_ne!(key, key.clone().with_key_id("k-1"));
         // same material, different handle
         assert_ne!(key, self::key());
+    }
+
+    /// The public half of [`TEST_EC_PEM`].
+    fn public_jwk() -> PublicJwk {
+        PublicJwk::new(volga_oauth_core::jwk::PublicKey::Ec {
+            crv: volga_oauth_core::jwk::JwkCurve::P256,
+            x: "z9O8S-Itj6aJliZmUmWTG0Ko-GG23Wi6M3qbdjh5w-g".into(),
+            y: "nuk1MebXY11oQniSfOsKSnqmGjYQUhCHlwqeoeb6FDA".into(),
+        })
+    }
+
+    #[test]
+    fn it_publishes_a_jwk_set_agreeing_with_the_assertions() {
+        // no public JWK attached - nothing to publish
+        assert!(key().jwks().is_none());
+
+        let key = key().with_key_id("2026-08").with_public_jwk(public_jwk());
+        let jwks = key.jwks().unwrap();
+        let published = &jwks.keys[0];
+
+        // the `kid` and `alg` must match what the assertion header carries,
+        // or the server cannot pick the key to verify with
+        let assertion = key.assertion("my-client", &metadata()).unwrap();
+        let (header, _) = parts(&assertion);
+        assert_eq!(published.key_id(), Some("2026-08"));
+        assert_eq!(published.key_id(), header["kid"].as_str());
+        assert_eq!(published.algorithm(), Some(JwsAlgorithm::ES256));
+        assert_eq!(published.algorithm().unwrap().as_str(), header["alg"]);
+
+        // ...and the published key must actually verify the signature -
+        // the whole point of publishing it
+        let document = serde_json::to_value(published).unwrap();
+        let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_value(document).unwrap();
+        let decoding = jsonwebtoken::DecodingKey::from_jwk(&jwk).unwrap();
+        let mut validation = jsonwebtoken::Validation::new(Algorithm::ES256);
+        validation.set_issuer(&["my-client"]);
+        validation.set_audience(&["https://auth.example.com"]);
+        jsonwebtoken::decode::<Value>(&assertion, &decoding, &validation)
+            .expect("the published JWK must verify the assertion it was published for");
+
+        // an `alg` disagreeing with the signing algorithm is corrected: the
+        // assertions are what the published document has to describe
+        let contradicting = public_jwk().with_algorithm(JwsAlgorithm::RS256);
+        let jwks = key.with_public_jwk(contradicting).jwks().unwrap();
+        assert_eq!(jwks.keys[0].algorithm(), Some(JwsAlgorithm::ES256));
     }
 
     #[test]

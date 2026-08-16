@@ -7,6 +7,14 @@
 
 mod common;
 
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::{Duration, SystemTime},
+};
+
 use common::{free_port, serve};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::Deserialize;
@@ -15,8 +23,9 @@ use volga::{
     headers::{Authorization, Header},
 };
 use volga_oauth_client::{
-    AuthorizationServerMetadata, ClientConfig, ClientError, JwsAlgorithm, OAuthClient,
-    OAuthErrorCode, PrivateKeyJwt, client_auth, grant, token_type,
+    AuthorizationServerMetadata, ClientConfig, ClientError, InMemoryTokenStore, JwsAlgorithm,
+    OAuthClient, OAuthErrorCode, PrivateKeyJwt, TokenSet, TokenStore, client_auth, grant,
+    token_type,
 };
 
 /// A throwaway P-256 key pair; the client signs with the private half,
@@ -143,6 +152,85 @@ async fn it_requests_a_token_with_client_credentials() {
     // the client credentials grant issues no refresh token (RFC 6749 Section 4.4.3)
     assert_eq!(tokens.refresh_token, None);
     assert!(!tokens.is_expired());
+    server.abort();
+}
+
+#[tokio::test]
+async fn it_serves_a_stored_service_token_and_re_requests_it_when_stale() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+
+    // every request gets a distinct token, so the client side can tell a
+    // cache hit from a fresh grant
+    let issued = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&issued);
+    let mut app = App::new();
+    app.map_post("/token", move |form: Form<TokenForm>| {
+        let counter = Arc::clone(&counter);
+        async move {
+            if form.grant_type != grant::CLIENT_CREDENTIALS {
+                return volga::status!(400, { "error": "unsupported_grant_type" });
+            }
+            let nth = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            volga::ok!({
+                "access_token": format!("at-{nth}"),
+                "token_type": "Bearer",
+                // short enough that the second token is already stale by
+                // the leeway, and no refresh token - as RFC 6749
+                // Section 4.4.3 prescribes for this grant
+                "expires_in": if nth == 1 { 3600 } else { 5 }
+            })
+        }
+    });
+    let server = serve(port, app).await;
+
+    let metadata = server_metadata(&base);
+    let store = Arc::new(InMemoryTokenStore::new());
+    let client = plaintext_client("my-service")
+        .with_secret("s3cret")
+        .with_token_store(store.clone());
+
+    let service_token = || {
+        client
+            .client_credentials(&metadata)
+            .with_scopes(["inventory:read"])
+            .token("inventory")
+    };
+
+    // nothing stored yet - the grant runs
+    assert_eq!(service_token().await.unwrap().access_token, "at-1");
+    // ...and the next call is served from the store
+    assert_eq!(service_token().await.unwrap().access_token, "at-1");
+    assert_eq!(issued.load(Ordering::SeqCst), 1);
+
+    // a token that expires within the leeway is replaced, even though the
+    // grant issues nothing to refresh it with
+    store.put(
+        "inventory",
+        &TokenSet {
+            access_token: "stale".into(),
+            token_type: "Bearer".into(),
+            refresh_token: None,
+            scope: None,
+            id_token: None,
+            expires_at: Some(SystemTime::now() + Duration::from_secs(5)),
+        },
+    );
+    assert_eq!(service_token().await.unwrap().access_token, "at-2");
+    assert_eq!(issued.load(Ordering::SeqCst), 2);
+
+    // the freshly stored one is itself stale, so it is not served back
+    assert_eq!(service_token().await.unwrap().access_token, "at-3");
+
+    // `OAuthClient::token` cannot serve this grant: with no refresh token
+    // it can only report that authorization is needed
+    assert!(
+        client
+            .token("inventory", &metadata)
+            .await
+            .unwrap()
+            .is_none()
+    );
     server.abort();
 }
 

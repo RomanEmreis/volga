@@ -1,5 +1,6 @@
 //! JWS signing and verification algorithm identifiers
 
+use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 
 /// A JWS signing / verification algorithm (RFC 7518 Section 3.1)
@@ -9,7 +10,9 @@ use std::fmt::{Display, Formatter};
 /// and `private_key_jwt` client assertions on the client side. The mapping
 /// onto the underlying JWT implementation stays private to each crate, so
 /// no consumer has to name it.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Default)]
+/// The variant names are the registered `alg` values verbatim, so the
+/// derived serde impls are the wire form (`JwsAlgorithm::EdDSA` <-> `"EdDSA"`).
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum JwsAlgorithm {
     /// HMAC using SHA-256

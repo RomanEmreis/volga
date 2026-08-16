@@ -118,10 +118,16 @@ impl RegistrationClient {
             .map(bearer_credentials)
             .transpose()?;
 
+        let mut headers = http::HeaderMap::new();
+        if let Some(authorization) = authorization {
+            headers.insert(http::header::AUTHORIZATION, authorization);
+        }
+
         let value = self
             .transport
-            .post_json(endpoint, body, authorization)
-            .await?;
+            .post_json(endpoint, body, headers)
+            .await?
+            .into_json()?;
 
         serde_json::from_value(value).map_err(Into::into)
     }
