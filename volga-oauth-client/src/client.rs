@@ -14,7 +14,7 @@ use volga_oauth_core::{AuthorizationServerMetadata, OAuthErrorCode};
 
 use crate::{
     ClientConfig, ClientError, Pkce, PrivateKeyJwt, TokenResponse, TokenSet, TokenStore,
-    assertion::CLIENT_ASSERTION_TYPE_JWT_BEARER,
+    client_auth, grant,
     pkce::{PKCE_METHOD, random_urlsafe},
     transport::Transport,
 };
@@ -159,15 +159,15 @@ impl OAuthClient {
             .metadata
             .token_endpoint_auth_method
             .as_deref()
-            .unwrap_or("client_secret_basic")
+            .unwrap_or(client_auth::CLIENT_SECRET_BASIC)
         {
-            "none" => {}
-            "client_secret_basic" => {
+            client_auth::NONE => {}
+            client_auth::CLIENT_SECRET_BASIC => {
                 if let Some(secret) = &response.client_secret {
                     client = client.with_secret(secret.clone());
                 }
             }
-            "client_secret_post" => {
+            client_auth::CLIENT_SECRET_POST => {
                 if let Some(secret) = &response.client_secret {
                     client = client
                         .with_secret(secret.clone())
@@ -175,7 +175,7 @@ impl OAuthClient {
                 }
             }
             // performable only with a key to sign the assertions with
-            "private_key_jwt" => match key {
+            client_auth::PRIVATE_KEY_JWT => match key {
                 Some(key) => client = client.with_private_key_jwt(key),
                 None => {
                     return Err(ClientError::validation(
@@ -187,8 +187,11 @@ impl OAuthClient {
             unsupported => {
                 return Err(ClientError::validation(format!(
                     "registered token_endpoint_auth_method '{unsupported}' is not supported; \
-                     this client supports client_secret_basic, client_secret_post, \
-                     private_key_jwt and none"
+                     this client supports {}, {}, {} and {}",
+                    client_auth::CLIENT_SECRET_BASIC,
+                    client_auth::CLIENT_SECRET_POST,
+                    client_auth::PRIVATE_KEY_JWT,
+                    client_auth::NONE,
                 )));
             }
         }
@@ -284,7 +287,7 @@ impl OAuthClient {
         let (body, authorization) = {
             let mut form = form_urlencoded::Serializer::new(String::new());
 
-            form.append_pair("grant_type", "authorization_code")
+            form.append_pair("grant_type", grant::AUTHORIZATION_CODE)
                 .append_pair("code", code)
                 .append_pair("code_verifier", request.pkce.verifier());
 
@@ -319,7 +322,7 @@ impl OAuthClient {
         let (body, authorization) = {
             let mut form = form_urlencoded::Serializer::new(String::new());
 
-            form.append_pair("grant_type", "refresh_token")
+            form.append_pair("grant_type", grant::REFRESH_TOKEN)
                 .append_pair("refresh_token", refresh_token);
 
             let authorization = self.apply_client_auth(&mut form, metadata)?;
@@ -432,7 +435,10 @@ impl OAuthClient {
         // the assertion is the credential; a secret, if any, is not sent
         if let ClientAuthMethod::PrivateKeyJwt(key) = &self.auth_method {
             form.append_pair("client_id", &self.client_id)
-                .append_pair("client_assertion_type", CLIENT_ASSERTION_TYPE_JWT_BEARER)
+                .append_pair(
+                    "client_assertion_type",
+                    client_auth::ASSERTION_TYPE_JWT_BEARER,
+                )
                 .append_pair(
                     "client_assertion",
                     &key.assertion(&self.client_id, metadata)?,
@@ -858,7 +864,7 @@ mod tests {
         assert_eq!(get("client_id").as_deref(), Some("my-client"));
         assert_eq!(
             get("client_assertion_type").as_deref(),
-            Some(CLIENT_ASSERTION_TYPE_JWT_BEARER)
+            Some(client_auth::ASSERTION_TYPE_JWT_BEARER)
         );
         assert_eq!(get("client_secret"), None);
         assert_eq!(

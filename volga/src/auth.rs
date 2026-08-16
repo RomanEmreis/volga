@@ -50,6 +50,8 @@ pub mod claims;
 pub mod decoding_key;
 #[cfg(feature = "jwt-auth")]
 pub mod encoding_key;
+#[cfg(feature = "jwt-auth")]
+pub(crate) mod key;
 #[cfg(feature = "oauth")]
 pub mod oauth;
 #[cfg(feature = "oauth-client")]

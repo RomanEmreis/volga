@@ -15,9 +15,8 @@ use volga::{
     headers::{Authorization, Header},
 };
 use volga_oauth_client::{
-    AuthorizationServerMetadata, CLIENT_ASSERTION_TYPE_JWT_BEARER, ClientConfig, ClientError,
-    GRANT_TYPE_CLIENT_CREDENTIALS, GRANT_TYPE_JWT_BEARER, GRANT_TYPE_TOKEN_EXCHANGE, OAuthClient,
-    OAuthErrorCode, PrivateKeyJwt, SigningAlgorithm, TOKEN_TYPE_ID_JAG, TOKEN_TYPE_ID_TOKEN,
+    AuthorizationServerMetadata, ClientConfig, ClientError, JwsAlgorithm, OAuthClient,
+    OAuthErrorCode, PrivateKeyJwt, client_auth, grant, token_type,
 };
 
 /// A throwaway P-256 key pair; the client signs with the private half,
@@ -67,15 +66,15 @@ fn server_metadata(base: &str) -> AuthorizationServerMetadata {
     let mut metadata = AuthorizationServerMetadata::new(base);
     metadata.token_endpoint = Some(format!("{base}/token"));
     metadata.grant_types_supported = vec![
-        GRANT_TYPE_CLIENT_CREDENTIALS.into(),
-        GRANT_TYPE_JWT_BEARER.into(),
-        GRANT_TYPE_TOKEN_EXCHANGE.into(),
+        grant::CLIENT_CREDENTIALS.into(),
+        grant::JWT_BEARER.into(),
+        grant::TOKEN_EXCHANGE.into(),
     ];
     metadata
 }
 
 fn key() -> PrivateKeyJwt {
-    PrivateKeyJwt::from_pem(CLIENT_KEY_PEM, SigningAlgorithm::ES256).unwrap()
+    PrivateKeyJwt::from_pem(CLIENT_KEY_PEM, JwsAlgorithm::ES256).unwrap()
 }
 
 /// Verifies a client assertion the way an authorization server would:
@@ -105,7 +104,7 @@ async fn it_requests_a_token_with_client_credentials() {
     app.map_post(
         "/token",
         |authorization: Header<Authorization>, form: Form<TokenForm>| async move {
-            if form.grant_type != GRANT_TYPE_CLIENT_CREDENTIALS {
+            if form.grant_type != grant::CLIENT_CREDENTIALS {
                 return volga::status!(400, { "error": "unsupported_grant_type" });
             }
             match authorization.as_str() {
@@ -157,8 +156,9 @@ async fn it_requests_a_token_with_a_private_key_jwt_assertion() {
     app.map_post("/token", move |form: Form<TokenForm>| {
         let issuer = issuer.clone();
         async move {
-            if form.grant_type != GRANT_TYPE_CLIENT_CREDENTIALS
-                || form.client_assertion_type.as_deref() != Some(CLIENT_ASSERTION_TYPE_JWT_BEARER)
+            if form.grant_type != grant::CLIENT_CREDENTIALS
+                || form.client_assertion_type.as_deref()
+                    != Some(client_auth::ASSERTION_TYPE_JWT_BEARER)
                 || form.client_id.as_deref() != Some("my-service")
             {
                 return volga::status!(400, { "error": "invalid_request" });
@@ -196,7 +196,7 @@ async fn it_presents_a_workload_jwt_as_an_authorization_grant() {
 
     let mut app = App::new();
     app.map_post("/token", |form: Form<TokenForm>| async move {
-        if form.grant_type != GRANT_TYPE_JWT_BEARER {
+        if form.grant_type != grant::JWT_BEARER {
             return volga::status!(400, { "error": "unsupported_grant_type" });
         }
         // the assertion is the credential - the client authenticates with
@@ -253,17 +253,17 @@ async fn it_exchanges_an_id_token_then_presents_the_assertion() {
 
     let mut idp = App::new();
     idp.map_post("/token", |form: Form<TokenForm>| async move {
-        if form.grant_type != GRANT_TYPE_TOKEN_EXCHANGE
+        if form.grant_type != grant::TOKEN_EXCHANGE
             || form.subject_token.as_deref() != Some("the.id.token")
-            || form.subject_token_type.as_deref() != Some(TOKEN_TYPE_ID_TOKEN)
-            || form.requested_token_type.as_deref() != Some(TOKEN_TYPE_ID_JAG)
+            || form.subject_token_type.as_deref() != Some(token_type::ID_TOKEN)
+            || form.requested_token_type.as_deref() != Some(token_type::ID_JAG)
             || form.audience.as_deref() != Some("https://api.example.com")
         {
             return volga::status!(400, { "error": "invalid_request" });
         }
         volga::ok!({
             "access_token": "the.id.jag",
-            "issued_token_type": TOKEN_TYPE_ID_JAG,
+            "issued_token_type": token_type::ID_JAG,
             "token_type": "N_A",
             "expires_in": 300
         })
@@ -272,9 +272,7 @@ async fn it_exchanges_an_id_token_then_presents_the_assertion() {
 
     let mut authorization_server = App::new();
     authorization_server.map_post("/token", |form: Form<TokenForm>| async move {
-        if form.grant_type != GRANT_TYPE_JWT_BEARER
-            || form.assertion.as_deref() != Some("the.id.jag")
-        {
+        if form.grant_type != grant::JWT_BEARER || form.assertion.as_deref() != Some("the.id.jag") {
             return volga::status!(400, { "error": "invalid_grant" });
         }
         volga::ok!({ "access_token": "at", "token_type": "Bearer", "expires_in": 3600 })
@@ -286,15 +284,15 @@ async fn it_exchanges_an_id_token_then_presents_the_assertion() {
     let as_metadata = server_metadata(&as_base);
 
     let exchanged = client
-        .exchange_token(&idp_metadata, "the.id.token", TOKEN_TYPE_ID_TOKEN)
-        .with_requested_token_type(TOKEN_TYPE_ID_JAG)
+        .exchange_token(&idp_metadata, "the.id.token", token_type::ID_TOKEN)
+        .with_requested_token_type(token_type::ID_JAG)
         .with_audience("https://api.example.com")
         .send()
         .await
         .unwrap();
 
     assert_eq!(exchanged.token, "the.id.jag");
-    assert_eq!(exchanged.issued_token_type, TOKEN_TYPE_ID_JAG);
+    assert_eq!(exchanged.issued_token_type, token_type::ID_JAG);
     // an ID-JAG is not a bearer token - it is only good as a grant
     assert!(!exchanged.is_bearer());
     assert!(!exchanged.is_expired());

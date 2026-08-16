@@ -10,6 +10,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::protocol::{client_auth, grant};
+
 /// Well-known path for OAuth 2.0 Authorization Server Metadata (RFC 8414)
 pub const WELL_KNOWN_AUTHORIZATION_SERVER: &str = "/.well-known/oauth-authorization-server";
 
@@ -166,7 +168,7 @@ impl AuthorizationServerMetadata {
         Self {
             issuer: issuer.into(),
             response_types_supported: vec!["code".into()],
-            grant_types_supported: vec!["authorization_code".into()],
+            grant_types_supported: vec![grant::AUTHORIZATION_CODE.into()],
             ..Default::default()
         }
     }
@@ -405,13 +407,13 @@ fn default_response_modes() -> Vec<String> {
 /// RFC 8414 Section 2 default for an omitted `grant_types_supported`
 #[inline]
 fn default_grant_types() -> Vec<String> {
-    vec!["authorization_code".into(), "implicit".into()]
+    vec![grant::AUTHORIZATION_CODE.into(), grant::IMPLICIT.into()]
 }
 
 /// RFC 8414 Section 2 default for omitted token/revocation endpoint auth methods
 #[inline]
 fn default_client_auth_methods() -> Vec<String> {
-    vec!["client_secret_basic".into()]
+    vec![client_auth::CLIENT_SECRET_BASIC.into()]
 }
 
 /// Keeps `false` - the spec default for the boolean metadata fields -

@@ -2,7 +2,6 @@
 
 /// The key format inferred from a PEM header.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[allow(dead_code)]
 pub(crate) enum PemKind {
     /// `-----BEGIN RSA PRIVATE KEY-----` or `-----BEGIN RSA PUBLIC KEY-----`.
     Rsa,
@@ -17,7 +16,6 @@ pub(crate) enum PemKind {
 
 /// Inspects the first recognizable PEM header line in `bytes` and returns the
 /// inferred key kind. Leading whitespace / blank lines are skipped.
-#[allow(dead_code)]
 pub(crate) fn detect(bytes: &[u8]) -> PemKind {
     for line in bytes.split(|&b| b == b'\n') {
         let trimmed = trim_ascii(line);
@@ -34,7 +32,6 @@ pub(crate) fn detect(bytes: &[u8]) -> PemKind {
     PemKind::Unknown
 }
 
-#[allow(dead_code)]
 fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
     while let [first, rest @ ..] = bytes {
         if first.is_ascii_whitespace() {

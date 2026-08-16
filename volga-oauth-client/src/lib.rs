@@ -28,9 +28,7 @@ compile_error!(
     "volga-oauth-client requires at least one of the `http1` or `http2` features to be enabled"
 );
 
-pub use assertion::{
-    CLIENT_ASSERTION_TYPE_JWT_BEARER, DEFAULT_ASSERTION_LIFETIME, PrivateKeyJwt, SigningAlgorithm,
-};
+pub use assertion::{DEFAULT_ASSERTION_LIFETIME, PrivateKeyJwt};
 pub use cache::MetadataCache;
 pub use client::{
     AuthorizationRequest, AuthorizationRequestBuilder, ClientAuthMethod, OAuthClient,
@@ -39,9 +37,7 @@ pub use config::{ClientConfig, DEFAULT_MAX_REDIRECTS, DEFAULT_TIMEOUT};
 pub use discovery::DiscoveryClient;
 pub use error::ClientError;
 pub use grants::{
-    ClientCredentialsRequest, ExchangedToken, GRANT_TYPE_CLIENT_CREDENTIALS, GRANT_TYPE_JWT_BEARER,
-    GRANT_TYPE_TOKEN_EXCHANGE, JwtBearerRequest, TOKEN_TYPE_ACCESS_TOKEN, TOKEN_TYPE_ID_JAG,
-    TOKEN_TYPE_ID_TOKEN, TOKEN_TYPE_JWT, TOKEN_TYPE_REFRESH_TOKEN, TokenExchangeRequest,
+    ClientCredentialsRequest, ExchangedToken, JwtBearerRequest, TokenExchangeRequest,
     TokenExchangeResponse,
 };
 pub use pkce::{PKCE_METHOD, Pkce};
@@ -52,10 +48,10 @@ pub use token::{TokenResponse, TokenSet};
 // Shared protocol types (`volga::auth::oauth` re-exports the same set)
 pub use volga_oauth_core::{
     AuthorizationServerMetadata, BearerChallenge, ClientMetadata, ClientRegistrationResponse,
-    OAuthError, OAuthErrorCode, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
-    WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
-    authorization_server_metadata_url, canonicalize_resource_uri, openid_configuration_url,
-    protected_resource_metadata_url,
+    JwsAlgorithm, OAuthError, OAuthErrorCode, ProtectedResourceMetadata,
+    WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION,
+    WELL_KNOWN_PROTECTED_RESOURCE, authorization_server_metadata_url, canonicalize_resource_uri,
+    client_auth, grant, openid_configuration_url, protected_resource_metadata_url, token_type,
 };
 
 mod assertion;

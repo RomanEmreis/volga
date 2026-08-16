@@ -52,7 +52,7 @@ No user is involved, so the client's own credentials are the grant:
 
 ```rust,no_run
 use volga_oauth_client::{
-    ClientError, DiscoveryClient, OAuthClient, PrivateKeyJwt, SigningAlgorithm,
+    ClientError, DiscoveryClient, JwsAlgorithm, OAuthClient, PrivateKeyJwt,
 };
 
 async fn service_token(signing_key_pem: &[u8]) -> Result<(), ClientError> {
@@ -64,7 +64,7 @@ async fn service_token(signing_key_pem: &[u8]) -> Result<(), ClientError> {
     let client = OAuthClient::new("my-service")
         .with_private_key_jwt(PrivateKeyJwt::from_pem(
             signing_key_pem,
-            SigningAlgorithm::RS256,
+            JwsAlgorithm::RS256,
         )?);
 
     let tokens = client

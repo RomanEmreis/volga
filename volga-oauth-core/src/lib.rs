@@ -11,11 +11,16 @@
 //! * The `WWW-Authenticate` Bearer challenge builder and parser
 //! * Resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
 //!   and well-known metadata URL derivation
+//! * The registered protocol identifiers both sides agree on ([`grant`],
+//!   [`client_auth`], [`token_type`]) and the JWS algorithm names
+//!   ([`JwsAlgorithm`])
 //!
-//! This crate contains no HTTP I/O. Most applications should depend on
-//! `volga` (with the `oauth` feature) or `volga-oauth-client` instead of
-//! this crate directly; both re-export these types.
+//! This crate contains no HTTP I/O and no cryptography. Most applications
+//! should depend on `volga` (with the `oauth` feature) or
+//! `volga-oauth-client` instead of this crate directly; both re-export
+//! these types.
 
+pub use algorithm::JwsAlgorithm;
 pub use error::{OAuthError, OAuthErrorCode};
 pub use metadata::{
     AuthorizationServerMetadata, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
@@ -27,7 +32,12 @@ pub use utils::{
     openid_configuration_url, protected_resource_metadata_url,
 };
 
+mod algorithm;
 mod error;
 mod metadata;
+pub mod protocol;
 mod registration;
 mod utils;
+
+#[doc(inline)]
+pub use protocol::{client_auth, grant, token_type};

@@ -20,39 +20,13 @@ use std::time::{Duration, SystemTime};
 
 use http::HeaderValue;
 use serde::{Deserialize, Serialize};
-use volga_oauth_core::AuthorizationServerMetadata;
+use volga_oauth_core::{AuthorizationServerMetadata, grant};
 
 use crate::{
     ClientError, OAuthClient, TokenSet,
     client::token_endpoint,
     token::{TokenResponse, expires_at},
 };
-
-/// The RFC 6749 Section 4.4 client credentials grant type
-pub const GRANT_TYPE_CLIENT_CREDENTIALS: &str = "client_credentials";
-
-/// The RFC 7523 Section 2.1 JWT bearer authorization grant type
-pub const GRANT_TYPE_JWT_BEARER: &str = "urn:ietf:params:oauth:grant-type:jwt-bearer";
-
-/// The RFC 8693 token exchange grant type
-pub const GRANT_TYPE_TOKEN_EXCHANGE: &str = "urn:ietf:params:oauth:grant-type:token-exchange";
-
-/// RFC 8693 Section 3 token type identifier for an OAuth 2.0 access token
-pub const TOKEN_TYPE_ACCESS_TOKEN: &str = "urn:ietf:params:oauth:token-type:access_token";
-
-/// RFC 8693 Section 3 token type identifier for an OAuth 2.0 refresh token
-pub const TOKEN_TYPE_REFRESH_TOKEN: &str = "urn:ietf:params:oauth:token-type:refresh_token";
-
-/// RFC 8693 Section 3 token type identifier for an OpenID Connect ID token
-pub const TOKEN_TYPE_ID_TOKEN: &str = "urn:ietf:params:oauth:token-type:id_token";
-
-/// RFC 8693 Section 3 token type identifier for a plain JWT
-pub const TOKEN_TYPE_JWT: &str = "urn:ietf:params:oauth:token-type:jwt";
-
-/// Token type identifier of an identity assertion authorization grant,
-/// the cross-domain assertion an identity provider issues for an
-/// application to present to a resource's authorization server
-pub const TOKEN_TYPE_ID_JAG: &str = "urn:ietf:params:oauth:token-type:id-jag";
 
 impl OAuthClient {
     /// Requests a token with the client's own credentials (RFC 6749
@@ -87,7 +61,7 @@ impl OAuthClient {
         metadata: &'a AuthorizationServerMetadata,
     ) -> ClientCredentialsRequest<'a> {
         ClientCredentialsRequest {
-            request: TokenRequest::new(self, metadata, GRANT_TYPE_CLIENT_CREDENTIALS),
+            request: TokenRequest::new(self, metadata, grant::CLIENT_CREDENTIALS),
         }
     }
 
@@ -123,7 +97,7 @@ impl OAuthClient {
         metadata: &'a AuthorizationServerMetadata,
         assertion: &'a str,
     ) -> JwtBearerRequest<'a> {
-        let mut request = TokenRequest::new(self, metadata, GRANT_TYPE_JWT_BEARER);
+        let mut request = TokenRequest::new(self, metadata, grant::JWT_BEARER);
         request.params.push(("assertion", assertion.to_owned()));
         JwtBearerRequest { request }
     }
@@ -132,7 +106,8 @@ impl OAuthClient {
     ///
     /// `subject_token` is the token representing the party the new token
     /// is requested for, and `subject_token_type` the identifier of what
-    /// it is - one of the `TOKEN_TYPE_*` constants, or any URI the server
+    /// it is - one of the [`token_type`](crate::token_type) constants, or
+    /// any URI the server
     /// understands.
     ///
     /// Unlike the other grants this one does not necessarily yield a
@@ -143,8 +118,7 @@ impl OAuthClient {
     /// # Example
     /// ```no_run
     /// # use volga_oauth_client::{
-    /// #     AuthorizationServerMetadata, ClientError, OAuthClient, TOKEN_TYPE_ID_JAG,
-    /// #     TOKEN_TYPE_ID_TOKEN,
+    /// #     AuthorizationServerMetadata, ClientError, OAuthClient, token_type,
     /// # };
     /// # async fn run(
     /// #     idp: &AuthorizationServerMetadata,
@@ -155,8 +129,8 @@ impl OAuthClient {
     /// // exchange the user's ID token for an assertion the resource's
     /// // authorization server accepts...
     /// let exchanged = client
-    ///     .exchange_token(idp, id_token, TOKEN_TYPE_ID_TOKEN)
-    ///     .with_requested_token_type(TOKEN_TYPE_ID_JAG)
+    ///     .exchange_token(idp, id_token, token_type::ID_TOKEN)
+    ///     .with_requested_token_type(token_type::ID_JAG)
     ///     .with_audience("https://api.example.com")
     ///     .send()
     ///     .await?;
@@ -176,7 +150,7 @@ impl OAuthClient {
         subject_token: &'a str,
         subject_token_type: &'a str,
     ) -> TokenExchangeRequest<'a> {
-        let mut request = TokenRequest::new(self, metadata, GRANT_TYPE_TOKEN_EXCHANGE);
+        let mut request = TokenRequest::new(self, metadata, grant::TOKEN_EXCHANGE);
         request.params.extend([
             ("subject_token", subject_token.to_owned()),
             ("subject_token_type", subject_token_type.to_owned()),
@@ -448,7 +422,7 @@ pub struct ExchangedToken {
     pub token: String,
 
     /// The type identifier of the issued token, one of the
-    /// `TOKEN_TYPE_*` constants or a server-specific URI
+    /// [`token_type`](crate::token_type) constants or a server-specific URI
     pub issued_token_type: String,
 
     /// How the token is to be presented, e.g. `Bearer`
@@ -565,15 +539,16 @@ fn ensure_grant_supported(
 mod tests {
     use super::*;
     use crate::{ClientAuthMethod, assertion::test_key};
+    use volga_oauth_core::token_type;
 
     fn metadata() -> AuthorizationServerMetadata {
         let mut metadata = AuthorizationServerMetadata::new("https://auth.example.com");
         metadata.token_endpoint = Some("https://auth.example.com/token".into());
         metadata.grant_types_supported = vec![
             "authorization_code".into(),
-            GRANT_TYPE_CLIENT_CREDENTIALS.into(),
-            GRANT_TYPE_JWT_BEARER.into(),
-            GRANT_TYPE_TOKEN_EXCHANGE.into(),
+            grant::CLIENT_CREDENTIALS.into(),
+            grant::JWT_BEARER.into(),
+            grant::TOKEN_EXCHANGE.into(),
         ];
         metadata
     }
@@ -655,7 +630,7 @@ mod tests {
         assert!(authorization.is_none());
         assert_eq!(
             value(&body, "grant_type").as_deref(),
-            Some(GRANT_TYPE_JWT_BEARER)
+            Some(grant::JWT_BEARER)
         );
         assert_eq!(
             value(&body, "assertion").as_deref(),
@@ -671,10 +646,10 @@ mod tests {
         let metadata = metadata();
 
         let (body, authorization) = client
-            .exchange_token(&metadata, "the.id.token", TOKEN_TYPE_ID_TOKEN)
-            .with_requested_token_type(TOKEN_TYPE_ID_JAG)
+            .exchange_token(&metadata, "the.id.token", token_type::ID_TOKEN)
+            .with_requested_token_type(token_type::ID_JAG)
             .with_audience("https://api.example.com")
-            .with_actor_token("the.actor.token", TOKEN_TYPE_JWT)
+            .with_actor_token("the.actor.token", token_type::JWT)
             .request
             .build()
             .unwrap();
@@ -682,7 +657,7 @@ mod tests {
         assert!(authorization.is_none());
         assert_eq!(
             value(&body, "grant_type").as_deref(),
-            Some(GRANT_TYPE_TOKEN_EXCHANGE)
+            Some(grant::TOKEN_EXCHANGE)
         );
         assert_eq!(
             value(&body, "subject_token").as_deref(),
@@ -690,11 +665,11 @@ mod tests {
         );
         assert_eq!(
             value(&body, "subject_token_type").as_deref(),
-            Some(TOKEN_TYPE_ID_TOKEN)
+            Some(token_type::ID_TOKEN)
         );
         assert_eq!(
             value(&body, "requested_token_type").as_deref(),
-            Some(TOKEN_TYPE_ID_JAG)
+            Some(token_type::ID_JAG)
         );
         assert_eq!(
             value(&body, "audience").as_deref(),
@@ -706,7 +681,7 @@ mod tests {
         );
         assert_eq!(
             value(&body, "actor_token_type").as_deref(),
-            Some(TOKEN_TYPE_JWT)
+            Some(token_type::JWT)
         );
         // ...authenticated by a freshly signed client assertion
         assert!(value(&body, "client_assertion").is_some());
@@ -731,7 +706,7 @@ mod tests {
         );
 
         let err = client
-            .exchange_token(&metadata, "t", TOKEN_TYPE_JWT)
+            .exchange_token(&metadata, "t", token_type::JWT)
             .request
             .build()
             .unwrap_err();
@@ -757,7 +732,7 @@ mod tests {
         assert_send(client.jwt_bearer(&metadata, "the.jwt").send());
         assert_send(
             client
-                .exchange_token(&metadata, "the.jwt", TOKEN_TYPE_JWT)
+                .exchange_token(&metadata, "the.jwt", token_type::JWT)
                 .send(),
         );
     }
@@ -766,7 +741,7 @@ mod tests {
     fn it_resolves_an_exchanged_token() {
         let response = TokenExchangeResponse {
             access_token: "issued".into(),
-            issued_token_type: TOKEN_TYPE_ACCESS_TOKEN.into(),
+            issued_token_type: token_type::ACCESS_TOKEN.into(),
             token_type: "Bearer".into(),
             expires_in: Some(3600),
             scope: Some("read".into()),
@@ -775,7 +750,7 @@ mod tests {
 
         let token = ExchangedToken::from(response);
         assert_eq!(token.token, "issued");
-        assert_eq!(token.issued_token_type, TOKEN_TYPE_ACCESS_TOKEN);
+        assert_eq!(token.issued_token_type, token_type::ACCESS_TOKEN);
         assert!(token.is_bearer());
         assert!(!token.is_expired());
         assert!(token.expires_within(Duration::from_secs(3601)));
@@ -786,7 +761,7 @@ mod tests {
         )
         .unwrap();
         let token = ExchangedToken::from(response);
-        assert_eq!(token.issued_token_type, TOKEN_TYPE_ID_JAG);
+        assert_eq!(token.issued_token_type, token_type::ID_JAG);
         assert!(!token.is_bearer());
         assert_eq!(token.expires_at, None);
         assert!(!token.is_expired());
@@ -796,7 +771,7 @@ mod tests {
     fn it_redacts_tokens_in_debug_output() {
         let response = TokenExchangeResponse {
             access_token: "s3cr3t-token".into(),
-            issued_token_type: TOKEN_TYPE_ACCESS_TOKEN.into(),
+            issued_token_type: token_type::ACCESS_TOKEN.into(),
             token_type: "Bearer".into(),
             expires_in: None,
             scope: None,

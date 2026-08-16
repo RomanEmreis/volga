@@ -15,12 +15,7 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::Serialize;
 use volga_oauth_core::AuthorizationServerMetadata;
 
-use crate::{ClientError, pkce::random_urlsafe};
-
-/// The `client_assertion_type` accompanying a `private_key_jwt`
-/// assertion (RFC 7523 Section 2.2)
-pub const CLIENT_ASSERTION_TYPE_JWT_BEARER: &str =
-    "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+use crate::{ClientError, JwsAlgorithm, pkce::random_urlsafe};
 
 /// Default validity of a generated client assertion
 ///
@@ -28,72 +23,39 @@ pub const CLIENT_ASSERTION_TYPE_JWT_BEARER: &str =
 /// assertion is consumed by a single token request.
 pub const DEFAULT_ASSERTION_LIFETIME: Duration = Duration::from_secs(60);
 
-/// A JWS algorithm usable for `private_key_jwt` client authentication
+/// The key families a [`JwsAlgorithm`] can be keyed by, selecting the
+/// constructor a PEM or DER blob is loaded with.
+#[derive(Clone, Copy)]
+enum KeyFamily {
+    Rsa,
+    Ec,
+    Ed,
+}
+
+/// Maps an algorithm onto the underlying JWT implementation and the key
+/// family it needs.
 ///
-/// Only asymmetric algorithms are listed: the point of the method is that
-/// the authorization server never holds the signing key. The value is
-/// matched against `token_endpoint_auth_signing_alg_values_supported`
-/// when the server advertises one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub enum SigningAlgorithm {
-    /// RSASSA-PKCS1-v1_5 using SHA-256 - the most widely accepted choice
-    #[default]
-    RS256,
-    /// RSASSA-PKCS1-v1_5 using SHA-384
-    RS384,
-    /// RSASSA-PKCS1-v1_5 using SHA-512
-    RS512,
-    /// RSASSA-PSS using SHA-256
-    PS256,
-    /// RSASSA-PSS using SHA-384
-    PS384,
-    /// RSASSA-PSS using SHA-512
-    PS512,
-    /// ECDSA using P-256 and SHA-256
-    ES256,
-    /// ECDSA using P-384 and SHA-384
-    ES384,
-    /// EdDSA (Ed25519)
-    EdDSA,
-}
-
-impl SigningAlgorithm {
-    /// Returns the `alg` header value of this algorithm (RFC 7518)
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::RS256 => "RS256",
-            Self::RS384 => "RS384",
-            Self::RS512 => "RS512",
-            Self::PS256 => "PS256",
-            Self::PS384 => "PS384",
-            Self::PS512 => "PS512",
-            Self::ES256 => "ES256",
-            Self::ES384 => "ES384",
-            Self::EdDSA => "EdDSA",
+/// The symmetric algorithms have no place here: `private_key_jwt` proves
+/// possession of a key the authorization server does not hold, and an
+/// HMAC secret proves nothing of the sort.
+fn asymmetric(algorithm: JwsAlgorithm) -> Result<(Algorithm, KeyFamily), ClientError> {
+    Ok(match algorithm {
+        JwsAlgorithm::RS256 => (Algorithm::RS256, KeyFamily::Rsa),
+        JwsAlgorithm::RS384 => (Algorithm::RS384, KeyFamily::Rsa),
+        JwsAlgorithm::RS512 => (Algorithm::RS512, KeyFamily::Rsa),
+        JwsAlgorithm::PS256 => (Algorithm::PS256, KeyFamily::Rsa),
+        JwsAlgorithm::PS384 => (Algorithm::PS384, KeyFamily::Rsa),
+        JwsAlgorithm::PS512 => (Algorithm::PS512, KeyFamily::Rsa),
+        JwsAlgorithm::ES256 => (Algorithm::ES256, KeyFamily::Ec),
+        JwsAlgorithm::ES384 => (Algorithm::ES384, KeyFamily::Ec),
+        JwsAlgorithm::EdDSA => (Algorithm::EdDSA, KeyFamily::Ed),
+        symmetric => {
+            return Err(ClientError::signing(format!(
+                "{symmetric} is a shared-secret algorithm; private_key_jwt requires an \
+                 asymmetric key the authorization server does not hold"
+            )));
         }
-    }
-
-    fn algorithm(&self) -> Algorithm {
-        match self {
-            Self::RS256 => Algorithm::RS256,
-            Self::RS384 => Algorithm::RS384,
-            Self::RS512 => Algorithm::RS512,
-            Self::PS256 => Algorithm::PS256,
-            Self::PS384 => Algorithm::PS384,
-            Self::PS512 => Algorithm::PS512,
-            Self::ES256 => Algorithm::ES256,
-            Self::ES384 => Algorithm::ES384,
-            Self::EdDSA => Algorithm::EdDSA,
-        }
-    }
-}
-
-impl std::fmt::Display for SigningAlgorithm {
-    #[inline]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
+    })
 }
 
 /// The signing key and claims policy of `private_key_jwt` client
@@ -106,10 +68,10 @@ impl std::fmt::Display for SigningAlgorithm {
 ///
 /// # Example
 /// ```no_run
-/// use volga_oauth_client::{OAuthClient, PrivateKeyJwt, SigningAlgorithm};
+/// use volga_oauth_client::{JwsAlgorithm, OAuthClient, PrivateKeyJwt};
 ///
 /// # fn run(pem: &[u8]) -> Result<(), volga_oauth_client::ClientError> {
-/// let key = PrivateKeyJwt::from_pem(pem, SigningAlgorithm::RS256)?
+/// let key = PrivateKeyJwt::from_pem(pem, JwsAlgorithm::RS256)?
 ///     .with_key_id("2026-08");
 ///
 /// let client = OAuthClient::new("my-client").with_private_key_jwt(key);
@@ -119,7 +81,9 @@ impl std::fmt::Display for SigningAlgorithm {
 #[derive(Clone)]
 pub struct PrivateKeyJwt {
     key: Arc<EncodingKey>,
-    algorithm: SigningAlgorithm,
+    algorithm: JwsAlgorithm,
+    /// The `alg` header value, resolved once at construction
+    alg: Algorithm,
     key_id: Option<String>,
     lifetime: Duration,
     audiences: Vec<String>,
@@ -129,22 +93,19 @@ impl PrivateKeyJwt {
     /// Loads a PEM-encoded private key for `algorithm`
     ///
     /// RSA keys are expected in PKCS#1 or PKCS#8 form, EC and Ed25519 keys
-    /// in PKCS#8 form. Fails with [`ClientError::Signing`] when the key
-    /// does not parse or does not match the algorithm family.
-    pub fn from_pem(pem: &[u8], algorithm: SigningAlgorithm) -> Result<Self, ClientError> {
-        let key = match algorithm {
-            SigningAlgorithm::RS256
-            | SigningAlgorithm::RS384
-            | SigningAlgorithm::RS512
-            | SigningAlgorithm::PS256
-            | SigningAlgorithm::PS384
-            | SigningAlgorithm::PS512 => EncodingKey::from_rsa_pem(pem),
-            SigningAlgorithm::ES256 | SigningAlgorithm::ES384 => EncodingKey::from_ec_pem(pem),
-            SigningAlgorithm::EdDSA => EncodingKey::from_ed_pem(pem),
+    /// in PKCS#8 form. Fails with [`ClientError::Signing`] when `algorithm`
+    /// is symmetric (an HMAC secret cannot back this method), or when the
+    /// key does not parse or does not match the algorithm family.
+    pub fn from_pem(pem: &[u8], algorithm: JwsAlgorithm) -> Result<Self, ClientError> {
+        let (alg, family) = asymmetric(algorithm)?;
+        let key = match family {
+            KeyFamily::Rsa => EncodingKey::from_rsa_pem(pem),
+            KeyFamily::Ec => EncodingKey::from_ec_pem(pem),
+            KeyFamily::Ed => EncodingKey::from_ed_pem(pem),
         }
         .map_err(ClientError::signing)?;
 
-        Ok(Self::from_key(key, algorithm))
+        Ok(Self::from_key(key, algorithm, alg))
     }
 
     /// Adopts a DER-encoded private key for `algorithm`
@@ -152,25 +113,22 @@ impl PrivateKeyJwt {
     /// Unlike [`from_pem`](Self::from_pem) the bytes are taken as-is; a
     /// key that does not match the algorithm surfaces at the first signing
     /// attempt rather than here.
-    pub fn from_der(der: &[u8], algorithm: SigningAlgorithm) -> Self {
-        let key = match algorithm {
-            SigningAlgorithm::RS256
-            | SigningAlgorithm::RS384
-            | SigningAlgorithm::RS512
-            | SigningAlgorithm::PS256
-            | SigningAlgorithm::PS384
-            | SigningAlgorithm::PS512 => EncodingKey::from_rsa_der(der),
-            SigningAlgorithm::ES256 | SigningAlgorithm::ES384 => EncodingKey::from_ec_der(der),
-            SigningAlgorithm::EdDSA => EncodingKey::from_ed_der(der),
+    pub fn from_der(der: &[u8], algorithm: JwsAlgorithm) -> Result<Self, ClientError> {
+        let (alg, family) = asymmetric(algorithm)?;
+        let key = match family {
+            KeyFamily::Rsa => EncodingKey::from_rsa_der(der),
+            KeyFamily::Ec => EncodingKey::from_ec_der(der),
+            KeyFamily::Ed => EncodingKey::from_ed_der(der),
         };
 
-        Self::from_key(key, algorithm)
+        Ok(Self::from_key(key, algorithm, alg))
     }
 
-    fn from_key(key: EncodingKey, algorithm: SigningAlgorithm) -> Self {
+    fn from_key(key: EncodingKey, algorithm: JwsAlgorithm, alg: Algorithm) -> Self {
         Self {
             key: Arc::new(key),
             algorithm,
+            alg,
             key_id: None,
             lifetime: DEFAULT_ASSERTION_LIFETIME,
             audiences: Vec::new(),
@@ -213,7 +171,7 @@ impl PrivateKeyJwt {
 
     /// Returns the algorithm assertions are signed with
     #[inline]
-    pub fn algorithm(&self) -> SigningAlgorithm {
+    pub fn algorithm(&self) -> JwsAlgorithm {
         self.algorithm
     }
 
@@ -262,7 +220,7 @@ impl PrivateKeyJwt {
             exp: now.saturating_add(self.lifetime.as_secs()),
         };
 
-        let mut header = Header::new(self.algorithm.algorithm());
+        let mut header = Header::new(self.alg);
         header.kid.clone_from(&self.key_id);
 
         encode(&header, &claims, &self.key).map_err(ClientError::signing)
@@ -327,7 +285,7 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
 /// Loads [`TEST_EC_PEM`] as a signing key.
 #[cfg(test)]
 pub(crate) fn test_key() -> PrivateKeyJwt {
-    PrivateKeyJwt::from_pem(TEST_EC_PEM, SigningAlgorithm::ES256).expect("the test key must parse")
+    PrivateKeyJwt::from_pem(TEST_EC_PEM, JwsAlgorithm::ES256).expect("the test key must parse")
 }
 
 #[cfg(test)]
@@ -396,7 +354,7 @@ mod tests {
             .with_lifetime(Duration::from_secs(5))
             .with_audiences(["https://auth.example.com/token"]);
         assert_eq!(key.key_id(), Some("k-1"));
-        assert_eq!(key.algorithm(), SigningAlgorithm::ES256);
+        assert_eq!(key.algorithm(), JwsAlgorithm::ES256);
 
         let (header, claims) = parts(&key.assertion("my-client", &metadata()).unwrap());
         assert_eq!(header["kid"], "k-1");
@@ -433,14 +391,36 @@ mod tests {
     #[test]
     fn it_rejects_a_key_that_does_not_parse() {
         assert!(matches!(
-            PrivateKeyJwt::from_pem(b"not a pem", SigningAlgorithm::RS256),
+            PrivateKeyJwt::from_pem(b"not a pem", JwsAlgorithm::RS256),
             Err(ClientError::Signing(_))
         ));
         // ...including one from the wrong family
         assert!(matches!(
-            PrivateKeyJwt::from_pem(EC_PEM, SigningAlgorithm::RS256),
+            PrivateKeyJwt::from_pem(EC_PEM, JwsAlgorithm::RS256),
             Err(ClientError::Signing(_))
         ));
+    }
+
+    #[test]
+    fn it_rejects_symmetric_algorithms() {
+        // the shared vocabulary of `JwsAlgorithm` includes the HMAC
+        // algorithms, but a secret the server already holds proves nothing
+        // about who signed - this method has to refuse them
+        for alg in [
+            JwsAlgorithm::HS256,
+            JwsAlgorithm::HS384,
+            JwsAlgorithm::HS512,
+        ] {
+            let err = PrivateKeyJwt::from_pem(EC_PEM, alg).unwrap_err();
+            assert!(
+                matches!(&err, ClientError::Signing(_)) && err.to_string().contains("asymmetric"),
+                "got: {err}"
+            );
+            assert!(PrivateKeyJwt::from_der(b"whatever", alg).is_err());
+        }
+
+        // ...while an asymmetric one loaded from DER is taken as-is
+        assert!(PrivateKeyJwt::from_der(b"not really a key", JwsAlgorithm::RS256).is_ok());
     }
 
     #[test]

@@ -112,7 +112,7 @@ impl BearerAuthConfig {
     ///         .with_alg(Algorithm::RS256));
     /// ```
     pub fn with_alg(mut self, alg: Algorithm) -> Self {
-        let jwt_alg: jsonwebtoken::Algorithm = alg.to_jwt();
+        let jwt_alg: jsonwebtoken::Algorithm = crate::auth::algorithm::to_jwt(alg);
         if !self.validation.algorithms.contains(&jwt_alg) {
             self.validation.algorithms.push(jwt_alg);
         }
