@@ -201,7 +201,9 @@ impl std::error::Error for UnsupportedAlgorithm {}
 /// Holds only the members of a *public* signing key: there is no way to
 /// represent `d`, `p`, `q` or the other private members, so a key that goes
 /// through this type cannot leak the secret half. Deserialization refuses a
-/// document carrying them outright rather than quietly dropping them.
+/// document carrying them outright rather than quietly dropping them, and
+/// likewise one declaring a use this key cannot serve - `use` other than
+/// `sig`, or a `key_ops` that excludes `verify`.
 ///
 /// # Example
 /// ```
@@ -319,15 +321,33 @@ impl<'de> Deserialize<'de> for PublicJwk {
         }
 
         let document = serde_json::Value::deserialize(deserializer)?;
-        if let Some(members) = document.as_object()
-            && let Some(member) = PRIVATE_MEMBERS
+        if let Some(members) = document.as_object() {
+            if let Some(member) = PRIVATE_MEMBERS
                 .iter()
                 .find(|member| members.contains_key(**member))
-        {
-            return Err(D::Error::custom(format!(
-                "the JWK carries the private member '{member}'; a published key holds \
-                 public material only"
-            )));
+            {
+                return Err(D::Error::custom(format!(
+                    "the JWK carries the private member '{member}'; a published key holds \
+                     public material only"
+                )));
+            }
+
+            // RFC 7517 Section 4.3: `key_ops` is the other way a document
+            // restricts what its key may be used for. This type publishes
+            // signing keys and says so with `use: "sig"`, so a document
+            // restricted away from verification has to be refused - dropping
+            // the restriction and republishing it as a signing key would
+            // turn an encryption-only key into a verification one
+            if let Some(operations) = members.get("key_ops")
+                && !operations
+                    .as_array()
+                    .is_some_and(|operations| operations.iter().any(|op| op == "verify"))
+            {
+                return Err(D::Error::custom(
+                    "the JWK is restricted by `key_ops` to operations that exclude 'verify'; \
+                     a published signing key has to permit signature verification",
+                ));
+            }
         }
 
         let public: Public = serde_json::from_value(document).map_err(D::Error::custom)?;
@@ -552,6 +572,37 @@ mod tests {
         let mut document = serde_json::to_value(PublicJwk::new(ec_key())).unwrap();
         document["x5t#S256"] = "thumbprint".into();
         assert!(serde_json::from_value::<PublicJwk>(document).is_ok());
+    }
+
+    #[test]
+    fn it_refuses_a_key_restricted_away_from_verification() {
+        let with_ops = |operations: serde_json::Value| {
+            let mut document = serde_json::to_value(PublicJwk::new(ec_key())).unwrap();
+            document["key_ops"] = operations;
+            serde_json::from_value::<PublicJwk>(document)
+        };
+
+        // dropping the restriction and republishing under `use: "sig"`
+        // would turn an encryption-only key into a verification one
+        for operations in [
+            json!(["encrypt"]),
+            json!(["decrypt", "unwrapKey"]),
+            json!(["deriveKey"]),
+            // a published key that only signs is nonsense too
+            json!(["sign"]),
+            json!([]),
+            // a malformed restriction is not evidence of permission
+            json!("verify"),
+            json!(null),
+        ] {
+            let err = with_ops(operations.clone()).unwrap_err().to_string();
+            assert!(err.contains("key_ops"), "accepted {operations}: {err}");
+        }
+
+        // ...while anything permitting verification goes through
+        for operations in [json!(["verify"]), json!(["sign", "verify"])] {
+            assert!(with_ops(operations.clone()).is_ok(), "refused {operations}");
+        }
     }
 
     #[test]
