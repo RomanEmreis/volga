@@ -217,7 +217,18 @@ impl PrivateKeyJwt {
     /// [`jwks`](Self::jwks) then renders the JWK Set to serve, whether as
     /// the `jwks` member of a Dynamic Client Registration request, or as
     /// the document a `jwks_uri` points at.
+    ///
+    /// A `kid` on `jwk` is adopted when this key has none of its own, so
+    /// the assertions start naming the key the document publishes. An
+    /// explicit [`with_key_id`](Self::with_key_id) wins in either order.
     pub fn with_public_jwk(mut self, jwk: PublicJwk) -> Self {
+        // otherwise the published document would name a `kid` that no
+        // assertion carries, and a server selecting the client's key by it
+        // would find nothing
+        if self.key_id.is_none() {
+            self.key_id = jwk.key_id().map(ToOwned::to_owned);
+        }
+
         self.public_jwk = Some(jwk);
         self
     }
@@ -229,7 +240,8 @@ impl PrivateKeyJwt {
     /// `kid` and `alg` are taken from this key's configuration so the
     /// published document agrees with what the assertions actually carry -
     /// a `kid` mismatch is what makes a server unable to find the key it
-    /// should verify with.
+    /// should verify with. The document therefore names a `kid` exactly
+    /// when the assertions do.
     ///
     /// # Example
     /// ```
@@ -605,7 +617,7 @@ mod tests {
     /// The public half of [`TEST_EC_PEM`].
     fn public_jwk() -> PublicJwk {
         PublicJwk::new(volga_oauth_core::jwk::PublicKey::Ec {
-            crv: volga_oauth_core::jwk::JwkCurve::P256,
+            crv: volga_oauth_core::jwk::EcCurve::P256,
             x: "z9O8S-Itj6aJliZmUmWTG0Ko-GG23Wi6M3qbdjh5w-g".into(),
             y: "nuk1MebXY11oQniSfOsKSnqmGjYQUhCHlwqeoeb6FDA".into(),
         })
@@ -645,6 +657,40 @@ mod tests {
         let contradicting = public_jwk().with_algorithm(JwsAlgorithm::RS256);
         let jwks = key.with_public_jwk(contradicting).jwks().unwrap();
         assert_eq!(jwks.keys[0].algorithm(), Some(JwsAlgorithm::ES256));
+    }
+
+    #[test]
+    fn it_publishes_a_kid_exactly_when_the_assertions_carry_one() {
+        let kid_of = |key: &PrivateKeyJwt| {
+            let published = key.jwks().unwrap().keys[0].key_id().map(str::to_owned);
+            let signed = parts(&key.assertion("my-client", &metadata()).unwrap()).0["kid"]
+                .as_str()
+                .map(str::to_owned);
+            assert_eq!(
+                published, signed,
+                "the published document and the assertion must name the same key"
+            );
+            published
+        };
+
+        // neither names one
+        assert_eq!(kid_of(&key().with_public_jwk(public_jwk())), None);
+
+        // a `kid` on the JWK alone is adopted, so the assertions start
+        // naming the key the document publishes
+        let adopted = key().with_public_jwk(public_jwk().with_key_id("from-the-jwk"));
+        assert_eq!(kid_of(&adopted), Some("from-the-jwk".into()));
+
+        // an explicit one wins, whichever order the two are set in
+        let jwk_first = key()
+            .with_public_jwk(public_jwk().with_key_id("from-the-jwk"))
+            .with_key_id("explicit");
+        assert_eq!(kid_of(&jwk_first), Some("explicit".into()));
+
+        let id_first = key()
+            .with_key_id("explicit")
+            .with_public_jwk(public_jwk().with_key_id("from-the-jwk"));
+        assert_eq!(kid_of(&id_first), Some("explicit".into()));
     }
 
     #[test]

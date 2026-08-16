@@ -44,18 +44,30 @@ pub enum KeyUse {
     Signature,
 }
 
-/// An elliptic curve a published key can be on
+/// A curve an elliptic-curve (`EC`) key can be on
 ///
-/// The set is closed to the curves [`JwsAlgorithm`] can sign with.
+/// The set is closed to the curves [`JwsAlgorithm`] can sign with. It is
+/// separate from [`OkpCurve`] on purpose: `"kty": "EC"` with an Edwards
+/// curve is not a key any verifier can use, and a shared curve type would
+/// let that document be built and published.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
-pub enum JwkCurve {
+pub enum EcCurve {
     /// NIST P-256, paired with `ES256`
     #[serde(rename = "P-256")]
     P256,
     /// NIST P-384, paired with `ES384`
     #[serde(rename = "P-384")]
     P384,
+}
+
+/// A curve an octet key pair (`OKP`) can be on
+///
+/// Only the signing curve of RFC 8037: `X25519` and `X448` are
+/// key-agreement curves and never carry a signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum OkpCurve {
     /// Ed25519, paired with `EdDSA`
     Ed25519,
 }
@@ -72,7 +84,7 @@ pub enum PublicKey {
     #[serde(rename = "EC")]
     Ec {
         /// The curve the key is on
-        crv: JwkCurve,
+        crv: EcCurve,
         /// The x coordinate
         x: String,
         /// The y coordinate
@@ -92,7 +104,7 @@ pub enum PublicKey {
     #[serde(rename = "OKP")]
     Okp {
         /// The curve the key is on
-        crv: JwkCurve,
+        crv: OkpCurve,
         /// The public key
         x: String,
     },
@@ -107,10 +119,10 @@ pub enum PublicKey {
 ///
 /// # Example
 /// ```
-/// use volga_oauth_core::{JwsAlgorithm, jwk::{JwkCurve, PublicJwk, PublicKey}};
+/// use volga_oauth_core::{JwsAlgorithm, jwk::{EcCurve, PublicJwk, PublicKey}};
 ///
 /// let jwk = PublicJwk::new(PublicKey::Ec {
-///         crv: JwkCurve::P256,
+///         crv: EcCurve::P256,
 ///         x: "z9O8S-Itj6aJliZmUmWTG0Ko-GG23Wi6M3qbdjh5w-g".into(),
 ///         y: "nuk1MebXY11oQniSfOsKSnqmGjYQUhCHlwqeoeb6FDA".into(),
 ///     })
@@ -236,7 +248,7 @@ mod tests {
 
     fn ec_key() -> PublicKey {
         PublicKey::Ec {
-            crv: JwkCurve::P256,
+            crv: EcCurve::P256,
             x: "z9O8S-Itj6aJliZmUmWTG0Ko-GG23Wi6M3qbdjh5w-g".into(),
             y: "nuk1MebXY11oQniSfOsKSnqmGjYQUhCHlwqeoeb6FDA".into(),
         }
@@ -247,7 +259,7 @@ mod tests {
         let cases = [
             (
                 PublicKey::Ec {
-                    crv: JwkCurve::P384,
+                    crv: EcCurve::P384,
                     x: "x".into(),
                     y: "y".into(),
                 },
@@ -262,7 +274,7 @@ mod tests {
             ),
             (
                 PublicKey::Okp {
-                    crv: JwkCurve::Ed25519,
+                    crv: OkpCurve::Ed25519,
                     x: "x".into(),
                 },
                 json!({"kty": "OKP", "crv": "Ed25519", "x": "x", "use": "sig"}),
@@ -316,6 +328,12 @@ mod tests {
             json!({"kty": "EC", "crv": "P-521", "x": "x", "y": "y"}),
             json!({"kty": "EC", "crv": "P-256", "x": "x"}),
             json!({"kty": "RSA", "n": "n"}),
+            // the curve has to belong to the key type: an EC key is never
+            // on an Edwards curve, and an OKP key is never on a NIST one
+            json!({"kty": "EC", "crv": "Ed25519", "x": "x", "y": "y"}),
+            json!({"kty": "OKP", "crv": "P-256", "x": "x"}),
+            // ...and X25519 is for key agreement, never for signing
+            json!({"kty": "OKP", "crv": "X25519", "x": "x"}),
         ] {
             assert!(
                 serde_json::from_value::<PublicJwk>(document.clone()).is_err(),
