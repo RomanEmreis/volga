@@ -194,7 +194,10 @@ impl<'a> TokenRequest<'a> {
     /// here, so it is dropped before the caller awaits and the resulting
     /// future stays `Send`.
     fn build(&self) -> Result<(String, Option<HeaderValue>), ClientError> {
+        // both sides have to allow the grant: the server advertises what it
+        // implements, the registration approved what this client may use
         ensure_grant_supported(self.metadata, self.grant_type)?;
+        self.client.ensure_grant_registered(self.grant_type)?;
 
         let mut form = form_urlencoded::Serializer::new(String::new());
         form.append_pair("grant_type", self.grant_type);

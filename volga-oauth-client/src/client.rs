@@ -98,6 +98,10 @@ pub struct OAuthClient {
     auth_method: ClientAuthMethod,
     redirect_uri: Option<String>,
     store: Option<Arc<dyn TokenStore>>,
+    /// The grants the registration approved, when this client came from
+    /// one that named any; empty means nothing was recorded and nothing is
+    /// constrained
+    registered_grant_types: Vec<String>,
 }
 
 impl OAuthClient {
@@ -111,6 +115,7 @@ impl OAuthClient {
             auth_method: ClientAuthMethod::default(),
             redirect_uri: None,
             store: None,
+            registered_grant_types: Vec::new(),
         }
     }
 
@@ -182,7 +187,7 @@ impl OAuthClient {
             }
         }
 
-        Ok(client.with_registered_redirect_uri(response))
+        Ok(client.adopt_registered_metadata(response))
     }
 
     /// Creates a client from a Dynamic Client Registration response that
@@ -192,6 +197,12 @@ impl OAuthClient {
     /// for every other registered method - `key` is then simply unused,
     /// since sending an assertion the registration did not announce would
     /// only yield `invalid_client`.
+    ///
+    /// Fails with [`ClientError::Validation`] when the registration pins
+    /// `token_endpoint_auth_signing_alg` and `key` signs with something
+    /// else. That field is per-client and narrower than the server-wide
+    /// list an assertion is checked against, so a key disagreeing with it
+    /// would satisfy discovery and still be refused at the token endpoint.
     #[cfg(feature = "private-key-jwt")]
     pub fn from_registration_with_key(
         response: &volga_oauth_core::ClientRegistrationResponse,
@@ -203,20 +214,65 @@ impl OAuthClient {
             return Self::from_registration(response);
         }
 
+        if let Some(registered) = response.metadata.token_endpoint_auth_signing_alg.as_deref()
+            && registered != key.algorithm().as_str()
+        {
+            return Err(ClientError::validation(format!(
+                "the registration signs client assertions with {registered}, but the key \
+                 supplied signs with {}",
+                key.algorithm()
+            )));
+        }
+
+        // when the registration inlines the client's JWK Set, the server
+        // looks the assertion's `kid` up in it - a key naming one that is
+        // not there is refused at the token endpoint, whatever it signs
+        if let Some(key_id) = key.key_id()
+            && let Some(registered) = registered_key_ids(response)
+            && !registered.iter().any(|candidate| candidate == key_id)
+        {
+            return Err(ClientError::validation(format!(
+                "the key is identified by '{key_id}', which the registered JWK Set does not \
+                 hold; it published {registered:?}"
+            )));
+        }
+
         Ok(Self::new(response.client_id.clone())
             .with_private_key_jwt(key)
-            .with_registered_redirect_uri(response))
+            .adopt_registered_metadata(response))
     }
 
-    /// Adopts the registered redirect URI, when exactly one was registered.
-    fn with_registered_redirect_uri(
-        self,
+    /// Adopts what the registration approved: the redirect URI when exactly
+    /// one was registered, and the grant types when it named any.
+    fn adopt_registered_metadata(
+        mut self,
         response: &volga_oauth_core::ClientRegistrationResponse,
     ) -> Self {
-        match response.metadata.redirect_uris.as_slice() {
-            [redirect_uri] => self.with_redirect_uri(redirect_uri.clone()),
-            _ => self,
+        if let [redirect_uri] = response.metadata.redirect_uris.as_slice() {
+            self = self.with_redirect_uri(redirect_uri.clone());
         }
+
+        self.registered_grant_types
+            .clone_from(&response.metadata.grant_types);
+        self
+    }
+
+    /// Refuses a grant this client's registration did not approve.
+    ///
+    /// The token endpoint answers `unauthorized_client` for one it did not,
+    /// and that is a harder failure to read than this. A registration that
+    /// named no grant types constrains nothing - the server told us
+    /// nothing, so there is nothing to check against.
+    pub(crate) fn ensure_grant_registered(&self, grant_type: &str) -> Result<(), ClientError> {
+        let registered = &self.registered_grant_types;
+        if registered.is_empty() || registered.iter().any(|grant| grant == grant_type) {
+            return Ok(());
+        }
+
+        Err(ClientError::validation(format!(
+            "this client is not registered for the '{grant_type}' grant; \
+             its registration approved {registered:?}"
+        )))
     }
 
     /// Replaces the transport configuration
@@ -513,6 +569,7 @@ impl std::fmt::Debug for OAuthClient {
             .field("auth_method", &self.auth_method)
             .field("redirect_uri", &self.redirect_uri)
             .field("store", &self.store.as_ref().map(|_| "dyn TokenStore"))
+            .field("registered_grant_types", &self.registered_grant_types)
             .finish()
     }
 }
@@ -727,6 +784,31 @@ fn basic_credentials(client_id: &str, client_secret: &str) -> HeaderValue {
 
     HeaderValue::from_str(&format!("Basic {credentials}"))
         .expect("base64 output is always a valid header value")
+}
+
+/// The `kid`s of the JWK Set a registration response inlines, or `None`
+/// when it inlines none.
+///
+/// Read leniently out of the raw document rather than through
+/// [`JwkSet`](volga_oauth_core::JwkSet): a registration may echo a set this
+/// framework would refuse to model - an encryption key, a curve it does not
+/// sign with - and that is no reason to fail. Only the identifiers matter
+/// here, and a set that names none constrains nothing.
+#[cfg(feature = "private-key-jwt")]
+fn registered_key_ids(
+    response: &volga_oauth_core::ClientRegistrationResponse,
+) -> Option<Vec<String>> {
+    let key_ids: Vec<String> = response
+        .metadata
+        .jwks
+        .as_ref()?
+        .get("keys")?
+        .as_array()?
+        .iter()
+        .filter_map(|key| key.get("kid")?.as_str().map(ToOwned::to_owned))
+        .collect();
+
+    (!key_ids.is_empty()).then_some(key_ids)
 }
 
 pub(crate) fn token_endpoint(metadata: &AuthorizationServerMetadata) -> Result<&str, ClientError> {
@@ -1020,6 +1102,157 @@ mod tests {
         .unwrap();
         assert_eq!(client.auth_method, ClientAuthMethod::Post);
         assert_eq!(client.client_secret.as_deref(), Some("generated-secret"));
+    }
+
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_honors_the_registered_client_assertion_algorithm() {
+        let registration = |signing_alg: serde_json::Value| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "token_endpoint_auth_method": "private_key_jwt",
+                    "token_endpoint_auth_signing_alg": signing_alg,
+                }),
+            )
+            .unwrap()
+        };
+
+        // the test key signs ES256; a registration pinning RS256 would have
+        // the token endpoint answer `invalid_client`, however capable the
+        // authorization server itself is
+        let err = OAuthClient::from_registration_with_key(
+            &registration("RS256".into()),
+            crate::assertion::test_key(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Validation(reason)
+                if reason.contains("RS256") && reason.contains("ES256")),
+            "got: {err}"
+        );
+
+        // the matching algorithm, and an unpinned registration, go through
+        for signing_alg in [serde_json::json!("ES256"), serde_json::Value::Null] {
+            assert!(
+                OAuthClient::from_registration_with_key(
+                    &registration(signing_alg.clone()),
+                    crate::assertion::test_key(),
+                )
+                .is_ok(),
+                "refused {signing_alg}"
+            );
+        }
+    }
+
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_matches_the_key_against_the_registered_jwk_set() {
+        let registration = |jwks: serde_json::Value| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "token_endpoint_auth_method": "private_key_jwt",
+                    "jwks": jwks,
+                }),
+            )
+            .unwrap()
+        };
+        let published = |kid: &str| serde_json::json!({ "keys": [{ "kty": "EC", "kid": kid }] });
+        let with_key_id = || crate::assertion::test_key().with_key_id("2026-08");
+
+        // the server resolves the assertion's `kid` in the registered set;
+        // one that is not there is refused at the token endpoint
+        let err = OAuthClient::from_registration_with_key(
+            &registration(published("other")),
+            with_key_id(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Validation(reason)
+                if reason.contains("2026-08") && reason.contains("other")),
+            "got: {err}"
+        );
+
+        // a matching `kid` goes through...
+        assert!(
+            OAuthClient::from_registration_with_key(
+                &registration(published("2026-08")),
+                with_key_id()
+            )
+            .is_ok()
+        );
+
+        // ...and so does anything that constrains nothing: no `kid` on the
+        // key, a set naming none, a `jwks_uri` we would have to fetch
+        assert!(
+            OAuthClient::from_registration_with_key(
+                &registration(published("other")),
+                crate::assertion::test_key(),
+            )
+            .is_ok()
+        );
+        for jwks in [
+            serde_json::json!({ "keys": [{ "kty": "EC" }] }),
+            serde_json::json!({ "keys": [] }),
+            serde_json::Value::Null,
+        ] {
+            assert!(
+                OAuthClient::from_registration_with_key(&registration(jwks.clone()), with_key_id())
+                    .is_ok(),
+                "refused {jwks}"
+            );
+        }
+    }
+
+    #[test]
+    fn it_refuses_a_grant_the_registration_did_not_approve() {
+        let registration = |grant_types: serde_json::Value| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "client_secret": "generated-secret",
+                    "grant_types": grant_types,
+                }),
+            )
+            .unwrap()
+        };
+
+        let client = OAuthClient::from_registration(&registration(serde_json::json!([
+            "client_credentials"
+        ])))
+        .unwrap();
+        assert!(
+            client
+                .ensure_grant_registered(grant::CLIENT_CREDENTIALS)
+                .is_ok()
+        );
+
+        let err = client
+            .ensure_grant_registered(grant::JWT_BEARER)
+            .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Validation(reason)
+                if reason.contains("jwt-bearer") && reason.contains("client_credentials")),
+            "got: {err}"
+        );
+
+        // a registration naming no grants constrains nothing - the server
+        // told us nothing to check against
+        let unconstrained =
+            OAuthClient::from_registration(&registration(serde_json::json!([]))).unwrap();
+        assert!(
+            unconstrained
+                .ensure_grant_registered(grant::JWT_BEARER)
+                .is_ok()
+        );
+
+        // ...and neither does a client that never went through registration
+        assert!(
+            OAuthClient::new("my-client")
+                .ensure_grant_registered(grant::JWT_BEARER)
+                .is_ok()
+        );
     }
 
     #[test]
