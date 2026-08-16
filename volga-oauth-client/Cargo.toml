@@ -23,6 +23,7 @@ http-body-util = "0.1.4"
 hyper = { version = "1.10.1", features = ["client"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["tls12", "webpki-tokio", "aws-lc-rs"] }
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "tokio"] }
+jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["time"] }

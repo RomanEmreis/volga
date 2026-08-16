@@ -12,6 +12,12 @@
 //!   mandatory PKCE ([`Pkce`], S256 only), refresh tokens and resource
 //!   indicators (RFC 8707), plus token persistence through the
 //!   [`TokenStore`] abstraction.
+//! * The grants that authenticate the client itself:
+//!   [`client_credentials`](OAuthClient::client_credentials) (RFC 6749
+//!   Section 4.4), [`jwt_bearer`](OAuthClient::jwt_bearer) (RFC 7523
+//!   Section 2.1) and [`exchange_token`](OAuthClient::exchange_token)
+//!   (RFC 8693) - authenticating with a client secret or a
+//!   [`PrivateKeyJwt`] assertion (RFC 7523 Section 2.2).
 //! * [`RegistrationClient`] - Dynamic Client Registration (RFC 7591).
 //!
 //! All of them share the transport policy of [`ClientConfig`] and the
@@ -22,6 +28,9 @@ compile_error!(
     "volga-oauth-client requires at least one of the `http1` or `http2` features to be enabled"
 );
 
+pub use assertion::{
+    CLIENT_ASSERTION_TYPE_JWT_BEARER, DEFAULT_ASSERTION_LIFETIME, PrivateKeyJwt, SigningAlgorithm,
+};
 pub use cache::MetadataCache;
 pub use client::{
     AuthorizationRequest, AuthorizationRequestBuilder, ClientAuthMethod, OAuthClient,
@@ -29,6 +38,12 @@ pub use client::{
 pub use config::{ClientConfig, DEFAULT_MAX_REDIRECTS, DEFAULT_TIMEOUT};
 pub use discovery::DiscoveryClient;
 pub use error::ClientError;
+pub use grants::{
+    ClientCredentialsRequest, ExchangedToken, GRANT_TYPE_CLIENT_CREDENTIALS, GRANT_TYPE_JWT_BEARER,
+    GRANT_TYPE_TOKEN_EXCHANGE, JwtBearerRequest, TOKEN_TYPE_ACCESS_TOKEN, TOKEN_TYPE_ID_JAG,
+    TOKEN_TYPE_ID_TOKEN, TOKEN_TYPE_JWT, TOKEN_TYPE_REFRESH_TOKEN, TokenExchangeRequest,
+    TokenExchangeResponse,
+};
 pub use pkce::{PKCE_METHOD, Pkce};
 pub use registration::RegistrationClient;
 pub use store::{InMemoryTokenStore, TokenStore};
@@ -43,11 +58,13 @@ pub use volga_oauth_core::{
     protected_resource_metadata_url,
 };
 
+mod assertion;
 mod cache;
 mod client;
 mod config;
 mod discovery;
 mod error;
+mod grants;
 mod pkce;
 mod registration;
 mod store;

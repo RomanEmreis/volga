@@ -35,6 +35,11 @@ pub enum ClientError {
     /// (e.g. the `issuer` in a discovered document does not match the
     /// requested issuer, RFC 8414 Section 3.3)
     Validation(String),
+
+    /// A `private_key_jwt` client assertion could not be produced: the
+    /// key failed to load or the signature could not be computed
+    /// (see [`PrivateKeyJwt`](crate::PrivateKeyJwt))
+    Signing(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl ClientError {
@@ -47,6 +52,11 @@ impl ClientError {
     pub fn validation(reason: impl Into<String>) -> Self {
         Self::Validation(reason.into())
     }
+
+    /// Creates a [`ClientError::Signing`] from any error source
+    pub fn signing(err: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        Self::Signing(err.into())
+    }
 }
 
 impl Display for ClientError {
@@ -58,6 +68,7 @@ impl Display for ClientError {
             Self::Decode(err) => write!(f, "malformed response body: {err}"),
             Self::InsecureUrl(url) => write!(f, "insecure URL rejected (HTTPS is enforced): {url}"),
             Self::Validation(reason) => write!(f, "response validation failed: {reason}"),
+            Self::Signing(err) => write!(f, "client assertion signing failed: {err}"),
         }
     }
 }
@@ -66,7 +77,7 @@ impl std::error::Error for ClientError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Protocol(err) => Some(err),
-            Self::Transport(err) => Some(err.as_ref()),
+            Self::Transport(err) | Self::Signing(err) => Some(err.as_ref()),
             Self::Decode(err) => Some(err),
             _ => None,
         }
@@ -94,7 +105,7 @@ mod tests {
 
     #[test]
     fn it_displays_all_variants() {
-        let cases: [(ClientError, &str); 6] = [
+        let cases: [(ClientError, &str); 7] = [
             (
                 OAuthError::new(OAuthErrorCode::InvalidGrant)
                     .with_description("expired")
@@ -123,6 +134,10 @@ mod tests {
                 ClientError::validation("issuer mismatch"),
                 "response validation failed: issuer mismatch",
             ),
+            (
+                ClientError::signing(std::io::Error::other("unsupported key")),
+                "client assertion signing failed: unsupported key",
+            ),
         ];
         for (err, expected) in cases {
             assert_eq!(err.to_string(), expected);
@@ -135,6 +150,9 @@ mod tests {
         assert!(std::error::Error::source(&err).is_some());
 
         let err = ClientError::transport(std::io::Error::other("reset"));
+        assert!(std::error::Error::source(&err).is_some());
+
+        let err = ClientError::signing(std::io::Error::other("unsupported key"));
         assert!(std::error::Error::source(&err).is_some());
 
         let err = ClientError::Http(StatusCode::BAD_GATEWAY);

@@ -3294,6 +3294,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
+ "jsonwebtoken",
  "serde",
  "serde_json",
  "tokio",

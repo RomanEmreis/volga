@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use volga_oauth_core::{AuthorizationServerMetadata, OAuthErrorCode};
 
 use crate::{
-    ClientConfig, ClientError, Pkce, TokenResponse, TokenSet, TokenStore,
+    ClientConfig, ClientError, Pkce, PrivateKeyJwt, TokenResponse, TokenSet, TokenStore,
+    assertion::CLIENT_ASSERTION_TYPE_JWT_BEARER,
     pkce::{PKCE_METHOD, random_urlsafe},
     transport::Transport,
 };
@@ -26,7 +27,7 @@ const TOKEN_STORE_NOT_CONFIGURED: &str =
     "OAuth client: token store is not configured; attach one with with_token_store(..)";
 
 /// How a confidential client authenticates to the token endpoint
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ClientAuthMethod {
     /// `client_secret_basic` - HTTP Basic authentication (RFC 6749
@@ -37,6 +38,15 @@ pub enum ClientAuthMethod {
     /// `client_secret_post` - credentials in the request body, for
     /// servers that do not accept HTTP Basic authentication
     Post,
+
+    /// `private_key_jwt` - a client assertion signed with the client's own
+    /// key (RFC 7523 Section 2.2), so no shared secret ever leaves it
+    ///
+    /// Set through
+    /// [`OAuthClient::with_private_key_jwt`](OAuthClient::with_private_key_jwt);
+    /// unlike the two secret-based methods it needs no
+    /// [`with_secret`](OAuthClient::with_secret).
+    PrivateKeyJwt(PrivateKeyJwt),
 }
 
 /// OAuth 2.1 client for the Authorization Code + PKCE flow
@@ -113,8 +123,34 @@ impl OAuthClient {
     /// `invalid_client` at the token endpoint. A registration with `none`
     /// produces a public client; a secret issued alongside it is ignored,
     /// since that method sends no credentials.
+    ///
+    /// A registration for `private_key_jwt` is rejected here because this
+    /// constructor is given no key to sign assertions with - pass one to
+    /// [`from_registration_with_key`](Self::from_registration_with_key)
+    /// instead.
     pub fn from_registration(
         response: &volga_oauth_core::ClientRegistrationResponse,
+    ) -> Result<Self, ClientError> {
+        Self::adopt_registration(response, None)
+    }
+
+    /// Creates a client from a Dynamic Client Registration response that
+    /// registered `private_key_jwt`, signing its assertions with `key`
+    ///
+    /// Behaves exactly like [`from_registration`](Self::from_registration)
+    /// for every other registered method - `key` is then simply unused,
+    /// since sending an assertion the registration did not announce would
+    /// only yield `invalid_client`.
+    pub fn from_registration_with_key(
+        response: &volga_oauth_core::ClientRegistrationResponse,
+        key: PrivateKeyJwt,
+    ) -> Result<Self, ClientError> {
+        Self::adopt_registration(response, Some(key))
+    }
+
+    fn adopt_registration(
+        response: &volga_oauth_core::ClientRegistrationResponse,
+        key: Option<PrivateKeyJwt>,
     ) -> Result<Self, ClientError> {
         let mut client = Self::new(response.client_id.clone());
 
@@ -138,10 +174,21 @@ impl OAuthClient {
                         .with_auth_method(ClientAuthMethod::Post);
                 }
             }
+            // performable only with a key to sign the assertions with
+            "private_key_jwt" => match key {
+                Some(key) => client = client.with_private_key_jwt(key),
+                None => {
+                    return Err(ClientError::validation(
+                        "registered token_endpoint_auth_method 'private_key_jwt' needs a \
+                         signing key; use OAuthClient::from_registration_with_key",
+                    ));
+                }
+            },
             unsupported => {
                 return Err(ClientError::validation(format!(
                     "registered token_endpoint_auth_method '{unsupported}' is not supported; \
-                     this client supports client_secret_basic, client_secret_post and none"
+                     this client supports client_secret_basic, client_secret_post, \
+                     private_key_jwt and none"
                 )));
             }
         }
@@ -166,10 +213,25 @@ impl OAuthClient {
         self
     }
 
-    /// Sets how the client secret is presented to the token endpoint;
-    /// [`ClientAuthMethod::Basic`] by default, ignored without a secret
+    /// Sets how the client authenticates to the token endpoint;
+    /// [`ClientAuthMethod::Basic`] by default
+    ///
+    /// The two secret-based methods are ignored without a secret - the
+    /// client then stays public. [`ClientAuthMethod::PrivateKeyJwt`]
+    /// carries its own credential and applies on its own; prefer
+    /// [`with_private_key_jwt`](Self::with_private_key_jwt) for it.
     pub fn with_auth_method(mut self, method: ClientAuthMethod) -> Self {
         self.auth_method = method;
+        self
+    }
+
+    /// Makes this a confidential client authenticating with a
+    /// `private_key_jwt` client assertion (RFC 7523 Section 2.2)
+    ///
+    /// Supersedes any [`with_secret`](Self::with_secret): the assertion is
+    /// the credential, and no secret is sent alongside it.
+    pub fn with_private_key_jwt(mut self, key: PrivateKeyJwt) -> Self {
+        self.auth_method = ClientAuthMethod::PrivateKeyJwt(key);
         self
     }
 
@@ -234,7 +296,7 @@ impl OAuthClient {
                 form.append_pair("resource", resource);
             }
 
-            let authorization = self.apply_client_auth(&mut form);
+            let authorization = self.apply_client_auth(&mut form, metadata)?;
             (form.finish(), authorization)
         };
 
@@ -260,7 +322,7 @@ impl OAuthClient {
             form.append_pair("grant_type", "refresh_token")
                 .append_pair("refresh_token", refresh_token);
 
-            let authorization = self.apply_client_auth(&mut form);
+            let authorization = self.apply_client_auth(&mut form, metadata)?;
             (form.finish(), authorization)
         };
 
@@ -327,29 +389,59 @@ impl OAuthClient {
             .put(key, tokens);
     }
 
-    async fn request_tokens(
+    pub(crate) async fn request_tokens(
         &self,
         endpoint: &str,
         body: String,
         authorization: Option<HeaderValue>,
     ) -> Result<TokenSet, ClientError> {
+        let response: TokenResponse = self
+            .post_token_request(endpoint, body, authorization)
+            .await?;
+
+        Ok(response.into())
+    }
+
+    /// Submits a prepared token request and deserializes the successful
+    /// response into `T`; every grant goes through here.
+    pub(crate) async fn post_token_request<T: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        body: String,
+        authorization: Option<HeaderValue>,
+    ) -> Result<T, ClientError> {
         let value = self
             .transport
             .post_form(endpoint, body, authorization)
             .await?;
 
-        let response: TokenResponse = serde_json::from_value(value)?;
-        Ok(response.into())
+        serde_json::from_value(value).map_err(Into::into)
     }
 
     /// Applies client authentication to a token request: either an HTTP
     /// Basic header or credentials appended to `form`, per the configured
     /// method. Public clients identify themselves with `client_id` alone.
-    fn apply_client_auth(
+    ///
+    /// `metadata` is only consulted by `private_key_jwt`, whose assertion
+    /// is bound to the authorization server it is sent to.
+    pub(crate) fn apply_client_auth(
         &self,
         form: &mut form_urlencoded::Serializer<'_, String>,
-    ) -> Option<HeaderValue> {
-        match (&self.client_secret, self.auth_method) {
+        metadata: &AuthorizationServerMetadata,
+    ) -> Result<Option<HeaderValue>, ClientError> {
+        // the assertion is the credential; a secret, if any, is not sent
+        if let ClientAuthMethod::PrivateKeyJwt(key) = &self.auth_method {
+            form.append_pair("client_id", &self.client_id)
+                .append_pair("client_assertion_type", CLIENT_ASSERTION_TYPE_JWT_BEARER)
+                .append_pair(
+                    "client_assertion",
+                    &key.assertion(&self.client_id, metadata)?,
+                );
+
+            return Ok(None);
+        }
+
+        Ok(match (&self.client_secret, &self.auth_method) {
             (Some(secret), ClientAuthMethod::Basic) => {
                 Some(basic_credentials(&self.client_id, secret))
             }
@@ -358,11 +450,11 @@ impl OAuthClient {
                     .append_pair("client_secret", secret);
                 None
             }
-            (None, _) => {
+            _ => {
                 form.append_pair("client_id", &self.client_id);
                 None
             }
-        }
+        })
     }
 }
 
@@ -594,7 +686,7 @@ fn basic_credentials(client_id: &str, client_secret: &str) -> HeaderValue {
         .expect("base64 output is always a valid header value")
 }
 
-fn token_endpoint(metadata: &AuthorizationServerMetadata) -> Result<&str, ClientError> {
+pub(crate) fn token_endpoint(metadata: &AuthorizationServerMetadata) -> Result<&str, ClientError> {
     metadata
         .token_endpoint
         .as_deref()
@@ -716,22 +808,78 @@ mod tests {
 
     #[test]
     fn it_applies_the_configured_client_authentication() {
-        let public = OAuthClient::new("my-client");
-        let mut form = form_urlencoded::Serializer::new(String::new());
-        assert!(public.apply_client_auth(&mut form).is_none());
-        assert_eq!(form.finish(), "client_id=my-client");
+        let metadata = metadata();
+        let apply = |client: &OAuthClient| {
+            let mut form = form_urlencoded::Serializer::new(String::new());
+            let authorization = client.apply_client_auth(&mut form, &metadata).unwrap();
+            (authorization, form.finish())
+        };
 
-        let basic = OAuthClient::new("my-client").with_secret("s3cret");
-        let mut form = form_urlencoded::Serializer::new(String::new());
-        assert!(basic.apply_client_auth(&mut form).is_some());
-        assert_eq!(form.finish(), "");
+        let (authorization, body) = apply(&OAuthClient::new("my-client"));
+        assert!(authorization.is_none());
+        assert_eq!(body, "client_id=my-client");
 
-        let post = OAuthClient::new("my-client")
+        let (authorization, body) = apply(&OAuthClient::new("my-client").with_secret("s3cret"));
+        assert!(authorization.is_some());
+        assert_eq!(body, "");
+
+        let (authorization, body) = apply(
+            &OAuthClient::new("my-client")
+                .with_secret("s3cret")
+                .with_auth_method(ClientAuthMethod::Post),
+        );
+        assert!(authorization.is_none());
+        assert_eq!(body, "client_id=my-client&client_secret=s3cret");
+    }
+
+    #[test]
+    fn it_authenticates_with_a_signed_client_assertion() {
+        // a secret set alongside the key is never sent: the assertion is
+        // the credential
+        let client = OAuthClient::new("my-client")
             .with_secret("s3cret")
-            .with_auth_method(ClientAuthMethod::Post);
+            .with_private_key_jwt(crate::assertion::test_key());
+
+        let metadata = metadata();
         let mut form = form_urlencoded::Serializer::new(String::new());
-        assert!(post.apply_client_auth(&mut form).is_none());
-        assert_eq!(form.finish(), "client_id=my-client&client_secret=s3cret");
+        let authorization = client.apply_client_auth(&mut form, &metadata).unwrap();
+        assert!(authorization.is_none());
+
+        let body = form.finish();
+        let pairs: Vec<_> = form_urlencoded::parse(body.as_bytes())
+            .into_owned()
+            .collect();
+        let get = |name: &str| {
+            pairs
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(get("client_id").as_deref(), Some("my-client"));
+        assert_eq!(
+            get("client_assertion_type").as_deref(),
+            Some(CLIENT_ASSERTION_TYPE_JWT_BEARER)
+        );
+        assert_eq!(get("client_secret"), None);
+        assert_eq!(
+            get("client_assertion").unwrap().split('.').count(),
+            3,
+            "the assertion must be a compact JWS"
+        );
+    }
+
+    #[test]
+    fn it_reports_a_failing_client_assertion() {
+        let mut metadata = metadata();
+        metadata.token_endpoint_auth_signing_alg_values_supported = vec!["RS256".into()];
+
+        let client =
+            OAuthClient::new("my-client").with_private_key_jwt(crate::assertion::test_key());
+        let mut form = form_urlencoded::Serializer::new(String::new());
+        assert!(matches!(
+            client.apply_client_auth(&mut form, &metadata),
+            Err(ClientError::Validation(reason)) if reason.contains("ES256")
+        ));
     }
 
     #[test]
@@ -776,6 +924,32 @@ mod tests {
             err,
             ClientError::Validation(reason) if reason.contains("client_secret_jwt")
         ));
+
+        // private_key_jwt is performable, but only with a key to sign with
+        let err =
+            OAuthClient::from_registration(&registration("private_key_jwt".into())).unwrap_err();
+        assert!(matches!(
+            err,
+            ClientError::Validation(reason) if reason.contains("from_registration_with_key")
+        ));
+
+        let key = crate::assertion::test_key();
+        let client = OAuthClient::from_registration_with_key(
+            &registration("private_key_jwt".into()),
+            key.clone(),
+        )
+        .unwrap();
+        assert_eq!(client.auth_method, ClientAuthMethod::PrivateKeyJwt(key));
+        assert_eq!(client.client_secret, None);
+
+        // ...and a key handed to a registration that announced something
+        // else stays unused
+        let client = OAuthClient::from_registration_with_key(
+            &registration("client_secret_post".into()),
+            crate::assertion::test_key(),
+        )
+        .unwrap();
+        assert_eq!(client.auth_method, ClientAuthMethod::Post);
     }
 
     #[test]
