@@ -55,15 +55,16 @@ use volga_oauth_client::{
     ClientError, DiscoveryClient, JwsAlgorithm, OAuthClient, PrivateKeyJwt,
 };
 
-async fn service_token(signing_key_pem: &[u8]) -> Result<(), ClientError> {
+async fn service_token() -> Result<(), ClientError> {
     let metadata = DiscoveryClient::new()
         .fetch_server_metadata("https://auth.example.com")
         .await?;
 
     // authenticating with a key of its own instead of a shared secret
+    // (`from_pem` takes the bytes directly when the key is not a file)
     let client = OAuthClient::new("my-service")
-        .with_private_key_jwt(PrivateKeyJwt::from_pem(
-            signing_key_pem,
+        .with_private_key_jwt(PrivateKeyJwt::from_pem_file(
+            "/etc/secrets/client.pem",
             JwsAlgorithm::RS256,
         )?);
 

@@ -12,8 +12,8 @@
 //! * Resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
 //!   and well-known metadata URL derivation
 //! * The registered protocol identifiers both sides agree on ([`grant`],
-//!   [`client_auth`], [`token_type`]) and the JWS algorithm names
-//!   ([`JwsAlgorithm`])
+//!   [`client_auth`], [`token_type`]), the JWS algorithm names
+//!   ([`JwsAlgorithm`]) and PEM header inspection ([`pem`])
 //!
 //! This crate contains no HTTP I/O and no cryptography. Most applications
 //! should depend on `volga` (with the `oauth` feature) or
@@ -35,6 +35,7 @@ pub use utils::{
 mod algorithm;
 mod error;
 mod metadata;
+pub mod pem;
 pub mod protocol;
 mod registration;
 mod utils;

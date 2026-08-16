@@ -31,7 +31,7 @@ pub use volga_oauth_core::{
     OAuthError, OAuthErrorCode, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
     WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
     authorization_server_metadata_url, canonicalize_resource_uri, client_auth, grant,
-    openid_configuration_url, protected_resource_metadata_url, token_type,
+    openid_configuration_url, pem, protected_resource_metadata_url, token_type,
 };
 
 mod handlers;

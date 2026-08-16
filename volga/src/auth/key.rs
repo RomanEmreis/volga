@@ -213,15 +213,15 @@ macro_rules! jwt_key {
                 path: P,
             ) -> Result<Self, $crate::error::Error> {
                 let bytes = $crate::auth::key::read_key_file(path.as_ref())?;
-                match $crate::auth::pem::detect(&bytes) {
-                    $crate::auth::pem::PemKind::Rsa => Self::from_rsa_pem(&bytes),
-                    $crate::auth::pem::PemKind::Ec => Self::from_ec_pem(&bytes),
+                match volga_oauth_core::pem::detect(&bytes) {
+                    volga_oauth_core::pem::PemKind::Rsa => Self::from_rsa_pem(&bytes),
+                    volga_oauth_core::pem::PemKind::Ec => Self::from_ec_pem(&bytes),
                     // the unqualified header names no algorithm: try each
                     // candidate rather than guessing from the body
-                    $crate::auth::pem::PemKind::Ambiguous => Self::from_rsa_pem(&bytes)
+                    volga_oauth_core::pem::PemKind::Ambiguous => Self::from_rsa_pem(&bytes)
                         .or_else(|_| Self::from_ec_pem(&bytes))
                         .or_else(|_| Self::from_ed_pem(&bytes)),
-                    $crate::auth::pem::PemKind::Unknown => {
+                    volga_oauth_core::pem::PemKind::Unknown => {
                         Err($crate::error::Error::server_error(format!(
                             "Unrecognized PEM header in {}; use from_rsa_pem / from_ec_pem / \
                              from_ed_pem explicitly",

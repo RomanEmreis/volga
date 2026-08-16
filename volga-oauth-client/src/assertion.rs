@@ -13,7 +13,7 @@ use std::{
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::Serialize;
-use volga_oauth_core::AuthorizationServerMetadata;
+use volga_oauth_core::{AuthorizationServerMetadata, pem::PemKind};
 
 use crate::{ClientError, JwsAlgorithm, pkce::random_urlsafe};
 
@@ -30,6 +30,32 @@ enum KeyFamily {
     Rsa,
     Ec,
     Ed,
+}
+
+impl KeyFamily {
+    /// Returns `false` when a PEM header rules this family out.
+    ///
+    /// [`PemKind::Ambiguous`] is the PKCS#8 / SPKI header, which carries
+    /// any family (and is the only form an Ed25519 key comes in), and
+    /// [`PemKind::Unknown`] is no evidence either way - only a header that
+    /// positively names the *other* family is a contradiction. Judging it
+    /// here turns an opaque `InvalidKeyFormat` from the parser into an
+    /// error that says which of the two the caller got wrong.
+    fn accepts(self, header: PemKind) -> bool {
+        match self {
+            Self::Rsa => header != PemKind::Ec,
+            Self::Ec => header != PemKind::Rsa,
+            Self::Ed => !matches!(header, PemKind::Rsa | PemKind::Ec),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Rsa => "an RSA",
+            Self::Ec => "an EC",
+            Self::Ed => "an Ed25519",
+        }
+    }
 }
 
 /// Maps an algorithm onto the underlying JWT implementation and the key
@@ -98,6 +124,18 @@ impl PrivateKeyJwt {
     /// key does not parse or does not match the algorithm family.
     pub fn from_pem(pem: &[u8], algorithm: JwsAlgorithm) -> Result<Self, ClientError> {
         let (alg, family) = asymmetric(algorithm)?;
+
+        // the header names the family, never the algorithm: it can only
+        // rule a key out, and does so with a better message than the
+        // parser's `InvalidKeyFormat`
+        let header = volga_oauth_core::pem::detect(pem);
+        if !family.accepts(header) {
+            return Err(ClientError::signing(format!(
+                "{algorithm} needs {} key, but the PEM header describes {header:?}",
+                family.name()
+            )));
+        }
+
         let key = match family {
             KeyFamily::Rsa => EncodingKey::from_rsa_pem(pem),
             KeyFamily::Ec => EncodingKey::from_ec_pem(pem),
@@ -106,6 +144,37 @@ impl PrivateKeyJwt {
         .map_err(ClientError::signing)?;
 
         Ok(Self::from_key(key, algorithm, alg))
+    }
+
+    /// Loads the PEM file at `path` as the signing key for `algorithm`
+    ///
+    /// A convenience over [`from_pem`](Self::from_pem) for the common case
+    /// of a key mounted as a file; the same failures apply, plus an I/O
+    /// error when the file cannot be read.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga_oauth_client::{JwsAlgorithm, OAuthClient, PrivateKeyJwt};
+    ///
+    /// # fn run() -> Result<(), volga_oauth_client::ClientError> {
+    /// let key = PrivateKeyJwt::from_pem_file("/etc/secrets/client.pem", JwsAlgorithm::RS256)?;
+    /// let client = OAuthClient::new("my-client").with_private_key_jwt(key);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn from_pem_file(
+        path: impl AsRef<std::path::Path>,
+        algorithm: JwsAlgorithm,
+    ) -> Result<Self, ClientError> {
+        let path = path.as_ref();
+        let pem = std::fs::read(path).map_err(|err| {
+            ClientError::signing(format!(
+                "failed to read the signing key at {}: {err}",
+                path.display()
+            ))
+        })?;
+
+        Self::from_pem(&pem, algorithm)
     }
 
     /// Adopts a DER-encoded private key for `algorithm`
@@ -394,11 +463,59 @@ mod tests {
             PrivateKeyJwt::from_pem(b"not a pem", JwsAlgorithm::RS256),
             Err(ClientError::Signing(_))
         ));
-        // ...including one from the wrong family
+        // ...including one from the wrong family. The header here is the
+        // unqualified PKCS#8 one, so nothing rules it out up front - the
+        // key parser is what refuses it
         assert!(matches!(
             PrivateKeyJwt::from_pem(EC_PEM, JwsAlgorithm::RS256),
             Err(ClientError::Signing(_))
         ));
+    }
+
+    #[test]
+    fn it_names_the_family_a_pem_header_rules_out() {
+        // a header that positively names the other family is caught before
+        // the parser, so the message says which half is wrong
+        let sec1_ec = b"-----BEGIN EC PRIVATE KEY-----\nabc\n-----END EC PRIVATE KEY-----";
+        let err = PrivateKeyJwt::from_pem(sec1_ec, JwsAlgorithm::RS256).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("RS256") && message.contains("RSA"),
+            "{message}"
+        );
+        assert!(message.contains("Ec"), "{message}");
+
+        let pkcs1_rsa = b"-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----";
+        for alg in [JwsAlgorithm::ES256, JwsAlgorithm::EdDSA] {
+            let message = PrivateKeyJwt::from_pem(pkcs1_rsa, alg)
+                .unwrap_err()
+                .to_string();
+            assert!(message.contains("Rsa"), "{message}");
+        }
+
+        // ...while the PKCS#8 header carries any family and is never the
+        // grounds for rejection
+        assert!(PrivateKeyJwt::from_pem(EC_PEM, JwsAlgorithm::ES256).is_ok());
+    }
+
+    #[test]
+    fn it_loads_a_key_from_a_pem_file() {
+        let path = std::env::temp_dir().join(format!(
+            "volga-test-private-key-jwt-{}.pem",
+            std::process::id()
+        ));
+        std::fs::write(&path, EC_PEM).unwrap();
+        let key = PrivateKeyJwt::from_pem_file(&path, JwsAlgorithm::ES256);
+        let _ = std::fs::remove_file(&path);
+        assert!(key.is_ok(), "got: {key:?}");
+
+        let err =
+            PrivateKeyJwt::from_pem_file("/nonexistent/volga/client.pem", JwsAlgorithm::ES256)
+                .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Signing(_)) && err.to_string().contains("client.pem"),
+            "the error must name the file it could not read, got: {err}"
+        );
     }
 
     #[test]

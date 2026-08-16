@@ -56,8 +56,6 @@ pub(crate) mod key;
 pub mod oauth;
 #[cfg(feature = "oauth-client")]
 pub mod oauth_client;
-#[cfg(feature = "jwt-auth")]
-pub(crate) mod pem;
 
 #[cfg(feature = "oauth-client")]
 pub use oauth_client::{DEFAULT_MAX_KEY_AGE, DEFAULT_REFRESH_COOLDOWN, OAuthConfig};
