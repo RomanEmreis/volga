@@ -528,14 +528,11 @@ impl OAuthClient {
     /// Basic header or credentials appended to `form`, per the configured
     /// method. Public clients identify themselves with `client_id` alone.
     ///
-    /// `metadata` is only consulted by `private_key_jwt`: its assertion is
-    /// bound to the authorization server it is sent to, and unlike the
-    /// secret-based methods it needs that server to have registered a key
-    /// for this client - a capability it announces in
-    /// `token_endpoint_auth_methods_supported`, and one this refuses to
-    /// assume. The two secret-based methods are left unchecked: they are
-    /// two encodings of the same shared secret, and a server accepting one
-    /// commonly accepts the other whatever it advertises.
+    /// Every credential-bearing method is checked against
+    /// `token_endpoint_auth_methods_supported` first: sending one the
+    /// server never announced only earns an `invalid_client` over the
+    /// network. A public client is not checked - it presents no credential
+    /// for the server to have a method for.
     pub(crate) fn apply_client_auth(
         &self,
         form: &mut form_urlencoded::Serializer<'_, String>,
@@ -544,20 +541,7 @@ impl OAuthClient {
         // the assertion is the credential; a secret, if any, is not sent
         #[cfg(feature = "private-key-jwt")]
         if let ClientAuthMethod::PrivateKeyJwt(key) = &self.auth_method {
-            // a server that never announced the method has not registered a
-            // key for this client and would answer `invalid_client`
-            let advertised = &metadata.token_endpoint_auth_methods_supported;
-            if !advertised.is_empty()
-                && !advertised
-                    .iter()
-                    .any(|method| method == client_auth::PRIVATE_KEY_JWT)
-            {
-                return Err(ClientError::validation(format!(
-                    "authorization server does not accept {} at the token endpoint; it \
-                     advertises {advertised:?}",
-                    client_auth::PRIVATE_KEY_JWT
-                )));
-            }
+            ensure_auth_method_supported(metadata, client_auth::PRIVATE_KEY_JWT)?;
 
             form.append_pair("client_id", &self.client_id)
                 .append_pair(
@@ -571,14 +555,14 @@ impl OAuthClient {
 
             return Ok(None);
         }
-        #[cfg(not(feature = "private-key-jwt"))]
-        let _ = metadata;
 
         Ok(match (&self.client_secret, &self.auth_method) {
             (Some(secret), ClientAuthMethod::Basic) => {
+                ensure_auth_method_supported(metadata, client_auth::CLIENT_SECRET_BASIC)?;
                 Some(basic_credentials(&self.client_id, secret))
             }
             (Some(secret), ClientAuthMethod::Post) => {
+                ensure_auth_method_supported(metadata, client_auth::CLIENT_SECRET_POST)?;
                 form.append_pair("client_id", &self.client_id)
                     .append_pair("client_secret", secret);
                 None
@@ -850,6 +834,30 @@ fn registered_key_ids(
     (!key_ids.is_empty()).then_some(key_ids)
 }
 
+/// Refuses a client authentication method the server does not announce in
+/// `token_endpoint_auth_methods_supported`.
+///
+/// A metadata document that lists none is not second-guessed - that is what
+/// a hand-built [`AuthorizationServerMetadata`] carries. A *discovered* one
+/// always lists something: RFC 8414 Section 2 defines the default for an
+/// omitted field as `client_secret_basic`, which deserialization
+/// materializes, so a server silent about the field is taken at the spec's
+/// word rather than assumed to accept anything.
+fn ensure_auth_method_supported(
+    metadata: &AuthorizationServerMetadata,
+    method: &str,
+) -> Result<(), ClientError> {
+    let advertised = &metadata.token_endpoint_auth_methods_supported;
+    if advertised.is_empty() || advertised.iter().any(|candidate| candidate == method) {
+        return Ok(());
+    }
+
+    Err(ClientError::validation(format!(
+        "authorization server does not accept {method} at the token endpoint; \
+         it advertises {advertised:?}"
+    )))
+}
+
 pub(crate) fn token_endpoint(metadata: &AuthorizationServerMetadata) -> Result<&str, ClientError> {
     metadata
         .token_endpoint
@@ -1033,39 +1041,65 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "private-key-jwt")]
     #[test]
     fn it_refuses_an_unadvertised_client_authentication_method() {
-        let client =
-            OAuthClient::new("my-client").with_private_key_jwt(crate::assertion::test_key());
-        let apply = |metadata: &AuthorizationServerMetadata| {
+        let apply = |client: &OAuthClient, metadata: &AuthorizationServerMetadata| {
             let mut form = form_urlencoded::Serializer::new(String::new());
             client.apply_client_auth(&mut form, metadata).map(|_| ())
         };
+        let advertising = |methods: &[&str]| {
+            let mut metadata = metadata();
+            metadata.token_endpoint_auth_methods_supported =
+                methods.iter().map(|method| (*method).to_owned()).collect();
+            metadata
+        };
 
-        // the RFC 8414 default a document without the field deserializes as
-        // announces `client_secret_basic` and nothing else
+        let basic = OAuthClient::new("my-client").with_secret("s3cret");
+        let post = OAuthClient::new("my-client")
+            .with_secret("s3cret")
+            .with_auth_method(ClientAuthMethod::Post);
+        #[cfg(feature = "private-key-jwt")]
+        let assertion =
+            OAuthClient::new("my-client").with_private_key_jwt(crate::assertion::test_key());
+
+        #[allow(unused_mut)]
+        let mut clients = vec![
+            (&basic, client_auth::CLIENT_SECRET_BASIC),
+            (&post, client_auth::CLIENT_SECRET_POST),
+        ];
+        #[cfg(feature = "private-key-jwt")]
+        clients.push((&assertion, client_auth::PRIVATE_KEY_JWT));
+
+        for (client, method) in clients {
+            // a server announcing only other methods refuses this one
+            let others = advertising(&["client_secret_jwt", "tls_client_auth"]);
+            let err = apply(client, &others).unwrap_err();
+            assert!(
+                matches!(&err, ClientError::Validation(reason) if reason.contains(method)),
+                "{method}: {err}"
+            );
+
+            // ...it goes through once announced
+            assert!(apply(client, &advertising(&[method])).is_ok(), "{method}");
+
+            // ...and metadata announcing nothing is not second-guessed,
+            // which is what a hand-built document carries
+            assert!(apply(client, &metadata()).is_ok(), "{method}");
+        }
+
+        // a discovered document silent about the field materializes the
+        // RFC 8414 default, so it accepts Basic and nothing else
         let discovered: AuthorizationServerMetadata = serde_json::from_value(serde_json::json!({
             "issuer": "https://auth.example.com",
             "response_types_supported": ["code"],
         }))
         .unwrap();
-        let err = apply(&discovered).unwrap_err();
-        assert!(
-            matches!(&err, ClientError::Validation(reason)
-                if reason.contains("private_key_jwt") && reason.contains("client_secret_basic")),
-            "got: {err}"
-        );
+        assert!(apply(&basic, &discovered).is_ok());
+        assert!(apply(&post, &discovered).is_err());
 
-        // an advertised method goes through...
-        let mut advertised = metadata();
-        advertised.token_endpoint_auth_methods_supported =
-            vec!["client_secret_basic".into(), "private_key_jwt".into()];
-        assert!(apply(&advertised).is_ok());
-
-        // ...and so does metadata that advertises nothing at all, which is
-        // what a hand-built document carries
-        assert!(apply(&metadata()).is_ok());
+        // a public client presents no credential, so there is no method for
+        // the server to have announced
+        assert!(apply(&OAuthClient::new("my-client"), &discovered).is_ok());
     }
 
     #[cfg(feature = "private-key-jwt")]
