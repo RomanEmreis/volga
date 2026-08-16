@@ -10,8 +10,10 @@
 //!   resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
 //!   and well-known metadata URL derivation
 //! * The registered protocol identifiers to advertise in metadata
-//!   ([`grant`], [`client_auth`], [`token_type`]), spelled the same way the
-//!   client crates match on them
+//!   ([`grant`], [`client_auth`], [`token_type`], [`auth_scheme`]), spelled
+//!   the same way the client crates match on them, plus public signing keys
+//!   to publish ([`PublicJwk`], [`JwkSet`]) and PEM header inspection
+//!   ([`pem`])
 //! * Built-in handlers serving the metadata documents from a volga
 //!   application: configure with
 //!   [`App::with_oauth_resource_metadata`](crate::App::with_oauth_resource_metadata) /
@@ -28,10 +30,11 @@
 
 pub use volga_oauth_core::{
     AuthorizationServerMetadata, BearerChallenge, ClientMetadata, ClientRegistrationResponse,
-    OAuthError, OAuthErrorCode, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
-    WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
-    authorization_server_metadata_url, canonicalize_resource_uri, client_auth, grant,
-    openid_configuration_url, pem, protected_resource_metadata_url, token_type,
+    JwkSet, OAuthError, OAuthErrorCode, ProtectedResourceMetadata, PublicJwk,
+    WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION,
+    WELL_KNOWN_PROTECTED_RESOURCE, auth_scheme, authorization_server_metadata_url,
+    canonicalize_resource_uri, client_auth, grant, jwk, openid_configuration_url, pem,
+    protected_resource_metadata_url, token_type,
 };
 
 mod handlers;

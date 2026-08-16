@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.8
+
+## Added
+* The grants that authenticate the **client itself** in `volga-oauth-client` - the machine-to-machine profiles, where no user is involved and the client is the subject (#212). Each is a builder taking `with_scopes` / `with_resource` (RFC 8707) / `with_param`, sent with `send()`:
+  * `OAuthClient::client_credentials` - RFC 6749 Section 4.4. There is no authorization request to carry scopes here, so they go on the token request itself.
+  * `OAuthClient::jwt_bearer` - RFC 7523 Section 2.1. The assertion is supplied by the caller rather than minted here: it is what some other authority already issued, a workload identity token or an identity assertion from a prior exchange.
+  * `OAuthClient::exchange_token` - RFC 8693 token exchange, parameterised on `subject_token`, `subject_token_type`, `with_requested_token_type`, `with_audience`, `with_resource` and `with_actor_token`. It may hand back something other than a bearer access token, so it answers with `ExchangedToken` (carrying `issued_token_type` and `is_bearer()`) rather than `TokenSet`.
+  * All three refuse a grant the server does not list in `grant_types_supported` before reaching the network.
+* `ClientCredentialsRequest::token(key)` - the store-backed counterpart of `OAuthClient::token` for a service token. It cannot be served by that method: RFC 6749 Section 4.4.3 issues no refresh token for this grant, so there is nothing to renew a stored token *with* - re-running the grant is the renewal, and the request carries the scopes and resource indicators to run it the same way again.
+* `private_key_jwt` client authentication (RFC 7523 Section 2.2) - a client assertion signed with the client's own key, so no shared secret ever leaves it. `PrivateKeyJwt` loads the key (`from_pem`, `from_pem_file`, `from_der`) and carries the claims policy (`with_key_id`, `with_lifetime`, `with_audiences`); attach it with `OAuthClient::with_private_key_jwt` or `OAuthClient::from_registration_with_key` and it applies to every grant the client sends, the Authorization Code flow included. A fresh assertion with a random `jti` is minted per token request, and the algorithm is checked against `token_endpoint_auth_signing_alg_values_supported` when the server advertises one. Symmetric algorithms are refused: an HMAC secret the server already holds proves nothing about who signed.
+* Public key publication for the above: `PublicJwk` and `JwkSet` in `volga-oauth-core` (RFC 7517), plus `PrivateKeyJwt::with_public_jwk` / `jwks()`, which fill `kid` and `alg` in from the signing configuration so the published document agrees with what the assertions actually carry. `PublicJwk` models public signing material exclusively - there is no way to represent `d`, `p`, `q` or the other private members, and deserialization refuses a document carrying them rather than quietly dropping them.
+* `volga_oauth_core::protocol` - the registered wire identifiers both sides of the protocol agree on, as `grant`, `client_auth`, `token_type` and `auth_scheme` constants, re-exported from `volga::auth::oauth` and `volga_oauth_client`. A server advertises them in its metadata document and a client matches on them; they live in one place so the two cannot drift.
+* `volga_oauth_core::JwsAlgorithm` - the JWS `alg` names shared by everything in the framework that signs or verifies a JWT, with `as_str`, `Display`, `is_symmetric` and serde support.
+* `volga_oauth_core::jwk` and `volga_oauth_core::pem` - public JWK models and PEM header inspection, both usable from the server side to publish or load keys.
+* `AuthorizationServerMetadata::dpop_signing_alg_values_supported` (RFC 9449 Section 5.1) with the `with_dpop_signing_algs` builder, alongside the resource-side field that was already modeled.
+* `BearerChallenge::parse_scheme` - reads the challenge for any auth scheme, `parse` being this method with `auth_scheme::BEARER`. Pass `auth_scheme::DPOP` to read what a DPoP-protected resource answers with (RFC 9449 Section 7.1), whose `error` and `error_description` are the RFC 6750 ones. `with_scheme` / `scheme` render and report it, so a parsed challenge re-renders under the scheme it arrived with.
+* `ClientError::Signing` - a client assertion could not be produced: the key failed to load, the algorithm cannot back the method, or the signature could not be computed.
+
+## Changed
+* `volga::auth::Algorithm` is now a re-export of `volga_oauth_core::JwsAlgorithm`. The variants, the `HS256` default and the behavior are unchanged, and `jsonwebtoken` stays out of the public API - the mapping onto it moved from an inherent method to a crate-private free function. The type is now shared with the client crates, so a `private_key_jwt` assertion and a bearer token the server issues are described in one vocabulary.
+* `EncodingKey` and `DecodingKey` are generated from a single implementation instead of two near-identical copies (about 250 duplicated lines, plus two parallel test suites). The public API - every `from_*` / `try_from_*` constructor, the redacted `Debug` - is unchanged.
+* `volga-oauth-client`'s internal transport carries an arbitrary `HeaderMap` on a request and hands the response back whole (status, headers, body) for the caller to judge, instead of one optional `Authorization` header and a parsed body. Nothing public changed; this is what lets a flow read a header off a *failed* response, which RFC 9449 nonce handling needs (see #213).
+* `AuthorizationServerMetadata`'s RFC 8414 defaults, the `[oauth.server]` config prefill and the client's `token_endpoint_auth_method` matching all read from the shared `protocol` constants rather than repeating string literals.
+
+## Breaking Changes
+* `ClientAuthMethod` (`volga-oauth-client`) is no longer `Copy` - the new `PrivateKeyJwt` variant carries a signing key. It stays `Clone`, `Debug`, `PartialEq` and `Eq`; two `PrivateKeyJwt` values compare equal when they were built from the same key handle and carry the same claims policy (key material is never compared).
+
 # 0.9.7
 
 ## Security
