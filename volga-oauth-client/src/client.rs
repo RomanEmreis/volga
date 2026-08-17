@@ -227,16 +227,10 @@ impl OAuthClient {
         }
 
         // when the registration inlines the client's JWK Set, the server
-        // looks the assertion's `kid` up in it - a key naming one that is
-        // not there is refused at the token endpoint, whatever it signs
-        if let Some(key_id) = key.key_id()
-            && let Some(registered) = registered_key_ids(response)
-            && !registered.iter().any(|candidate| candidate == key_id)
-        {
-            return Err(ClientError::validation(format!(
-                "the key is identified by '{key_id}', which the registered JWK Set does not \
-                 hold; it published {registered:?}"
-            )));
+        // resolves the assertion's `kid` in it - a key it cannot resolve is
+        // refused at the token endpoint, whatever it signs
+        if let Some(key_id) = key.key_id() {
+            ensure_key_id_registered(response, key_id)?;
         }
 
         Ok(Self::new(response.client_id.clone())
@@ -809,29 +803,53 @@ fn basic_credentials(client_id: &str, client_secret: &str) -> HeaderValue {
         .expect("base64 output is always a valid header value")
 }
 
-/// The `kid`s of the JWK Set a registration response inlines, or `None`
-/// when it inlines none.
+/// Refuses a signing key whose `kid` the registration's inline JWK Set
+/// cannot resolve.
 ///
-/// Read leniently out of the raw document rather than through
-/// [`JwkSet`](volga_oauth_core::JwkSet): a registration may echo a set this
+/// The set is read leniently out of the raw document rather than through
+/// [`JwkSet`](volga_oauth_core::JwkSet): a registration may echo one this
 /// framework would refuse to model - an encryption key, a curve it does not
-/// sign with - and that is no reason to fail. Only the identifiers matter
-/// here, and a set that names none constrains nothing.
+/// sign with - and that is no reason to fail. Only the identifiers matter.
 #[cfg(feature = "private-key-jwt")]
-fn registered_key_ids(
+fn ensure_key_id_registered(
     response: &volga_oauth_core::ClientRegistrationResponse,
-) -> Option<Vec<String>> {
-    let key_ids: Vec<String> = response
+    key_id: &str,
+) -> Result<(), ClientError> {
+    // no inline set: the registration named a `jwks_uri` we would have to
+    // fetch, or nothing at all - either way it told us nothing to check
+    let Some(keys) = response
         .metadata
         .jwks
-        .as_ref()?
-        .get("keys")?
-        .as_array()?
+        .as_ref()
+        .and_then(|jwks| jwks.get("keys"))
+        .and_then(|keys| keys.as_array())
+    else {
+        return Ok(());
+    };
+
+    let named: Vec<&str> = keys
         .iter()
-        .filter_map(|key| key.get("kid")?.as_str().map(ToOwned::to_owned))
+        .filter_map(|key| key.get("kid")?.as_str())
         .collect();
 
-    (!key_ids.is_empty()).then_some(key_ids)
+    if named.contains(&key_id) {
+        return Ok(());
+    }
+
+    // a set that labels nothing leaves at most one key to resolve to, and
+    // `kid` is a hint rather than a selector (RFC 7515 Section 4.1.4) - this
+    // is what volga's own JWKS reader does with a single unlabelled key.
+    // Past one key the label is the only thing that could have chosen
+    // between them, so an unresolvable one is a genuine contradiction
+    if named.is_empty() && keys.len() <= 1 {
+        return Ok(());
+    }
+
+    Err(ClientError::validation(format!(
+        "the key is identified by '{key_id}', which the registered JWK Set cannot resolve; \
+         it published {named:?} across {} keys",
+        keys.len()
+    )))
 }
 
 /// Refuses a client authentication method the server does not announce in
@@ -1291,8 +1309,22 @@ mod tests {
             .is_ok()
         );
 
-        // ...and so does anything that constrains nothing: no `kid` on the
-        // key, a set naming none, a `jwks_uri` we would have to fetch
+        // a set that labels some key but not ours cannot resolve it, even
+        // when the rest carry no label at all
+        for jwks in [
+            serde_json::json!({ "keys": [{ "kty": "EC", "kid": "other" }, { "kty": "RSA" }] }),
+            // ...and past one key an unlabelled set has nothing to choose by
+            serde_json::json!({ "keys": [{ "kty": "EC" }, { "kty": "RSA" }] }),
+        ] {
+            assert!(
+                OAuthClient::from_registration_with_key(&registration(jwks.clone()), with_key_id())
+                    .is_err(),
+                "accepted {jwks}"
+            );
+        }
+
+        // ...and anything that constrains nothing goes through: no `kid` on
+        // the key at all
         assert!(
             OAuthClient::from_registration_with_key(
                 &registration(published("other")),
@@ -1301,8 +1333,11 @@ mod tests {
             .is_ok()
         );
         for jwks in [
+            // a lone unlabelled key is what the server resolves to whatever
+            // the assertion is labelled - `kid` is a hint, not a selector
             serde_json::json!({ "keys": [{ "kty": "EC" }] }),
             serde_json::json!({ "keys": [] }),
+            // a `jwks_uri` we would have to fetch, or nothing at all
             serde_json::Value::Null,
         ] {
             assert!(
