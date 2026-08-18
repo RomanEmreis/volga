@@ -75,8 +75,17 @@ async fn it_rejects_request_with_large_headers_http1() {
         .build()
         .await;
 
+    // the shared client speaks HTTP/2 whenever that feature is on, and an
+    // oversized header list is a connection-level GOAWAY there rather than
+    // a response (RFC 9113 Section 6.5.2). This test is about the HTTP/1
+    // rejection, so it pins the protocol instead of taking whatever the
+    // enabled feature set happens to negotiate - `it_rejects_request_with
+    // _large_headers_http2` covers the other side.
     let response = server
-        .client()
+        .client_builder()
+        .http1_only()
+        .build()
+        .unwrap()
         .get(server.url("/"))
         .header("x-large-header", "this-is-too-large")
         .send()
@@ -84,6 +93,7 @@ async fn it_rejects_request_with_large_headers_http1() {
         .unwrap();
 
     assert_eq!(response.status().as_u16(), 431);
+    assert_eq!(response.version(), reqwest::Version::HTTP_11);
 
     server.shutdown().await;
 }
