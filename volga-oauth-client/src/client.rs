@@ -12,21 +12,23 @@ use std::{sync::Arc, time::Duration};
 use serde::{Deserialize, Serialize};
 use volga_oauth_core::{AuthorizationServerMetadata, OAuthErrorCode};
 
+#[cfg(feature = "private-key-jwt")]
+use crate::PrivateKeyJwt;
 use crate::{
-    ClientConfig, ClientError, Pkce, TokenResponse, TokenSet, TokenStore,
+    ClientConfig, ClientError, Pkce, TokenResponse, TokenSet, TokenStore, client_auth, grant,
     pkce::{PKCE_METHOD, random_urlsafe},
     transport::Transport,
 };
 
 /// How early before its expiration a stored access token is considered
 /// stale by [`OAuthClient::token`] and refreshed
-const EXPIRY_LEEWAY: Duration = Duration::from_secs(30);
+pub(crate) const EXPIRY_LEEWAY: Duration = Duration::from_secs(30);
 
 const TOKEN_STORE_NOT_CONFIGURED: &str =
     "OAuth client: token store is not configured; attach one with with_token_store(..)";
 
 /// How a confidential client authenticates to the token endpoint
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ClientAuthMethod {
     /// `client_secret_basic` - HTTP Basic authentication (RFC 6749
@@ -37,6 +39,19 @@ pub enum ClientAuthMethod {
     /// `client_secret_post` - credentials in the request body, for
     /// servers that do not accept HTTP Basic authentication
     Post,
+
+    /// `private_key_jwt` - a client assertion signed with the client's own
+    /// key (RFC 7523 Section 2.2), so no shared secret ever leaves it
+    ///
+    /// Set through
+    /// [`OAuthClient::with_private_key_jwt`](OAuthClient::with_private_key_jwt);
+    /// unlike the two secret-based methods it needs no
+    /// [`with_secret`](OAuthClient::with_secret).
+    ///
+    /// Requires the `private-key-jwt` feature, the only part of this crate
+    /// that needs a JWS signing backend.
+    #[cfg(feature = "private-key-jwt")]
+    PrivateKeyJwt(PrivateKeyJwt),
 }
 
 /// OAuth 2.1 client for the Authorization Code + PKCE flow
@@ -83,6 +98,12 @@ pub struct OAuthClient {
     auth_method: ClientAuthMethod,
     redirect_uri: Option<String>,
     store: Option<Arc<dyn TokenStore>>,
+    /// The `grant_types` of the registration this client was built from,
+    /// as returned - `None` when it never went through one, which is the
+    /// only case that constrains nothing. An empty list is *not* that: per
+    /// RFC 7591 Section 2 it means `authorization_code` alone, which
+    /// [`grant::covers`] applies.
+    registered_grant_types: Option<Vec<String>>,
 }
 
 impl OAuthClient {
@@ -96,6 +117,7 @@ impl OAuthClient {
             auth_method: ClientAuthMethod::default(),
             redirect_uri: None,
             store: None,
+            registered_grant_types: None,
         }
     }
 
@@ -113,6 +135,11 @@ impl OAuthClient {
     /// `invalid_client` at the token endpoint. A registration with `none`
     /// produces a public client; a secret issued alongside it is ignored,
     /// since that method sends no credentials.
+    ///
+    /// A registration for `private_key_jwt` is rejected here because this
+    /// constructor is given no key to sign assertions with - pass one to
+    /// `from_registration_with_key` instead, which the `private-key-jwt`
+    /// feature enables.
     pub fn from_registration(
         response: &volga_oauth_core::ClientRegistrationResponse,
     ) -> Result<Self, ClientError> {
@@ -123,34 +150,134 @@ impl OAuthClient {
             .metadata
             .token_endpoint_auth_method
             .as_deref()
-            .unwrap_or("client_secret_basic")
+            .unwrap_or(client_auth::CLIENT_SECRET_BASIC)
         {
-            "none" => {}
-            "client_secret_basic" => {
+            client_auth::NONE => {}
+            client_auth::CLIENT_SECRET_BASIC => {
                 if let Some(secret) = &response.client_secret {
                     client = client.with_secret(secret.clone());
                 }
             }
-            "client_secret_post" => {
+            client_auth::CLIENT_SECRET_POST => {
                 if let Some(secret) = &response.client_secret {
                     client = client
                         .with_secret(secret.clone())
                         .with_auth_method(ClientAuthMethod::Post);
                 }
             }
+            // performable only with a key to sign the assertions with
+            #[cfg(feature = "private-key-jwt")]
+            client_auth::PRIVATE_KEY_JWT => {
+                return Err(ClientError::validation(
+                    "registered token_endpoint_auth_method 'private_key_jwt' needs a signing \
+                     key; use OAuthClient::from_registration_with_key",
+                ));
+            }
             unsupported => {
                 return Err(ClientError::validation(format!(
                     "registered token_endpoint_auth_method '{unsupported}' is not supported; \
-                     this client supports client_secret_basic, client_secret_post and none"
+                     this client supports {}, {} and {}{}",
+                    client_auth::CLIENT_SECRET_BASIC,
+                    client_auth::CLIENT_SECRET_POST,
+                    client_auth::NONE,
+                    if cfg!(feature = "private-key-jwt") {
+                        ", plus private_key_jwt through from_registration_with_key"
+                    } else {
+                        " (private_key_jwt needs the `private-key-jwt` feature)"
+                    },
                 )));
             }
         }
 
-        if let [redirect_uri] = response.metadata.redirect_uris.as_slice() {
-            client = client.with_redirect_uri(redirect_uri.clone());
+        Ok(client.adopt_registered_metadata(response))
+    }
+
+    /// Creates a client from a Dynamic Client Registration response that
+    /// registered `private_key_jwt`, signing its assertions with `key`
+    ///
+    /// Behaves exactly like [`from_registration`](Self::from_registration)
+    /// for every other registered method - `key` is then simply unused,
+    /// since sending an assertion the registration did not announce would
+    /// only yield `invalid_client`.
+    ///
+    /// Fails with [`ClientError::Validation`] when the registration pins
+    /// `token_endpoint_auth_signing_alg` and `key` signs with something
+    /// else. That field is per-client and narrower than the server-wide
+    /// list an assertion is checked against, so a key disagreeing with it
+    /// would satisfy discovery and still be refused at the token endpoint.
+    #[cfg(feature = "private-key-jwt")]
+    pub fn from_registration_with_key(
+        response: &volga_oauth_core::ClientRegistrationResponse,
+        key: PrivateKeyJwt,
+    ) -> Result<Self, ClientError> {
+        if response.metadata.token_endpoint_auth_method.as_deref()
+            != Some(client_auth::PRIVATE_KEY_JWT)
+        {
+            return Self::from_registration(response);
         }
 
-        Ok(client)
+        if let Some(registered) = response.metadata.token_endpoint_auth_signing_alg.as_deref()
+            && registered != key.algorithm().as_str()
+        {
+            return Err(ClientError::validation(format!(
+                "the registration signs client assertions with {registered}, but the key \
+                 supplied signs with {}",
+                key.algorithm()
+            )));
+        }
+
+        // when the registration inlines the client's JWK Set, the server
+        // resolves the assertion's `kid` in it - a key it cannot resolve is
+        // refused at the token endpoint, whatever it signs
+        if let Some(key_id) = key.key_id() {
+            ensure_key_id_registered(response, key_id)?;
+        }
+
+        Ok(Self::new(response.client_id.clone())
+            .with_private_key_jwt(key)
+            .adopt_registered_metadata(response))
+    }
+
+    /// Adopts what the registration approved: the redirect URI when exactly
+    /// one was registered, and the grant types when it named any.
+    fn adopt_registered_metadata(
+        mut self,
+        response: &volga_oauth_core::ClientRegistrationResponse,
+    ) -> Self {
+        if let [redirect_uri] = response.metadata.redirect_uris.as_slice() {
+            self = self.with_redirect_uri(redirect_uri.clone());
+        }
+
+        self.registered_grant_types = Some(response.metadata.grant_types.clone());
+        self
+    }
+
+    /// Refuses a grant this client's registration did not approve.
+    ///
+    /// The token endpoint answers `unauthorized_client` for one it did not,
+    /// and that is a harder failure to read than this. Only a client that
+    /// never went through a registration is unconstrained - an omitted
+    /// `grant_types` is `authorization_code` alone, not carte blanche
+    /// (RFC 7591 Section 2, applied by [`grant::covers`]).
+    ///
+    /// `refresh_token` is exempt. RFC 6749 Section 6 makes it the
+    /// continuation of a grant the client already holds rather than a
+    /// separate authorization, and servers routinely issue refresh tokens
+    /// without naming the grant in a registration - refusing it here would
+    /// break those clients for a check the token endpoint never applies.
+    pub(crate) fn ensure_grant_registered(&self, grant_type: &str) -> Result<(), ClientError> {
+        let Some(registered) = &self.registered_grant_types else {
+            return Ok(());
+        };
+
+        if grant_type == grant::REFRESH_TOKEN || grant::covers(registered, grant_type) {
+            return Ok(());
+        }
+
+        Err(ClientError::validation(format!(
+            "this client is not registered for the '{grant_type}' grant; its registration \
+             approved {registered:?}"
+        )))
     }
 
     /// Replaces the transport configuration
@@ -166,10 +293,26 @@ impl OAuthClient {
         self
     }
 
-    /// Sets how the client secret is presented to the token endpoint;
-    /// [`ClientAuthMethod::Basic`] by default, ignored without a secret
+    /// Sets how the client authenticates to the token endpoint;
+    /// [`ClientAuthMethod::Basic`] by default
+    ///
+    /// The two secret-based methods are ignored without a secret - the
+    /// client then stays public. `ClientAuthMethod::PrivateKeyJwt` carries
+    /// its own credential and applies on its own; prefer
+    /// `with_private_key_jwt` for it (feature `private-key-jwt`).
     pub fn with_auth_method(mut self, method: ClientAuthMethod) -> Self {
         self.auth_method = method;
+        self
+    }
+
+    /// Makes this a confidential client authenticating with a
+    /// `private_key_jwt` client assertion (RFC 7523 Section 2.2)
+    ///
+    /// Supersedes any [`with_secret`](Self::with_secret): the assertion is
+    /// the credential, and no secret is sent alongside it.
+    #[cfg(feature = "private-key-jwt")]
+    pub fn with_private_key_jwt(mut self, key: PrivateKeyJwt) -> Self {
+        self.auth_method = ClientAuthMethod::PrivateKeyJwt(key);
         self
     }
 
@@ -216,13 +359,15 @@ impl OAuthClient {
         code: &str,
         request: &AuthorizationRequest,
     ) -> Result<TokenSet, ClientError> {
+        self.ensure_grant_registered(grant::AUTHORIZATION_CODE)?;
+
         let endpoint = token_endpoint(metadata)?;
         // the serializer is not `Sync`: scoping it keeps it out of the
         // future's state, so this future stays `Send` (see `refresh`)
         let (body, authorization) = {
             let mut form = form_urlencoded::Serializer::new(String::new());
 
-            form.append_pair("grant_type", "authorization_code")
+            form.append_pair("grant_type", grant::AUTHORIZATION_CODE)
                 .append_pair("code", code)
                 .append_pair("code_verifier", request.pkce.verifier());
 
@@ -234,7 +379,7 @@ impl OAuthClient {
                 form.append_pair("resource", resource);
             }
 
-            let authorization = self.apply_client_auth(&mut form);
+            let authorization = self.apply_client_auth(&mut form, metadata)?;
             (form.finish(), authorization)
         };
 
@@ -257,10 +402,10 @@ impl OAuthClient {
         let (body, authorization) = {
             let mut form = form_urlencoded::Serializer::new(String::new());
 
-            form.append_pair("grant_type", "refresh_token")
+            form.append_pair("grant_type", grant::REFRESH_TOKEN)
                 .append_pair("refresh_token", refresh_token);
 
-            let authorization = self.apply_client_auth(&mut form);
+            let authorization = self.apply_client_auth(&mut form, metadata)?;
             (form.finish(), authorization)
         };
 
@@ -275,6 +420,11 @@ impl OAuthClient {
     /// the server rejected the refresh token (`invalid_grant`) - in the
     /// latter cases the dead entry is removed from the store.
     ///
+    /// This is the Authorization Code counterpart, where renewal means the
+    /// refresh token. A client acting for itself has none to renew with;
+    /// see [`ClientCredentialsRequest::token`](crate::ClientCredentialsRequest::token),
+    /// which re-runs the grant instead.
+    ///
     /// # Panics
     /// Panics when no [`TokenStore`] is attached
     /// (see [`with_token_store`](Self::with_token_store)).
@@ -283,7 +433,7 @@ impl OAuthClient {
         key: &str,
         metadata: &AuthorizationServerMetadata,
     ) -> Result<Option<TokenSet>, ClientError> {
-        let store = self.store.as_deref().expect(TOKEN_STORE_NOT_CONFIGURED);
+        let store = self.token_store();
         let Some(tokens) = store.get(key) else {
             return Ok(None);
         };
@@ -321,48 +471,101 @@ impl OAuthClient {
     /// Panics when no [`TokenStore`] is attached
     /// (see [`with_token_store`](Self::with_token_store)).
     pub fn store_tokens(&self, key: &str, tokens: &TokenSet) {
-        self.store
-            .as_deref()
-            .expect(TOKEN_STORE_NOT_CONFIGURED)
-            .put(key, tokens);
+        self.token_store().put(key, tokens);
     }
 
-    async fn request_tokens(
+    /// The attached [`TokenStore`].
+    ///
+    /// # Panics
+    /// Panics when none is attached - the same contract every public
+    /// store-backed method carries.
+    pub(crate) fn token_store(&self) -> &dyn TokenStore {
+        self.store.as_deref().expect(TOKEN_STORE_NOT_CONFIGURED)
+    }
+
+    pub(crate) async fn request_tokens(
         &self,
         endpoint: &str,
         body: String,
         authorization: Option<HeaderValue>,
     ) -> Result<TokenSet, ClientError> {
-        let value = self
-            .transport
-            .post_form(endpoint, body, authorization)
+        let response: TokenResponse = self
+            .post_token_request(endpoint, body, authorization)
             .await?;
 
-        let response: TokenResponse = serde_json::from_value(value)?;
         Ok(response.into())
+    }
+
+    /// Submits a prepared token request and deserializes the successful
+    /// response into `T`; every grant goes through here.
+    pub(crate) async fn post_token_request<T: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        body: String,
+        authorization: Option<HeaderValue>,
+    ) -> Result<T, ClientError> {
+        let mut headers = http::HeaderMap::new();
+        if let Some(authorization) = authorization {
+            headers.insert(http::header::AUTHORIZATION, authorization);
+        }
+
+        let value = self
+            .transport
+            .post_form(endpoint, body, headers)
+            .await?
+            .into_json()?;
+
+        serde_json::from_value(value).map_err(Into::into)
     }
 
     /// Applies client authentication to a token request: either an HTTP
     /// Basic header or credentials appended to `form`, per the configured
     /// method. Public clients identify themselves with `client_id` alone.
-    fn apply_client_auth(
+    ///
+    /// Every credential-bearing method is checked against
+    /// `token_endpoint_auth_methods_supported` first: sending one the
+    /// server never announced only earns an `invalid_client` over the
+    /// network. A public client is not checked - it presents no credential
+    /// for the server to have a method for.
+    pub(crate) fn apply_client_auth(
         &self,
         form: &mut form_urlencoded::Serializer<'_, String>,
-    ) -> Option<HeaderValue> {
-        match (&self.client_secret, self.auth_method) {
+        metadata: &AuthorizationServerMetadata,
+    ) -> Result<Option<HeaderValue>, ClientError> {
+        // the assertion is the credential; a secret, if any, is not sent
+        #[cfg(feature = "private-key-jwt")]
+        if let ClientAuthMethod::PrivateKeyJwt(key) = &self.auth_method {
+            ensure_auth_method_supported(metadata, client_auth::PRIVATE_KEY_JWT)?;
+
+            form.append_pair("client_id", &self.client_id)
+                .append_pair(
+                    "client_assertion_type",
+                    client_auth::ASSERTION_TYPE_JWT_BEARER,
+                )
+                .append_pair(
+                    "client_assertion",
+                    &key.assertion(&self.client_id, metadata)?,
+                );
+
+            return Ok(None);
+        }
+
+        Ok(match (&self.client_secret, &self.auth_method) {
             (Some(secret), ClientAuthMethod::Basic) => {
+                ensure_auth_method_supported(metadata, client_auth::CLIENT_SECRET_BASIC)?;
                 Some(basic_credentials(&self.client_id, secret))
             }
             (Some(secret), ClientAuthMethod::Post) => {
+                ensure_auth_method_supported(metadata, client_auth::CLIENT_SECRET_POST)?;
                 form.append_pair("client_id", &self.client_id)
                     .append_pair("client_secret", secret);
                 None
             }
-            (None, _) => {
+            _ => {
                 form.append_pair("client_id", &self.client_id);
                 None
             }
-        }
+        })
     }
 }
 
@@ -378,6 +581,7 @@ impl std::fmt::Debug for OAuthClient {
             .field("auth_method", &self.auth_method)
             .field("redirect_uri", &self.redirect_uri)
             .field("store", &self.store.as_ref().map(|_| "dyn TokenStore"))
+            .field("registered_grant_types", &self.registered_grant_types)
             .finish()
     }
 }
@@ -432,6 +636,11 @@ impl AuthorizationRequestBuilder<'_> {
     /// no `authorization_endpoint` or advertises PKCE methods without
     /// `S256` (OAuth 2.1 requires it).
     pub fn build(self) -> Result<AuthorizationRequest, ClientError> {
+        // caught before the URL exists, rather than after a user has been
+        // redirected into a flow this client may not complete
+        self.client
+            .ensure_grant_registered(grant::AUTHORIZATION_CODE)?;
+
         let endpoint = self
             .metadata
             .authorization_endpoint
@@ -594,7 +803,80 @@ fn basic_credentials(client_id: &str, client_secret: &str) -> HeaderValue {
         .expect("base64 output is always a valid header value")
 }
 
-fn token_endpoint(metadata: &AuthorizationServerMetadata) -> Result<&str, ClientError> {
+/// Refuses a signing key whose `kid` the registration's inline JWK Set
+/// cannot resolve.
+///
+/// The set is read leniently out of the raw document rather than through
+/// [`JwkSet`](volga_oauth_core::JwkSet): a registration may echo one this
+/// framework would refuse to model - an encryption key, a curve it does not
+/// sign with - and that is no reason to fail. Only the identifiers matter.
+#[cfg(feature = "private-key-jwt")]
+fn ensure_key_id_registered(
+    response: &volga_oauth_core::ClientRegistrationResponse,
+    key_id: &str,
+) -> Result<(), ClientError> {
+    // no inline set: the registration named a `jwks_uri` we would have to
+    // fetch, or nothing at all - either way it told us nothing to check
+    let Some(keys) = response
+        .metadata
+        .jwks
+        .as_ref()
+        .and_then(|jwks| jwks.get("keys"))
+        .and_then(|keys| keys.as_array())
+    else {
+        return Ok(());
+    };
+
+    let named: Vec<&str> = keys
+        .iter()
+        .filter_map(|key| key.get("kid")?.as_str())
+        .collect();
+
+    if named.contains(&key_id) {
+        return Ok(());
+    }
+
+    // a set that labels nothing leaves at most one key to resolve to, and
+    // `kid` is a hint rather than a selector (RFC 7515 Section 4.1.4) - this
+    // is what volga's own JWKS reader does with a single unlabelled key.
+    // Past one key the label is the only thing that could have chosen
+    // between them, so an unresolvable one is a genuine contradiction
+    if named.is_empty() && keys.len() <= 1 {
+        return Ok(());
+    }
+
+    Err(ClientError::validation(format!(
+        "the key is identified by '{key_id}', which the registered JWK Set cannot resolve; \
+         it published {named:?} across {} keys",
+        keys.len()
+    )))
+}
+
+/// Refuses a client authentication method the server does not announce in
+/// `token_endpoint_auth_methods_supported`.
+///
+/// A metadata document that lists none is not second-guessed - that is what
+/// a hand-built [`AuthorizationServerMetadata`] carries. A *discovered* one
+/// always lists something: RFC 8414 Section 2 defines the default for an
+/// omitted field as `client_secret_basic`, which deserialization
+/// materializes, so a server silent about the field is taken at the spec's
+/// word rather than assumed to accept anything.
+fn ensure_auth_method_supported(
+    metadata: &AuthorizationServerMetadata,
+    method: &str,
+) -> Result<(), ClientError> {
+    let advertised = &metadata.token_endpoint_auth_methods_supported;
+    if advertised.is_empty() || advertised.iter().any(|candidate| candidate == method) {
+        return Ok(());
+    }
+
+    Err(ClientError::validation(format!(
+        "authorization server does not accept {method} at the token endpoint; \
+         it advertises {advertised:?}"
+    )))
+}
+
+pub(crate) fn token_endpoint(metadata: &AuthorizationServerMetadata) -> Result<&str, ClientError> {
     metadata
         .token_endpoint
         .as_deref()
@@ -716,22 +998,141 @@ mod tests {
 
     #[test]
     fn it_applies_the_configured_client_authentication() {
-        let public = OAuthClient::new("my-client");
+        let metadata = metadata();
+        let apply = |client: &OAuthClient| {
+            let mut form = form_urlencoded::Serializer::new(String::new());
+            let authorization = client.apply_client_auth(&mut form, &metadata).unwrap();
+            (authorization, form.finish())
+        };
+
+        let (authorization, body) = apply(&OAuthClient::new("my-client"));
+        assert!(authorization.is_none());
+        assert_eq!(body, "client_id=my-client");
+
+        let (authorization, body) = apply(&OAuthClient::new("my-client").with_secret("s3cret"));
+        assert!(authorization.is_some());
+        assert_eq!(body, "");
+
+        let (authorization, body) = apply(
+            &OAuthClient::new("my-client")
+                .with_secret("s3cret")
+                .with_auth_method(ClientAuthMethod::Post),
+        );
+        assert!(authorization.is_none());
+        assert_eq!(body, "client_id=my-client&client_secret=s3cret");
+    }
+
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_authenticates_with_a_signed_client_assertion() {
+        // a secret set alongside the key is never sent: the assertion is
+        // the credential
+        let client = OAuthClient::new("my-client")
+            .with_secret("s3cret")
+            .with_private_key_jwt(crate::assertion::test_key());
+
+        let metadata = metadata();
         let mut form = form_urlencoded::Serializer::new(String::new());
-        assert!(public.apply_client_auth(&mut form).is_none());
-        assert_eq!(form.finish(), "client_id=my-client");
+        let authorization = client.apply_client_auth(&mut form, &metadata).unwrap();
+        assert!(authorization.is_none());
+
+        let body = form.finish();
+        let pairs: Vec<_> = form_urlencoded::parse(body.as_bytes())
+            .into_owned()
+            .collect();
+        let get = |name: &str| {
+            pairs
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(get("client_id").as_deref(), Some("my-client"));
+        assert_eq!(
+            get("client_assertion_type").as_deref(),
+            Some(client_auth::ASSERTION_TYPE_JWT_BEARER)
+        );
+        assert_eq!(get("client_secret"), None);
+        assert_eq!(
+            get("client_assertion").unwrap().split('.').count(),
+            3,
+            "the assertion must be a compact JWS"
+        );
+    }
+
+    #[test]
+    fn it_refuses_an_unadvertised_client_authentication_method() {
+        let apply = |client: &OAuthClient, metadata: &AuthorizationServerMetadata| {
+            let mut form = form_urlencoded::Serializer::new(String::new());
+            client.apply_client_auth(&mut form, metadata).map(|_| ())
+        };
+        let advertising = |methods: &[&str]| {
+            let mut metadata = metadata();
+            metadata.token_endpoint_auth_methods_supported =
+                methods.iter().map(|method| (*method).to_owned()).collect();
+            metadata
+        };
 
         let basic = OAuthClient::new("my-client").with_secret("s3cret");
-        let mut form = form_urlencoded::Serializer::new(String::new());
-        assert!(basic.apply_client_auth(&mut form).is_some());
-        assert_eq!(form.finish(), "");
-
         let post = OAuthClient::new("my-client")
             .with_secret("s3cret")
             .with_auth_method(ClientAuthMethod::Post);
+        #[cfg(feature = "private-key-jwt")]
+        let assertion =
+            OAuthClient::new("my-client").with_private_key_jwt(crate::assertion::test_key());
+
+        #[allow(unused_mut)]
+        let mut clients = vec![
+            (&basic, client_auth::CLIENT_SECRET_BASIC),
+            (&post, client_auth::CLIENT_SECRET_POST),
+        ];
+        #[cfg(feature = "private-key-jwt")]
+        clients.push((&assertion, client_auth::PRIVATE_KEY_JWT));
+
+        for (client, method) in clients {
+            // a server announcing only other methods refuses this one
+            let others = advertising(&["client_secret_jwt", "tls_client_auth"]);
+            let err = apply(client, &others).unwrap_err();
+            assert!(
+                matches!(&err, ClientError::Validation(reason) if reason.contains(method)),
+                "{method}: {err}"
+            );
+
+            // ...it goes through once announced
+            assert!(apply(client, &advertising(&[method])).is_ok(), "{method}");
+
+            // ...and metadata announcing nothing is not second-guessed,
+            // which is what a hand-built document carries
+            assert!(apply(client, &metadata()).is_ok(), "{method}");
+        }
+
+        // a discovered document silent about the field materializes the
+        // RFC 8414 default, so it accepts Basic and nothing else
+        let discovered: AuthorizationServerMetadata = serde_json::from_value(serde_json::json!({
+            "issuer": "https://auth.example.com",
+            "response_types_supported": ["code"],
+        }))
+        .unwrap();
+        assert!(apply(&basic, &discovered).is_ok());
+        assert!(apply(&post, &discovered).is_err());
+
+        // a public client presents no credential, so there is no method for
+        // the server to have announced
+        assert!(apply(&OAuthClient::new("my-client"), &discovered).is_ok());
+    }
+
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_reports_a_failing_client_assertion() {
+        let mut metadata = metadata();
+        metadata.token_endpoint_auth_signing_alg_values_supported = vec!["RS256".into()];
+
+        let client =
+            OAuthClient::new("my-client").with_private_key_jwt(crate::assertion::test_key());
         let mut form = form_urlencoded::Serializer::new(String::new());
-        assert!(post.apply_client_auth(&mut form).is_none());
-        assert_eq!(form.finish(), "client_id=my-client&client_secret=s3cret");
+        assert!(matches!(
+            client.apply_client_auth(&mut form, &metadata),
+            Err(ClientError::Validation(reason)) if reason.contains("ES256")
+        ));
     }
 
     #[test]
@@ -776,6 +1177,248 @@ mod tests {
             err,
             ClientError::Validation(reason) if reason.contains("client_secret_jwt")
         ));
+
+        // private_key_jwt is announced as needing a key when this client can
+        // sign at all, and as needing the feature when it cannot
+        let err =
+            OAuthClient::from_registration(&registration("private_key_jwt".into())).unwrap_err();
+        let expected = if cfg!(feature = "private-key-jwt") {
+            "from_registration_with_key"
+        } else {
+            "private-key-jwt"
+        };
+        assert!(
+            matches!(&err, ClientError::Validation(reason) if reason.contains(expected)),
+            "got: {err}"
+        );
+    }
+
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_adopts_a_registration_signing_with_a_key() {
+        let registration = |auth_method: &str| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "client_secret": "generated-secret",
+                    "token_endpoint_auth_method": auth_method,
+                    "redirect_uris": ["https://app.example.com/callback"]
+                }),
+            )
+            .unwrap()
+        };
+
+        let key = crate::assertion::test_key();
+        let client =
+            OAuthClient::from_registration_with_key(&registration("private_key_jwt"), key.clone())
+                .unwrap();
+        assert_eq!(client.auth_method, ClientAuthMethod::PrivateKeyJwt(key));
+        assert_eq!(client.client_secret, None);
+        assert_eq!(
+            client.redirect_uri.as_deref(),
+            Some("https://app.example.com/callback")
+        );
+
+        // ...and a key handed to a registration that announced something
+        // else stays unused
+        let client = OAuthClient::from_registration_with_key(
+            &registration("client_secret_post"),
+            crate::assertion::test_key(),
+        )
+        .unwrap();
+        assert_eq!(client.auth_method, ClientAuthMethod::Post);
+        assert_eq!(client.client_secret.as_deref(), Some("generated-secret"));
+    }
+
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_honors_the_registered_client_assertion_algorithm() {
+        let registration = |signing_alg: serde_json::Value| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "token_endpoint_auth_method": "private_key_jwt",
+                    "token_endpoint_auth_signing_alg": signing_alg,
+                }),
+            )
+            .unwrap()
+        };
+
+        // the test key signs ES256; a registration pinning RS256 would have
+        // the token endpoint answer `invalid_client`, however capable the
+        // authorization server itself is
+        let err = OAuthClient::from_registration_with_key(
+            &registration("RS256".into()),
+            crate::assertion::test_key(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Validation(reason)
+                if reason.contains("RS256") && reason.contains("ES256")),
+            "got: {err}"
+        );
+
+        // the matching algorithm, and an unpinned registration, go through
+        for signing_alg in [serde_json::json!("ES256"), serde_json::Value::Null] {
+            assert!(
+                OAuthClient::from_registration_with_key(
+                    &registration(signing_alg.clone()),
+                    crate::assertion::test_key(),
+                )
+                .is_ok(),
+                "refused {signing_alg}"
+            );
+        }
+    }
+
+    #[cfg(feature = "private-key-jwt")]
+    #[test]
+    fn it_matches_the_key_against_the_registered_jwk_set() {
+        let registration = |jwks: serde_json::Value| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "token_endpoint_auth_method": "private_key_jwt",
+                    "jwks": jwks,
+                }),
+            )
+            .unwrap()
+        };
+        let published = |kid: &str| serde_json::json!({ "keys": [{ "kty": "EC", "kid": kid }] });
+        let with_key_id = || crate::assertion::test_key().with_key_id("2026-08");
+
+        // the server resolves the assertion's `kid` in the registered set;
+        // one that is not there is refused at the token endpoint
+        let err = OAuthClient::from_registration_with_key(
+            &registration(published("other")),
+            with_key_id(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Validation(reason)
+                if reason.contains("2026-08") && reason.contains("other")),
+            "got: {err}"
+        );
+
+        // a matching `kid` goes through...
+        assert!(
+            OAuthClient::from_registration_with_key(
+                &registration(published("2026-08")),
+                with_key_id()
+            )
+            .is_ok()
+        );
+
+        // a set that labels some key but not ours cannot resolve it, even
+        // when the rest carry no label at all
+        for jwks in [
+            serde_json::json!({ "keys": [{ "kty": "EC", "kid": "other" }, { "kty": "RSA" }] }),
+            // ...and past one key an unlabelled set has nothing to choose by
+            serde_json::json!({ "keys": [{ "kty": "EC" }, { "kty": "RSA" }] }),
+        ] {
+            assert!(
+                OAuthClient::from_registration_with_key(&registration(jwks.clone()), with_key_id())
+                    .is_err(),
+                "accepted {jwks}"
+            );
+        }
+
+        // ...and anything that constrains nothing goes through: no `kid` on
+        // the key at all
+        assert!(
+            OAuthClient::from_registration_with_key(
+                &registration(published("other")),
+                crate::assertion::test_key(),
+            )
+            .is_ok()
+        );
+        for jwks in [
+            // a lone unlabelled key is what the server resolves to whatever
+            // the assertion is labelled - `kid` is a hint, not a selector
+            serde_json::json!({ "keys": [{ "kty": "EC" }] }),
+            serde_json::json!({ "keys": [] }),
+            // a `jwks_uri` we would have to fetch, or nothing at all
+            serde_json::Value::Null,
+        ] {
+            assert!(
+                OAuthClient::from_registration_with_key(&registration(jwks.clone()), with_key_id())
+                    .is_ok(),
+                "refused {jwks}"
+            );
+        }
+    }
+
+    #[test]
+    fn it_refuses_a_grant_the_registration_did_not_approve() {
+        let registration = |grant_types: serde_json::Value| {
+            serde_json::from_value::<volga_oauth_core::ClientRegistrationResponse>(
+                serde_json::json!({
+                    "client_id": "generated-id",
+                    "client_secret": "generated-secret",
+                    "grant_types": grant_types,
+                }),
+            )
+            .unwrap()
+        };
+
+        let client = OAuthClient::from_registration(&registration(serde_json::json!([
+            "client_credentials"
+        ])))
+        .unwrap();
+        assert!(
+            client
+                .ensure_grant_registered(grant::CLIENT_CREDENTIALS)
+                .is_ok()
+        );
+
+        let err = client
+            .ensure_grant_registered(grant::JWT_BEARER)
+            .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Validation(reason)
+                if reason.contains("jwt-bearer") && reason.contains("client_credentials")),
+            "got: {err}"
+        );
+
+        // ...the authorization code flow included, which this registration
+        // did not approve either
+        assert!(
+            client
+                .ensure_grant_registered(grant::AUTHORIZATION_CODE)
+                .is_err()
+        );
+
+        // an omitted `grant_types` is not carte blanche: RFC 7591 Section 2
+        // makes it authorization_code alone
+        let defaulted =
+            OAuthClient::from_registration(&registration(serde_json::json!([]))).unwrap();
+        assert!(
+            defaulted
+                .ensure_grant_registered(grant::AUTHORIZATION_CODE)
+                .is_ok()
+        );
+        assert!(
+            defaulted
+                .ensure_grant_registered(grant::CLIENT_CREDENTIALS)
+                .is_err()
+        );
+
+        // refresh is the continuation of a grant already held, and servers
+        // routinely omit it from a registration - never refused
+        for approved in [
+            serde_json::json!([]),
+            serde_json::json!(["client_credentials"]),
+        ] {
+            let client = OAuthClient::from_registration(&registration(approved)).unwrap();
+            assert!(client.ensure_grant_registered(grant::REFRESH_TOKEN).is_ok());
+        }
+
+        // a client that never went through a registration is unconstrained
+        assert!(
+            OAuthClient::new("my-client")
+                .ensure_grant_registered(grant::JWT_BEARER)
+                .is_ok()
+        );
     }
 
     #[test]

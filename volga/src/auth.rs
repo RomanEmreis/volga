@@ -50,12 +50,12 @@ pub mod claims;
 pub mod decoding_key;
 #[cfg(feature = "jwt-auth")]
 pub mod encoding_key;
+#[cfg(feature = "jwt-auth")]
+pub(crate) mod key;
 #[cfg(feature = "oauth")]
 pub mod oauth;
 #[cfg(feature = "oauth-client")]
 pub mod oauth_client;
-#[cfg(feature = "jwt-auth")]
-pub(crate) mod pem;
 
 #[cfg(feature = "oauth-client")]
 pub use oauth_client::{DEFAULT_MAX_KEY_AGE, DEFAULT_REFRESH_COOLDOWN, OAuthConfig};

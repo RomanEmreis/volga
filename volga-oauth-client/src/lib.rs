@@ -12,16 +12,32 @@
 //!   mandatory PKCE ([`Pkce`], S256 only), refresh tokens and resource
 //!   indicators (RFC 8707), plus token persistence through the
 //!   [`TokenStore`] abstraction.
+//! * The grants that authenticate the client itself:
+//!   [`client_credentials`](OAuthClient::client_credentials) (RFC 6749
+//!   Section 4.4), [`jwt_bearer`](OAuthClient::jwt_bearer) (RFC 7523
+//!   Section 2.1) and [`exchange_token`](OAuthClient::exchange_token)
+//!   (RFC 8693).
 //! * [`RegistrationClient`] - Dynamic Client Registration (RFC 7591).
 //!
 //! All of them share the transport policy of [`ClientConfig`] and the
 //! error model of [`ClientError`].
+//!
+//! # Feature flags
+//!
+//! `http1` (default) and `http2` select the HTTP version; at least one is
+//! required. `private-key-jwt` adds `private_key_jwt` client authentication
+//! (RFC 7523 Section 2.2) - a client assertion signed with the client's own
+//! key. It is off by default because it is the only part of this crate that
+//! needs a JWS signing backend; the secret-based methods and every grant
+//! work without it.
 
 #[cfg(not(any(feature = "http1", feature = "http2")))]
 compile_error!(
     "volga-oauth-client requires at least one of the `http1` or `http2` features to be enabled"
 );
 
+#[cfg(feature = "private-key-jwt")]
+pub use assertion::{DEFAULT_ASSERTION_LIFETIME, PrivateKeyJwt};
 pub use cache::MetadataCache;
 pub use client::{
     AuthorizationRequest, AuthorizationRequestBuilder, ClientAuthMethod, OAuthClient,
@@ -29,6 +45,10 @@ pub use client::{
 pub use config::{ClientConfig, DEFAULT_MAX_REDIRECTS, DEFAULT_TIMEOUT};
 pub use discovery::DiscoveryClient;
 pub use error::ClientError;
+pub use grants::{
+    ClientCredentialsRequest, ExchangedToken, JwtBearerRequest, TokenExchangeRequest,
+    TokenExchangeResponse,
+};
 pub use pkce::{PKCE_METHOD, Pkce};
 pub use registration::RegistrationClient;
 pub use store::{InMemoryTokenStore, TokenStore};
@@ -37,17 +57,21 @@ pub use token::{TokenResponse, TokenSet};
 // Shared protocol types (`volga::auth::oauth` re-exports the same set)
 pub use volga_oauth_core::{
     AuthorizationServerMetadata, BearerChallenge, ClientMetadata, ClientRegistrationResponse,
-    OAuthError, OAuthErrorCode, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
-    WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
-    authorization_server_metadata_url, canonicalize_resource_uri, openid_configuration_url,
-    protected_resource_metadata_url,
+    JwkSet, JwsAlgorithm, OAuthError, OAuthErrorCode, ProtectedResourceMetadata, PublicJwk,
+    WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION,
+    WELL_KNOWN_PROTECTED_RESOURCE, auth_scheme, authorization_server_metadata_url,
+    canonicalize_resource_uri, client_auth, grant, jwk, openid_configuration_url, pem,
+    protected_resource_metadata_url, token_type,
 };
 
+#[cfg(feature = "private-key-jwt")]
+mod assertion;
 mod cache;
 mod client;
 mod config;
 mod discovery;
 mod error;
+mod grants;
 mod pkce;
 mod registration;
 mod store;

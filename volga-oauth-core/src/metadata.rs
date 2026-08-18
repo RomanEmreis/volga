@@ -10,6 +10,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::protocol::{client_auth, grant};
+
 /// Well-known path for OAuth 2.0 Authorization Server Metadata (RFC 8414)
 pub const WELL_KNOWN_AUTHORIZATION_SERVER: &str = "/.well-known/oauth-authorization-server";
 
@@ -146,6 +148,15 @@ pub struct AuthorizationServerMetadata {
     #[serde(default, skip_serializing_if = "is_false")]
     pub authorization_response_iss_parameter_supported: bool,
 
+    /// JWS algorithms this server accepts for DPoP proof JWTs
+    /// ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449) Section 5.1)
+    ///
+    /// A client binding its tokens to a key picks its proof algorithm from
+    /// here. The resource-side counterpart is
+    /// [`ProtectedResourceMetadata::dpop_signing_alg_values_supported`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dpop_signing_alg_values_supported: Vec<String>,
+
     /// Extension and OIDC-specific fields not modeled above
     #[serde(flatten)]
     pub additional_fields: HashMap<String, serde_json::Value>,
@@ -166,7 +177,7 @@ impl AuthorizationServerMetadata {
         Self {
             issuer: issuer.into(),
             response_types_supported: vec!["code".into()],
-            grant_types_supported: vec!["authorization_code".into()],
+            grant_types_supported: vec![grant::AUTHORIZATION_CODE.into()],
             ..Default::default()
         }
     }
@@ -371,6 +382,16 @@ impl AuthorizationServerMetadata {
         self
     }
 
+    /// Sets the JWS algorithms accepted for DPoP proof JWTs (RFC 9449 Section 5.1)
+    pub fn with_dpop_signing_algs<I, S>(mut self, algs: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.dpop_signing_alg_values_supported = algs.into_iter().map(Into::into).collect();
+        self
+    }
+
     /// Adds an extension or OIDC-specific field not modeled by the typed fields
     pub fn with_additional_field(
         mut self,
@@ -405,13 +426,13 @@ fn default_response_modes() -> Vec<String> {
 /// RFC 8414 Section 2 default for an omitted `grant_types_supported`
 #[inline]
 fn default_grant_types() -> Vec<String> {
-    vec!["authorization_code".into(), "implicit".into()]
+    vec![grant::AUTHORIZATION_CODE.into(), grant::IMPLICIT.into()]
 }
 
 /// RFC 8414 Section 2 default for omitted token/revocation endpoint auth methods
 #[inline]
 fn default_client_auth_methods() -> Vec<String> {
-    vec!["client_secret_basic".into()]
+    vec![client_auth::CLIENT_SECRET_BASIC.into()]
 }
 
 /// Keeps `false` - the spec default for the boolean metadata fields -

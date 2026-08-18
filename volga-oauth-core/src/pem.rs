@@ -1,9 +1,14 @@
-//! PEM header detection for auto-selecting the right JWT key constructor.
+//! PEM header inspection
+//!
+//! A PEM header names the key family but not the algorithm: `RS256` and
+//! `PS512` both live behind `BEGIN RSA PRIVATE KEY`, and PKCS#8 hides the
+//! family altogether. That is enough to pick the right key constructor,
+//! and enough to reject a key that plainly does not match the algorithm it
+//! was handed for - both sides of the framework do exactly that.
 
-/// The key format inferred from a PEM header.
+/// The key family inferred from a PEM header
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-#[allow(dead_code)]
-pub(crate) enum PemKind {
+pub enum PemKind {
     /// `-----BEGIN RSA PRIVATE KEY-----` or `-----BEGIN RSA PUBLIC KEY-----`.
     Rsa,
     /// `-----BEGIN EC PRIVATE KEY-----`.
@@ -16,9 +21,8 @@ pub(crate) enum PemKind {
 }
 
 /// Inspects the first recognizable PEM header line in `bytes` and returns the
-/// inferred key kind. Leading whitespace / blank lines are skipped.
-#[allow(dead_code)]
-pub(crate) fn detect(bytes: &[u8]) -> PemKind {
+/// inferred key family. Leading whitespace / blank lines are skipped.
+pub fn detect(bytes: &[u8]) -> PemKind {
     for line in bytes.split(|&b| b == b'\n') {
         let trimmed = trim_ascii(line);
         if trimmed.is_empty() {
@@ -34,7 +38,6 @@ pub(crate) fn detect(bytes: &[u8]) -> PemKind {
     PemKind::Unknown
 }
 
-#[allow(dead_code)]
 fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
     while let [first, rest @ ..] = bytes {
         if first.is_ascii_whitespace() {

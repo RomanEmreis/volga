@@ -10,6 +10,7 @@ use crate::error::{OAuthError, OAuthErrorCode};
 use crate::metadata::{
     WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
 };
+use crate::protocol::auth_scheme;
 use std::fmt::{self, Display, Formatter, Write};
 use std::net::Ipv6Addr;
 use std::str::FromStr;
@@ -41,6 +42,9 @@ use std::str::FromStr;
 /// ```
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BearerChallenge {
+    /// The auth scheme; `None` is [`auth_scheme::BEARER`], so a challenge
+    /// built or parsed for the default scheme compares equal either way
+    scheme: Option<String>,
     realm: Option<String>,
     error: Option<OAuthErrorCode>,
     error_description: Option<String>,
@@ -52,6 +56,24 @@ impl BearerChallenge {
     /// Creates an empty challenge (renders as `Bearer`)
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Overrides the auth scheme this challenge is rendered with
+    ///
+    /// [`auth_scheme::BEARER`] by default. The parameters of RFC 6750
+    /// Section 3 carry over to the schemes that build on it - notably
+    /// [`auth_scheme::DPOP`] (RFC 9449 Section 7.1), which uses the same
+    /// `error` and `error_description`.
+    pub fn with_scheme(mut self, scheme: impl Into<String>) -> Self {
+        let scheme = scheme.into();
+        self.scheme = (!scheme.eq_ignore_ascii_case(auth_scheme::BEARER)).then_some(scheme);
+        self
+    }
+
+    /// Returns the auth scheme, [`auth_scheme::BEARER`] unless overridden
+    #[inline]
+    pub fn scheme(&self) -> &str {
+        self.scheme.as_deref().unwrap_or(auth_scheme::BEARER)
     }
 
     /// Sets the `realm` parameter
@@ -145,7 +167,35 @@ impl BearerChallenge {
     /// assert_eq!(challenge.description(), Some("Token has expired"));
     /// ```
     pub fn parse(header: &str) -> Result<Self, OAuthError> {
-        let mut bearer: Option<Self> = None;
+        Self::parse_scheme(header, auth_scheme::BEARER)
+    }
+
+    /// Parses a `WWW-Authenticate` header value and extracts the challenge
+    /// for `scheme`
+    ///
+    /// Behaves exactly like [`parse`](Self::parse), which is this method
+    /// with [`auth_scheme::BEARER`]; pass [`auth_scheme::DPOP`] to read the
+    /// challenge a DPoP-protected resource answers with (RFC 9449
+    /// Section 7.1), whose `error` and `error_description` parameters are the
+    /// RFC 6750 ones.
+    ///
+    /// # Example
+    /// ```
+    /// use volga_oauth_core::{BearerChallenge, OAuthErrorCode, auth_scheme};
+    ///
+    /// let challenge = BearerChallenge::parse_scheme(
+    ///     r#"DPoP error="use_dpop_nonce", error_description="Resource server requires nonce""#,
+    ///     auth_scheme::DPOP,
+    /// ).unwrap();
+    ///
+    /// assert_eq!(challenge.scheme(), "DPoP");
+    /// assert_eq!(
+    ///     challenge.error(),
+    ///     Some(&OAuthErrorCode::Other("use_dpop_nonce".into()))
+    /// );
+    /// ```
+    pub fn parse_scheme(header: &str, scheme: &str) -> Result<Self, OAuthError> {
+        let mut matched: Option<Self> = None;
         let mut seen_scheme = false;
         for element in split_list_elements(header)? {
             // Empty list elements (`Bearer, , Basic`) are legal per RFC 9110 Section 5.6.1
@@ -154,29 +204,34 @@ impl BearerChallenge {
             }
 
             match classify_element(element) {
-                Element::Scheme { scheme, param } => {
-                    // The Bearer challenge ends where the next challenge begins
-                    if bearer.is_some() {
+                Element::Scheme {
+                    scheme: candidate,
+                    param,
+                } => {
+                    // The challenge ends where the next challenge begins
+                    if matched.is_some() {
                         break;
                     }
 
-                    if !scheme.bytes().all(is_tchar) {
+                    if !candidate.bytes().all(is_tchar) {
                         return Err(invalid_challenge("auth scheme is not a valid token"));
                     }
 
                     seen_scheme = true;
 
-                    if scheme.eq_ignore_ascii_case("Bearer") {
-                        let mut challenge = Self::new();
+                    if candidate.eq_ignore_ascii_case(scheme) {
+                        // the sender's spelling is kept, so re-rendering a
+                        // parsed challenge reproduces the scheme it came in
+                        let mut challenge = Self::new().with_scheme(candidate);
                         if let Some(param) = param {
                             let (name, value) = parse_auth_param(param)?;
                             challenge.set_param(&name, value)?;
                         }
-                        bearer = Some(challenge);
+                        matched = Some(challenge);
                     }
                 }
                 Element::Param => {
-                    if let Some(challenge) = &mut bearer {
+                    if let Some(challenge) = &mut matched {
                         let (name, value) = parse_auth_param(element)?;
                         challenge.set_param(&name, value)?;
                     } else if !seen_scheme {
@@ -188,7 +243,7 @@ impl BearerChallenge {
                 }
             }
         }
-        bearer.ok_or_else(|| invalid_challenge("no Bearer challenge found"))
+        matched.ok_or_else(|| invalid_challenge(format!("no {scheme} challenge found")))
     }
 
     /// Stores a parsed auth parameter; `name` must already be lowercased.
@@ -229,7 +284,7 @@ impl FromStr for BearerChallenge {
 
 impl Display for BearerChallenge {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str("Bearer")?;
+        f.write_str(self.scheme())?;
         let mut first = true;
         if let Some(realm) = &self.realm {
             write_param(f, &mut first, "realm", realm)?;
@@ -417,7 +472,7 @@ fn is_tchar(byte: u8) -> bool {
 }
 
 #[inline]
-fn invalid_challenge(description: &str) -> OAuthError {
+fn invalid_challenge(description: impl Into<String>) -> OAuthError {
     OAuthError::new(OAuthErrorCode::InvalidRequest).with_description(description)
 }
 
@@ -860,6 +915,66 @@ mod tests {
             .with_resource_metadata("https://api.example.com/.well-known/oauth-protected-resource");
         let parsed = BearerChallenge::parse(&original.to_string()).unwrap();
         assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn it_parses_a_challenge_of_another_scheme() {
+        // RFC 9449 Section 7.1: a DPoP-protected resource answers with the DPoP
+        // scheme carrying the same RFC 6750 parameters
+        let challenge = BearerChallenge::parse_scheme(
+            r#"DPoP error="use_dpop_nonce", error_description="nonce required""#,
+            auth_scheme::DPOP,
+        )
+        .unwrap();
+        assert_eq!(challenge.scheme(), "DPoP");
+        assert_eq!(
+            challenge.error(),
+            Some(&OAuthErrorCode::Other("use_dpop_nonce".into()))
+        );
+        assert_eq!(challenge.description(), Some("nonce required"));
+
+        // ...and it re-renders under the scheme it arrived with
+        let rendered = challenge.to_string();
+        assert!(rendered.starts_with("DPoP "), "{rendered}");
+        assert_eq!(
+            BearerChallenge::parse_scheme(&rendered, auth_scheme::DPOP).unwrap(),
+            challenge
+        );
+
+        // the schemes do not answer for each other, in either direction
+        let header = r#"Bearer error="invalid_token", DPoP error="use_dpop_nonce""#;
+        assert_eq!(
+            BearerChallenge::parse(header).unwrap().error(),
+            Some(&OAuthErrorCode::InvalidToken)
+        );
+        assert_eq!(
+            BearerChallenge::parse_scheme(header, auth_scheme::DPOP)
+                .unwrap()
+                .error(),
+            Some(&OAuthErrorCode::Other("use_dpop_nonce".into()))
+        );
+        let err =
+            BearerChallenge::parse_scheme(r#"Bearer realm="api""#, auth_scheme::DPOP).unwrap_err();
+        assert!(err.to_string().contains("no DPoP challenge found"));
+    }
+
+    #[test]
+    fn it_normalizes_the_default_scheme() {
+        // `Bearer` is the default, so parsing one must compare equal to a
+        // built challenge - however the sender spelled it
+        assert_eq!(
+            BearerChallenge::parse("bearer").unwrap(),
+            BearerChallenge::new()
+        );
+        assert_eq!(
+            BearerChallenge::new().with_scheme("BEARER"),
+            BearerChallenge::new()
+        );
+        assert_eq!(BearerChallenge::new().scheme(), auth_scheme::BEARER);
+        assert_eq!(
+            BearerChallenge::new().with_scheme("DPoP").to_string(),
+            "DPoP"
+        );
     }
 
     #[test]

@@ -9,6 +9,12 @@
 //! * Utilities: the `WWW-Authenticate` Bearer challenge builder and parser,
 //!   resource URI canonicalization per [RFC 8707](https://www.rfc-editor.org/rfc/rfc8707)
 //!   and well-known metadata URL derivation
+//! * The registered protocol identifiers to advertise in metadata
+//!   ([`grant`], [`client_auth`], [`token_type`], [`auth_scheme`]), spelled
+//!   the same way the client crates match on them, plus public signing keys
+//!   to publish ([`PublicJwk`], [`JwkSet`], [`JwsAlgorithm`] - the same
+//!   type as [`auth::Algorithm`](crate::auth::Algorithm), reachable here
+//!   without the `jwt-auth` feature) and PEM header inspection ([`pem`])
 //! * Built-in handlers serving the metadata documents from a volga
 //!   application: configure with
 //!   [`App::with_oauth_resource_metadata`](crate::App::with_oauth_resource_metadata) /
@@ -25,10 +31,11 @@
 
 pub use volga_oauth_core::{
     AuthorizationServerMetadata, BearerChallenge, ClientMetadata, ClientRegistrationResponse,
-    OAuthError, OAuthErrorCode, ProtectedResourceMetadata, WELL_KNOWN_AUTHORIZATION_SERVER,
-    WELL_KNOWN_OPENID_CONFIGURATION, WELL_KNOWN_PROTECTED_RESOURCE,
-    authorization_server_metadata_url, canonicalize_resource_uri, openid_configuration_url,
-    protected_resource_metadata_url,
+    JwkSet, JwsAlgorithm, OAuthError, OAuthErrorCode, ProtectedResourceMetadata, PublicJwk,
+    WELL_KNOWN_AUTHORIZATION_SERVER, WELL_KNOWN_OPENID_CONFIGURATION,
+    WELL_KNOWN_PROTECTED_RESOURCE, auth_scheme, authorization_server_metadata_url,
+    canonicalize_resource_uri, client_auth, grant, jwk, openid_configuration_url, pem,
+    protected_resource_metadata_url, token_type,
 };
 
 mod handlers;
@@ -40,6 +47,20 @@ impl From<OAuthError> for crate::error::Error {
     #[inline]
     fn from(err: OAuthError) -> Self {
         Self::from_parts(err.error.status(), None, err)
+    }
+}
+
+impl From<jwk::UnsupportedAlgorithm> for crate::error::Error {
+    /// Converts a [`jwk::UnsupportedAlgorithm`] into a
+    /// [`volga::Error`](crate::error::Error), so building a key to publish
+    /// can be propagated from a handler with `?`.
+    ///
+    /// The status is `500`: pairing an algorithm with key material that
+    /// cannot carry it is a misconfiguration of this server, never
+    /// something a request caused.
+    #[inline]
+    fn from(err: jwk::UnsupportedAlgorithm) -> Self {
+        Self::server_error(err)
     }
 }
 
@@ -56,5 +77,29 @@ mod tests {
         assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
         assert!(err.instance().is_none());
         assert_eq!(err.to_string(), "invalid_token: Token has expired");
+    }
+
+    #[test]
+    fn it_converts_an_unsupported_algorithm_into_a_server_error() {
+        use super::{
+            JwsAlgorithm,
+            jwk::{PublicJwk, PublicKey},
+        };
+
+        let unsupported = PublicJwk::new(PublicKey::Rsa {
+            n: "n".into(),
+            e: "AQAB".into(),
+        })
+        .with_algorithm(JwsAlgorithm::ES256)
+        .unwrap_err();
+
+        // publishing a key the server paired wrong is the server's fault,
+        // never the request's
+        let err: Error = unsupported.into();
+        assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            err.to_string(),
+            "a RSA key cannot carry the ES256 algorithm"
+        );
     }
 }

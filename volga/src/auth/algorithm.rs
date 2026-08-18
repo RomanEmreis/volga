@@ -4,62 +4,48 @@
 ///
 /// Mirrors the algorithms defined in [RFC 7518](https://www.rfc-editor.org/rfc/rfc7518).
 /// Use this type with [`BearerAuthConfig::with_alg`](super::bearer::BearerAuthConfig::with_alg).
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-#[non_exhaustive]
-pub enum Algorithm {
-    /// HMAC using SHA-256.
-    HS256,
-    /// HMAC using SHA-384.
-    HS384,
-    /// HMAC using SHA-512.
-    HS512,
-    /// ECDSA using P-256 and SHA-256.
-    ES256,
-    /// ECDSA using P-384 and SHA-384.
-    ES384,
-    /// RSASSA-PKCS1-v1_5 using SHA-256.
-    RS256,
-    /// RSASSA-PKCS1-v1_5 using SHA-384.
-    RS384,
-    /// RSASSA-PKCS1-v1_5 using SHA-512.
-    RS512,
-    /// RSASSA-PSS using SHA-256.
-    PS256,
-    /// RSASSA-PSS using SHA-384.
-    PS384,
-    /// RSASSA-PSS using SHA-512.
-    PS512,
-    /// Edwards-curve Digital Signature Algorithm (EdDSA).
-    EdDSA,
-}
+///
+/// The same type is used by the OAuth client crates, so a `private_key_jwt`
+/// client assertion and a bearer token this server issues are described in
+/// one vocabulary.
+pub use volga_oauth_core::JwsAlgorithm as Algorithm;
 
-impl Default for Algorithm {
-    #[inline]
-    fn default() -> Self {
-        Algorithm::HS256
-    }
-}
-
-impl Algorithm {
-    /// Converts this algorithm to the underlying `jsonwebtoken::Algorithm`.
-    ///
-    /// Crate-private to keep `jsonwebtoken` out of volga's public API surface.
-    #[inline]
-    pub(crate) fn to_jwt(self) -> jsonwebtoken::Algorithm {
-        match self {
-            Self::HS256 => jsonwebtoken::Algorithm::HS256,
-            Self::HS384 => jsonwebtoken::Algorithm::HS384,
-            Self::HS512 => jsonwebtoken::Algorithm::HS512,
-            Self::ES256 => jsonwebtoken::Algorithm::ES256,
-            Self::ES384 => jsonwebtoken::Algorithm::ES384,
-            Self::RS256 => jsonwebtoken::Algorithm::RS256,
-            Self::RS384 => jsonwebtoken::Algorithm::RS384,
-            Self::RS512 => jsonwebtoken::Algorithm::RS512,
-            Self::PS256 => jsonwebtoken::Algorithm::PS256,
-            Self::PS384 => jsonwebtoken::Algorithm::PS384,
-            Self::PS512 => jsonwebtoken::Algorithm::PS512,
-            Self::EdDSA => jsonwebtoken::Algorithm::EdDSA,
-        }
+/// Converts an [`Algorithm`] to the underlying `jsonwebtoken::Algorithm`.
+///
+/// A free function rather than an inherent method: the type itself is
+/// shared through `volga-oauth-core`, which carries no cryptography.
+/// Crate-private to keep `jsonwebtoken` out of volga's public API surface.
+///
+/// # Panics
+/// Panics on an algorithm this mapping does not cover. `JwsAlgorithm` is
+/// `#[non_exhaustive]`, so a variant added to `volga-oauth-core` without a
+/// mapping here cannot be caught at compile time from this side. Every
+/// variant that exists today is covered, so this is unreachable in a
+/// consistent build - and substituting a default instead would be worse
+/// than a crash: the caller's algorithm would stay disabled while a
+/// different one was quietly accepted for verifying tokens.
+#[inline]
+pub(crate) fn to_jwt(alg: Algorithm) -> jsonwebtoken::Algorithm {
+    match alg {
+        Algorithm::HS256 => jsonwebtoken::Algorithm::HS256,
+        Algorithm::HS384 => jsonwebtoken::Algorithm::HS384,
+        Algorithm::HS512 => jsonwebtoken::Algorithm::HS512,
+        Algorithm::ES256 => jsonwebtoken::Algorithm::ES256,
+        Algorithm::ES384 => jsonwebtoken::Algorithm::ES384,
+        Algorithm::RS256 => jsonwebtoken::Algorithm::RS256,
+        Algorithm::RS384 => jsonwebtoken::Algorithm::RS384,
+        Algorithm::RS512 => jsonwebtoken::Algorithm::RS512,
+        Algorithm::PS256 => jsonwebtoken::Algorithm::PS256,
+        Algorithm::PS384 => jsonwebtoken::Algorithm::PS384,
+        Algorithm::PS512 => jsonwebtoken::Algorithm::PS512,
+        Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
+        // fail closed: an unmapped algorithm is this workspace being
+        // internally inconsistent, and the token validation policy is not
+        // something to guess at
+        unmapped => panic!(
+            "volga has no mapping for the {unmapped} JWS algorithm; this is a volga bug, \
+             please report it"
+        ),
     }
 }
 
@@ -89,7 +75,10 @@ mod tests {
             (Algorithm::EdDSA, jsonwebtoken::Algorithm::EdDSA),
         ];
         for (volga, jwt) in pairs {
-            assert_eq!(volga.to_jwt(), jwt);
+            assert_eq!(to_jwt(volga), jwt);
+            // the shared `alg` name and the underlying one must agree, or
+            // a token would be signed under a header it does not match
+            assert_eq!(volga.as_str(), format!("{jwt:?}"));
         }
     }
 

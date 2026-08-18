@@ -170,8 +170,9 @@ impl App {
             if let Some(obj) = server.as_object_mut() {
                 obj.entry("response_types_supported")
                     .or_insert_with(|| serde_json::json!(["code"]));
-                obj.entry("grant_types_supported")
-                    .or_insert_with(|| serde_json::json!(["authorization_code"]));
+                obj.entry("grant_types_supported").or_insert_with(|| {
+                    serde_json::json!([volga_oauth_core::grant::AUTHORIZATION_CODE])
+                });
             }
             let metadata: AuthorizationServerMetadata = parse_subsection(&server, "oauth.server")?;
             self = self.set_oauth_server_metadata(metadata);

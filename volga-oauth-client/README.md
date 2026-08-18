@@ -8,6 +8,8 @@ Provides:
 
 * Discovery client fetching Authorization Server Metadata ([RFC 8414](https://www.rfc-editor.org/rfc/rfc8414)) and Protected Resource Metadata ([RFC 9728](https://www.rfc-editor.org/rfc/rfc9728))
 * Authorization Code flow with mandatory PKCE (S256, [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636)), refresh tokens and resource indicators ([RFC 8707](https://www.rfc-editor.org/rfc/rfc8707))
+* The grants that authenticate the client itself: client credentials ([RFC 6749](https://www.rfc-editor.org/rfc/rfc6749) Section 4.4), the JWT bearer grant ([RFC 7523](https://www.rfc-editor.org/rfc/rfc7523) Section 2.1) and token exchange ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693))
+* Client authentication with `client_secret_basic`, `client_secret_post` or `private_key_jwt` ([RFC 7523](https://www.rfc-editor.org/rfc/rfc7523) Section 2.2, feature `private-key-jwt`)
 * Token persistence and transparent refresh through the `TokenStore` abstraction
 * Dynamic Client Registration ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) - the RFC 7592 management protocol is not implemented, but the `registration_access_token` / `registration_client_uri` pair is surfaced for applications that need it
 
@@ -44,11 +46,48 @@ async fn authorize() -> Result<(), ClientError> {
 }
 ```
 
+### Machine-to-machine
+
+No user is involved, so the client's own credentials are the grant. This example authenticates with a key of its own, which needs the `private-key-jwt` feature; with a client secret it is `with_secret("s3cret")` instead and no extra feature:
+
+```rust,no_run
+use volga_oauth_client::{
+    ClientError, DiscoveryClient, JwsAlgorithm, OAuthClient, PrivateKeyJwt,
+};
+
+async fn service_token() -> Result<(), ClientError> {
+    let metadata = DiscoveryClient::new()
+        .fetch_server_metadata("https://auth.example.com")
+        .await?;
+
+    // authenticating with a key of its own instead of a shared secret
+    // (`from_pem` takes the bytes directly when the key is not a file)
+    let client = OAuthClient::new("my-service")
+        .with_private_key_jwt(PrivateKeyJwt::from_pem_file(
+            "/etc/secrets/client.pem",
+            JwsAlgorithm::RS256,
+        )?);
+
+    let tokens = client
+        .client_credentials(&metadata)
+        .with_scopes(["inventory:read"])
+        .with_resource("https://api.example.com")
+        .send()
+        .await?;
+    Ok(())
+}
+```
+
+`jwt_bearer` presents a JWT the caller already holds (a workload identity token, say) as the grant, and `exchange_token` implements RFC 8693 - trading one token for another, possibly of a different type.
+
 ## Feature flags
 
 | Flag | What it enables |
 |---|---|
 | `http1` (default) | HTTP/1.1 via hyper |
 | `http2` | HTTP/2 via hyper; negotiated through TLS ALPN when combined with `http1`, used exclusively (prior knowledge over plaintext) without it |
+| `private-key-jwt` | `private_key_jwt` client authentication ([RFC 7523](https://www.rfc-editor.org/rfc/rfc7523) Section 2.2) - `PrivateKeyJwt`, `ClientAuthMethod::PrivateKeyJwt`, `OAuthClient::with_private_key_jwt` and `from_registration_with_key` |
 
-At least one of the two must be enabled.
+At least one of `http1` / `http2` must be enabled.
+
+`private-key-jwt` is off by default: it is the only part of this crate that needs a JWS signing backend (`jsonwebtoken` on `aws-lc-rs`). Everything else - every grant, `client_secret_basic`, `client_secret_post` and public clients - works without it.

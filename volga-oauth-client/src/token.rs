@@ -92,14 +92,19 @@ impl From<TokenResponse> for TokenSet {
             refresh_token: response.refresh_token,
             scope: response.scope,
             id_token: response.id_token,
-            // an `expires_in` too large to represent as a `SystemTime`
-            // (a buggy or malicious server) is treated as no reported
-            // lifetime rather than panicking
-            expires_at: response
-                .expires_in
-                .and_then(|secs| SystemTime::now().checked_add(Duration::from_secs(secs))),
+            expires_at: expires_at(response.expires_in),
         }
     }
+}
+
+/// Resolves a token response's relative `expires_in` into an absolute
+/// expiration, captured now.
+///
+/// An `expires_in` too large to represent as a [`SystemTime`] (a buggy or
+/// malicious server) is treated as no reported lifetime rather than
+/// panicking.
+pub(crate) fn expires_at(expires_in: Option<u64>) -> Option<SystemTime> {
+    expires_in.and_then(|secs| SystemTime::now().checked_add(Duration::from_secs(secs)))
 }
 
 impl std::fmt::Debug for TokenResponse {

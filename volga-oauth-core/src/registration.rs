@@ -41,6 +41,21 @@ pub struct ClientMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_endpoint_auth_method: Option<String>,
 
+    /// JWS `alg` the client signs its token endpoint assertion with, for
+    /// the `private_key_jwt` and `client_secret_jwt` methods
+    ///
+    /// Defined by OpenID Connect Dynamic Client Registration Section 2. It
+    /// pins the algorithm for *this* client, more narrowly than the
+    /// server-wide `token_endpoint_auth_signing_alg_values_supported` of
+    /// the authorization server metadata: signing with anything else is
+    /// answered with `invalid_client`, however capable the server is.
+    ///
+    /// Kept as a string rather than a
+    /// [`JwsAlgorithm`](crate::JwsAlgorithm) so a registration naming an
+    /// algorithm this framework does not implement still deserializes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_endpoint_auth_signing_alg: Option<String>,
+
     /// Grant types the client will use
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub grant_types: Vec<String>,
@@ -137,6 +152,13 @@ impl ClientMetadata {
     /// Sets the requested token endpoint authentication method
     pub fn with_token_endpoint_auth_method(mut self, method: impl Into<String>) -> Self {
         self.token_endpoint_auth_method = Some(method.into());
+        self
+    }
+
+    /// Sets the JWS `alg` the client signs its token endpoint assertion
+    /// with (OpenID Connect Dynamic Client Registration Section 2)
+    pub fn with_token_endpoint_auth_signing_alg(mut self, algorithm: impl Into<String>) -> Self {
+        self.token_endpoint_auth_signing_alg = Some(algorithm.into());
         self
     }
 
