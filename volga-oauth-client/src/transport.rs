@@ -254,12 +254,25 @@ pub(crate) struct EndpointResponse {
 
 impl EndpointResponse {
     /// The response headers, available whatever the status says.
-    #[allow(
-        dead_code,
-        reason = "the seam DPoP nonce handling needs; see RomanEmreis/volga#213"
-    )]
+    ///
+    /// Only DPoP reads them today - the nonce a `use_dpop_nonce` refusal
+    /// carries lives in one (RFC 9449 Section 8.2), which the error the
+    /// status turns into cannot hold.
+    #[cfg_attr(not(feature = "dpop"), allow(dead_code))]
     pub(crate) fn headers(&self) -> &HeaderMap {
         &self.headers
+    }
+
+    /// Returns whether this response is a failure carrying the OAuth error
+    /// `code` (RFC 6749 Section 5.2).
+    ///
+    /// The question a retryable refusal asks - `use_dpop_nonce` above all -
+    /// before the response is turned into an error by
+    /// [`into_json`](Self::into_json), which consumes it.
+    #[cfg_attr(not(feature = "dpop"), allow(dead_code))]
+    pub(crate) fn is_error(&self, code: &volga_oauth_core::OAuthErrorCode) -> bool {
+        !self.status.is_success()
+            && serde_json::from_slice::<OAuthError>(&self.body).is_ok_and(|err| &err.error == code)
     }
 
     /// Reads a non-redirect response, capturing the body up to
@@ -375,6 +388,21 @@ mod tests {
         assert!(matches!(err, ClientError::Http(StatusCode::BAD_GATEWAY)));
         let err = response(200, "<html></html>").into_json().unwrap_err();
         assert!(matches!(err, ClientError::Decode(_)));
+    }
+
+    #[test]
+    fn it_recognizes_a_retryable_refusal_before_consuming_it() {
+        let failed = response(400, r#"{"error": "use_dpop_nonce"}"#);
+        assert!(failed.is_error(&OAuthErrorCode::UseDpopNonce));
+        assert!(!failed.is_error(&OAuthErrorCode::InvalidGrant));
+
+        // a *successful* response is never an error, whatever its body
+        // happens to look like
+        assert!(
+            !response(200, r#"{"error": "use_dpop_nonce"}"#)
+                .is_error(&OAuthErrorCode::UseDpopNonce)
+        );
+        assert!(!response(400, "<html></html>").is_error(&OAuthErrorCode::UseDpopNonce));
     }
 
     #[test]

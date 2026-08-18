@@ -227,7 +227,7 @@ impl<'a> TokenRequest<'a> {
         let endpoint = token_endpoint(self.metadata)?;
         let (body, authorization) = self.build()?;
         self.client
-            .post_token_request(endpoint, body, authorization)
+            .post_token_request(self.metadata, endpoint, body, authorization)
             .await
     }
 }

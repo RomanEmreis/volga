@@ -191,7 +191,7 @@ impl BearerChallenge {
     /// assert_eq!(challenge.scheme(), "DPoP");
     /// assert_eq!(
     ///     challenge.error(),
-    ///     Some(&OAuthErrorCode::Other("use_dpop_nonce".into()))
+    ///     Some(&OAuthErrorCode::UseDpopNonce)
     /// );
     /// ```
     pub fn parse_scheme(header: &str, scheme: &str) -> Result<Self, OAuthError> {
@@ -927,10 +927,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(challenge.scheme(), "DPoP");
-        assert_eq!(
-            challenge.error(),
-            Some(&OAuthErrorCode::Other("use_dpop_nonce".into()))
-        );
+        assert_eq!(challenge.error(), Some(&OAuthErrorCode::UseDpopNonce));
         assert_eq!(challenge.description(), Some("nonce required"));
 
         // ...and it re-renders under the scheme it arrived with
@@ -951,7 +948,7 @@ mod tests {
             BearerChallenge::parse_scheme(header, auth_scheme::DPOP)
                 .unwrap()
                 .error(),
-            Some(&OAuthErrorCode::Other("use_dpop_nonce".into()))
+            Some(&OAuthErrorCode::UseDpopNonce)
         );
         let err =
             BearerChallenge::parse_scheme(r#"Bearer realm="api""#, auth_scheme::DPOP).unwrap_err();
@@ -1017,10 +1014,7 @@ mod tests {
     fn it_ignores_unknown_parameters() {
         let challenge =
             BearerChallenge::parse(r#"Bearer nonce="abc", error="use_dpop_nonce""#).unwrap();
-        assert_eq!(
-            challenge.error(),
-            Some(&OAuthErrorCode::from("use_dpop_nonce"))
-        );
+        assert_eq!(challenge.error(), Some(&OAuthErrorCode::UseDpopNonce));
         assert_eq!(challenge.realm(), None);
     }
 

@@ -13,76 +13,15 @@ use std::{
 
 use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use serde::Serialize;
-use volga_oauth_core::{AuthorizationServerMetadata, JwkSet, PublicJwk, pem::PemKind};
+use volga_oauth_core::{AuthorizationServerMetadata, JwkSet, PublicJwk};
 
-use crate::{ClientError, JwsAlgorithm, pkce::random_urlsafe};
+use crate::{ClientError, JwsAlgorithm, jws, pkce::random_urlsafe};
 
 /// Default validity of a generated client assertion
 ///
 /// RFC 7523 Section 3 requires an `exp` and expects it to be short - the
 /// assertion is consumed by a single token request.
 pub const DEFAULT_ASSERTION_LIFETIME: Duration = Duration::from_secs(60);
-
-/// The key families a [`JwsAlgorithm`] can be keyed by, selecting the
-/// constructor a PEM or DER blob is loaded with.
-#[derive(Clone, Copy)]
-enum KeyFamily {
-    Rsa,
-    Ec,
-    Ed,
-}
-
-impl KeyFamily {
-    /// Returns `false` when a PEM header rules this family out.
-    ///
-    /// [`PemKind::Ambiguous`] is the PKCS#8 / SPKI header, which carries
-    /// any family (and is the only form an Ed25519 key comes in), and
-    /// [`PemKind::Unknown`] is no evidence either way - only a header that
-    /// positively names the *other* family is a contradiction. Judging it
-    /// here turns an opaque `InvalidKeyFormat` from the parser into an
-    /// error that says which of the two the caller got wrong.
-    fn accepts(self, header: PemKind) -> bool {
-        match self {
-            Self::Rsa => header != PemKind::Ec,
-            Self::Ec => header != PemKind::Rsa,
-            Self::Ed => !matches!(header, PemKind::Rsa | PemKind::Ec),
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Rsa => "an RSA",
-            Self::Ec => "an EC",
-            Self::Ed => "an Ed25519",
-        }
-    }
-}
-
-/// Maps an algorithm onto the underlying JWT implementation and the key
-/// family it needs.
-///
-/// The symmetric algorithms have no place here: `private_key_jwt` proves
-/// possession of a key the authorization server does not hold, and an
-/// HMAC secret proves nothing of the sort.
-fn asymmetric(algorithm: JwsAlgorithm) -> Result<(Algorithm, KeyFamily), ClientError> {
-    Ok(match algorithm {
-        JwsAlgorithm::RS256 => (Algorithm::RS256, KeyFamily::Rsa),
-        JwsAlgorithm::RS384 => (Algorithm::RS384, KeyFamily::Rsa),
-        JwsAlgorithm::RS512 => (Algorithm::RS512, KeyFamily::Rsa),
-        JwsAlgorithm::PS256 => (Algorithm::PS256, KeyFamily::Rsa),
-        JwsAlgorithm::PS384 => (Algorithm::PS384, KeyFamily::Rsa),
-        JwsAlgorithm::PS512 => (Algorithm::PS512, KeyFamily::Rsa),
-        JwsAlgorithm::ES256 => (Algorithm::ES256, KeyFamily::Ec),
-        JwsAlgorithm::ES384 => (Algorithm::ES384, KeyFamily::Ec),
-        JwsAlgorithm::EdDSA => (Algorithm::EdDSA, KeyFamily::Ed),
-        symmetric => {
-            return Err(ClientError::signing(format!(
-                "{symmetric} is a shared-secret algorithm; private_key_jwt requires an \
-                 asymmetric key the authorization server does not hold"
-            )));
-        }
-    })
-}
 
 /// The signing key and claims policy of `private_key_jwt` client
 /// authentication (RFC 7523 Section 2.2)
@@ -124,26 +63,7 @@ impl PrivateKeyJwt {
     /// is symmetric (an HMAC secret cannot back this method), or when the
     /// key does not parse or does not match the algorithm family.
     pub fn from_pem(pem: &[u8], algorithm: JwsAlgorithm) -> Result<Self, ClientError> {
-        let (alg, family) = asymmetric(algorithm)?;
-
-        // the header names the family, never the algorithm: it can only
-        // rule a key out, and does so with a better message than the
-        // parser's `InvalidKeyFormat`
-        let header = volga_oauth_core::pem::detect(pem);
-        if !family.accepts(header) {
-            return Err(ClientError::signing(format!(
-                "{algorithm} needs {} key, but the PEM header describes {header:?}",
-                family.name()
-            )));
-        }
-
-        let key = match family {
-            KeyFamily::Rsa => EncodingKey::from_rsa_pem(pem),
-            KeyFamily::Ec => EncodingKey::from_ec_pem(pem),
-            KeyFamily::Ed => EncodingKey::from_ed_pem(pem),
-        }
-        .map_err(ClientError::signing)?;
-
+        let (key, alg) = jws::from_pem(pem, algorithm)?;
         Ok(Self::from_key(key, algorithm, alg))
     }
 
@@ -167,15 +87,7 @@ impl PrivateKeyJwt {
         path: impl AsRef<std::path::Path>,
         algorithm: JwsAlgorithm,
     ) -> Result<Self, ClientError> {
-        let path = path.as_ref();
-        let pem = std::fs::read(path).map_err(|err| {
-            ClientError::signing(format!(
-                "failed to read the signing key at {}: {err}",
-                path.display()
-            ))
-        })?;
-
-        Self::from_pem(&pem, algorithm)
+        Self::from_pem(&jws::read_pem_file(path.as_ref())?, algorithm)
     }
 
     /// Adopts a DER-encoded private key for `algorithm`
@@ -184,13 +96,7 @@ impl PrivateKeyJwt {
     /// key that does not match the algorithm surfaces at the first signing
     /// attempt rather than here.
     pub fn from_der(der: &[u8], algorithm: JwsAlgorithm) -> Result<Self, ClientError> {
-        let (alg, family) = asymmetric(algorithm)?;
-        let key = match family {
-            KeyFamily::Rsa => EncodingKey::from_rsa_der(der),
-            KeyFamily::Ec => EncodingKey::from_ec_der(der),
-            KeyFamily::Ed => EncodingKey::from_ed_der(der),
-        };
-
+        let (key, alg) = jws::from_der(der, algorithm)?;
         Ok(Self::from_key(key, algorithm, alg))
     }
 

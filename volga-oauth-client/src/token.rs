@@ -63,6 +63,34 @@ pub struct TokenSet {
 }
 
 impl TokenSet {
+    /// Returns `true` when the access token is DPoP-bound (RFC 9449
+    /// Section 5) and must be presented under that scheme
+    ///
+    /// A DPoP-bound token is not a bearer token: sending it as `Bearer`
+    /// gives up the binding and is refused by any server that issued it.
+    /// [`Dpop::authorize`](crate::Dpop::authorize) presents it correctly;
+    /// this is how a caller doing its own request handling tells the two
+    /// apart. `token_type` is case-insensitive per RFC 6749 Section 5.1.
+    ///
+    /// ```
+    /// # use volga_oauth_client::{TokenResponse, TokenSet};
+    /// # let response = TokenResponse {
+    /// #     access_token: "at".into(),
+    /// #     token_type: "DPoP".into(),
+    /// #     expires_in: None,
+    /// #     refresh_token: None,
+    /// #     scope: None,
+    /// #     id_token: None,
+    /// # };
+    /// let tokens = TokenSet::from(response);
+    /// assert!(tokens.is_dpop());
+    /// ```
+    #[inline]
+    pub fn is_dpop(&self) -> bool {
+        self.token_type
+            .eq_ignore_ascii_case(volga_oauth_core::auth_scheme::DPOP)
+    }
+
     /// Returns `true` when the access token has expired
     ///
     /// A token without a known lifetime never reports as expired.
@@ -196,6 +224,22 @@ mod tests {
         assert!(tokens.expires_within(Duration::MAX));
         let tokens = TokenSet::from(response(None));
         assert!(!tokens.expires_within(Duration::MAX));
+    }
+
+    #[test]
+    fn it_recognizes_a_dpop_bound_token() {
+        let mut response = response(None);
+        assert!(!TokenSet::from(response.clone()).is_dpop());
+
+        // RFC 6749 Section 5.1 makes `token_type` case-insensitive, and
+        // servers do spell it every which way
+        for spelling in ["DPoP", "dpop", "DPOP"] {
+            response.token_type = spelling.into();
+            assert!(
+                TokenSet::from(response.clone()).is_dpop(),
+                "'{spelling}' was not recognized"
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,399 @@
+//! End-to-end DPoP tests (RFC 9449): a real volga application playing the
+//! token endpoint and a DPoP-protected resource, verifying the proofs the
+//! way a server would. Same HTTP/1-only gating as the discovery suite (see
+//! `discovery_tests.rs`).
+
+#![cfg(all(feature = "http1", feature = "dpop"))]
+
+mod common;
+
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
+
+use bytes::Bytes;
+use common::{free_port, serve};
+use http::{HeaderMap, Method, StatusCode};
+use http_body_util::{BodyExt, Full};
+use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+use jsonwebtoken::{
+    Algorithm, DecodingKey, Validation, decode, decode_header, jwk::ThumbprintHash,
+};
+use serde::Deserialize;
+use volga::{App, headers::HttpHeaders};
+use volga_oauth_client::{
+    AuthorizationServerMetadata, BearerChallenge, ClientConfig, ClientError, DPOP_HEADER,
+    DPOP_NONCE_HEADER, Dpop, OAuthClient, OAuthErrorCode, TokenSet, auth_scheme, grant,
+};
+
+/// The claims of a DPoP proof (RFC 9449 Section 4.2), as a server reads them.
+#[derive(Deserialize)]
+struct ProofClaims {
+    jti: String,
+    htm: String,
+    htu: String,
+    #[allow(dead_code)]
+    iat: u64,
+    ath: Option<String>,
+    nonce: Option<String>,
+}
+
+/// A verified proof: its claims and the thumbprint of the key that signed
+/// it - the `jkt` an authorization server binds the issued token to.
+struct VerifiedProof {
+    claims: ProofClaims,
+    thumbprint: String,
+}
+
+/// Verifies a proof the way a server would: `typ`, the signature against
+/// the public key the header publishes, and nothing else to go on.
+fn verify_proof(proof: &str) -> VerifiedProof {
+    let header = decode_header(proof).expect("the proof must have a JOSE header");
+    assert_eq!(header.typ.as_deref(), Some("dpop+jwt"));
+
+    let jwk = header.jwk.expect("a proof must publish its public key");
+    let thumbprint = jwk
+        .thumbprint(ThumbprintHash::SHA256)
+        .expect("the published key must be thumbprintable");
+
+    let mut validation = Validation::new(match header.alg {
+        Algorithm::ES256 => Algorithm::ES256,
+        other => panic!("unexpected proof algorithm: {other:?}"),
+    });
+    // a proof carries no `exp` and no `aud`; freshness is `iat` and the
+    // nonce, which this endpoint judges itself
+    validation.required_spec_claims.clear();
+    validation.validate_exp = false;
+
+    let claims = decode::<ProofClaims>(proof, &DecodingKey::from_jwk(&jwk).unwrap(), &validation)
+        .expect("the proof must verify against the key it publishes")
+        .claims;
+
+    VerifiedProof { claims, thumbprint }
+}
+
+/// Reads the `DPoP` header of a request, or fails the request the way a
+/// server without one would.
+fn proof_of(headers: &HttpHeaders) -> Option<String> {
+    headers
+        .get_raw(DPOP_HEADER)
+        .and_then(|proof| proof.to_str().ok())
+        .map(ToOwned::to_owned)
+}
+
+/// An OAuth client accepting the plaintext test server.
+fn plaintext_client(client_id: &str) -> OAuthClient {
+    OAuthClient::new(client_id).with_config(ClientConfig::new().require_https(false))
+}
+
+fn server_metadata(base: &str) -> AuthorizationServerMetadata {
+    let mut metadata = AuthorizationServerMetadata::new(base);
+    metadata.token_endpoint = Some(format!("{base}/token"));
+    metadata.grant_types_supported = vec![grant::CLIENT_CREDENTIALS.into()];
+    metadata.dpop_signing_alg_values_supported = vec!["ES256".into()];
+    metadata
+}
+
+/// Sends a plain `GET`, returning the status, headers and body - the raw
+/// resource request a consumer of this crate makes for itself.
+async fn get(url: &str, headers: HeaderMap) -> (StatusCode, HeaderMap, String) {
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new())
+        .build(hyper_util::client::legacy::connect::HttpConnector::new());
+
+    let mut request = http::Request::builder()
+        .method(Method::GET)
+        .uri(url)
+        .body(Full::default())
+        .unwrap();
+    request.headers_mut().extend(headers);
+
+    let response = client.request(request).await.unwrap();
+    let (status, headers) = (response.status(), response.headers().clone());
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+
+    (status, headers, String::from_utf8(body.to_vec()).unwrap())
+}
+
+#[tokio::test]
+async fn it_binds_a_token_request_to_the_dpop_key() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let endpoint = format!("{base}/token");
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let identifiers: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let (seen, collected) = (requests.clone(), identifiers.clone());
+    let htu = endpoint.clone();
+
+    // the endpoint demands a nonce on the first request and echoes the
+    // thumbprint of the proving key back as the access token, so the client
+    // side can assert the token is bound to the key it signed with
+    let mut app = App::new();
+    app.map_post("/token", move |headers: HttpHeaders| {
+        let (seen, collected, htu) = (seen.clone(), collected.clone(), htu.clone());
+        async move {
+            let attempt = seen.fetch_add(1, Ordering::SeqCst);
+            let Some(proof) = proof_of(&headers) else {
+                return volga::status!(400, { "error": "invalid_dpop_proof" });
+            };
+
+            let proof = verify_proof(&proof);
+            assert_eq!(proof.claims.htm, "POST");
+            assert_eq!(proof.claims.htu, htu);
+            collected.lock().unwrap().push(proof.claims.jti.clone());
+            // no access token is presented to the token endpoint
+            assert!(proof.claims.ath.is_none());
+
+            match proof.claims.nonce.as_deref() {
+                None => {
+                    assert_eq!(attempt, 0, "the nonce was demanded once already");
+                    volga::status!(
+                        400,
+                        { "error": "use_dpop_nonce",
+                          "error_description": "Authorization server requires nonce in DPoP proof" };
+                        [("dpop-nonce", "n-1")]
+                    )
+                }
+                Some("n-1") => volga::ok!({
+                    "access_token": proof.thumbprint,
+                    "token_type": "DPoP",
+                    "expires_in": 3600
+                }),
+                Some(other) => panic!("unexpected nonce: {other}"),
+            }
+        }
+    });
+    let server = serve(port, app).await;
+
+    let dpop = Dpop::generate().unwrap();
+    let client = plaintext_client("my-service").with_dpop(dpop.clone());
+    let metadata = server_metadata(&base);
+
+    let tokens = client
+        .client_credentials(&metadata)
+        .send()
+        .await
+        .expect("the nonce round must be answered transparently");
+
+    // the token came back bound to the key that proved possession...
+    assert!(tokens.is_dpop());
+    assert_eq!(tokens.access_token, dpop.thumbprint());
+    // ...after exactly one retry
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    // ...and the nonce is remembered, so the next request carries it
+    // without a round trip
+    assert_eq!(dpop.nonce(&endpoint).as_deref(), Some("n-1"));
+
+    let second = client.client_credentials(&metadata).send().await.unwrap();
+    assert_eq!(second.access_token, dpop.thumbprint());
+    assert_eq!(requests.load(Ordering::SeqCst), 3);
+
+    // every request carried a freshly signed proof: a captured one is not
+    // replayable (RFC 9449 Section 11.1)
+    let identifiers = identifiers.lock().unwrap();
+    let unique: std::collections::HashSet<&String> = identifiers.iter().collect();
+    assert_eq!(unique.len(), identifiers.len(), "a `jti` was reused");
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn it_retries_a_nonce_refusal_exactly_once() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+
+    // a server that refuses forever, handing out a *fresh* nonce every
+    // time: the retry must be bounded by the attempt, not by the nonce
+    let requests = Arc::new(AtomicUsize::new(0));
+    let seen = requests.clone();
+
+    let mut app = App::new();
+    app.map_post("/token", move |headers: HttpHeaders| {
+        let seen = seen.clone();
+        async move {
+            let attempt = seen.fetch_add(1, Ordering::SeqCst);
+            assert!(proof_of(&headers).is_some(), "the request carried no proof");
+            volga::status!(
+                400,
+                { "error": "use_dpop_nonce" };
+                [("dpop-nonce", format!("n-{attempt}"))]
+            )
+        }
+    });
+    let server = serve(port, app).await;
+
+    let client = plaintext_client("my-service").with_dpop(Dpop::generate().unwrap());
+    let err = client
+        .client_credentials(&server_metadata(&base))
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(&err, ClientError::Protocol(err) if err.error == OAuthErrorCode::UseDpopNonce),
+        "got: {err}"
+    );
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn it_refuses_an_algorithm_the_server_does_not_accept() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+
+    let requests = Arc::new(AtomicUsize::new(0));
+    let seen = requests.clone();
+
+    let mut app = App::new();
+    app.map_post("/token", move |_headers: HttpHeaders| {
+        let seen = seen.clone();
+        async move {
+            seen.fetch_add(1, Ordering::SeqCst);
+            volga::ok!({ "access_token": "at", "token_type": "DPoP" })
+        }
+    });
+    let server = serve(port, app).await;
+
+    let mut metadata = server_metadata(&base);
+    metadata.dpop_signing_alg_values_supported = vec!["RS256".into()];
+
+    let client = plaintext_client("my-service").with_dpop(Dpop::generate().unwrap());
+    let err = client
+        .client_credentials(&metadata)
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(&err, ClientError::Validation(reason) if reason.contains("ES256")));
+    // the server advertised what it accepts; there was nothing to try
+    assert_eq!(requests.load(Ordering::SeqCst), 0);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn it_protects_a_resource_request_with_a_proof() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let url = format!("{base}/orders");
+
+    let dpop = Dpop::generate().unwrap();
+    let tokens = TokenSet {
+        access_token: "at-1".into(),
+        token_type: auth_scheme::DPOP.into(),
+        refresh_token: None,
+        scope: None,
+        id_token: None,
+        expires_at: None,
+    };
+
+    // a resource server that binds the token to the key (RFC 9449
+    // Section 6), demands `ath` and asks for a nonce once (Section 9)
+    let jkt = dpop.thumbprint().to_owned();
+    let htu = url.clone();
+    let ath = {
+        use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+        URL_SAFE_NO_PAD.encode(
+            aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, tokens.access_token.as_bytes())
+                .as_ref(),
+        )
+    };
+
+    let mut app = App::new();
+    app.map_get("/orders", move |headers: HttpHeaders| {
+        let (jkt, htu, ath) = (jkt.clone(), htu.clone(), ath.clone());
+        async move {
+            let credential = headers
+                .get_raw(http::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default();
+            // a DPoP-bound token is never accepted as a bearer token
+            assert_eq!(credential, "DPoP at-1");
+
+            let proof = verify_proof(&proof_of(&headers).expect("no proof"));
+            assert_eq!(proof.claims.htm, "GET");
+            // the query string is not part of the proven target
+            assert_eq!(proof.claims.htu, htu);
+            // the proof is bound to the token presented alongside it...
+            assert_eq!(proof.claims.ath.as_deref(), Some(ath.as_str()));
+            // ...and the token is bound to the key that signed it
+            assert_eq!(proof.thumbprint, jkt);
+
+            match proof.claims.nonce.as_deref() {
+                Some("rs-1") => volga::ok!({ "orders": [] }),
+                _ => volga::status!(
+                    401,
+                    { "error": "use_dpop_nonce" };
+                    [
+                        ("www-authenticate", r#"DPoP error="use_dpop_nonce", error_description="Resource server requires nonce""#),
+                        ("dpop-nonce", "rs-1")
+                    ]
+                ),
+            }
+        }
+    });
+    let server = serve(port, app).await;
+
+    // this is the consumer's half: mint the proof, send the request, and
+    // repeat it once when the resource asks for a nonce
+    let target = format!("{url}?page=2");
+    let mut headers = HeaderMap::new();
+    dpop.authorize(&mut headers, &Method::GET, &target, &tokens)
+        .unwrap();
+
+    let (status, response_headers, _) = get(&target, headers).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let challenge = BearerChallenge::parse_scheme(
+        response_headers[http::header::WWW_AUTHENTICATE]
+            .to_str()
+            .unwrap(),
+        auth_scheme::DPOP,
+    )
+    .unwrap();
+    assert_eq!(challenge.error(), Some(&OAuthErrorCode::UseDpopNonce));
+
+    // the nonce the challenge came with is what makes the retry worth
+    // making - and the proof picks it up on its own
+    assert!(dpop.accept_nonce(&target, &response_headers));
+
+    let mut headers = HeaderMap::new();
+    dpop.authorize(&mut headers, &Method::GET, &target, &tokens)
+        .unwrap();
+    let (status, _, body) = get(&target, headers).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, r#"{"orders":[]}"#);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn it_leaves_a_bearer_client_untouched() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+
+    // no DPoP configured: nothing about the request changes
+    let mut app = App::new();
+    app.map_post("/token", |headers: HttpHeaders| async move {
+        assert!(headers.get_raw(DPOP_HEADER).is_none());
+        volga::ok!({ "access_token": "at", "token_type": "Bearer" })
+    });
+    let server = serve(port, app).await;
+
+    let client = plaintext_client("my-service");
+    let tokens = client
+        .client_credentials(&server_metadata(&base))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(!tokens.is_dpop());
+    assert!(client.dpop().is_none());
+    // ...and a nonce header on a response nobody asked for is ignored
+    assert!(HeaderMap::new().get(DPOP_NONCE_HEADER).is_none());
+
+    server.abort();
+}

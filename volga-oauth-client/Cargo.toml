@@ -41,6 +41,8 @@ http2 = ["hyper/http2", "hyper-util/http2", "hyper-rustls/http2"]
 # `private_key_jwt` client authentication (RFC 7523 Section 2.2); pulls in a
 # JWS signing backend, which the other client authentication methods do not need
 private-key-jwt = ["dep:jsonwebtoken"]
+# DPoP sender-constrained tokens (RFC 9449); shares the JWS signing backend
+dpop = ["dep:jsonwebtoken"]
 
 [package.metadata.docs.rs]
 all-features = true
