@@ -310,6 +310,138 @@ async fn it_retries_when_the_nonce_it_sent_was_not_the_one_demanded() {
     server.abort();
 }
 
+/// A throwaway P-256 key pair: the client signs assertions with the
+/// private half, the test token endpoint verifies with the public one.
+#[cfg(feature = "private-key-jwt")]
+const CLIENT_KEY_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgIeRig+AlqV2rBdgt
+BzEQ28UAk8/d5l2+4PDfsspynmShRANCAATP07xL4i2PpomWJmZSZZMbQqj4Ybbd
+aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
+-----END PRIVATE KEY-----";
+
+#[cfg(feature = "private-key-jwt")]
+const CLIENT_PUBLIC_KEY_PEM: &[u8] = b"-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEz9O8S+Itj6aJliZmUmWTG0Ko+GG2
+3Wi6M3qbdjh5w+ie6TUx5tdjXWhCeJJ86wpKeqYaNhBSEIeXCp6h5voUMA==
+-----END PUBLIC KEY-----";
+
+#[cfg(feature = "private-key-jwt")]
+#[derive(Deserialize)]
+struct AssertionForm {
+    client_assertion: Option<String>,
+}
+
+#[cfg(feature = "private-key-jwt")]
+#[derive(Deserialize)]
+struct AssertionClaims {
+    jti: String,
+}
+
+/// Verifies a client assertion the way an authorization server would and
+/// returns its `jti` - the identifier a replay-protecting server records.
+#[cfg(feature = "private-key-jwt")]
+fn assertion_jti(assertion: &str, client_id: &str, issuer: &str) -> String {
+    let mut validation = Validation::new(Algorithm::ES256);
+    validation.set_issuer(&[client_id]);
+    validation.set_audience(&[issuer]);
+
+    let key = DecodingKey::from_ec_pem(CLIENT_PUBLIC_KEY_PEM).unwrap();
+    decode::<AssertionClaims>(assertion, &key, &validation)
+        .expect("the client assertion must verify")
+        .claims
+        .jti
+}
+
+/// The nonce round repeats the token request, and a repeat has to be a new
+/// request: `private_key_jwt` authenticates with a one-shot assertion, and
+/// RFC 7523 Section 3 invites the server to remember its `jti`. Resending
+/// the first request's bytes would present that assertion twice.
+#[cfg(feature = "private-key-jwt")]
+#[tokio::test]
+async fn it_mints_a_fresh_client_assertion_for_the_nonce_retry() {
+    use volga::Form;
+    use volga_oauth_client::{JwsAlgorithm, PrivateKeyJwt, client_auth};
+
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let issuer = base.clone();
+
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorded = seen.clone();
+
+    let mut app = App::new();
+    app.map_post(
+        "/token",
+        move |headers: HttpHeaders, form: Form<AssertionForm>| {
+            let (recorded, issuer) = (recorded.clone(), issuer.clone());
+            async move {
+                let proof = verify_proof(&proof_of(&headers).expect("no proof"));
+                let assertion = form
+                    .client_assertion
+                    .as_deref()
+                    .expect("the request carried no client assertion");
+                let jti = assertion_jti(assertion, "my-service", &issuer);
+
+                // a replay-protecting server refuses an assertion it has
+                // already consumed
+                if !recorded.lock().unwrap().insert_unique(jti) {
+                    return volga::status!(401, { "error": "invalid_client" });
+                }
+
+                match proof.claims.nonce.as_deref() {
+                    None => volga::status!(
+                        400,
+                        { "error": "use_dpop_nonce" };
+                        [("dpop-nonce", "n-1")]
+                    ),
+                    Some("n-1") => {
+                        volga::ok!({ "access_token": "at", "token_type": "DPoP" })
+                    }
+                    Some(other) => panic!("unexpected nonce: {other}"),
+                }
+            }
+        },
+    );
+    let server = serve(port, app).await;
+
+    let mut metadata = server_metadata(&base);
+    metadata.token_endpoint_auth_methods_supported = vec![client_auth::PRIVATE_KEY_JWT.into()];
+
+    let key = PrivateKeyJwt::from_pem(CLIENT_KEY_PEM, JwsAlgorithm::ES256).unwrap();
+    let client = plaintext_client("my-service")
+        .with_private_key_jwt(key)
+        .with_dpop(Dpop::generate().unwrap());
+
+    let tokens = client
+        .client_credentials(&metadata)
+        .send()
+        .await
+        .expect("the retry must present a freshly signed assertion");
+
+    assert!(tokens.is_dpop());
+    // both attempts authenticated, each with an assertion of its own
+    assert_eq!(seen.lock().unwrap().len(), 2);
+
+    server.abort();
+}
+
+/// `Vec::push` that reports whether the value was new.
+#[cfg(feature = "private-key-jwt")]
+trait InsertUnique {
+    fn insert_unique(&mut self, value: String) -> bool;
+}
+
+#[cfg(feature = "private-key-jwt")]
+impl InsertUnique for Vec<String> {
+    fn insert_unique(&mut self, value: String) -> bool {
+        if self.contains(&value) {
+            return false;
+        }
+        self.push(value);
+        true
+    }
+}
+
 #[tokio::test]
 async fn it_refuses_an_algorithm_the_server_does_not_accept() {
     let port = free_port();
@@ -429,10 +561,15 @@ async fn it_protects_a_resource_request_with_a_proof() {
 
     // the nonce the challenge came with is what makes the retry worth
     // making - and the proof picks it up on its own
-    assert!(dpop.accept_nonce(&target, &response_headers));
+    let demanded = dpop
+        .accept_nonce(&target, &response_headers)
+        .expect("the challenge must carry the nonce to retry with");
+    assert_eq!(demanded, "rs-1");
 
+    // the retry answers with the nonce *that* response demanded, not with
+    // whatever the shared state holds by now
     let mut headers = HeaderMap::new();
-    dpop.authorize(&mut headers, &Method::GET, &target, &tokens)
+    dpop.authorize_with_nonce(&mut headers, &Method::GET, &target, &tokens, &demanded)
         .unwrap();
     let (status, _, body) = get(&target, headers).await;
     assert_eq!(status, StatusCode::OK);

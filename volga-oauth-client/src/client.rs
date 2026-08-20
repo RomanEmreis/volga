@@ -409,9 +409,9 @@ impl OAuthClient {
         self.ensure_grant_registered(grant::AUTHORIZATION_CODE)?;
 
         let endpoint = token_endpoint(metadata)?;
-        // the serializer is not `Sync`: scoping it keeps it out of the
-        // future's state, so this future stays `Send` (see `refresh`)
-        let (body, authorization) = {
+        // the serializer is not `Sync`: confining it to this closure keeps
+        // it out of the future's state, so the future stays `Send`
+        let build = || {
             let mut form = form_urlencoded::Serializer::new(String::new());
 
             form.append_pair("grant_type", grant::AUTHORIZATION_CODE)
@@ -427,11 +427,10 @@ impl OAuthClient {
             }
 
             let authorization = self.apply_client_auth(&mut form, metadata)?;
-            (form.finish(), authorization)
+            Ok((form.finish(), authorization))
         };
 
-        self.request_tokens(metadata, endpoint, body, authorization)
-            .await
+        self.request_tokens(metadata, endpoint, build).await
     }
 
     /// Obtains fresh tokens with a refresh token (RFC 6749 Section 6)
@@ -445,20 +444,20 @@ impl OAuthClient {
         refresh_token: &str,
     ) -> Result<TokenSet, ClientError> {
         let endpoint = token_endpoint(metadata)?;
-        // scoped so the non-`Sync` serializer is dropped before the await:
-        // a future holding it would be `!Send` and could not be spawned
-        let (body, authorization) = {
+        // confined to the closure so the non-`Sync` serializer never lives
+        // across an await: a future holding it would be `!Send` and could
+        // not be spawned
+        let build = || {
             let mut form = form_urlencoded::Serializer::new(String::new());
 
             form.append_pair("grant_type", grant::REFRESH_TOKEN)
                 .append_pair("refresh_token", refresh_token);
 
             let authorization = self.apply_client_auth(&mut form, metadata)?;
-            (form.finish(), authorization)
+            Ok((form.finish(), authorization))
         };
 
-        self.request_tokens(metadata, endpoint, body, authorization)
-            .await
+        self.request_tokens(metadata, endpoint, build).await
     }
 
     /// Returns valid tokens stored under `key`, refreshing a stale access
@@ -536,43 +535,43 @@ impl OAuthClient {
         &self,
         metadata: &AuthorizationServerMetadata,
         endpoint: &str,
-        body: String,
-        authorization: Option<HeaderValue>,
+        build: impl Fn() -> Result<TokenRequestParts, ClientError>,
     ) -> Result<TokenSet, ClientError> {
-        let response: TokenResponse = self
-            .post_token_request(metadata, endpoint, body, authorization)
-            .await?;
+        let response: TokenResponse = self.post_token_request(metadata, endpoint, build).await?;
 
         Ok(response.into())
     }
 
-    /// Submits a prepared token request and deserializes the successful
-    /// response into `T`; every grant goes through here.
+    /// Submits a token request and deserializes the successful response
+    /// into `T`; every grant goes through here.
+    ///
+    /// `build` renders the request rather than being handed its bytes,
+    /// because a request may be sent more than once: the DPoP nonce round
+    /// (RFC 9449 Section 8.2) repeats it, and a repeat has to be a new
+    /// request rather than a resend. A `private_key_jwt` credential is a
+    /// one-shot assertion carrying a random `jti`, and a server that
+    /// remembers those (RFC 7523 Section 3 invites it to) answers a second
+    /// sight of one with `invalid_client`.
     pub(crate) async fn post_token_request<T: serde::de::DeserializeOwned>(
         &self,
         metadata: &AuthorizationServerMetadata,
         endpoint: &str,
-        body: String,
-        authorization: Option<HeaderValue>,
+        build: impl Fn() -> Result<TokenRequestParts, ClientError>,
     ) -> Result<T, ClientError> {
-        let mut headers = http::HeaderMap::new();
-        if let Some(authorization) = authorization {
-            headers.insert(http::header::AUTHORIZATION, authorization);
-        }
-
         #[cfg(feature = "dpop")]
         if let Some(dpop) = &self.dpop {
             return self
-                .post_dpop_token_request(dpop, metadata, endpoint, body, headers)
+                .post_dpop_token_request(dpop, metadata, endpoint, build)
                 .await;
         }
 
         // the metadata is only consulted by the DPoP path above
         let _ = metadata;
 
+        let (body, authorization) = build()?;
         let value = self
             .transport
-            .post_form(endpoint, body, headers)
+            .post_form(endpoint, body, authorization_headers(authorization))
             .await?
             .into_json()?;
 
@@ -594,8 +593,7 @@ impl OAuthClient {
         dpop: &Dpop,
         metadata: &AuthorizationServerMetadata,
         endpoint: &str,
-        body: String,
-        headers: http::HeaderMap,
+        build: impl Fn() -> Result<TokenRequestParts, ClientError>,
     ) -> Result<T, ClientError> {
         use volga_oauth_core::OAuthErrorCode;
 
@@ -607,21 +605,23 @@ impl OAuthClient {
         // bound outside the closure so the proof builder can borrow it
         // across the `with_nonce` call below
         let method = http::Method::POST;
-        let proof = |headers: &http::HeaderMap,
-                     nonce: Option<&str>|
-         -> Result<http::HeaderMap, ClientError> {
-            let mut headers = headers.clone();
+
+        // every attempt is rendered afresh, credential included - see
+        // `post_token_request` on why a retry is a new request
+        let attempt = |nonce: Option<&str>| -> Result<(String, http::HeaderMap), ClientError> {
+            let (body, authorization) = build()?;
+            let mut headers = authorization_headers(authorization);
+
             let mut proof = dpop.proof(&method, endpoint);
             if let Some(nonce) = nonce {
                 proof = proof.with_nonce(nonce);
             }
-
             headers.insert(
                 crate::dpop::DPOP_HEADER,
                 crate::dpop::proof_header(proof.sign()?)?,
             );
 
-            Ok(headers)
+            Ok((body, headers))
         };
 
         // what this request's proof carries, resolved here rather than left
@@ -630,24 +630,11 @@ impl OAuthClient {
         // have moved on by the time the answer arrives
         let sent = dpop.nonce(endpoint);
 
-        let response = self
-            .transport
-            .post_form(endpoint, body.clone(), proof(&headers, sent.as_deref())?)
-            .await?;
-
-        // the nonce this response supplied, read off the response itself
-        // rather than back out of the shared state: another request to the
-        // same origin may store a nonce of its own in between, and the
-        // retry has to carry the one that was demanded of *it*
-        let demanded = response
-            .headers()
-            .get(crate::dpop::DPOP_NONCE_HEADER)
-            .and_then(|nonce| nonce.to_str().ok())
-            .filter(|nonce| !nonce.is_empty())
-            .map(ToOwned::to_owned);
+        let (body, headers) = attempt(sent.as_deref())?;
+        let response = self.transport.post_form(endpoint, body, headers).await?;
 
         // a nonce may arrive with any response, refusal or not
-        dpop.accept_nonce(endpoint, response.headers());
+        let demanded = dpop.accept_nonce(endpoint, response.headers());
 
         // one retry, and only when the server demanded a nonce this request
         // did not carry. Whether the *shared* state learned something is the
@@ -666,10 +653,8 @@ impl OAuthClient {
             return serde_json::from_value(response.into_json()?).map_err(Into::into);
         };
 
-        let response = self
-            .transport
-            .post_form(endpoint, body, proof(&headers, Some(&nonce))?)
-            .await?;
+        let (body, headers) = attempt(Some(&nonce))?;
+        let response = self.transport.post_form(endpoint, body, headers).await?;
 
         // the retry may be answered with a nonce of its own - RFC 9449
         // Section 8.2 permits one on a successful response too, and dropping
@@ -1047,6 +1032,19 @@ fn ensure_auth_method_supported(
         "authorization server does not accept {method} at the token endpoint; \
          it advertises {advertised:?}"
     )))
+}
+
+/// A rendered token request: the form body and the `Authorization` header
+/// the configured client authentication produced, if any.
+pub(crate) type TokenRequestParts = (String, Option<HeaderValue>);
+
+/// The request headers carrying `authorization`, if there is one.
+fn authorization_headers(authorization: Option<HeaderValue>) -> http::HeaderMap {
+    let mut headers = http::HeaderMap::new();
+    if let Some(authorization) = authorization {
+        headers.insert(http::header::AUTHORIZATION, authorization);
+    }
+    headers
 }
 
 pub(crate) fn token_endpoint(metadata: &AuthorizationServerMetadata) -> Result<&str, ClientError> {

@@ -18,7 +18,6 @@
 
 use std::time::{Duration, SystemTime};
 
-use http::HeaderValue;
 use serde::{Deserialize, Serialize};
 use volga_oauth_core::{AuthorizationServerMetadata, grant};
 
@@ -193,7 +192,7 @@ impl<'a> TokenRequest<'a> {
     /// The form serializer is not `Sync`: everything touching it happens
     /// here, so it is dropped before the caller awaits and the resulting
     /// future stays `Send`.
-    fn build(&self) -> Result<(String, Option<HeaderValue>), ClientError> {
+    fn build(&self) -> Result<crate::client::TokenRequestParts, ClientError> {
         // both sides have to allow the grant: the server advertises what it
         // implements, the registration approved what this client may use
         ensure_grant_supported(self.metadata, self.grant_type)?;
@@ -225,9 +224,8 @@ impl<'a> TokenRequest<'a> {
     /// Sends the request and deserializes the response into `T`.
     async fn send<T: serde::de::DeserializeOwned>(&self) -> Result<T, ClientError> {
         let endpoint = token_endpoint(self.metadata)?;
-        let (body, authorization) = self.build()?;
         self.client
-            .post_token_request(self.metadata, endpoint, body, authorization)
+            .post_token_request(self.metadata, endpoint, || self.build())
             .await
     }
 }

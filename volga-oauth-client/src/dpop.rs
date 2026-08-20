@@ -286,6 +286,10 @@ impl Dpop {
     /// The caller sends the request; this only prepares it. Existing
     /// values for either header are replaced.
     ///
+    /// The proof carries the nonce last remembered for that server; use
+    /// [`authorize_with_nonce`](Self::authorize_with_nonce) to answer a
+    /// refusal with the nonce it demanded.
+    ///
     /// Fails with [`ClientError::Validation`] when `tokens` is not
     /// DPoP-bound - a `Bearer` token presented under this scheme is
     /// refused by any server, and presenting it as `Bearer` instead would
@@ -297,6 +301,36 @@ impl Dpop {
         url: &str,
         tokens: &TokenSet,
     ) -> Result<(), ClientError> {
+        self.authorize_inner(headers, method, url, tokens, None)
+    }
+
+    /// [`authorize`](Self::authorize) for the retry of a request a server
+    /// refused with `use_dpop_nonce`: the proof carries exactly `nonce`
+    ///
+    /// The nonce a retry must answer with is the one *that* response
+    /// demanded (see [`accept_nonce`](Self::accept_nonce)), which is not
+    /// necessarily what the shared state holds by the time the proof is
+    /// signed - a concurrent request to the same origin may have been
+    /// handed a different one in between.
+    pub fn authorize_with_nonce(
+        &self,
+        headers: &mut HeaderMap,
+        method: &Method,
+        url: &str,
+        tokens: &TokenSet,
+        nonce: &str,
+    ) -> Result<(), ClientError> {
+        self.authorize_inner(headers, method, url, tokens, Some(nonce))
+    }
+
+    fn authorize_inner(
+        &self,
+        headers: &mut HeaderMap,
+        method: &Method,
+        url: &str,
+        tokens: &TokenSet,
+        nonce: Option<&str>,
+    ) -> Result<(), ClientError> {
         if !tokens.is_dpop() {
             return Err(ClientError::validation(format!(
                 "the access token is of type '{}', not DPoP; it is not bound to this key",
@@ -307,10 +341,13 @@ impl Dpop {
         let credential = HeaderValue::from_str(&format!("{DPOP} {}", tokens.access_token))
             .map_err(|_| ClientError::validation("the access token is not a valid header value"))?;
 
-        let proof = self
+        let mut proof = self
             .proof(method, url)
-            .with_access_token(&tokens.access_token)
-            .sign()?;
+            .with_access_token(&tokens.access_token);
+        if let Some(nonce) = nonce {
+            proof = proof.with_nonce(nonce);
+        }
+        let proof = proof.sign()?;
 
         headers.insert(AUTHORIZATION, credential);
         headers.insert(DPOP_HEADER, proof_header(proof)?);
@@ -344,14 +381,18 @@ impl Dpop {
     /// calling on every response - including the answer to a retry, which
     /// otherwise costs the next request a round trip to be told again.
     ///
-    /// The returned `bool` says whether this changed the stored nonce. That
-    /// is a fact about the shared state and *not* the retry condition:
-    /// under concurrency another request to the same origin may have stored
-    /// the very nonce this response demands, and a `false` here would then
-    /// abandon a request the server was willing to serve. Repeat a refused
-    /// request once when the nonce it demands is not the one that request
-    /// carried - which is known by reading [`nonce`](Self::nonce) before
-    /// signing:
+    /// Returns the nonce the response carried, if any - what the server
+    /// demanded of *this* request, which is what a retry has to answer
+    /// with. It is deliberately not "whether the stored nonce changed":
+    /// under concurrency a request to the same origin may have stored this
+    /// very nonce first, and treating that as "nothing new" would abandon a
+    /// request the server was willing to serve.
+    ///
+    /// Repeat a refused request once, when the nonce it demands is not the
+    /// one that request carried - read [`nonce`](Self::nonce) before
+    /// signing to know what that was, and hand the demanded one to
+    /// [`authorize_with_nonce`](Self::authorize_with_nonce) so the retry
+    /// carries it whatever the shared state has moved on to:
     ///
     /// ```no_run
     /// # use http::{HeaderMap, Method};
@@ -361,19 +402,26 @@ impl Dpop {
     /// let mut headers = HeaderMap::new();
     /// dpop.authorize(&mut headers, &Method::GET, url, tokens)?;
     ///
-    /// // ...send the request, then, given the response headers:
+    /// // ...send the request; then, given a `use_dpop_nonce` refusal:
     /// # let response_headers = HeaderMap::new();
-    /// let demanded = dpop.accept_nonce(url, &response_headers);
-    /// # let _ = (sent, demanded);
+    /// if let Some(demanded) = dpop.accept_nonce(url, &response_headers)
+    ///     && Some(demanded.as_str()) != sent.as_deref()
+    /// {
+    ///     dpop.authorize_with_nonce(&mut headers, &Method::GET, url, tokens, &demanded)?;
+    ///     // ...and send it once more
+    /// }
     /// # Ok(())
     /// # }
     /// ```
-    pub fn accept_nonce(&self, url: &str, headers: &HeaderMap) -> bool {
-        headers
+    pub fn accept_nonce(&self, url: &str, headers: &HeaderMap) -> Option<String> {
+        let nonce = headers
             .get(DPOP_NONCE_HEADER)
             .and_then(|nonce| nonce.to_str().ok())
-            .filter(|nonce| !nonce.is_empty())
-            .is_some_and(|nonce| self.remember_nonce(url, nonce))
+            .filter(|nonce| !nonce.is_empty())?
+            .to_owned();
+
+        self.remember_nonce(url, nonce.clone());
+        Some(nonce)
     }
 
     /// Refuses an algorithm the authorization server does not accept for
@@ -868,7 +916,7 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
 
         let mut headers = HeaderMap::new();
         headers.insert(DPOP_NONCE_HEADER, "n-1".parse().unwrap());
-        assert!(dpop.accept_nonce(auth, &headers));
+        assert_eq!(dpop.accept_nonce(auth, &headers).as_deref(), Some("n-1"));
         assert_eq!(dpop.nonce(auth).as_deref(), Some("n-1"));
 
         // ...and it goes into the next proof for that server
@@ -884,16 +932,21 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
             Some("n-1")
         );
 
-        // the same nonce again is not news - only a fresh one justifies
-        // repeating a refused request
-        assert!(!dpop.accept_nonce(auth, &headers));
-        headers.insert(DPOP_NONCE_HEADER, "n-2".parse().unwrap());
-        assert!(dpop.accept_nonce(auth, &headers));
+        // what the response demanded is reported whether or not the shared
+        // state already held it: a concurrent request may have stored this
+        // very nonce first, and the request that was refused for it still
+        // has to answer with it
+        assert_eq!(dpop.accept_nonce(auth, &headers).as_deref(), Some("n-1"));
+        assert!(!dpop.remember_nonce(auth, "n-1"));
 
-        // a response without one (or with an empty one) teaches nothing
-        assert!(!dpop.accept_nonce(auth, &HeaderMap::new()));
+        headers.insert(DPOP_NONCE_HEADER, "n-2".parse().unwrap());
+        assert_eq!(dpop.accept_nonce(auth, &headers).as_deref(), Some("n-2"));
+
+        // a response without one (or with an empty one) demands nothing and
+        // leaves what is held alone
+        assert!(dpop.accept_nonce(auth, &HeaderMap::new()).is_none());
         headers.insert(DPOP_NONCE_HEADER, "".parse().unwrap());
-        assert!(!dpop.accept_nonce(auth, &headers));
+        assert!(dpop.accept_nonce(auth, &headers).is_none());
         assert_eq!(dpop.nonce(auth).as_deref(), Some("n-2"));
 
         // an explicit nonce wins over the remembered one
@@ -935,6 +988,23 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
         assert_eq!(claims["htm"], "GET");
         assert_eq!(claims["htu"], "https://api.example.com/orders");
         assert_eq!(claims["ath"], "sda5G2fCr6XjIpiNlGJjjTVN34oe9526mH-BXCK0uu4");
+
+        // the retry counterpart carries exactly the nonce it was handed,
+        // whatever the shared state has moved on to in the meantime
+        dpop.remember_nonce("https://api.example.com/orders", "stale");
+        let mut retry = HeaderMap::new();
+        dpop.authorize_with_nonce(
+            &mut retry,
+            &Method::GET,
+            "https://api.example.com/orders",
+            &tokens(DPOP),
+            "demanded",
+        )
+        .unwrap();
+        assert_eq!(
+            parts(retry[DPOP_HEADER].to_str().unwrap()).1["nonce"],
+            "demanded"
+        );
 
         // a bearer token is not bound to this key: presenting it here would
         // be refused, and presenting it as `Bearer` would give up the
