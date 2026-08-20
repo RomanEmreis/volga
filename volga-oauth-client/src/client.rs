@@ -583,9 +583,11 @@ impl OAuthClient {
     /// the one retry a `use_dpop_nonce` refusal is answered with
     /// (RFC 9449 Section 8.2).
     ///
-    /// Exactly one retry, and only against a nonce the server just supplied
-    /// and we did not already hold - a server that keeps refusing is
-    /// answered with the error, not with another request.
+    /// Exactly one retry, and only when the server demanded a nonce this
+    /// request did not carry - a server that keeps refusing is answered
+    /// with the error, not with another request. The bound is the
+    /// straight-line shape of this function rather than a condition, so no
+    /// answer a server can give turns it into a loop.
     #[cfg(feature = "dpop")]
     async fn post_dpop_token_request<T: serde::de::DeserializeOwned>(
         &self,
@@ -622,9 +624,15 @@ impl OAuthClient {
             Ok(headers)
         };
 
+        // what this request's proof carries, resolved here rather than left
+        // to the builder: the retry decision below compares what the server
+        // demanded against what was actually sent, and the shared state may
+        // have moved on by the time the answer arrives
+        let sent = dpop.nonce(endpoint);
+
         let response = self
             .transport
-            .post_form(endpoint, body.clone(), proof(&headers, None)?)
+            .post_form(endpoint, body.clone(), proof(&headers, sent.as_deref())?)
             .await?;
 
         // the nonce this response supplied, read off the response itself
@@ -639,15 +647,24 @@ impl OAuthClient {
             .map(ToOwned::to_owned);
 
         // a nonce may arrive with any response, refusal or not
-        let learned = dpop.accept_nonce(endpoint, response.headers());
+        dpop.accept_nonce(endpoint, response.headers());
 
-        let Some(nonce) = demanded.filter(|_| learned) else {
+        // one retry, and only when the server demanded a nonce this request
+        // did not carry. Whether the *shared* state learned something is the
+        // wrong question: a concurrent request to the same origin may have
+        // stored this very nonce first, which says nothing about what this
+        // proof contained - and answering that refusal without retrying
+        // would fail a request the server was willing to serve. Repeating a
+        // proof with the nonce it was already refused for, on the other
+        // hand, buys nothing, so that case surfaces the error
+        let retry_with = demanded.filter(|demanded| {
+            response.is_error(&OAuthErrorCode::UseDpopNonce)
+                && Some(demanded.as_str()) != sent.as_deref()
+        });
+
+        let Some(nonce) = retry_with else {
             return serde_json::from_value(response.into_json()?).map_err(Into::into);
         };
-
-        if !response.is_error(&OAuthErrorCode::UseDpopNonce) {
-            return serde_json::from_value(response.into_json()?).map_err(Into::into);
-        }
 
         let response = self
             .transport

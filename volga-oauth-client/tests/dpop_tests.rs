@@ -254,6 +254,63 @@ async fn it_retries_a_nonce_refusal_exactly_once() {
 }
 
 #[tokio::test]
+async fn it_retries_when_the_nonce_it_sent_was_not_the_one_demanded() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+    let endpoint = format!("{base}/token");
+
+    let dpop = Dpop::generate().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let (seen, sibling, target) = (requests.clone(), dpop.clone(), endpoint.clone());
+
+    // Two concurrent token requests, neither carrying a nonce, challenged
+    // with the *same* one: whichever answer is processed first stores it,
+    // and the second then finds the shared state already holding the nonce
+    // it is being told to use. That is the interleaving reproduced here -
+    // the endpoint stores the nonce into the client's shared state before
+    // replying, exactly as a sibling response landing first would.
+    let mut app = App::new();
+    app.map_post("/token", move |headers: HttpHeaders| {
+        let (seen, sibling, target) = (seen.clone(), sibling.clone(), target.clone());
+        async move {
+            let attempt = seen.fetch_add(1, Ordering::SeqCst);
+            let proof = verify_proof(&proof_of(&headers).expect("no proof"));
+
+            match proof.claims.nonce.as_deref() {
+                None => {
+                    assert_eq!(attempt, 0, "the nonce was demanded once already");
+                    // the sibling's answer, landing first
+                    sibling.remember_nonce(&target, "n-1");
+                    volga::status!(
+                        400,
+                        { "error": "use_dpop_nonce" };
+                        [("dpop-nonce", "n-1")]
+                    )
+                }
+                Some("n-1") => volga::ok!({ "access_token": "at", "token_type": "DPoP" }),
+                Some(other) => panic!("unexpected nonce: {other}"),
+            }
+        }
+    });
+    let server = serve(port, app).await;
+
+    let client = plaintext_client("my-service").with_dpop(dpop.clone());
+    let tokens = client
+        .client_credentials(&server_metadata(&base))
+        .send()
+        .await
+        .expect("a request refused for a nonce it did not carry must be retried");
+
+    // the shared state having already learned the nonce says nothing about
+    // what *this* proof contained - the request was refused for a nonce it
+    // did not send, so it is repeated with the one demanded
+    assert!(tokens.is_dpop());
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+
+    server.abort();
+}
+
+#[tokio::test]
 async fn it_refuses_an_algorithm_the_server_does_not_accept() {
     let port = free_port();
     let base = format!("http://127.0.0.1:{port}");

@@ -325,9 +325,9 @@ impl Dpop {
 
     /// Remembers `nonce` as the one to use for the server serving `url`
     ///
-    /// Returns whether it differs from the one already held, which is the
-    /// question worth asking about a refused request: a *fresh* nonce is
-    /// grounds to repeat it, the same one again is not.
+    /// Returns whether it differs from the one already held. That is a fact
+    /// about this shared state, not about any one request - see
+    /// [`accept_nonce`](Self::accept_nonce) for what does decide a retry.
     pub fn remember_nonce(&self, url: &str, nonce: impl Into<String>) -> bool {
         let (origin, nonce) = (origin_of(url), nonce.into());
         match self.lock().insert(origin, nonce.clone()) {
@@ -339,12 +339,35 @@ impl Dpop {
     /// Adopts the `DPoP-Nonce` of a response from the server serving
     /// `url`, if it carries one (RFC 9449 Section 8)
     ///
-    /// Returns whether a *new* nonce was learned. A server may supply one
-    /// with any response, not only with the `use_dpop_nonce` refusal that
-    /// demands a retry, so this is worth calling on every response - but
-    /// only a `true` here justifies repeating a refused request, and only
-    /// once: the answer to a retry that is refused again is to surface the
-    /// error, not to keep trying.
+    /// A server may supply a nonce with any response, not only with the
+    /// `use_dpop_nonce` refusal that demands a retry, so this is worth
+    /// calling on every response - including the answer to a retry, which
+    /// otherwise costs the next request a round trip to be told again.
+    ///
+    /// The returned `bool` says whether this changed the stored nonce. That
+    /// is a fact about the shared state and *not* the retry condition:
+    /// under concurrency another request to the same origin may have stored
+    /// the very nonce this response demands, and a `false` here would then
+    /// abandon a request the server was willing to serve. Repeat a refused
+    /// request once when the nonce it demands is not the one that request
+    /// carried - which is known by reading [`nonce`](Self::nonce) before
+    /// signing:
+    ///
+    /// ```no_run
+    /// # use http::{HeaderMap, Method};
+    /// # use volga_oauth_client::{ClientError, Dpop, TokenSet};
+    /// # fn run(dpop: &Dpop, url: &str, tokens: &TokenSet) -> Result<(), ClientError> {
+    /// let sent = dpop.nonce(url);
+    /// let mut headers = HeaderMap::new();
+    /// dpop.authorize(&mut headers, &Method::GET, url, tokens)?;
+    ///
+    /// // ...send the request, then, given the response headers:
+    /// # let response_headers = HeaderMap::new();
+    /// let demanded = dpop.accept_nonce(url, &response_headers);
+    /// # let _ = (sent, demanded);
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn accept_nonce(&self, url: &str, headers: &HeaderMap) -> bool {
         headers
             .get(DPOP_NONCE_HEADER)
