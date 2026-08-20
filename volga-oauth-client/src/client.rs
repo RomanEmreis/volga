@@ -595,18 +595,17 @@ impl OAuthClient {
     /// the answer is to discard it and obtain a token that fits.
     pub(crate) fn can_present(&self, tokens: &TokenSet) -> bool {
         #[cfg(feature = "dpop")]
-        match (&self.dpop, tokens.is_dpop()) {
+        if let Some(dpop) = &self.dpop {
             // an entry stored before this key existed carries no
             // thumbprint, and an unconfirmed binding is not a binding
-            (Some(dpop), true) => {
-                return tokens.dpop_jkt.as_deref() == Some(dpop.thumbprint());
-            }
-            (Some(_), false) | (None, true) => return false,
-            (None, false) => {}
+            return tokens.is_dpop() && tokens.dpop_jkt.as_deref() == Some(dpop.thumbprint());
         }
 
-        let _ = tokens;
-        true
+        // no key to present it with. This holds whether the client was
+        // simply not given one or the build has no DPoP support at all: a
+        // store is shared and outlives a deployment, so a bound token can
+        // reach a binary that has no way whatever to prove possession of it
+        !tokens.is_dpop()
     }
 
     /// Submits a token request and deserializes the successful response
@@ -1749,10 +1748,9 @@ mod tests {
         assert!(matches!(err, ClientError::Validation(reason) if reason.contains("RFC 9207")));
     }
 
-    #[cfg(feature = "dpop")]
-    #[test]
-    fn it_judges_whether_a_stored_entry_can_still_be_presented() {
-        let stored = |token_type: &str, jkt: Option<&str>| TokenSet {
+    /// A stored entry of `token_type`, bound to `jkt` when it claims one.
+    fn stored(token_type: &str, jkt: Option<&str>) -> TokenSet {
+        TokenSet {
             access_token: "at".into(),
             token_type: token_type.into(),
             refresh_token: None,
@@ -1760,18 +1758,28 @@ mod tests {
             id_token: None,
             expires_at: None,
             dpop_jkt: jkt.map(ToOwned::to_owned),
-        };
+        }
+    }
 
-        // a client with no key presents bearer tokens and nothing else: a
-        // bound one is not a credential it can use
-        let plain = OAuthClient::new("my-client");
-        assert!(plain.can_present(&stored("Bearer", None)));
-        assert!(!plain.can_present(&stored("DPoP", Some("jkt"))));
+    #[test]
+    fn it_refuses_a_bound_token_with_no_key_to_present_it() {
+        // deliberately not gated on the `dpop` feature: a store is shared
+        // and outlives a deployment, so an entry written by a DPoP-enabled
+        // one can reach a binary that has no way whatever to prove
+        // possession of it - and it must not be handed out there either
+        let client = OAuthClient::new("my-client");
+        assert!(client.can_present(&stored("Bearer", None)));
+        assert!(!client.can_present(&stored("DPoP", Some("jkt"))));
+        assert!(!client.can_present(&stored("DPoP", None)));
+    }
 
+    #[cfg(feature = "dpop")]
+    #[test]
+    fn it_judges_whether_a_stored_entry_can_still_be_presented() {
         let dpop = crate::Dpop::generate().unwrap();
         let client = OAuthClient::new("my-client").with_dpop(dpop.clone());
 
-        // ...and one with a key can present exactly what that key is bound
+        // a client with a key can present exactly what that key is bound
         // to. A bearer entry cached before the key existed would otherwise
         // walk straight past the downgrade check
         assert!(client.can_present(&stored("DPoP", Some(dpop.thumbprint()))));

@@ -315,10 +315,17 @@ impl Dpop {
     /// [`authorize_with_nonce`](Self::authorize_with_nonce) to answer a
     /// refusal with the nonce it demanded.
     ///
-    /// Fails with [`ClientError::Validation`] when `tokens` is not
-    /// DPoP-bound - a `Bearer` token presented under this scheme is
-    /// refused by any server, and presenting it as `Bearer` instead would
-    /// silently give up the binding this key exists for.
+    /// Fails with [`ClientError::Validation`] when `tokens` is not bound
+    /// to *this* key: a `Bearer` token presented under this scheme is
+    /// refused by any server (and presenting it as `Bearer` instead would
+    /// silently give up the binding this key exists for), and a token bound
+    /// to another key is refused by the resource on every request, since it
+    /// compares the proof against the token's `cnf.jkt` (RFC 9449
+    /// Section 6). The binding is read from
+    /// [`TokenSet::dpop_jkt`](crate::TokenSet::dpop_jkt), which every token
+    /// obtained through this crate carries; a token that records none - one
+    /// obtained elsewhere - is taken at its word, there being nothing to
+    /// contradict.
     pub fn authorize(
         &self,
         headers: &mut HeaderMap,
@@ -360,6 +367,23 @@ impl Dpop {
             return Err(ClientError::validation(format!(
                 "the access token is of type '{}', not DPoP; it is not bound to this key",
                 tokens.token_type
+            )));
+        }
+
+        // ...and a token that names *another* key is not this key's to
+        // present: the resource compares the proof's thumbprint against the
+        // token's `cnf.jkt` (RFC 9449 Section 6) and refuses every single
+        // request, so it is said here instead, where the reason can be
+        // named. A token that names none is taken at its word - one
+        // obtained outside this crate carries no binding to check, and
+        // there is nothing to contradict
+        if let Some(jkt) = tokens.dpop_jkt.as_deref()
+            && jkt != self.thumbprint()
+        {
+            return Err(ClientError::validation(format!(
+                "the access token is bound to the key '{jkt}', but this one is '{}'; \
+                 a proof signed here would not match its cnf.jkt",
+                self.thumbprint()
             )));
         }
 
@@ -798,7 +822,8 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
         Dpop::from_pem(EC_PEM, JwsAlgorithm::ES256, public_jwk()).expect("the test key must parse")
     }
 
-    fn tokens(token_type: &str) -> TokenSet {
+    /// A token of `token_type`, bound to `jkt` when it claims a binding.
+    fn tokens(token_type: &str, jkt: Option<&str>) -> TokenSet {
         TokenSet {
             access_token: "at".into(),
             token_type: token_type.into(),
@@ -806,7 +831,7 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
             scope: None,
             id_token: None,
             expires_at: None,
-            dpop_jkt: None,
+            dpop_jkt: jkt.map(ToOwned::to_owned),
         }
     }
 
@@ -1073,7 +1098,7 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
             &mut headers,
             &Method::GET,
             "https://api.example.com/orders?page=2",
-            &tokens(DPOP),
+            &tokens(DPOP, Some(dpop.thumbprint())),
         )
         .unwrap();
 
@@ -1091,13 +1116,41 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
             &mut retry,
             &Method::GET,
             "https://api.example.com/orders",
-            &tokens(DPOP),
+            &tokens(DPOP, Some(dpop.thumbprint())),
             "demanded",
         )
         .unwrap();
         assert_eq!(
             parts(retry[DPOP_HEADER].to_str().unwrap()).1["nonce"],
             "demanded"
+        );
+
+        // a token bound to another key is refused on every request by the
+        // resource, which compares the proof against its `cnf.jkt` - so it
+        // is refused here, where the reason can be named
+        let err = dpop
+            .authorize(
+                &mut headers,
+                &Method::GET,
+                "https://api.example.com/orders",
+                &tokens(DPOP, Some("another-key")),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Validation(_)) && err.to_string().contains("another-key"),
+            "got: {err}"
+        );
+
+        // ...while one that records no binding is taken at its word: it
+        // came from outside this crate, and there is nothing to contradict
+        assert!(
+            dpop.authorize(
+                &mut headers,
+                &Method::GET,
+                "https://api.example.com/orders",
+                &tokens(DPOP, None),
+            )
+            .is_ok()
         );
 
         // a bearer token is not bound to this key: presenting it here would
@@ -1108,7 +1161,7 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
                 &mut headers,
                 &Method::GET,
                 "https://api.example.com/orders",
-                &tokens("Bearer"),
+                &tokens("Bearer", None),
             )
             .unwrap_err();
         assert!(
