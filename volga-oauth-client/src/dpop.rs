@@ -107,9 +107,24 @@ struct Inner {
     /// The proof's JOSE header, base64url-encoded once: it is the same for
     /// every proof this key signs
     header: String,
-    /// The last nonce each server handed out, by origin (RFC 9449
-    /// Section 8 scopes a nonce to the server that issued it)
-    nonces: Mutex<HashMap<String, String>>,
+    /// The last nonce each server handed out, by namespace and origin
+    nonces: Mutex<HashMap<(NonceScope, String), String>>,
+}
+
+/// The two nonce namespaces RFC 9449 keeps apart
+///
+/// An authorization server issues its own nonces (Section 8) and a
+/// resource server its own (Section 9); the two are unrelated sequences
+/// even when one host serves both, which is common enough - an API and its
+/// token endpoint on the same origin. Sending one where the other is
+/// expected earns a refusal and an avoidable round trip, so the origin
+/// alone cannot be the key.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) enum NonceScope {
+    /// The token endpoint's nonces, driven by this crate
+    AuthorizationServer,
+    /// A protected resource's nonces, driven by the caller
+    Resource,
 }
 
 impl Dpop {
@@ -271,8 +286,18 @@ impl Dpop {
     /// # }
     /// ```
     pub fn proof<'a>(&'a self, method: &'a Method, url: &'a str) -> DpopProof<'a> {
+        self.proof_in(NonceScope::Resource, method, url)
+    }
+
+    pub(crate) fn proof_in<'a>(
+        &'a self,
+        scope: NonceScope,
+        method: &'a Method,
+        url: &'a str,
+    ) -> DpopProof<'a> {
         DpopProof {
             dpop: self,
+            scope,
             method,
             url,
             access_token: None,
@@ -354,10 +379,16 @@ impl Dpop {
         Ok(())
     }
 
-    /// Returns the nonce last remembered for the server serving `url`
+    /// Returns the nonce last remembered for the *resource* serving `url`
+    ///
+    /// The token endpoint's nonces are kept apart and driven by this crate;
+    /// see [`NonceScope`].
     pub fn nonce(&self, url: &str) -> Option<String> {
-        let origin = origin_of(url);
-        self.lock().get(&origin).cloned()
+        self.nonce_in(NonceScope::Resource, url)
+    }
+
+    pub(crate) fn nonce_in(&self, scope: NonceScope, url: &str) -> Option<String> {
+        self.lock().get(&(scope, origin_of(url))).cloned()
     }
 
     /// Remembers `nonce` as the one to use for the server serving `url`
@@ -366,8 +397,17 @@ impl Dpop {
     /// about this shared state, not about any one request - see
     /// [`accept_nonce`](Self::accept_nonce) for what does decide a retry.
     pub fn remember_nonce(&self, url: &str, nonce: impl Into<String>) -> bool {
-        let (origin, nonce) = (origin_of(url), nonce.into());
-        match self.lock().insert(origin, nonce.clone()) {
+        self.remember_nonce_in(NonceScope::Resource, url, nonce)
+    }
+
+    pub(crate) fn remember_nonce_in(
+        &self,
+        scope: NonceScope,
+        url: &str,
+        nonce: impl Into<String>,
+    ) -> bool {
+        let (key, nonce) = ((scope, origin_of(url)), nonce.into());
+        match self.lock().insert(key, nonce.clone()) {
             Some(previous) => previous != nonce,
             None => true,
         }
@@ -414,13 +454,22 @@ impl Dpop {
     /// # }
     /// ```
     pub fn accept_nonce(&self, url: &str, headers: &HeaderMap) -> Option<String> {
+        self.accept_nonce_in(NonceScope::Resource, url, headers)
+    }
+
+    pub(crate) fn accept_nonce_in(
+        &self,
+        scope: NonceScope,
+        url: &str,
+        headers: &HeaderMap,
+    ) -> Option<String> {
         let nonce = headers
             .get(DPOP_NONCE_HEADER)
             .and_then(|nonce| nonce.to_str().ok())
             .filter(|nonce| !nonce.is_empty())?
             .to_owned();
 
-        self.remember_nonce(url, nonce.clone());
+        self.remember_nonce_in(scope, url, nonce.clone());
         Some(nonce)
     }
 
@@ -456,7 +505,7 @@ impl Dpop {
     /// values a server handed out, not an invariant that can be broken -
     /// so the map is kept rather than propagating the panic to every
     /// subsequent request.
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, String>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<(NonceScope, String), String>> {
         self.inner
             .nonces
             .lock()
@@ -482,6 +531,8 @@ impl std::fmt::Debug for Dpop {
 #[must_use = "a proof does nothing until `sign` is called"]
 pub struct DpopProof<'a> {
     dpop: &'a Dpop,
+    /// Which nonce namespace an unset nonce falls back to
+    scope: NonceScope,
     method: &'a Method,
     url: &'a str,
     access_token: Option<&'a str>,
@@ -524,7 +575,7 @@ impl<'a> DpopProof<'a> {
         let nonce = match self.nonce {
             Some(nonce) => Some(nonce),
             None => {
-                held = self.dpop.nonce(self.url);
+                held = self.dpop.nonce_in(self.scope, self.url);
                 held.as_deref()
             }
         };
@@ -956,6 +1007,46 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
             .sign()
             .unwrap();
         assert_eq!(parts(&proof).1["nonce"], "n-9");
+    }
+
+    #[test]
+    fn it_keeps_the_two_nonce_namespaces_apart() {
+        // one host commonly serves both an API and the token endpoint it is
+        // protected by; the nonces they issue are unrelated sequences
+        // (RFC 9449 Sections 8 and 9), and sending one where the other is
+        // expected costs an avoidable refusal
+        let dpop = dpop();
+        let token = "https://example.com/oauth/token";
+        let api = "https://example.com/api/orders";
+
+        dpop.remember_nonce_in(NonceScope::AuthorizationServer, token, "as-1");
+        dpop.remember_nonce(api, "rs-1");
+
+        assert_eq!(
+            dpop.nonce_in(NonceScope::AuthorizationServer, token)
+                .as_deref(),
+            Some("as-1")
+        );
+        assert_eq!(dpop.nonce(api).as_deref(), Some("rs-1"));
+        // ...and neither leaks into the other, same origin or not
+        assert_eq!(dpop.nonce(token).as_deref(), Some("rs-1"));
+        assert_eq!(
+            dpop.nonce_in(NonceScope::AuthorizationServer, api)
+                .as_deref(),
+            Some("as-1")
+        );
+
+        // a proof falls back to the namespace it was built for
+        let nonce_of = |proof: DpopProof<'_>| {
+            parts(&proof.sign().unwrap()).1["nonce"]
+                .as_str()
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            nonce_of(dpop.proof_in(NonceScope::AuthorizationServer, &Method::POST, token)),
+            Some("as-1".into())
+        );
+        assert_eq!(nonce_of(dpop.proof(&Method::GET, api)), Some("rs-1".into()));
     }
 
     #[test]

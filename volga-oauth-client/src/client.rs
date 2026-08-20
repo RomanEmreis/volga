@@ -539,7 +539,34 @@ impl OAuthClient {
     ) -> Result<TokenSet, ClientError> {
         let response: TokenResponse = self.post_token_request(metadata, endpoint, build).await?;
 
-        Ok(response.into())
+        self.adopt_tokens(response)
+    }
+
+    /// Takes delivery of an issued access token, refusing one the server
+    /// did not bind to this client's DPoP key.
+    ///
+    /// A server that does not implement DPoP ignores the proof and answers
+    /// with an ordinary bearer token - RFC 9449 asks it to advertise
+    /// `dpop_signing_alg_values_supported`, but that field is optional and
+    /// its absence proves nothing either way, so the downgrade cannot be
+    /// caught before the request. Taking the token anyway would hand the
+    /// caller (and the token store) an unbound credential in answer to an
+    /// explicit `with_dpop`, which is the one thing that configuration
+    /// exists to prevent - so it is refused, loudly, instead.
+    pub(crate) fn adopt_tokens(&self, response: TokenResponse) -> Result<TokenSet, ClientError> {
+        let tokens = TokenSet::from(response);
+
+        #[cfg(feature = "dpop")]
+        if self.dpop.is_some() && !tokens.is_dpop() {
+            return Err(ClientError::validation(format!(
+                "this client requested a DPoP-bound token, but the authorization server \
+                 issued one of type '{}'; it is not bound to the key and presenting it \
+                 would be an unconstrained bearer credential",
+                tokens.token_type
+            )));
+        }
+
+        Ok(tokens)
     }
 
     /// Submits a token request and deserializes the successful response
@@ -595,7 +622,12 @@ impl OAuthClient {
         endpoint: &str,
         build: impl Fn() -> Result<TokenRequestParts, ClientError>,
     ) -> Result<T, ClientError> {
+        use crate::dpop::NonceScope;
         use volga_oauth_core::OAuthErrorCode;
+
+        // the token endpoint's nonces are its own: a resource sharing this
+        // origin issues an unrelated sequence (RFC 9449 Sections 8 and 9)
+        const SCOPE: NonceScope = NonceScope::AuthorizationServer;
 
         // caught before the request: the server would answer
         // `invalid_dpop_proof`, which says nothing about which algorithm to
@@ -612,7 +644,7 @@ impl OAuthClient {
             let (body, authorization) = build()?;
             let mut headers = authorization_headers(authorization);
 
-            let mut proof = dpop.proof(&method, endpoint);
+            let mut proof = dpop.proof_in(SCOPE, &method, endpoint);
             if let Some(nonce) = nonce {
                 proof = proof.with_nonce(nonce);
             }
@@ -628,13 +660,13 @@ impl OAuthClient {
         // to the builder: the retry decision below compares what the server
         // demanded against what was actually sent, and the shared state may
         // have moved on by the time the answer arrives
-        let sent = dpop.nonce(endpoint);
+        let sent = dpop.nonce_in(SCOPE, endpoint);
 
         let (body, headers) = attempt(sent.as_deref())?;
         let response = self.transport.post_form(endpoint, body, headers).await?;
 
         // a nonce may arrive with any response, refusal or not
-        let demanded = dpop.accept_nonce(endpoint, response.headers());
+        let demanded = dpop.accept_nonce_in(SCOPE, endpoint, response.headers());
 
         // one retry, and only when the server demanded a nonce this request
         // did not carry. Whether the *shared* state learned something is the
@@ -659,7 +691,7 @@ impl OAuthClient {
         // the retry may be answered with a nonce of its own - RFC 9449
         // Section 8.2 permits one on a successful response too, and dropping
         // it would cost the next request a round trip to be told again
-        dpop.accept_nonce(endpoint, response.headers());
+        dpop.accept_nonce_in(SCOPE, endpoint, response.headers());
 
         serde_json::from_value(response.into_json()?).map_err(Into::into)
     }

@@ -308,7 +308,7 @@ impl ClientCredentialsRequest<'_> {
     /// (`invalid_client`, `invalid_scope`, `unauthorized_client`).
     pub async fn send(self) -> Result<TokenSet, ClientError> {
         let response: TokenResponse = self.request.send().await?;
-        Ok(response.into())
+        self.request.client.adopt_tokens(response)
     }
 
     /// Returns the token stored under `key`, requesting a new one whenever
@@ -386,7 +386,7 @@ impl JwtBearerRequest<'_> {
     /// resending it will not help.
     pub async fn send(self) -> Result<TokenSet, ClientError> {
         let response: TokenResponse = self.request.send().await?;
-        Ok(response.into())
+        self.request.client.adopt_tokens(response)
     }
 }
 
@@ -442,7 +442,27 @@ impl TokenExchangeRequest<'_> {
     /// exchange.
     pub async fn send(self) -> Result<ExchangedToken, ClientError> {
         let response: TokenExchangeResponse = self.request.send().await?;
-        Ok(response.into())
+        let exchanged = ExchangedToken::from(response);
+
+        // an exchange need not yield an access token at all - an `id-jag`
+        // or an ID token is presented to something else entirely and comes
+        // back as `N_A` - so only the case that *is* an access token can be
+        // held to the binding this client asked for
+        #[cfg(feature = "dpop")]
+        if self.request.client.dpop().is_some()
+            && exchanged.issued_token_type == volga_oauth_core::token_type::ACCESS_TOKEN
+            && !exchanged
+                .token_type
+                .eq_ignore_ascii_case(volga_oauth_core::auth_scheme::DPOP)
+        {
+            return Err(ClientError::validation(format!(
+                "this client requested a DPoP-bound token, but the exchange issued an \
+                 access token of type '{}'; it is not bound to the key",
+                exchanged.token_type
+            )));
+        }
+
+        Ok(exchanged)
     }
 }
 

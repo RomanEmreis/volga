@@ -195,10 +195,10 @@ async fn it_binds_a_token_request_to_the_dpop_key() {
     // ...and the nonce the *retry* was answered with is the one now held,
     // not the one that provoked the retry - a nonce arriving on a success
     // is still a nonce, and dropping it would cost the next request a round
-    // trip to be told again
-    assert_eq!(dpop.nonce(&endpoint).as_deref(), Some("n-2"));
-
-    // which the next request carries straight away: one request, no round
+    // trip to be told again. The endpoint asserts that itself: request 2
+    // has to carry `n-2`, and it takes a single request to get there. (The
+    // token endpoint's nonces are not readable through `Dpop::nonce`, which
+    // reports what a *resource* handed out - RFC 9449 keeps the two apart.)
     let second = client.client_credentials(&metadata).send().await.unwrap();
     assert_eq!(second.access_token, dpop.thumbprint());
     assert_eq!(requests.load(Ordering::SeqCst), 3);
@@ -574,6 +574,49 @@ async fn it_protects_a_resource_request_with_a_proof() {
     let (status, _, body) = get(&target, headers).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, r#"{"orders":[]}"#);
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn it_refuses_a_token_the_server_did_not_bind() {
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+
+    // a server with no DPoP support ignores the header it does not know and
+    // answers with an ordinary bearer token
+    let mut app = App::new();
+    app.map_post("/token", |headers: HttpHeaders| async move {
+        assert!(proof_of(&headers).is_some());
+        volga::ok!({ "access_token": "at", "token_type": "Bearer", "expires_in": 3600 })
+    });
+    let server = serve(port, app).await;
+
+    // ...and its metadata says nothing either way, so nothing could have
+    // been caught before the request
+    let mut metadata = server_metadata(&base);
+    metadata.dpop_signing_alg_values_supported.clear();
+
+    let store = Arc::new(volga_oauth_client::InMemoryTokenStore::new());
+    let client = plaintext_client("my-service")
+        .with_dpop(Dpop::generate().unwrap())
+        .with_token_store(store.clone());
+
+    let err = client
+        .client_credentials(&metadata)
+        .token("service")
+        .await
+        .expect_err("an unbound token must not be taken for a bound one");
+
+    assert!(
+        matches!(&err, ClientError::Validation(reason) if reason.contains("Bearer")),
+        "got: {err}"
+    );
+    // ...and nothing unbound reached the store
+    assert!(
+        volga_oauth_client::TokenStore::get(store.as_ref(), "service").is_none(),
+        "an unbound credential was cached"
+    );
 
     server.abort();
 }
