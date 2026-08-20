@@ -602,29 +602,62 @@ impl OAuthClient {
         // pick instead
         dpop.ensure_supported(metadata)?;
 
-        let proof = |headers: &http::HeaderMap| -> Result<http::HeaderMap, ClientError> {
+        // bound outside the closure so the proof builder can borrow it
+        // across the `with_nonce` call below
+        let method = http::Method::POST;
+        let proof = |headers: &http::HeaderMap,
+                     nonce: Option<&str>|
+         -> Result<http::HeaderMap, ClientError> {
             let mut headers = headers.clone();
-            let proof = dpop.proof(&http::Method::POST, endpoint).sign()?;
+            let mut proof = dpop.proof(&method, endpoint);
+            if let Some(nonce) = nonce {
+                proof = proof.with_nonce(nonce);
+            }
 
-            headers.insert(crate::dpop::DPOP_HEADER, crate::dpop::proof_header(proof)?);
+            headers.insert(
+                crate::dpop::DPOP_HEADER,
+                crate::dpop::proof_header(proof.sign()?)?,
+            );
+
             Ok(headers)
         };
 
         let response = self
             .transport
-            .post_form(endpoint, body.clone(), proof(&headers)?)
+            .post_form(endpoint, body.clone(), proof(&headers, None)?)
             .await?;
 
+        // the nonce this response supplied, read off the response itself
+        // rather than back out of the shared state: another request to the
+        // same origin may store a nonce of its own in between, and the
+        // retry has to carry the one that was demanded of *it*
+        let demanded = response
+            .headers()
+            .get(crate::dpop::DPOP_NONCE_HEADER)
+            .and_then(|nonce| nonce.to_str().ok())
+            .filter(|nonce| !nonce.is_empty())
+            .map(ToOwned::to_owned);
+
         // a nonce may arrive with any response, refusal or not
-        let response = if dpop.accept_nonce(endpoint, response.headers())
-            && response.is_error(&OAuthErrorCode::UseDpopNonce)
-        {
-            self.transport
-                .post_form(endpoint, body, proof(&headers)?)
-                .await?
-        } else {
-            response
+        let learned = dpop.accept_nonce(endpoint, response.headers());
+
+        let Some(nonce) = demanded.filter(|_| learned) else {
+            return serde_json::from_value(response.into_json()?).map_err(Into::into);
         };
+
+        if !response.is_error(&OAuthErrorCode::UseDpopNonce) {
+            return serde_json::from_value(response.into_json()?).map_err(Into::into);
+        }
+
+        let response = self
+            .transport
+            .post_form(endpoint, body, proof(&headers, Some(&nonce))?)
+            .await?;
+
+        // the retry may be answered with a nonce of its own - RFC 9449
+        // Section 8.2 permits one on a successful response too, and dropping
+        // it would cost the next request a round trip to be told again
+        dpop.accept_nonce(endpoint, response.headers());
 
         serde_json::from_value(response.into_json()?).map_err(Into::into)
     }

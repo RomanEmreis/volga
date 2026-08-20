@@ -154,8 +154,10 @@ impl Dpop {
     /// material by accident.
     ///
     /// Fails with [`ClientError::Signing`] when the key does not parse, or
-    /// when `public_jwk` cannot carry `algorithm` - a proof whose header
-    /// advertises a key that did not sign it verifies nowhere.
+    /// when `public_jwk` is not the public half of it - a proof whose
+    /// header advertises a key that did not sign it verifies nowhere, and
+    /// the pairing is checked here rather than left to fail remotely on
+    /// every request as an `invalid_dpop_proof`.
     pub fn from_pem(
         pem: &[u8],
         algorithm: JwsAlgorithm,
@@ -201,6 +203,8 @@ impl Dpop {
         // `jwk` and as the `jkt` the token is bound to, so the two agree by
         // construction
         let canonical = jwk.thumbprint_input();
+        ensure_halves_match(&key, alg, &canonical)?;
+
         let thumbprint = base64url_sha256(canonical.as_bytes());
 
         // every proof this key signs carries the same JOSE header, so it is
@@ -511,6 +515,45 @@ struct ProofClaims<'a> {
     /// The nonce the server demanded, when it has demanded one
     #[serde(skip_serializing_if = "Option::is_none")]
     nonce: Option<&'a str>,
+}
+
+/// Refuses a public half that cannot verify what the private half signs.
+///
+/// [`PublicKey::supports`] only judges the key *type*: a P-256 JWK from an
+/// unrelated key pair passes it. That matters far more here than it does
+/// for a published JWK Set - the proof header is the only key a verifier
+/// has to go on, so a mismatched pair does not merely publish the wrong
+/// document, it makes every request this key ever signs fail remotely with
+/// `invalid_dpop_proof`, which names nothing a caller could act on. One
+/// signature at construction settles it locally instead.
+///
+/// `canonical` is the JWK as the proof header will carry it, so what is
+/// checked is exactly what verifiers will be given.
+fn ensure_halves_match(
+    key: &EncodingKey,
+    alg: Algorithm,
+    canonical: &str,
+) -> Result<(), ClientError> {
+    let mismatch = || {
+        ClientError::signing(
+            "the public JWK does not verify what this key signs; the two halves belong to \
+             different key pairs",
+        )
+    };
+
+    let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_str(canonical)?;
+    let public = jsonwebtoken::DecodingKey::from_jwk(&jwk).map_err(ClientError::signing)?;
+
+    const PROBE: &[u8] = b"volga-oauth-client dpop key check";
+    let signature = sign(PROBE, key, alg).map_err(ClientError::signing)?;
+
+    match jsonwebtoken::crypto::verify(&signature, PROBE, &public, alg) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(mismatch()),
+        // a verifier that cannot even be built from this pairing is the
+        // same failure, reported one step earlier
+        Err(_) => Err(mismatch()),
+    }
 }
 
 /// Renders a signed proof as a header value.
@@ -965,6 +1008,23 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
             Dpop::from_pem(b"not a pem", JwsAlgorithm::ES256, public_jwk()),
             Err(ClientError::Signing(_))
         ));
+    }
+
+    #[test]
+    fn it_refuses_a_public_half_from_another_key_pair() {
+        // the same key type and curve, so nothing about the *shape* of the
+        // document is wrong - it is simply not this key. The proof header
+        // is the only key a verifier gets, so this would otherwise fail
+        // remotely on every single request
+        let stranger = Dpop::generate().unwrap().public_jwk().clone();
+        let err = Dpop::from_pem(EC_PEM, JwsAlgorithm::ES256, stranger).unwrap_err();
+        assert!(
+            matches!(&err, ClientError::Signing(_)) && err.to_string().contains("different key"),
+            "got: {err}"
+        );
+
+        // ...while the matching half goes through
+        assert!(Dpop::from_pem(EC_PEM, JwsAlgorithm::ES256, public_jwk()).is_ok());
     }
 
     #[test]

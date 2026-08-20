@@ -145,22 +145,33 @@ async fn it_binds_a_token_request_to_the_dpop_key() {
             // no access token is presented to the token endpoint
             assert!(proof.claims.ath.is_none());
 
-            match proof.claims.nonce.as_deref() {
-                None => {
-                    assert_eq!(attempt, 0, "the nonce was demanded once already");
-                    volga::status!(
-                        400,
-                        { "error": "use_dpop_nonce",
-                          "error_description": "Authorization server requires nonce in DPoP proof" };
-                        [("dpop-nonce", "n-1")]
-                    )
-                }
-                Some("n-1") => volga::ok!({
-                    "access_token": proof.thumbprint,
-                    "token_type": "DPoP",
-                    "expires_in": 3600
-                }),
-                Some(other) => panic!("unexpected nonce: {other}"),
+            // the nonce rotates on the way out: the retry is answered with
+            // `n-2`, which the client has to pick up from a *successful*
+            // response and use next time (RFC 9449 Section 8.2)
+            let expected = match attempt {
+                0 => None,
+                1 => Some("n-1"),
+                _ => Some("n-2"),
+            };
+            assert_eq!(
+                proof.claims.nonce.as_deref(),
+                expected,
+                "request {attempt} carried the wrong nonce"
+            );
+
+            match expected {
+                None => volga::status!(
+                    400,
+                    { "error": "use_dpop_nonce",
+                      "error_description": "Authorization server requires nonce in DPoP proof" };
+                    [("dpop-nonce", "n-1")]
+                ),
+                Some(_) => volga::ok!(
+                    { "access_token": proof.thumbprint,
+                      "token_type": "DPoP",
+                      "expires_in": 3600 };
+                    [("dpop-nonce", "n-2")]
+                ),
             }
         }
     });
@@ -181,10 +192,13 @@ async fn it_binds_a_token_request_to_the_dpop_key() {
     assert_eq!(tokens.access_token, dpop.thumbprint());
     // ...after exactly one retry
     assert_eq!(requests.load(Ordering::SeqCst), 2);
-    // ...and the nonce is remembered, so the next request carries it
-    // without a round trip
-    assert_eq!(dpop.nonce(&endpoint).as_deref(), Some("n-1"));
+    // ...and the nonce the *retry* was answered with is the one now held,
+    // not the one that provoked the retry - a nonce arriving on a success
+    // is still a nonce, and dropping it would cost the next request a round
+    // trip to be told again
+    assert_eq!(dpop.nonce(&endpoint).as_deref(), Some("n-2"));
 
+    // which the next request carries straight away: one request, no round
     let second = client.client_credentials(&metadata).send().await.unwrap();
     assert_eq!(second.access_token, dpop.thumbprint());
     assert_eq!(requests.load(Ordering::SeqCst), 3);
