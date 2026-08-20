@@ -82,6 +82,7 @@ mod tests {
             scope: None,
             id_token: None,
             expires_at: None,
+            dpop_jkt: None,
         }
     }
 

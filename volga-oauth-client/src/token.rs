@@ -60,6 +60,17 @@ pub struct TokenSet {
     /// Absolute access token expiration; `None` when the server did not
     /// report a lifetime (or reported one too large to represent)
     pub expires_at: Option<SystemTime>,
+
+    /// The RFC 7638 thumbprint of the key this token is bound to, when it
+    /// is DPoP-bound (RFC 9449 Section 6)
+    ///
+    /// Recorded by the client that obtained it, so a persisted entry can be
+    /// told apart from one bound to a key this process no longer holds -
+    /// a token nothing can prove possession of is dead weight, however
+    /// unexpired it looks. `None` on a bearer token, and on one persisted
+    /// before this was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dpop_jkt: Option<String>,
 }
 
 impl TokenSet {
@@ -121,6 +132,9 @@ impl From<TokenResponse> for TokenSet {
             scope: response.scope,
             id_token: response.id_token,
             expires_at: expires_at(response.expires_in),
+            // stamped by the client that issued the request, which is what
+            // knows the key - see `OAuthClient::adopt_tokens`
+            dpop_jkt: None,
         }
     }
 }
@@ -164,6 +178,8 @@ impl std::fmt::Debug for TokenSet {
             .field("scope", &self.scope)
             .field("id_token", &self.id_token.as_ref().map(|_| "[redacted]"))
             .field("expires_at", &self.expires_at)
+            // a thumbprint is a public identifier, not a secret
+            .field("dpop_jkt", &self.dpop_jkt)
             .finish()
     }
 }
@@ -224,6 +240,26 @@ mod tests {
         assert!(tokens.expires_within(Duration::MAX));
         let tokens = TokenSet::from(response(None));
         assert!(!tokens.expires_within(Duration::MAX));
+    }
+
+    #[test]
+    fn it_keeps_an_unrecorded_binding_out_of_the_wire_form() {
+        // an entry persisted before the binding was recorded still reads
+        // back, and a bearer token does not grow a null member
+        let tokens = TokenSet::from(response(Some(60)));
+        assert_eq!(tokens.dpop_jkt, None);
+
+        let json = serde_json::to_value(&tokens).unwrap();
+        assert!(json.get("dpop_jkt").is_none());
+        assert_eq!(serde_json::from_value::<TokenSet>(json).unwrap(), tokens);
+
+        let bound = TokenSet {
+            dpop_jkt: Some("jkt".into()),
+            ..tokens
+        };
+        let json = serde_json::to_value(&bound).unwrap();
+        assert_eq!(json["dpop_jkt"], "jkt");
+        assert_eq!(serde_json::from_value::<TokenSet>(json).unwrap(), bound);
     }
 
     #[test]

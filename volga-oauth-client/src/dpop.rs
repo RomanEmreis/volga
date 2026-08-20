@@ -381,8 +381,10 @@ impl Dpop {
 
     /// Returns the nonce last remembered for the *resource* serving `url`
     ///
-    /// The token endpoint's nonces are kept apart and driven by this crate;
-    /// see [`NonceScope`].
+    /// A token endpoint's nonces are a separate sequence, kept apart from
+    /// these and driven by this crate (RFC 9449 Sections 8 and 9), so one
+    /// host serving both an API and its token endpoint does not have the
+    /// two overwrite each other.
     pub fn nonce(&self, url: &str) -> Option<String> {
         self.nonce_in(NonceScope::Resource, url)
     }
@@ -804,6 +806,7 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
             scope: None,
             id_token: None,
             expires_at: None,
+            dpop_jkt: None,
         }
     }
 

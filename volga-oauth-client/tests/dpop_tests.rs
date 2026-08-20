@@ -491,6 +491,7 @@ async fn it_protects_a_resource_request_with_a_proof() {
         scope: None,
         id_token: None,
         expires_at: None,
+        dpop_jkt: Some(dpop.thumbprint().to_owned()),
     };
 
     // a resource server that binds the token to the key (RFC 9449
@@ -617,6 +618,93 @@ async fn it_refuses_a_token_the_server_did_not_bind() {
         volga_oauth_client::TokenStore::get(store.as_ref(), "service").is_none(),
         "an unbound credential was cached"
     );
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn it_discards_a_stored_token_it_cannot_present() {
+    use volga_oauth_client::{InMemoryTokenStore, TokenStore};
+
+    let port = free_port();
+    let base = format!("http://127.0.0.1:{port}");
+
+    let issued = Arc::new(AtomicUsize::new(0));
+    let seen = issued.clone();
+
+    let mut app = App::new();
+    app.map_post("/token", move |headers: HttpHeaders| {
+        let seen = seen.clone();
+        async move {
+            seen.fetch_add(1, Ordering::SeqCst);
+            let proof = verify_proof(&proof_of(&headers).expect("no proof"));
+            volga::ok!({
+                "access_token": proof.thumbprint,
+                "token_type": "DPoP",
+                "expires_in": 3600
+            })
+        }
+    });
+    let server = serve(port, app).await;
+
+    let metadata = server_metadata(&base);
+    let store = Arc::new(InMemoryTokenStore::new());
+
+    // an entry left by an earlier run: unexpired, but bound to a key this
+    // process does not hold - a persistent store outlives a generated key
+    let stale = TokenSet {
+        access_token: "at-from-a-previous-run".into(),
+        token_type: auth_scheme::DPOP.into(),
+        refresh_token: None,
+        scope: None,
+        id_token: None,
+        expires_at: Some(std::time::SystemTime::now() + std::time::Duration::from_secs(3600)),
+        dpop_jkt: Some("a-thumbprint-of-some-other-key".into()),
+    };
+    store.put("service", &stale);
+
+    let dpop = Dpop::generate().unwrap();
+    let client = plaintext_client("my-service")
+        .with_dpop(dpop.clone())
+        .with_token_store(store.clone());
+
+    // nothing this key can prove possession of, so the grant runs again
+    let tokens = client
+        .client_credentials(&metadata)
+        .token("service")
+        .await
+        .unwrap();
+
+    assert_eq!(issued.load(Ordering::SeqCst), 1);
+    assert_eq!(tokens.access_token, dpop.thumbprint());
+    assert_eq!(tokens.dpop_jkt.as_deref(), Some(dpop.thumbprint()));
+
+    // ...and the entry now in the store is the one this key can present, so
+    // the next call is served from it
+    let again = client
+        .client_credentials(&metadata)
+        .token("service")
+        .await
+        .unwrap();
+    assert_eq!(issued.load(Ordering::SeqCst), 1);
+    assert_eq!(again.access_token, tokens.access_token);
+
+    // a bearer entry cached before DPoP was configured is likewise not a
+    // token this client has - it would walk past the downgrade check
+    store.put(
+        "service",
+        &TokenSet {
+            token_type: "Bearer".into(),
+            dpop_jkt: None,
+            ..tokens.clone()
+        },
+    );
+    client
+        .client_credentials(&metadata)
+        .token("service")
+        .await
+        .unwrap();
+    assert_eq!(issued.load(Ordering::SeqCst), 2);
 
     server.abort();
 }

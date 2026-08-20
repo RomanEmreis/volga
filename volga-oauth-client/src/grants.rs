@@ -360,6 +360,10 @@ impl ClientCredentialsRequest<'_> {
         if let Some(tokens) = store.get(key)
             && tokens.expires_at.is_some()
             && !tokens.expires_within(EXPIRY_LEEWAY)
+            // ...and it is a token this client can still present: one bound
+            // to a key it no longer holds is dead weight, and re-running the
+            // grant is this profile's renewal anyway
+            && self.request.client.can_present(&tokens)
         {
             return Ok(tokens);
         }

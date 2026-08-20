@@ -223,6 +223,7 @@ async fn it_serves_a_stored_service_token_and_re_requests_it_when_stale() {
             scope: None,
             id_token: None,
             expires_at: Some(SystemTime::now() + Duration::from_secs(5)),
+            dpop_jkt: None,
         },
     );
     assert_eq!(service_token().await.unwrap().access_token, "at-2");
@@ -252,6 +253,7 @@ async fn it_serves_a_stored_service_token_and_re_requests_it_when_stale() {
             scope: None,
             id_token: None,
             expires_at: None,
+            dpop_jkt: None,
         },
     );
     let issued_before = issued.load(Ordering::SeqCst);

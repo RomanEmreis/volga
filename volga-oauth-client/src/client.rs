@@ -486,6 +486,14 @@ impl OAuthClient {
             return Ok(None);
         };
 
+        // a stored entry this client cannot present is not a token it has -
+        // and its refresh token is bound the same way, so there is nothing
+        // to renew it with either
+        if !self.can_present(&tokens) {
+            store.remove(key);
+            return Ok(None);
+        }
+
         if !tokens.expires_within(EXPIRY_LEEWAY) {
             return Ok(Some(tokens));
         }
@@ -554,19 +562,51 @@ impl OAuthClient {
     /// explicit `with_dpop`, which is the one thing that configuration
     /// exists to prevent - so it is refused, loudly, instead.
     pub(crate) fn adopt_tokens(&self, response: TokenResponse) -> Result<TokenSet, ClientError> {
-        let tokens = TokenSet::from(response);
+        #[allow(unused_mut)]
+        let mut tokens = TokenSet::from(response);
 
         #[cfg(feature = "dpop")]
-        if self.dpop.is_some() && !tokens.is_dpop() {
-            return Err(ClientError::validation(format!(
-                "this client requested a DPoP-bound token, but the authorization server \
-                 issued one of type '{}'; it is not bound to the key and presenting it \
-                 would be an unconstrained bearer credential",
-                tokens.token_type
-            )));
+        if let Some(dpop) = &self.dpop {
+            if !tokens.is_dpop() {
+                return Err(ClientError::validation(format!(
+                    "this client requested a DPoP-bound token, but the authorization server \
+                     issued one of type '{}'; it is not bound to the key and presenting it \
+                     would be an unconstrained bearer credential",
+                    tokens.token_type
+                )));
+            }
+
+            // recorded so a stored entry can be told apart from one bound
+            // to a key this client no longer holds
+            tokens.dpop_jkt = Some(dpop.thumbprint().to_owned());
         }
 
         Ok(tokens)
+    }
+
+    /// Returns whether a stored entry is one this client can still present.
+    ///
+    /// The binding survives in the store while the key need not: a token
+    /// bound to a `jkt` this process cannot prove possession of is dead
+    /// weight however unexpired it looks, and so is a bearer token held by
+    /// a client that has since been given a DPoP key - taking either would
+    /// walk straight past the check [`adopt_tokens`](Self::adopt_tokens)
+    /// applies at issuance. Neither is an error: it is a stale cache, and
+    /// the answer is to discard it and obtain a token that fits.
+    pub(crate) fn can_present(&self, tokens: &TokenSet) -> bool {
+        #[cfg(feature = "dpop")]
+        match (&self.dpop, tokens.is_dpop()) {
+            // an entry stored before this key existed carries no
+            // thumbprint, and an unconfirmed binding is not a binding
+            (Some(dpop), true) => {
+                return tokens.dpop_jkt.as_deref() == Some(dpop.thumbprint());
+            }
+            (Some(_), false) | (None, true) => return false,
+            (None, false) => {}
+        }
+
+        let _ = tokens;
+        true
     }
 
     /// Submits a token request and deserializes the successful response
@@ -1709,6 +1749,40 @@ mod tests {
         assert!(matches!(err, ClientError::Validation(reason) if reason.contains("RFC 9207")));
     }
 
+    #[cfg(feature = "dpop")]
+    #[test]
+    fn it_judges_whether_a_stored_entry_can_still_be_presented() {
+        let stored = |token_type: &str, jkt: Option<&str>| TokenSet {
+            access_token: "at".into(),
+            token_type: token_type.into(),
+            refresh_token: None,
+            scope: None,
+            id_token: None,
+            expires_at: None,
+            dpop_jkt: jkt.map(ToOwned::to_owned),
+        };
+
+        // a client with no key presents bearer tokens and nothing else: a
+        // bound one is not a credential it can use
+        let plain = OAuthClient::new("my-client");
+        assert!(plain.can_present(&stored("Bearer", None)));
+        assert!(!plain.can_present(&stored("DPoP", Some("jkt"))));
+
+        let dpop = crate::Dpop::generate().unwrap();
+        let client = OAuthClient::new("my-client").with_dpop(dpop.clone());
+
+        // ...and one with a key can present exactly what that key is bound
+        // to. A bearer entry cached before the key existed would otherwise
+        // walk straight past the downgrade check
+        assert!(client.can_present(&stored("DPoP", Some(dpop.thumbprint()))));
+        assert!(!client.can_present(&stored("Bearer", None)));
+        // a token bound to a key this process no longer holds - a store
+        // outliving a generated key - and one whose binding was never
+        // recorded: an unconfirmed binding is not a binding
+        assert!(!client.can_present(&stored("DPoP", Some("some-other-key"))));
+        assert!(!client.can_present(&stored("DPoP", None)));
+    }
+
     #[test]
     #[should_panic(expected = "token store is not configured")]
     fn it_panics_on_store_access_without_a_store() {
@@ -1721,6 +1795,7 @@ mod tests {
                 scope: None,
                 id_token: None,
                 expires_at: None,
+                dpop_jkt: None,
             },
         );
     }
