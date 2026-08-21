@@ -311,8 +311,16 @@ impl Dpop {
     /// The caller sends the request; this only prepares it. Existing
     /// values for either header are replaced.
     ///
-    /// The proof carries the nonce last remembered for that server; use
-    /// [`authorize_with_nonce`](Self::authorize_with_nonce) to answer a
+    /// The proof carries the nonce last remembered for that server, and
+    /// that nonce is what comes back - resolving it and signing with it are
+    /// one step here, so the answer names what the request actually
+    /// carried, which a separate [`nonce`](Self::nonce) call could not
+    /// promise while other requests to the same origin are in flight. It is
+    /// what a `use_dpop_nonce` refusal has to be compared against; see
+    /// [`accept_nonce`](Self::accept_nonce). Discard it when nothing is
+    /// racing for the nonce.
+    ///
+    /// Use [`authorize_with_nonce`](Self::authorize_with_nonce) to answer a
     /// refusal with the nonce it demanded.
     ///
     /// Fails with [`ClientError::Validation`] when `tokens` is not bound
@@ -332,7 +340,7 @@ impl Dpop {
         method: &Method,
         url: &str,
         tokens: &TokenSet,
-    ) -> Result<(), ClientError> {
+    ) -> Result<Option<String>, ClientError> {
         self.authorize_inner(headers, method, url, tokens, None)
     }
 
@@ -343,7 +351,8 @@ impl Dpop {
     /// demanded (see [`accept_nonce`](Self::accept_nonce)), which is not
     /// necessarily what the shared state holds by the time the proof is
     /// signed - a concurrent request to the same origin may have been
-    /// handed a different one in between.
+    /// handed a different one in between. Returns `nonce`, so the two
+    /// authorizing calls answer alike.
     pub fn authorize_with_nonce(
         &self,
         headers: &mut HeaderMap,
@@ -351,7 +360,7 @@ impl Dpop {
         url: &str,
         tokens: &TokenSet,
         nonce: &str,
-    ) -> Result<(), ClientError> {
+    ) -> Result<Option<String>, ClientError> {
         self.authorize_inner(headers, method, url, tokens, Some(nonce))
     }
 
@@ -362,7 +371,7 @@ impl Dpop {
         url: &str,
         tokens: &TokenSet,
         nonce: Option<&str>,
-    ) -> Result<(), ClientError> {
+    ) -> Result<Option<String>, ClientError> {
         if !tokens.is_dpop() {
             return Err(ClientError::validation(format!(
                 "the access token is of type '{}', not DPoP; it is not bound to this key",
@@ -390,17 +399,28 @@ impl Dpop {
         let credential = HeaderValue::from_str(&format!("{DPOP} {}", tokens.access_token))
             .map_err(|_| ClientError::validation("the access token is not a valid header value"))?;
 
+        // resolved once and pinned onto the proof rather than left to the
+        // builder to look up: reading the nonce and signing with it have to
+        // be one step, or a concurrent response can replace it in between
+        // and the returned value would name a nonce the request never
+        // carried
+        let used = match nonce {
+            Some(nonce) => Some(nonce.to_owned()),
+            None => self.nonce(url),
+        };
+
         let mut proof = self
             .proof(method, url)
             .with_access_token(&tokens.access_token);
-        if let Some(nonce) = nonce {
+        
+        if let Some(nonce) = &used {
             proof = proof.with_nonce(nonce);
         }
         let proof = proof.sign()?;
 
         headers.insert(AUTHORIZATION, credential);
         headers.insert(DPOP_HEADER, proof_header(proof)?);
-        Ok(())
+        Ok(used)
     }
 
     /// Returns the nonce last remembered for the *resource* serving `url`
@@ -455,18 +475,17 @@ impl Dpop {
     /// request the server was willing to serve.
     ///
     /// Repeat a refused request once, when the nonce it demands is not the
-    /// one that request carried - read [`nonce`](Self::nonce) before
-    /// signing to know what that was, and hand the demanded one to
-    /// [`authorize_with_nonce`](Self::authorize_with_nonce) so the retry
-    /// carries it whatever the shared state has moved on to:
+    /// one that request carried - which is what
+    /// [`authorize`](Self::authorize) reports back - and hand the demanded
+    /// one to [`authorize_with_nonce`](Self::authorize_with_nonce) so the
+    /// retry carries it whatever the shared state has moved on to:
     ///
     /// ```no_run
     /// # use http::{HeaderMap, Method};
     /// # use volga_oauth_client::{ClientError, Dpop, TokenSet};
     /// # fn run(dpop: &Dpop, url: &str, tokens: &TokenSet) -> Result<(), ClientError> {
-    /// let sent = dpop.nonce(url);
     /// let mut headers = HeaderMap::new();
-    /// dpop.authorize(&mut headers, &Method::GET, url, tokens)?;
+    /// let sent = dpop.authorize(&mut headers, &Method::GET, url, tokens)?;
     ///
     /// // ...send the request; then, given a `use_dpop_nonce` refusal:
     /// # let response_headers = HeaderMap::new();
@@ -1094,13 +1113,14 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
     fn it_fills_in_the_headers_of_a_protected_request() {
         let dpop = dpop();
         let mut headers = HeaderMap::new();
-        dpop.authorize(
-            &mut headers,
-            &Method::GET,
-            "https://api.example.com/orders?page=2",
-            &tokens(DPOP, Some(dpop.thumbprint())),
-        )
-        .unwrap();
+        let used = dpop
+            .authorize(
+                &mut headers,
+                &Method::GET,
+                "https://api.example.com/orders?page=2",
+                &tokens(DPOP, Some(dpop.thumbprint())),
+            )
+            .unwrap();
 
         assert_eq!(headers[AUTHORIZATION], "DPoP at");
         let (_, claims) = parts(headers[DPOP_HEADER].to_str().unwrap());
@@ -1108,18 +1128,40 @@ aLozept2OHnD6J7pNTHm12NdaEJ4knzrCkp6pho2EFIQh5cKnqHm+hQw
         assert_eq!(claims["htu"], "https://api.example.com/orders");
         assert_eq!(claims["ath"], "sda5G2fCr6XjIpiNlGJjjTVN34oe9526mH-BXCK0uu4");
 
+        // ...and it reports the nonce it signed with, which is what a
+        // refusal has to be compared against. Resolving and signing are one
+        // step, so the answer cannot name a nonce the request never carried
+        assert!(used.is_none());
+        dpop.remember_nonce("https://api.example.com/orders", "current");
+        let mut pinned = HeaderMap::new();
+        let used = dpop
+            .authorize(
+                &mut pinned,
+                &Method::GET,
+                "https://api.example.com/orders",
+                &tokens(DPOP, Some(dpop.thumbprint())),
+            )
+            .unwrap();
+        assert_eq!(used.as_deref(), Some("current"));
+        assert_eq!(
+            parts(pinned[DPOP_HEADER].to_str().unwrap()).1["nonce"],
+            "current"
+        );
+
         // the retry counterpart carries exactly the nonce it was handed,
         // whatever the shared state has moved on to in the meantime
         dpop.remember_nonce("https://api.example.com/orders", "stale");
         let mut retry = HeaderMap::new();
-        dpop.authorize_with_nonce(
-            &mut retry,
-            &Method::GET,
-            "https://api.example.com/orders",
-            &tokens(DPOP, Some(dpop.thumbprint())),
-            "demanded",
-        )
-        .unwrap();
+        let used = dpop
+            .authorize_with_nonce(
+                &mut retry,
+                &Method::GET,
+                "https://api.example.com/orders",
+                &tokens(DPOP, Some(dpop.thumbprint())),
+                "demanded",
+            )
+            .unwrap();
+        assert_eq!(used.as_deref(), Some("demanded"));
         assert_eq!(
             parts(retry[DPOP_HEADER].to_str().unwrap()).1["nonce"],
             "demanded"

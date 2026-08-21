@@ -545,8 +545,11 @@ async fn it_protects_a_resource_request_with_a_proof() {
     // repeat it once when the resource asks for a nonce
     let target = format!("{url}?page=2");
     let mut headers = HeaderMap::new();
-    dpop.authorize(&mut headers, &Method::GET, &target, &tokens)
+    let sent = dpop
+        .authorize(&mut headers, &Method::GET, &target, &tokens)
         .unwrap();
+    // nothing has been handed out for this resource yet
+    assert!(sent.is_none());
 
     let (status, response_headers, _) = get(&target, headers).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -566,6 +569,9 @@ async fn it_protects_a_resource_request_with_a_proof() {
         .accept_nonce(&target, &response_headers)
         .expect("the challenge must carry the nonce to retry with");
     assert_eq!(demanded, "rs-1");
+    // the refusal demands a nonce this request did not carry, which is what
+    // makes repeating it worthwhile
+    assert_ne!(Some(demanded.as_str()), sent.as_deref());
 
     // the retry answers with the nonce *that* response demanded, not with
     // whatever the shared state holds by now

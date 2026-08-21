@@ -103,14 +103,16 @@ async fn bound_token(metadata: &AuthorizationServerMetadata) -> Result<(), Clien
     assert!(tokens.is_dpop());
 
     // resource requests are yours to make; this fills in
-    // `Authorization: DPoP <token>` and the `DPoP` proof covering it
+    // `Authorization: DPoP <token>` and the `DPoP` proof covering it, and
+    // reports the nonce the proof carried
     let url = "https://api.example.com/orders";
     let mut headers = HeaderMap::new();
-    dpop.authorize(&mut headers, &Method::GET, url, &tokens)?;
+    let sent = dpop.authorize(&mut headers, &Method::GET, url, &tokens)?;
 
-    // on a `use_dpop_nonce` refusal, adopt the nonce and repeat once:
-    // `dpop.accept_nonce(url, response.headers())` returns whether the
-    // nonce was new, which is what makes the retry worth making
+    // on a `use_dpop_nonce` refusal, adopt the nonce the response demands
+    // (`dpop.accept_nonce(url, response.headers())`) and repeat the request
+    // once when it is not the one just sent, through
+    // `dpop.authorize_with_nonce(.., &demanded)`
     Ok(())
 }
 ```
