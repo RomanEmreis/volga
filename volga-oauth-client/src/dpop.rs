@@ -412,7 +412,7 @@ impl Dpop {
         let mut proof = self
             .proof(method, url)
             .with_access_token(&tokens.access_token);
-        
+
         if let Some(nonce) = &used {
             proof = proof.with_nonce(nonce);
         }
