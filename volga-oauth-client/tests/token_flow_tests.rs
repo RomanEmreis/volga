@@ -51,6 +51,7 @@ fn stored(access_token: &str, refresh_token: Option<&str>, expires_at: SystemTim
         scope: None,
         id_token: None,
         expires_at: Some(expires_at),
+        dpop_jkt: None,
     }
 }
 

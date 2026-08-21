@@ -12,8 +12,9 @@ use std::fmt::{Display, Formatter};
 ///
 /// Covers the registered codes from RFC 6749 (authorization and token
 /// endpoints), RFC 6750 (bearer token usage), RFC 8707 (resource
-/// indicators) and RFC 7591 (dynamic client registration). Unregistered
-/// extension codes are preserved as [`OAuthErrorCode::Other`].
+/// indicators), RFC 7591 (dynamic client registration) and RFC 9449
+/// (DPoP). Unregistered extension codes are preserved as
+/// [`OAuthErrorCode::Other`].
 ///
 /// Serializes to/from its `snake_case` wire form:
 /// ```
@@ -63,6 +64,13 @@ pub enum OAuthErrorCode {
     /// The software statement is not approved for use by this
     /// authorization server (RFC 7591)
     UnapprovedSoftwareStatement,
+    /// The DPoP proof JWT is missing, malformed or does not match the
+    /// request it accompanies (RFC 9449 Section 7.1)
+    InvalidDpopProof,
+    /// The request must be repeated with a DPoP proof carrying the nonce
+    /// the response supplies in its `DPoP-Nonce` header
+    /// (RFC 9449 Sections 8.2 and 9)
+    UseDpopNonce,
     /// An unregistered extension error code
     Other(String),
 }
@@ -88,6 +96,8 @@ impl OAuthErrorCode {
             OAuthErrorCode::InvalidClientMetadata => "invalid_client_metadata",
             OAuthErrorCode::InvalidSoftwareStatement => "invalid_software_statement",
             OAuthErrorCode::UnapprovedSoftwareStatement => "unapproved_software_statement",
+            OAuthErrorCode::InvalidDpopProof => "invalid_dpop_proof",
+            OAuthErrorCode::UseDpopNonce => "use_dpop_nonce",
             OAuthErrorCode::Other(code) => code,
         }
     }
@@ -99,6 +109,12 @@ impl OAuthErrorCode {
     /// remaining token/authorization endpoint codes to 400 per RFC 6749 Section 5.2,
     /// except `server_error` (500) and `temporarily_unavailable` (503).
     /// Extension codes default to 400.
+    ///
+    /// The two DPoP codes take that default, which is what the token
+    /// endpoint answers with (RFC 9449 Section 5); a *resource* server
+    /// returns the same codes with 401 and the challenge in
+    /// `WWW-Authenticate` (RFC 9449 Section 7.1), so a status is chosen
+    /// there by the endpoint rather than by the code.
     pub fn status(&self) -> StatusCode {
         match self {
             OAuthErrorCode::InvalidToken | OAuthErrorCode::InvalidClient => {
@@ -133,6 +149,8 @@ impl OAuthErrorCode {
             "invalid_client_metadata" => OAuthErrorCode::InvalidClientMetadata,
             "invalid_software_statement" => OAuthErrorCode::InvalidSoftwareStatement,
             "unapproved_software_statement" => OAuthErrorCode::UnapprovedSoftwareStatement,
+            "invalid_dpop_proof" => OAuthErrorCode::InvalidDpopProof,
+            "use_dpop_nonce" => OAuthErrorCode::UseDpopNonce,
             _ => return None,
         };
         Some(known)
@@ -275,6 +293,8 @@ mod tests {
                 OAuthErrorCode::UnapprovedSoftwareStatement,
                 "unapproved_software_statement",
             ),
+            (OAuthErrorCode::InvalidDpopProof, "invalid_dpop_proof"),
+            (OAuthErrorCode::UseDpopNonce, "use_dpop_nonce"),
         ];
         for (code, wire) in cases {
             assert_eq!(code.as_str(), wire);
@@ -285,10 +305,13 @@ mod tests {
 
     #[test]
     fn it_preserves_unknown_codes() {
-        let code = OAuthErrorCode::from("use_dpop_nonce");
-        assert_eq!(code, OAuthErrorCode::Other("use_dpop_nonce".into()));
-        assert_eq!(code.as_str(), "use_dpop_nonce");
-        assert_eq!(String::from(code), "use_dpop_nonce");
+        let code = OAuthErrorCode::from("urn:vendor:quota_exceeded");
+        assert_eq!(
+            code,
+            OAuthErrorCode::Other("urn:vendor:quota_exceeded".into())
+        );
+        assert_eq!(code.as_str(), "urn:vendor:quota_exceeded");
+        assert_eq!(String::from(code), "urn:vendor:quota_exceeded");
     }
 
     #[test]

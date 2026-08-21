@@ -18,7 +18,6 @@
 
 use std::time::{Duration, SystemTime};
 
-use http::HeaderValue;
 use serde::{Deserialize, Serialize};
 use volga_oauth_core::{AuthorizationServerMetadata, grant};
 
@@ -193,7 +192,7 @@ impl<'a> TokenRequest<'a> {
     /// The form serializer is not `Sync`: everything touching it happens
     /// here, so it is dropped before the caller awaits and the resulting
     /// future stays `Send`.
-    fn build(&self) -> Result<(String, Option<HeaderValue>), ClientError> {
+    fn build(&self) -> Result<crate::client::TokenRequestParts, ClientError> {
         // both sides have to allow the grant: the server advertises what it
         // implements, the registration approved what this client may use
         ensure_grant_supported(self.metadata, self.grant_type)?;
@@ -225,9 +224,8 @@ impl<'a> TokenRequest<'a> {
     /// Sends the request and deserializes the response into `T`.
     async fn send<T: serde::de::DeserializeOwned>(&self) -> Result<T, ClientError> {
         let endpoint = token_endpoint(self.metadata)?;
-        let (body, authorization) = self.build()?;
         self.client
-            .post_token_request(endpoint, body, authorization)
+            .post_token_request(self.metadata, endpoint, || self.build())
             .await
     }
 }
@@ -310,7 +308,7 @@ impl ClientCredentialsRequest<'_> {
     /// (`invalid_client`, `invalid_scope`, `unauthorized_client`).
     pub async fn send(self) -> Result<TokenSet, ClientError> {
         let response: TokenResponse = self.request.send().await?;
-        Ok(response.into())
+        self.request.client.adopt_tokens(response)
     }
 
     /// Returns the token stored under `key`, requesting a new one whenever
@@ -362,6 +360,10 @@ impl ClientCredentialsRequest<'_> {
         if let Some(tokens) = store.get(key)
             && tokens.expires_at.is_some()
             && !tokens.expires_within(EXPIRY_LEEWAY)
+            // ...and it is a token this client can still present: one bound
+            // to a key it no longer holds is dead weight, and re-running the
+            // grant is this profile's renewal anyway
+            && self.request.client.can_present(&tokens)
         {
             return Ok(tokens);
         }
@@ -388,7 +390,7 @@ impl JwtBearerRequest<'_> {
     /// resending it will not help.
     pub async fn send(self) -> Result<TokenSet, ClientError> {
         let response: TokenResponse = self.request.send().await?;
-        Ok(response.into())
+        self.request.client.adopt_tokens(response)
     }
 }
 
@@ -444,7 +446,27 @@ impl TokenExchangeRequest<'_> {
     /// exchange.
     pub async fn send(self) -> Result<ExchangedToken, ClientError> {
         let response: TokenExchangeResponse = self.request.send().await?;
-        Ok(response.into())
+        let exchanged = ExchangedToken::from(response);
+
+        // an exchange need not yield an access token at all - an `id-jag`
+        // or an ID token is presented to something else entirely and comes
+        // back as `N_A` - so only the case that *is* an access token can be
+        // held to the binding this client asked for
+        #[cfg(feature = "dpop")]
+        if self.request.client.dpop().is_some()
+            && exchanged.issued_token_type == volga_oauth_core::token_type::ACCESS_TOKEN
+            && !exchanged
+                .token_type
+                .eq_ignore_ascii_case(volga_oauth_core::auth_scheme::DPOP)
+        {
+            return Err(ClientError::validation(format!(
+                "this client requested a DPoP-bound token, but the exchange issued an \
+                 access token of type '{}'; it is not bound to the key",
+                exchanged.token_type
+            )));
+        }
+
+        Ok(exchanged)
     }
 }
 

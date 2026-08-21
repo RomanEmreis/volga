@@ -36,10 +36,11 @@ pub enum ClientError {
     /// requested issuer, RFC 8414 Section 3.3)
     Validation(String),
 
-    /// The signing configuration cannot produce a `private_key_jwt` client
-    /// assertion: the key failed to load, the key and the algorithm do not
-    /// match, or the signature could not be computed
-    /// (see `PrivateKeyJwt`, feature `private-key-jwt`)
+    /// The signing configuration cannot produce the JWS a request needs -
+    /// a `private_key_jwt` client assertion (see `PrivateKeyJwt`, feature
+    /// `private-key-jwt`) or a DPoP proof (see `Dpop`, feature `dpop`):
+    /// the key failed to load, the key and the algorithm do not match, or
+    /// the signature could not be computed
     Signing(Box<dyn std::error::Error + Send + Sync>),
 }
 
@@ -69,7 +70,7 @@ impl Display for ClientError {
             Self::Decode(err) => write!(f, "malformed response body: {err}"),
             Self::InsecureUrl(url) => write!(f, "insecure URL rejected (HTTPS is enforced): {url}"),
             Self::Validation(reason) => write!(f, "response validation failed: {reason}"),
-            Self::Signing(err) => write!(f, "client assertion signing failed: {err}"),
+            Self::Signing(err) => write!(f, "JWS signing failed: {err}"),
         }
     }
 }
@@ -147,7 +148,7 @@ mod tests {
             ),
             (
                 ClientError::signing(std::io::Error::other("unsupported key")),
-                "client assertion signing failed: unsupported key",
+                "JWS signing failed: unsupported key",
             ),
         ];
         for (err, expected) in cases {
@@ -174,7 +175,7 @@ mod tests {
         assert!(matches!(err, ClientError::Signing(_)));
         assert_eq!(
             err.to_string(),
-            "client assertion signing failed: a RSA key cannot carry the ES256 algorithm"
+            "JWS signing failed: a RSA key cannot carry the ES256 algorithm"
         );
     }
 

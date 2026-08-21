@@ -18,6 +18,9 @@
 //!   Section 2.1) and [`exchange_token`](OAuthClient::exchange_token)
 //!   (RFC 8693).
 //! * [`RegistrationClient`] - Dynamic Client Registration (RFC 7591).
+//! * [`Dpop`] - sender-constrained tokens (RFC 9449): a proof of possession
+//!   on every token request, the nonce round a server may demand, and the
+//!   proofs a caller attaches to its own resource requests.
 //!
 //! All of them share the transport policy of [`ClientConfig`] and the
 //! error model of [`ClientError`].
@@ -27,9 +30,10 @@
 //! `http1` (default) and `http2` select the HTTP version; at least one is
 //! required. `private-key-jwt` adds `private_key_jwt` client authentication
 //! (RFC 7523 Section 2.2) - a client assertion signed with the client's own
-//! key. It is off by default because it is the only part of this crate that
-//! needs a JWS signing backend; the secret-based methods and every grant
-//! work without it.
+//! key - and `dpop` adds sender-constrained tokens (RFC 9449). Both are off
+//! by default because they are the only parts of this crate that need a JWS
+//! signing backend; the secret-based methods and every grant work without
+//! them.
 
 #[cfg(not(any(feature = "http1", feature = "http2")))]
 compile_error!(
@@ -44,6 +48,8 @@ pub use client::{
 };
 pub use config::{ClientConfig, DEFAULT_MAX_REDIRECTS, DEFAULT_TIMEOUT};
 pub use discovery::DiscoveryClient;
+#[cfg(feature = "dpop")]
+pub use dpop::{DPOP_HEADER, DPOP_NONCE_HEADER, Dpop, DpopProof};
 pub use error::ClientError;
 pub use grants::{
     ClientCredentialsRequest, ExchangedToken, JwtBearerRequest, TokenExchangeRequest,
@@ -70,8 +76,12 @@ mod cache;
 mod client;
 mod config;
 mod discovery;
+#[cfg(feature = "dpop")]
+pub mod dpop;
 mod error;
 mod grants;
+#[cfg(any(feature = "private-key-jwt", feature = "dpop"))]
+mod jws;
 mod pkce;
 mod registration;
 mod store;

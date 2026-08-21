@@ -12,6 +12,8 @@ use std::{sync::Arc, time::Duration};
 use serde::{Deserialize, Serialize};
 use volga_oauth_core::{AuthorizationServerMetadata, OAuthErrorCode};
 
+#[cfg(feature = "dpop")]
+use crate::Dpop;
 #[cfg(feature = "private-key-jwt")]
 use crate::PrivateKeyJwt;
 use crate::{
@@ -104,6 +106,10 @@ pub struct OAuthClient {
     /// RFC 7591 Section 2 it means `authorization_code` alone, which
     /// [`grant::covers`] applies.
     registered_grant_types: Option<Vec<String>>,
+    /// The key token requests are bound to, when this client presents DPoP
+    /// proofs (RFC 9449)
+    #[cfg(feature = "dpop")]
+    dpop: Option<Dpop>,
 }
 
 impl OAuthClient {
@@ -118,6 +124,8 @@ impl OAuthClient {
             redirect_uri: None,
             store: None,
             registered_grant_types: None,
+            #[cfg(feature = "dpop")]
+            dpop: None,
         }
     }
 
@@ -316,6 +324,45 @@ impl OAuthClient {
         self
     }
 
+    /// Binds the tokens this client obtains to `dpop` (RFC 9449)
+    ///
+    /// Every token request then carries a DPoP proof, including the nonce
+    /// round an authorization server may demand (RFC 9449 Section 8), and
+    /// the tokens come back with `token_type: DPoP` - see
+    /// [`TokenSet::is_dpop`]. Requests to the *resource* are the caller's
+    /// to make: hold on to the [`Dpop`] (it is cheap to clone and shares
+    /// its state) and protect them with
+    /// [`Dpop::authorize`](crate::Dpop::authorize).
+    ///
+    /// This is orthogonal to client authentication: a DPoP proof says who
+    /// holds the token, a client credential says who asked for it, and a
+    /// request can carry both.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use volga_oauth_client::{ClientError, Dpop, OAuthClient};
+    /// # fn run() -> Result<(), ClientError> {
+    /// let dpop = Dpop::generate()?;
+    /// let client = OAuthClient::new("my-client")
+    ///     .with_secret("s3cret")
+    ///     .with_dpop(dpop.clone());
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "dpop")]
+    pub fn with_dpop(mut self, dpop: Dpop) -> Self {
+        self.dpop = Some(dpop);
+        self
+    }
+
+    /// Returns the DPoP key this client binds its tokens to, if any
+    /// (see [`with_dpop`](Self::with_dpop))
+    #[cfg(feature = "dpop")]
+    #[inline]
+    pub fn dpop(&self) -> Option<&Dpop> {
+        self.dpop.as_ref()
+    }
+
     /// Sets the `redirect_uri` sent in authorization and token requests
     pub fn with_redirect_uri(mut self, redirect_uri: impl Into<String>) -> Self {
         self.redirect_uri = Some(redirect_uri.into());
@@ -362,9 +409,9 @@ impl OAuthClient {
         self.ensure_grant_registered(grant::AUTHORIZATION_CODE)?;
 
         let endpoint = token_endpoint(metadata)?;
-        // the serializer is not `Sync`: scoping it keeps it out of the
-        // future's state, so this future stays `Send` (see `refresh`)
-        let (body, authorization) = {
+        // the serializer is not `Sync`: confining it to this closure keeps
+        // it out of the future's state, so the future stays `Send`
+        let build = || {
             let mut form = form_urlencoded::Serializer::new(String::new());
 
             form.append_pair("grant_type", grant::AUTHORIZATION_CODE)
@@ -380,10 +427,10 @@ impl OAuthClient {
             }
 
             let authorization = self.apply_client_auth(&mut form, metadata)?;
-            (form.finish(), authorization)
+            Ok((form.finish(), authorization))
         };
 
-        self.request_tokens(endpoint, body, authorization).await
+        self.request_tokens(metadata, endpoint, build).await
     }
 
     /// Obtains fresh tokens with a refresh token (RFC 6749 Section 6)
@@ -397,19 +444,20 @@ impl OAuthClient {
         refresh_token: &str,
     ) -> Result<TokenSet, ClientError> {
         let endpoint = token_endpoint(metadata)?;
-        // scoped so the non-`Sync` serializer is dropped before the await:
-        // a future holding it would be `!Send` and could not be spawned
-        let (body, authorization) = {
+        // confined to the closure so the non-`Sync` serializer never lives
+        // across an await: a future holding it would be `!Send` and could
+        // not be spawned
+        let build = || {
             let mut form = form_urlencoded::Serializer::new(String::new());
 
             form.append_pair("grant_type", grant::REFRESH_TOKEN)
                 .append_pair("refresh_token", refresh_token);
 
             let authorization = self.apply_client_auth(&mut form, metadata)?;
-            (form.finish(), authorization)
+            Ok((form.finish(), authorization))
         };
 
-        self.request_tokens(endpoint, body, authorization).await
+        self.request_tokens(metadata, endpoint, build).await
     }
 
     /// Returns valid tokens stored under `key`, refreshing a stale access
@@ -437,6 +485,14 @@ impl OAuthClient {
         let Some(tokens) = store.get(key) else {
             return Ok(None);
         };
+
+        // a stored entry this client cannot present is not a token it has -
+        // and its refresh token is bound the same way, so there is nothing
+        // to renew it with either
+        if !self.can_present(&tokens) {
+            store.remove(key);
+            return Ok(None);
+        }
 
         if !tokens.expires_within(EXPIRY_LEEWAY) {
             return Ok(Some(tokens));
@@ -485,37 +541,198 @@ impl OAuthClient {
 
     pub(crate) async fn request_tokens(
         &self,
+        metadata: &AuthorizationServerMetadata,
         endpoint: &str,
-        body: String,
-        authorization: Option<HeaderValue>,
+        build: impl Fn() -> Result<TokenRequestParts, ClientError>,
     ) -> Result<TokenSet, ClientError> {
-        let response: TokenResponse = self
-            .post_token_request(endpoint, body, authorization)
-            .await?;
+        let response: TokenResponse = self.post_token_request(metadata, endpoint, build).await?;
 
-        Ok(response.into())
+        self.adopt_tokens(response)
     }
 
-    /// Submits a prepared token request and deserializes the successful
-    /// response into `T`; every grant goes through here.
-    pub(crate) async fn post_token_request<T: serde::de::DeserializeOwned>(
-        &self,
-        endpoint: &str,
-        body: String,
-        authorization: Option<HeaderValue>,
-    ) -> Result<T, ClientError> {
-        let mut headers = http::HeaderMap::new();
-        if let Some(authorization) = authorization {
-            headers.insert(http::header::AUTHORIZATION, authorization);
+    /// Takes delivery of an issued access token, refusing one the server
+    /// did not bind to this client's DPoP key.
+    ///
+    /// A server that does not implement DPoP ignores the proof and answers
+    /// with an ordinary bearer token - RFC 9449 asks it to advertise
+    /// `dpop_signing_alg_values_supported`, but that field is optional and
+    /// its absence proves nothing either way, so the downgrade cannot be
+    /// caught before the request. Taking the token anyway would hand the
+    /// caller (and the token store) an unbound credential in answer to an
+    /// explicit `with_dpop`, which is the one thing that configuration
+    /// exists to prevent - so it is refused, loudly, instead.
+    pub(crate) fn adopt_tokens(&self, response: TokenResponse) -> Result<TokenSet, ClientError> {
+        #[allow(unused_mut)]
+        let mut tokens = TokenSet::from(response);
+
+        #[cfg(feature = "dpop")]
+        if let Some(dpop) = &self.dpop {
+            if !tokens.is_dpop() {
+                return Err(ClientError::validation(format!(
+                    "this client requested a DPoP-bound token, but the authorization server \
+                     issued one of type '{}'; it is not bound to the key and presenting it \
+                     would be an unconstrained bearer credential",
+                    tokens.token_type
+                )));
+            }
+
+            // recorded so a stored entry can be told apart from one bound
+            // to a key this client no longer holds
+            tokens.dpop_jkt = Some(dpop.thumbprint().to_owned());
         }
 
+        Ok(tokens)
+    }
+
+    /// Returns whether a stored entry is one this client can still present.
+    ///
+    /// The binding survives in the store while the key need not: a token
+    /// bound to a `jkt` this process cannot prove possession of is dead
+    /// weight however unexpired it looks, and so is a bearer token held by
+    /// a client that has since been given a DPoP key - taking either would
+    /// walk straight past the check [`adopt_tokens`](Self::adopt_tokens)
+    /// applies at issuance. Neither is an error: it is a stale cache, and
+    /// the answer is to discard it and obtain a token that fits.
+    pub(crate) fn can_present(&self, tokens: &TokenSet) -> bool {
+        #[cfg(feature = "dpop")]
+        if let Some(dpop) = &self.dpop {
+            // an entry stored before this key existed carries no
+            // thumbprint, and an unconfirmed binding is not a binding
+            return tokens.is_dpop() && tokens.dpop_jkt.as_deref() == Some(dpop.thumbprint());
+        }
+
+        // no key to present it with. This holds whether the client was
+        // simply not given one or the build has no DPoP support at all: a
+        // store is shared and outlives a deployment, so a bound token can
+        // reach a binary that has no way whatever to prove possession of it
+        !tokens.is_dpop()
+    }
+
+    /// Submits a token request and deserializes the successful response
+    /// into `T`; every grant goes through here.
+    ///
+    /// `build` renders the request rather than being handed its bytes,
+    /// because a request may be sent more than once: the DPoP nonce round
+    /// (RFC 9449 Section 8.2) repeats it, and a repeat has to be a new
+    /// request rather than a resend. A `private_key_jwt` credential is a
+    /// one-shot assertion carrying a random `jti`, and a server that
+    /// remembers those (RFC 7523 Section 3 invites it to) answers a second
+    /// sight of one with `invalid_client`.
+    pub(crate) async fn post_token_request<T: serde::de::DeserializeOwned>(
+        &self,
+        metadata: &AuthorizationServerMetadata,
+        endpoint: &str,
+        build: impl Fn() -> Result<TokenRequestParts, ClientError>,
+    ) -> Result<T, ClientError> {
+        #[cfg(feature = "dpop")]
+        if let Some(dpop) = &self.dpop {
+            return self
+                .post_dpop_token_request(dpop, metadata, endpoint, build)
+                .await;
+        }
+
+        // the metadata is only consulted by the DPoP path above
+        let _ = metadata;
+
+        let (body, authorization) = build()?;
         let value = self
             .transport
-            .post_form(endpoint, body, headers)
+            .post_form(endpoint, body, authorization_headers(authorization))
             .await?
             .into_json()?;
 
         serde_json::from_value(value).map_err(Into::into)
+    }
+
+    /// Submits a token request under DPoP: a proof over the request, and
+    /// the one retry a `use_dpop_nonce` refusal is answered with
+    /// (RFC 9449 Section 8.2).
+    ///
+    /// Exactly one retry, and only when the server demanded a nonce this
+    /// request did not carry - a server that keeps refusing is answered
+    /// with the error, not with another request. The bound is the
+    /// straight-line shape of this function rather than a condition, so no
+    /// answer a server can give turns it into a loop.
+    #[cfg(feature = "dpop")]
+    async fn post_dpop_token_request<T: serde::de::DeserializeOwned>(
+        &self,
+        dpop: &Dpop,
+        metadata: &AuthorizationServerMetadata,
+        endpoint: &str,
+        build: impl Fn() -> Result<TokenRequestParts, ClientError>,
+    ) -> Result<T, ClientError> {
+        use crate::dpop::NonceScope;
+        use volga_oauth_core::OAuthErrorCode;
+
+        // the token endpoint's nonces are its own: a resource sharing this
+        // origin issues an unrelated sequence (RFC 9449 Sections 8 and 9)
+        const SCOPE: NonceScope = NonceScope::AuthorizationServer;
+
+        // caught before the request: the server would answer
+        // `invalid_dpop_proof`, which says nothing about which algorithm to
+        // pick instead
+        dpop.ensure_supported(metadata)?;
+
+        // bound outside the closure so the proof builder can borrow it
+        // across the `with_nonce` call below
+        let method = http::Method::POST;
+
+        // every attempt is rendered afresh, credential included - see
+        // `post_token_request` on why a retry is a new request
+        let attempt = |nonce: Option<&str>| -> Result<(String, http::HeaderMap), ClientError> {
+            let (body, authorization) = build()?;
+            let mut headers = authorization_headers(authorization);
+
+            let mut proof = dpop.proof_in(SCOPE, &method, endpoint);
+            if let Some(nonce) = nonce {
+                proof = proof.with_nonce(nonce);
+            }
+            headers.insert(
+                crate::dpop::DPOP_HEADER,
+                crate::dpop::proof_header(proof.sign()?)?,
+            );
+
+            Ok((body, headers))
+        };
+
+        // what this request's proof carries, resolved here rather than left
+        // to the builder: the retry decision below compares what the server
+        // demanded against what was actually sent, and the shared state may
+        // have moved on by the time the answer arrives
+        let sent = dpop.nonce_in(SCOPE, endpoint);
+
+        let (body, headers) = attempt(sent.as_deref())?;
+        let response = self.transport.post_form(endpoint, body, headers).await?;
+
+        // a nonce may arrive with any response, refusal or not
+        let demanded = dpop.accept_nonce_in(SCOPE, endpoint, response.headers());
+
+        // one retry, and only when the server demanded a nonce this request
+        // did not carry. Whether the *shared* state learned something is the
+        // wrong question: a concurrent request to the same origin may have
+        // stored this very nonce first, which says nothing about what this
+        // proof contained - and answering that refusal without retrying
+        // would fail a request the server was willing to serve. Repeating a
+        // proof with the nonce it was already refused for, on the other
+        // hand, buys nothing, so that case surfaces the error
+        let retry_with = demanded.filter(|demanded| {
+            response.is_error(&OAuthErrorCode::UseDpopNonce)
+                && Some(demanded.as_str()) != sent.as_deref()
+        });
+
+        let Some(nonce) = retry_with else {
+            return serde_json::from_value(response.into_json()?).map_err(Into::into);
+        };
+
+        let (body, headers) = attempt(Some(&nonce))?;
+        let response = self.transport.post_form(endpoint, body, headers).await?;
+
+        // the retry may be answered with a nonce of its own - RFC 9449
+        // Section 8.2 permits one on a successful response too, and dropping
+        // it would cost the next request a round trip to be told again
+        dpop.accept_nonce_in(SCOPE, endpoint, response.headers());
+
+        serde_json::from_value(response.into_json()?).map_err(Into::into)
     }
 
     /// Applies client authentication to a token request: either an HTTP
@@ -571,7 +788,8 @@ impl OAuthClient {
 
 impl std::fmt::Debug for OAuthClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("OAuthClient")
+        let mut debug = f.debug_struct("OAuthClient");
+        let debug = debug
             .field("transport", &self.transport)
             .field("client_id", &self.client_id)
             .field(
@@ -581,8 +799,10 @@ impl std::fmt::Debug for OAuthClient {
             .field("auth_method", &self.auth_method)
             .field("redirect_uri", &self.redirect_uri)
             .field("store", &self.store.as_ref().map(|_| "dyn TokenStore"))
-            .field("registered_grant_types", &self.registered_grant_types)
-            .finish()
+            .field("registered_grant_types", &self.registered_grant_types);
+        #[cfg(feature = "dpop")]
+        let debug = debug.field("dpop", &self.dpop);
+        debug.finish()
     }
 }
 
@@ -671,6 +891,15 @@ impl AuthorizationRequestBuilder<'_> {
 
         if let Some(redirect_uri) = &self.client.redirect_uri {
             query.append_pair("redirect_uri", redirect_uri);
+        }
+
+        // RFC 9449 Section 10: naming the key up front binds the
+        // authorization code to it, so a stolen code cannot be redeemed by
+        // anyone else. A server that does not implement it ignores the
+        // parameter, as RFC 6749 Section 3.1 requires of unrecognized ones
+        #[cfg(feature = "dpop")]
+        if let Some(dpop) = &self.client.dpop {
+            query.append_pair("dpop_jkt", dpop.thumbprint());
         }
 
         if !self.scopes.is_empty() {
@@ -876,6 +1105,19 @@ fn ensure_auth_method_supported(
     )))
 }
 
+/// A rendered token request: the form body and the `Authorization` header
+/// the configured client authentication produced, if any.
+pub(crate) type TokenRequestParts = (String, Option<HeaderValue>);
+
+/// The request headers carrying `authorization`, if there is one.
+fn authorization_headers(authorization: Option<HeaderValue>) -> http::HeaderMap {
+    let mut headers = http::HeaderMap::new();
+    if let Some(authorization) = authorization {
+        headers.insert(http::header::AUTHORIZATION, authorization);
+    }
+    headers
+}
+
 pub(crate) fn token_endpoint(metadata: &AuthorizationServerMetadata) -> Result<&str, ClientError> {
     metadata
         .token_endpoint
@@ -939,6 +1181,32 @@ mod tests {
         assert_eq!(get("nonce"), Some("n-1"));
         assert!(request.matches_state(&request.state.clone()));
         assert!(!request.matches_state("other"));
+    }
+
+    #[cfg(feature = "dpop")]
+    #[test]
+    fn it_binds_the_authorization_code_to_the_dpop_key() {
+        let dpop = crate::Dpop::generate().unwrap();
+        let client = OAuthClient::new("my-client").with_dpop(dpop.clone());
+        let request = client.authorization_request(&metadata()).build().unwrap();
+
+        // RFC 9449 Section 10: the code is bound to the key that will be
+        // proven at the token endpoint
+        let pairs = query_pairs(&request.url);
+        assert_eq!(
+            pairs
+                .iter()
+                .find(|(key, _)| key == "dpop_jkt")
+                .map(|(_, value)| value.as_str()),
+            Some(dpop.thumbprint())
+        );
+
+        // ...and a client without a key names none
+        let request = OAuthClient::new("my-client")
+            .authorization_request(&metadata())
+            .build()
+            .unwrap();
+        assert!(!request.url.contains("dpop_jkt"));
     }
 
     #[test]
@@ -1480,6 +1748,49 @@ mod tests {
         assert!(matches!(err, ClientError::Validation(reason) if reason.contains("RFC 9207")));
     }
 
+    /// A stored entry of `token_type`, bound to `jkt` when it claims one.
+    fn stored(token_type: &str, jkt: Option<&str>) -> TokenSet {
+        TokenSet {
+            access_token: "at".into(),
+            token_type: token_type.into(),
+            refresh_token: None,
+            scope: None,
+            id_token: None,
+            expires_at: None,
+            dpop_jkt: jkt.map(ToOwned::to_owned),
+        }
+    }
+
+    #[test]
+    fn it_refuses_a_bound_token_with_no_key_to_present_it() {
+        // deliberately not gated on the `dpop` feature: a store is shared
+        // and outlives a deployment, so an entry written by a DPoP-enabled
+        // one can reach a binary that has no way whatever to prove
+        // possession of it - and it must not be handed out there either
+        let client = OAuthClient::new("my-client");
+        assert!(client.can_present(&stored("Bearer", None)));
+        assert!(!client.can_present(&stored("DPoP", Some("jkt"))));
+        assert!(!client.can_present(&stored("DPoP", None)));
+    }
+
+    #[cfg(feature = "dpop")]
+    #[test]
+    fn it_judges_whether_a_stored_entry_can_still_be_presented() {
+        let dpop = crate::Dpop::generate().unwrap();
+        let client = OAuthClient::new("my-client").with_dpop(dpop.clone());
+
+        // a client with a key can present exactly what that key is bound
+        // to. A bearer entry cached before the key existed would otherwise
+        // walk straight past the downgrade check
+        assert!(client.can_present(&stored("DPoP", Some(dpop.thumbprint()))));
+        assert!(!client.can_present(&stored("Bearer", None)));
+        // a token bound to a key this process no longer holds - a store
+        // outliving a generated key - and one whose binding was never
+        // recorded: an unconfirmed binding is not a binding
+        assert!(!client.can_present(&stored("DPoP", Some("some-other-key"))));
+        assert!(!client.can_present(&stored("DPoP", None)));
+    }
+
     #[test]
     #[should_panic(expected = "token store is not configured")]
     fn it_panics_on_store_access_without_a_store() {
@@ -1492,6 +1803,7 @@ mod tests {
                 scope: None,
                 id_token: None,
                 expires_at: None,
+                dpop_jkt: None,
             },
         );
     }

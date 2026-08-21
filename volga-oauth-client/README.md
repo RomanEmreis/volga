@@ -10,6 +10,7 @@ Provides:
 * Authorization Code flow with mandatory PKCE (S256, [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636)), refresh tokens and resource indicators ([RFC 8707](https://www.rfc-editor.org/rfc/rfc8707))
 * The grants that authenticate the client itself: client credentials ([RFC 6749](https://www.rfc-editor.org/rfc/rfc6749) Section 4.4), the JWT bearer grant ([RFC 7523](https://www.rfc-editor.org/rfc/rfc7523) Section 2.1) and token exchange ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693))
 * Client authentication with `client_secret_basic`, `client_secret_post` or `private_key_jwt` ([RFC 7523](https://www.rfc-editor.org/rfc/rfc7523) Section 2.2, feature `private-key-jwt`)
+* DPoP sender-constrained tokens ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449), feature `dpop`) - proofs on every token request, the nonce round a server may demand, and the proofs a caller attaches to its own resource requests
 * Token persistence and transparent refresh through the `TokenStore` abstraction
 * Dynamic Client Registration ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) - the RFC 7592 management protocol is not implemented, but the `registration_access_token` / `registration_client_uri` pair is surfaced for applications that need it
 
@@ -80,6 +81,42 @@ async fn service_token() -> Result<(), ClientError> {
 
 `jwt_bearer` presents a JWT the caller already holds (a workload identity token, say) as the grant, and `exchange_token` implements RFC 8693 - trading one token for another, possibly of a different type.
 
+### Sender-constrained tokens (DPoP)
+
+A bearer token is a password: whoever holds it may use it. DPoP binds the token to a key the client holds, and every request carries a freshly signed proof of possession. Needs the `dpop` feature:
+
+```rust,no_run
+use http::{HeaderMap, Method};
+use volga_oauth_client::{AuthorizationServerMetadata, ClientError, Dpop, OAuthClient};
+
+async fn bound_token(metadata: &AuthorizationServerMetadata) -> Result<(), ClientError> {
+    // one key per session; the client and the code making resource
+    // requests share it, and cloning shares the nonce state with it
+    let dpop = Dpop::generate()?;
+    let client = OAuthClient::new("my-service")
+        .with_secret("s3cret")
+        .with_dpop(dpop.clone());
+
+    // the token request carries a proof, including the nonce round the
+    // server may demand - the token comes back bound to the key
+    let tokens = client.client_credentials(metadata).send().await?;
+    assert!(tokens.is_dpop());
+
+    // resource requests are yours to make; this fills in
+    // `Authorization: DPoP <token>` and the `DPoP` proof covering it, and
+    // reports the nonce the proof carried
+    let url = "https://api.example.com/orders";
+    let mut headers = HeaderMap::new();
+    let sent = dpop.authorize(&mut headers, &Method::GET, url, &tokens)?;
+
+    // on a `use_dpop_nonce` refusal, adopt the nonce the response demands
+    // (`dpop.accept_nonce(url, response.headers())`) and repeat the request
+    // once when it is not the one just sent, through
+    // `dpop.authorize_with_nonce(.., &demanded)`
+    Ok(())
+}
+```
+
 ## Feature flags
 
 | Flag | What it enables |
@@ -87,7 +124,8 @@ async fn service_token() -> Result<(), ClientError> {
 | `http1` (default) | HTTP/1.1 via hyper |
 | `http2` | HTTP/2 via hyper; negotiated through TLS ALPN when combined with `http1`, used exclusively (prior knowledge over plaintext) without it |
 | `private-key-jwt` | `private_key_jwt` client authentication ([RFC 7523](https://www.rfc-editor.org/rfc/rfc7523) Section 2.2) - `PrivateKeyJwt`, `ClientAuthMethod::PrivateKeyJwt`, `OAuthClient::with_private_key_jwt` and `from_registration_with_key` |
+| `dpop` | DPoP sender-constrained tokens ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) - `Dpop`, `OAuthClient::with_dpop`, `TokenSet::is_dpop` |
 
 At least one of `http1` / `http2` must be enabled.
 
-`private-key-jwt` is off by default: it is the only part of this crate that needs a JWS signing backend (`jsonwebtoken` on `aws-lc-rs`). Everything else - every grant, `client_secret_basic`, `client_secret_post` and public clients - works without it.
+`private-key-jwt` and `dpop` are off by default: they are the only parts of this crate that need a JWS signing backend (`jsonwebtoken` on `aws-lc-rs`). Everything else - every grant, `client_secret_basic`, `client_secret_post` and public clients - works without them. They are independent of each other: a `private_key_jwt` credential says who asked for a token, a DPoP proof says who holds it, and a request may carry both.

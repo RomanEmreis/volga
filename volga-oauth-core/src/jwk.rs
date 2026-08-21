@@ -61,6 +61,16 @@ pub enum EcCurve {
     P384,
 }
 
+impl EcCurve {
+    /// Returns the registered `crv` value of this curve
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::P256 => "P-256",
+            Self::P384 => "P-384",
+        }
+    }
+}
+
 /// A curve an octet key pair (`OKP`) can be on
 ///
 /// Only the signing curve of RFC 8037: `X25519` and `X448` are
@@ -70,6 +80,15 @@ pub enum EcCurve {
 pub enum OkpCurve {
     /// Ed25519, paired with `EdDSA`
     Ed25519,
+}
+
+impl OkpCurve {
+    /// Returns the registered `crv` value of this curve
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ed25519 => "Ed25519",
+        }
+    }
 }
 
 /// The key material of a [`PublicJwk`], by key type (RFC 7518 Section 6)
@@ -293,6 +312,55 @@ impl PublicJwk {
     #[inline]
     pub fn algorithm(&self) -> Option<JwsAlgorithm> {
         self.algorithm
+    }
+
+    /// Returns the JWK Thumbprint input of this key (RFC 7638 Section 3.1)
+    ///
+    /// The canonical JSON document a thumbprint is computed over: the
+    /// required members of the key type and nothing else, no whitespace,
+    /// members in lexicographic order. The thumbprint itself is the
+    /// base64url-encoded SHA-256 of it - this crate does no cryptography,
+    /// so it renders the input and leaves the digest to the caller:
+    ///
+    /// ```
+    /// # use volga_oauth_core::jwk::{EcCurve, PublicJwk, PublicKey};
+    /// let jwk = PublicJwk::new(PublicKey::Ec {
+    ///     crv: EcCurve::P256,
+    ///     x: "z9O8S-Itj6aJliZmUmWTG0Ko-GG23Wi6M3qbdjh5w-g".into(),
+    ///     y: "nuk1MebXY11oQniSfOsKSnqmGjYQUhCHlwqeoeb6FDA".into(),
+    /// })
+    /// .with_key_id("2026-08");
+    ///
+    /// // `kid`, `alg` and `use` are not thumbprinted - two documents
+    /// // describing the same key have the same thumbprint
+    /// assert!(jwk.thumbprint_input().starts_with(r#"{"crv":"P-256","kty":"EC","x":"#));
+    /// ```
+    ///
+    /// This is what identifies a key across the protocol: the `jkt`
+    /// confirmation an authorization server binds a DPoP-bound access
+    /// token to (RFC 9449 Section 6) is the thumbprint of the proof's
+    /// public key.
+    pub fn thumbprint_input(&self) -> String {
+        // a `BTreeMap` is the RFC 7638 canonicalization in one step:
+        // required members only, ordered lexicographically by their name,
+        // rendered without whitespace and with JSON string escaping
+        let members: std::collections::BTreeMap<&str, &str> = match &self.key {
+            PublicKey::Ec { crv, x, y } => [
+                ("kty", "EC"),
+                ("crv", crv.as_str()),
+                ("x", x.as_str()),
+                ("y", y.as_str()),
+            ]
+            .into(),
+            PublicKey::Rsa { n, e } => {
+                [("kty", "RSA"), ("n", n.as_str()), ("e", e.as_str())].into()
+            }
+            PublicKey::Okp { crv, x } => {
+                [("kty", "OKP"), ("crv", crv.as_str()), ("x", x.as_str())].into()
+            }
+        };
+
+        serde_json::to_string(&members).expect("a map of strings always serializes")
     }
 }
 
@@ -604,6 +672,50 @@ mod tests {
             assert!(with_ops(operations.clone()).is_ok(), "refused {operations}");
         }
     }
+
+    #[test]
+    fn it_renders_the_rfc7638_thumbprint_input() {
+        // RFC 7638 Section 3.1: required members only, lexicographic
+        // order, no whitespace
+        let rfc_example = PublicJwk::new(PublicKey::Rsa {
+            n: RFC7638_MODULUS.into(),
+            e: "AQAB".into(),
+        });
+        assert_eq!(
+            rfc_example.thumbprint_input(),
+            format!(r#"{{"e":"AQAB","kty":"RSA","n":"{RFC7638_MODULUS}"}}"#)
+        );
+
+        assert_eq!(
+            PublicJwk::new(ec_key()).thumbprint_input(),
+            r#"{"crv":"P-256","kty":"EC","x":"z9O8S-Itj6aJliZmUmWTG0Ko-GG23Wi6M3qbdjh5w-g","y":"nuk1MebXY11oQniSfOsKSnqmGjYQUhCHlwqeoeb6FDA"}"#
+        );
+        assert_eq!(
+            PublicJwk::new(PublicKey::Okp {
+                crv: OkpCurve::Ed25519,
+                x: "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo".into(),
+            })
+            .thumbprint_input(),
+            r#"{"crv":"Ed25519","kty":"OKP","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo"}"#
+        );
+
+        // the members that describe the *document* rather than the key are
+        // left out, so two ways of publishing one key thumbprint alike
+        let described = PublicJwk::new(ec_key())
+            .with_key_id("2026-08")
+            .with_algorithm(JwsAlgorithm::ES256)
+            .unwrap();
+        assert_eq!(
+            described.thumbprint_input(),
+            PublicJwk::new(ec_key()).thumbprint_input()
+        );
+    }
+
+    /// The modulus of the RFC 7638 Section 3.1 example key.
+    const RFC7638_MODULUS: &str = "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86z\
+wu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5\
+v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4\
+vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw";
 
     #[test]
     fn it_builds_and_searches_a_set() {
