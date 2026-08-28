@@ -7,6 +7,8 @@ use syn::parse_macro_input;
 #[cfg(feature = "jwt-auth-derive")]
 mod auth;
 mod http;
+#[cfg(feature = "validation-derive")]
+mod validation;
 
 /// Implements the `AuthClaims` trait for the custom claims structure
 ///
@@ -65,6 +67,37 @@ pub fn http_header(attr: TokenStream, item: TokenStream) -> TokenStream {
     let header = parse_macro_input!(attr as http::attr::HeaderInput);
     let input = parse_macro_input!(item as syn::ItemStruct);
     http::expand_http_header(&header, &input)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Implements the `Validate` trait from the field attributes.
+///
+/// # Example
+/// ```ignore
+/// use volga::validation::Validate;
+/// use serde::Deserialize;
+///
+/// #[derive(Deserialize, Validate)]
+/// #[validate(schema = "check_range")]
+/// struct Filter {
+///     #[validate(range(min = 1, max = 100))]
+///     per_page: u32,
+///
+///     #[validate(length(min = 1, max = 128))]
+///     key: String,
+/// }
+/// ```
+///
+/// Field rules: `length(min, max, equal)`, `range(min, max)`, `nested`,
+/// `custom = "path::to::fn"`, each taking an optional `message = ".."`;
+/// `rename = ".."` overrides the name a failure is reported under.
+/// The container takes `schema = "path::to::fn"` for rules spanning several fields.
+#[cfg(feature = "validation-derive")]
+#[proc_macro_derive(Validate, attributes(validate))]
+pub fn derive_validate(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::DeriveInput);
+    validation::expand_validate(&input)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

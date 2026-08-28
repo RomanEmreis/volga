@@ -159,7 +159,10 @@ where
     fn describe_openapi(
         config: crate::openapi::OpenApiRouteConfig,
     ) -> crate::openapi::OpenApiRouteConfig {
-        E::describe_openapi(config)
+        let config = E::describe_openapi(config);
+        T::constraints().iter().fold(config, |config, constraint| {
+            config.with_constraint(constraint.field, constraint.kind.into())
+        })
     }
 }
 

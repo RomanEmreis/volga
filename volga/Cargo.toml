@@ -93,6 +93,7 @@ full = [
     "problem-details",
     "rate-limiting",
     "static-files",
+    "validation-derive",
     "compression-full",
     "decompression-full",
     "ws"
@@ -109,6 +110,7 @@ basic-auth = ["dep:base64", "dep:subtle", "middleware"]
 jwt-auth-full = ["jwt-auth", "jwt-derive"]
 jwt-auth = ["dep:jsonwebtoken", "middleware", "oauth"]
 jwt-derive = ["dep:volga-macros", "volga-macros?/jwt-auth-derive"]
+validation-derive = ["dep:volga-macros", "volga-macros?/validation-derive"]
 oauth = ["dep:volga-oauth-core", "serde/derive"]
 oauth-client = ["jwt-auth", "dep:volga-oauth-client"]
 

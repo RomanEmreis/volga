@@ -39,14 +39,40 @@ pub struct OpenApiSchema {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) nullable: Option<bool>,
+
+    #[serde(rename = "minLength", skip_serializing_if = "Option::is_none")]
+    pub(super) min_length: Option<usize>,
+
+    #[serde(rename = "maxLength", skip_serializing_if = "Option::is_none")]
+    pub(super) max_length: Option<usize>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) minimum: Option<f64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) maximum: Option<f64>,
+}
+
+/// A constraint on a schema, named the way OpenAPI names it
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum SchemaConstraint {
+    /// `minLength`
+    MinLength(usize),
+    /// `maxLength`
+    MaxLength(usize),
+    /// `minimum`
+    Minimum(f64),
+    /// `maximum`
+    Maximum(f64),
 }
 
 impl OpenApiSchema {
-    /// Generates schema for object field
-    pub fn object() -> Self {
+    /// An entirely unset schema, which every constructor below starts from
+    fn empty() -> Self {
         Self {
             schema_ref: None,
-            schema_type: Some("object".to_string()),
+            schema_type: None,
             format: None,
             title: None,
             properties: None,
@@ -54,81 +80,75 @@ impl OpenApiSchema {
             additional_properties: None,
             items: None,
             nullable: None,
+            min_length: None,
+            max_length: None,
+            minimum: None,
+            maximum: None,
+        }
+    }
+
+    /// Applies a constraint to this schema
+    pub fn with_constraint(mut self, constraint: SchemaConstraint) -> Self {
+        self.apply_constraint(constraint);
+        self
+    }
+
+    /// Applies a constraint to this schema in place
+    pub(super) fn apply_constraint(&mut self, constraint: SchemaConstraint) {
+        match constraint {
+            SchemaConstraint::MinLength(value) => self.min_length = Some(value),
+            SchemaConstraint::MaxLength(value) => self.max_length = Some(value),
+            SchemaConstraint::Minimum(value) => self.minimum = Some(value),
+            SchemaConstraint::Maximum(value) => self.maximum = Some(value),
+        }
+    }
+
+    /// Generates schema for object field
+    pub fn object() -> Self {
+        Self {
+            schema_type: Some("object".to_string()),
+            ..Self::empty()
         }
     }
 
     /// Generates schema for string field
     pub fn string() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("string".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
     /// Generates schema for integer field
     pub fn integer() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("integer".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
     /// Generates schema for number field
     pub fn number() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("number".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
     /// Generates schema for boolean field
     pub fn boolean() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("boolean".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
     /// Generates schema for binary field
     pub fn binary() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("string".to_string()),
             format: Some("binary".to_string()),
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
@@ -143,15 +163,9 @@ impl OpenApiSchema {
     /// Generates schema for an array of items
     pub fn array(items: OpenApiSchema) -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("array".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
             items: Some(Box::new(items)),
-            nullable: None,
+            ..Self::empty()
         }
     }
 
@@ -159,14 +173,7 @@ impl OpenApiSchema {
     pub fn reference(name: &str) -> Self {
         Self {
             schema_ref: Some(format!("#/components/schemas/{name}")),
-            schema_type: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
-            format: None,
+            ..Self::empty()
         }
     }
 
@@ -439,26 +446,10 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
-        struct SomeDeserializer<'a>(&'a mut Probe);
-
-        impl<'de, 'a> Deserializer<'de> for SomeDeserializer<'a> {
-            type Error = ProbeError;
-
-            fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-            where
-                V: Visitor<'de>,
-            {
-                (&mut *self.0).deserialize_any(visitor)
-            }
-
-            serde::forward_to_deserialize_any! {
-                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-                bytes byte_buf unit unit_struct newtype_struct seq tuple tuple_struct
-                map struct enum identifier ignored_any option
-            }
-        }
-
-        let out = visitor.visit_some(SomeDeserializer(self))?;
+        // The inner type is probed by this very `Probe`: forwarding it to `deserialize_any`
+        // instead would answer every inner type with a unit, which a `String` (or any other
+        // typed) visitor rejects - and one rejected field drops the whole schema.
+        let out = visitor.visit_some(&mut *self)?;
 
         if let Some((schema, example)) = self.root.take() {
             self.root = Some((schema.nullable(), example));

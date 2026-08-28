@@ -13,7 +13,7 @@ use mime::{
 use super::{
     op::OpenApiOperation,
     param::OpenApiParameter,
-    schema::{OpenApiSchema, Probe},
+    schema::{OpenApiSchema, Probe, SchemaConstraint},
 };
 
 /// Converts a value into an HTTP status code.
@@ -429,6 +429,31 @@ impl OpenApiRouteConfig {
         self
     }
 
+    /// Publishes a constraint of `field` on whatever describes it in this operation:
+    /// the property of the request schema, or the query parameter of the same name.
+    ///
+    /// A field the operation does not describe is ignored.
+    pub fn with_constraint(mut self, field: &str, constraint: SchemaConstraint) -> Self {
+        if let Some(properties) = self
+            .request_schema
+            .as_mut()
+            .and_then(|schema| schema.properties.as_mut())
+            && let Some(property) = properties.get_mut(field)
+        {
+            property.apply_constraint(constraint);
+        }
+
+        for parameter in self
+            .extra_parameters
+            .iter_mut()
+            .filter(|parameter| parameter.name == field)
+        {
+            parameter.schema.apply_constraint(constraint);
+        }
+
+        self
+    }
+
     fn with_query_parameters_from_deserialize<T: DeserializeOwned>(mut self) -> Self {
         if let Some((schema, _)) = schema_and_example_from_deserialize::<T>()
             && let Some(properties) = schema.properties
@@ -642,6 +667,27 @@ mod tests {
     struct OptionalQuery {
         required_name: String,
         optional_age: Option<()>,
+    }
+
+    #[test]
+    fn consumes_query_keeps_parameters_of_a_typed_optional_field() {
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct OptionalString {
+            per_page: u32,
+            sort: Option<String>,
+        }
+
+        let cfg = OpenApiRouteConfig::default().consumes_query::<OptionalString>();
+        let names = cfg
+            .extra_parameters
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>();
+
+        // A typed `Option` used to make the whole probe fail, dropping every parameter
+        assert_eq!(names, vec!["per_page", "sort"]);
+        assert!(!cfg.extra_parameters[1].required);
     }
 
     #[test]

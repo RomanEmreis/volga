@@ -50,6 +50,9 @@ enum Target {
     Invalid {
         input: Box<str>,
         error: AddrError,
+        /// Read when a config file replaces the host, which is the only thing that needs it -
+        /// so without that feature nothing looks at it.
+        #[cfg_attr(not(feature = "config"), allow(dead_code))]
         port: Option<u16>,
     },
 }

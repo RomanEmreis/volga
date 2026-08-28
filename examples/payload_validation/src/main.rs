@@ -8,63 +8,46 @@
 //!
 //! ```no_rust
 //! curl -X POST localhost:7878/put -H "Content-Type: application/json" -d '{"key":"","value":"1"}'
-//! curl "localhost:7878/items?per_page=1000000"
+//! curl "localhost:7878/items?per_page=1000000&from=5&to=1"
 //! ```
 
 use serde::Deserialize;
 use volga::validation::{Validate, ValidationError};
 use volga::{App, ValidJson, ValidQuery, ok};
 
-#[derive(Deserialize)]
+// The derive writes out the same `validate()` a hand-written impl would, and the
+// bounds it reads are published in the OpenAPI schema as well as being enforced.
+#[derive(Deserialize, Validate)]
 struct KeyValue {
+    #[validate(length(min = 1, message = "key is required"))]
     key: String,
+
+    #[validate(length(max = 4096))]
     value: String,
 }
 
-// Volga knows nothing about the rules: it calls `validate()` while extracting
-// the payload and turns the failure into a response before the handler runs.
-impl Validate for KeyValue {
-    type Error = ValidationError;
-
-    fn validate(&self) -> Result<(), Self::Error> {
-        let mut err = ValidationError::new();
-        if self.key.is_empty() {
-            err.push("key", "key is required");
-        }
-        if self.value.len() > 4096 {
-            err.push("value", "value is too long");
-        }
-
-        err.into_result()
-    }
-}
-
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
+// A rule spanning two fields cannot live on either of them
+#[validate(schema = "from_is_before_to")]
 struct Filter {
+    #[validate(range(min = 1, max = 100))]
     per_page: u32,
+
     from: Option<u32>,
     to: Option<u32>,
 }
 
-impl Validate for Filter {
-    type Error = ValidationError;
-
-    fn validate(&self) -> Result<(), Self::Error> {
-        let mut err = ValidationError::new();
-        if self.per_page == 0 || self.per_page > 100 {
-            err.push("per_page", "must be between 1 and 100");
-        }
-        // A cross-field rule, which is why the trait is hand-written rather than derived
-        if let (Some(from), Some(to)) = (self.from, self.to)
-            && from > to
-        {
-            err.push("from", "must not be after `to`");
-        }
-
-        err.into_result()
+fn from_is_before_to(filter: &Filter) -> Result<(), ValidationError> {
+    if let (Some(from), Some(to)) = (filter.from, filter.to)
+        && from > to
+    {
+        return Err(ValidationError::field("from", "must not be after `to`"));
     }
+    Ok(())
 }
 
+// Volga knows nothing about the rules: it calls `validate()` while extracting the
+// payload and turns the failure into a response before the handler is entered.
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut app = App::new();

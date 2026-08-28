@@ -21,5 +21,6 @@ pub use {
     doc::OpenApiDocument,
     registry::OpenApiRegistry,
     route::{IntoStatusCode, OpenApiRouteConfig},
+    schema::SchemaConstraint,
     ui::ui_html,
 };

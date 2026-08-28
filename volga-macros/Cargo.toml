@@ -24,6 +24,7 @@ proc-macro2 = "1.0.107"
 [features]
 default = []
 jwt-auth-derive = []
+validation-derive = []
 
 [lints]
 workspace = true

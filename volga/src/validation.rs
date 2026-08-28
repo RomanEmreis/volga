@@ -10,6 +10,11 @@ use crate::{error::Error, http::StatusCode};
 
 pub use self::valid::{Valid, ValidForm, ValidJson, ValidPath, ValidQuery};
 
+/// Derives the [`Validate`] implementation from the field attributes
+#[cfg(feature = "validation-derive")]
+pub use volga_macros::Validate;
+
+pub mod rules;
 pub mod valid;
 
 /// Describes a type that can validate itself.
@@ -54,6 +59,49 @@ pub trait Validate {
 
     /// Validates `self`
     fn validate(&self) -> Result<(), Self::Error>;
+
+    /// Describes the constraints this type's own fields carry, so that they can be
+    /// published in the OpenAPI schema alongside being enforced.
+    ///
+    /// Empty by default; `#[derive(Validate)]` fills it in from the field attributes.
+    /// Only the fields of this type are described - a nested type publishes its own.
+    #[inline]
+    fn constraints() -> &'static [Constraint] {
+        &[]
+    }
+}
+
+/// A single constraint that a field carries, as OpenAPI describes it
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Constraint {
+    /// The name of the field, as it appears on the wire
+    pub field: &'static str,
+
+    /// What the constraint says
+    pub kind: ConstraintKind,
+}
+
+impl Constraint {
+    /// Creates a new [`Constraint`] for `field`
+    #[inline]
+    #[must_use]
+    pub const fn new(field: &'static str, kind: ConstraintKind) -> Self {
+        Self { field, kind }
+    }
+}
+
+/// The kinds of constraint that map onto an OpenAPI schema keyword
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum ConstraintKind {
+    /// `minLength`
+    MinLength(usize),
+    /// `maxLength`
+    MaxLength(usize),
+    /// `minimum`
+    Minimum(f64),
+    /// `maximum`
+    Maximum(f64),
 }
 
 /// A single validation failure: an optional field name and a message
@@ -182,6 +230,33 @@ impl ValidationError {
             .map(|entry| (entry.field.as_deref(), entry.message.as_ref()))
     }
 
+    /// Merges the failures of `other` in, keeping the fields they name
+    #[inline]
+    pub fn merge(&mut self, other: Self) -> &mut Self {
+        self.entries.extend(other.entries);
+        self
+    }
+
+    /// Merges the failures of `other` in, prefixing each field with `prefix`.
+    ///
+    /// A failure that names no field is attributed to `prefix` itself, so a nested
+    /// type's own message lands on the field that holds it.
+    #[inline]
+    pub fn merge_at(&mut self, prefix: &str, other: Self) -> &mut Self {
+        self.entries.reserve(other.entries.len());
+        for entry in other.entries {
+            let field = match entry.field {
+                Some(field) => format!("{prefix}.{field}"),
+                None => prefix.to_owned(),
+            };
+            self.entries.push(Entry {
+                field: Some(field.into()),
+                message: entry.message,
+            });
+        }
+        self
+    }
+
     /// Turns the accumulated failures into a [`Result`],
     /// which is `Ok(())` when nothing has been collected
     #[inline]
@@ -217,6 +292,19 @@ impl From<ValidationError> for Error {
     #[inline]
     fn from(err: ValidationError) -> Self {
         Error::from_parts(err.status, None, err)
+    }
+}
+
+#[cfg(feature = "openapi")]
+impl From<ConstraintKind> for crate::openapi::SchemaConstraint {
+    #[inline]
+    fn from(kind: ConstraintKind) -> Self {
+        match kind {
+            ConstraintKind::MinLength(value) => Self::MinLength(value),
+            ConstraintKind::MaxLength(value) => Self::MaxLength(value),
+            ConstraintKind::Minimum(value) => Self::Minimum(value),
+            ConstraintKind::Maximum(value) => Self::Maximum(value),
+        }
     }
 }
 

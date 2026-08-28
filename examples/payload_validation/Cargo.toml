@@ -5,9 +5,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-tokio = "1.46.1"
-volga = { path = "../../volga", features = ["problem-details"] }
-serde = { version = "1.0.219", features = ["serde_derive"] }
+tokio = "1.53.1"
+volga = { path = "../../volga", features = ["problem-details", "validation-derive"] }
+serde = { version = "1.0.229", features = ["serde_derive"] }
 
 [lints]
 workspace = true
