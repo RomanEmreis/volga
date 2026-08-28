@@ -1,7 +1,7 @@
 //! Building blocks the `#[derive(Validate)]` expansion calls into.
 //!
 //! Everything here is usable by hand as well - the derive writes out the same
-//! calls a hand-written [`Validate`](super::Validate) impl would make.
+//! calls a hand-written [`Validate`] impl would make.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
