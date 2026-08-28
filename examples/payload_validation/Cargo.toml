@@ -1,0 +1,13 @@
+[package]
+name = "payload_validation"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+tokio = "1.46.1"
+volga = { path = "../../volga", features = ["problem-details"] }
+serde = { version = "1.0.219", features = ["serde_derive"] }
+
+[lints]
+workspace = true
