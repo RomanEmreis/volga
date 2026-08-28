@@ -464,20 +464,20 @@ impl OpenApiRouteConfig {
         self
     }
 
-    /// Applies the constraints to the parameters of one location, by name
+    /// Applies the constraints to the parameters of one location, by name.
+    ///
+    /// Only the last parameter of a given name is touched: parameters are appended as each
+    /// extractor is described, so the last one carrying a name is the one the extractor
+    /// declaring these constraints just added. An earlier extractor that happened to use
+    /// the same name keeps its own.
     fn apply_to_parameters(&mut self, location: &str, constraints: &[FieldConstraint]) {
-        for parameter in self
-            .extra_parameters
-            .iter_mut()
-            .filter(|parameter| parameter.location == location)
-        {
-            // A field carries more than one constraint - a minimum and a maximum are two
-            for constraint in constraints
-                .iter()
-                .filter(|constraint| constraint.field == parameter.name)
-            {
-                parameter.schema.apply_constraint(&constraint.constraint);
-            }
+        for constraint in constraints {
+            let Some(parameter) = self.extra_parameters.iter_mut().rev().find(|parameter| {
+                parameter.location == location && parameter.name == constraint.field
+            }) else {
+                continue;
+            };
+            parameter.schema.apply_constraint(&constraint.constraint);
         }
     }
 
@@ -673,8 +673,11 @@ fn type_display_name<T>() -> String {
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
-    use super::{IntoStatusCode, OpenApiRouteConfig, ResponseBody};
-    use crate::{op::OpenApiOperation, schema::OpenApiSchema};
+    use super::{ConstraintTarget, IntoStatusCode, OpenApiRouteConfig, ResponseBody};
+    use crate::{
+        op::OpenApiOperation,
+        schema::{FieldConstraint, OpenApiSchema, SchemaConstraint},
+    };
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -694,6 +697,64 @@ mod tests {
     struct OptionalQuery {
         required_name: String,
         optional_age: Option<()>,
+    }
+
+    #[derive(Deserialize)]
+    #[allow(dead_code)]
+    struct Page {
+        page: u32,
+    }
+
+    #[test]
+    fn with_constraints_touches_only_the_parameter_its_extractor_added() {
+        // Two extractors describing a query parameter of the same name: each is described
+        // in turn, appending its own parameter, and neither may reach into the other's
+        let cfg = OpenApiRouteConfig::default()
+            .consumes_query::<Page>()
+            .with_constraints(
+                ConstraintTarget::QueryParameter,
+                &[FieldConstraint::new(
+                    "page",
+                    SchemaConstraint::Minimum(1.into()),
+                )],
+            )
+            .consumes_query::<Page>()
+            .with_constraints(
+                ConstraintTarget::QueryParameter,
+                &[FieldConstraint::new(
+                    "page",
+                    SchemaConstraint::Minimum(100.into()),
+                )],
+            );
+
+        let bounds = cfg
+            .extra_parameters
+            .iter()
+            .map(|parameter| parameter.schema.minimum.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(bounds, vec![Some(1.into()), Some(100.into())]);
+    }
+
+    #[test]
+    fn with_constraints_intersects_a_bound_declared_twice() {
+        // Both rules run at runtime, so the published bound is the one that survives both
+        let cfg = OpenApiRouteConfig::default()
+            .consumes_query::<Page>()
+            .with_constraints(
+                ConstraintTarget::QueryParameter,
+                &[
+                    FieldConstraint::new("page", SchemaConstraint::Minimum(10.into())),
+                    FieldConstraint::new("page", SchemaConstraint::Minimum(1.into())),
+                    FieldConstraint::new("page", SchemaConstraint::Maximum(50.into())),
+                    FieldConstraint::new("page", SchemaConstraint::Maximum(500.into())),
+                ],
+            );
+
+        let schema = &cfg.extra_parameters[0].schema;
+
+        assert_eq!(schema.minimum, Some(10.into()));
+        assert_eq!(schema.maximum, Some(50.into()));
     }
 
     #[test]

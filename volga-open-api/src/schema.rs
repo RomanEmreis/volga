@@ -5,7 +5,10 @@ use serde::{
     de::{DeserializeSeed, Error as DeError, IntoDeserializer, MapAccess, SeqAccess, Visitor},
 };
 use serde_json::{Map, Number, Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 /// Represents OpenAPI schema.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -106,6 +109,58 @@ pub enum SchemaConstraint {
     Each(Vec<FieldConstraint>),
 }
 
+/// Keeps the tighter of two lower bounds.
+///
+/// A field carrying a rule twice is checked against both at runtime, so the published bound
+/// is their intersection - which also makes the order the rules arrive in irrelevant.
+fn keep_greatest(slot: &mut Option<usize>, value: usize) {
+    *slot = Some(match *slot {
+        Some(current) => current.max(value),
+        None => value,
+    });
+}
+
+/// Keeps the tighter of two upper bounds; see [`keep_greatest`]
+fn keep_least(slot: &mut Option<usize>, value: usize) {
+    *slot = Some(match *slot {
+        Some(current) => current.min(value),
+        None => value,
+    });
+}
+
+/// Keeps the tighter of two numeric lower bounds; see [`keep_greatest`]
+fn keep_greatest_number(slot: &mut Option<Number>, value: &Number) {
+    let replace = match slot.as_ref() {
+        Some(current) => compare_numbers(value, current) == Some(Ordering::Greater),
+        None => true,
+    };
+    if replace {
+        *slot = Some(value.clone());
+    }
+}
+
+/// Keeps the tighter of two numeric upper bounds; see [`keep_greatest`]
+fn keep_least_number(slot: &mut Option<Number>, value: &Number) {
+    let replace = match slot.as_ref() {
+        Some(current) => compare_numbers(value, current) == Some(Ordering::Less),
+        None => true,
+    };
+    if replace {
+        *slot = Some(value.clone());
+    }
+}
+
+/// Orders two JSON numbers, exactly wherever both are whole
+fn compare_numbers(left: &Number, right: &Number) -> Option<Ordering> {
+    if let (Some(left), Some(right)) = (left.as_u64(), right.as_u64()) {
+        return Some(left.cmp(&right));
+    }
+    if let (Some(left), Some(right)) = (left.as_i64(), right.as_i64()) {
+        return Some(left.cmp(&right));
+    }
+    left.as_f64()?.partial_cmp(&right.as_f64()?)
+}
+
 /// The pair of OpenAPI keywords that bounds the size of one kind of schema
 enum SizeKeyword {
     /// `minLength` / `maxLength`
@@ -153,17 +208,17 @@ impl OpenApiSchema {
     pub(super) fn apply_constraint(&mut self, constraint: &SchemaConstraint) {
         match constraint {
             SchemaConstraint::MinSize(value) => match self.size_keyword() {
-                SizeKeyword::Items => self.min_items = Some(*value),
-                SizeKeyword::Properties => self.min_properties = Some(*value),
-                SizeKeyword::Length => self.min_length = Some(*value),
+                SizeKeyword::Items => keep_greatest(&mut self.min_items, *value),
+                SizeKeyword::Properties => keep_greatest(&mut self.min_properties, *value),
+                SizeKeyword::Length => keep_greatest(&mut self.min_length, *value),
             },
             SchemaConstraint::MaxSize(value) => match self.size_keyword() {
-                SizeKeyword::Items => self.max_items = Some(*value),
-                SizeKeyword::Properties => self.max_properties = Some(*value),
-                SizeKeyword::Length => self.max_length = Some(*value),
+                SizeKeyword::Items => keep_least(&mut self.max_items, *value),
+                SizeKeyword::Properties => keep_least(&mut self.max_properties, *value),
+                SizeKeyword::Length => keep_least(&mut self.max_length, *value),
             },
-            SchemaConstraint::Minimum(value) => self.minimum = Some(value.clone()),
-            SchemaConstraint::Maximum(value) => self.maximum = Some(value.clone()),
+            SchemaConstraint::Minimum(value) => keep_greatest_number(&mut self.minimum, value),
+            SchemaConstraint::Maximum(value) => keep_least_number(&mut self.maximum, value),
             SchemaConstraint::Nested(fields) => self.apply_field_constraints(fields),
             SchemaConstraint::Each(fields) => {
                 if let Some(items) = self.items.as_mut() {

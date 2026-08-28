@@ -577,6 +577,22 @@ mod spec {
     }
 
     #[tokio::test]
+    async fn it_publishes_the_tighter_of_two_rules() {
+        let spec = spec_of(|app| {
+            app.map_post("/twice", async |body: ValidJson<Twice>| {
+                ok!("{}", body.page)
+            });
+        })
+        .await;
+
+        let twice = &spec["components"]["schemas"]["Twice"]["properties"];
+
+        // The order the rules were written in must not decide what the schema says
+        assert_eq!(twice["page"]["minimum"], 10);
+        assert_eq!(twice["name"]["maxLength"], 8);
+    }
+
+    #[tokio::test]
     async fn it_publishes_a_collection_hidden_behind_an_alias_as_a_collection() {
         let spec = spec_of(|app| {
             app.map_post("/aliased", async |body: ValidJson<Aliased>| {
@@ -633,6 +649,46 @@ mod spec {
         );
         assert_eq!(order["note"]["properties"]["name"]["minLength"], 1);
     }
+}
+
+#[derive(Deserialize, Validate)]
+struct Twice {
+    // Both rules run, so the field really is bounded by the tighter of the two
+    #[validate(range(min = 1))]
+    #[validate(range(min = 10))]
+    page: u32,
+
+    #[validate(length(max = 64))]
+    #[validate(length(max = 8))]
+    name: String,
+}
+
+#[test]
+fn it_enforces_and_publishes_the_tighter_of_two_rules() {
+    assert!(
+        Twice {
+            page: 5,
+            name: "ok".into()
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        Twice {
+            page: 10,
+            name: "0123456789".into()
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        Twice {
+            page: 10,
+            name: "ok".into()
+        }
+        .validate()
+        .is_ok()
+    );
 }
 
 type Tags = Vec<String>;
