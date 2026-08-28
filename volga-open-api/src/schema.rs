@@ -4,7 +4,7 @@ use serde::{
     Deserialize, Deserializer, Serialize,
     de::{DeserializeSeed, Error as DeError, IntoDeserializer, MapAccess, SeqAccess, Visitor},
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Number, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Represents OpenAPI schema.
@@ -59,10 +59,10 @@ pub struct OpenApiSchema {
     pub(super) max_properties: Option<usize>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) minimum: Option<f64>,
+    pub(super) minimum: Option<Number>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(super) maximum: Option<f64>,
+    pub(super) maximum: Option<Number>,
 }
 
 /// A constraint bound to the field it describes
@@ -106,9 +106,9 @@ pub enum SchemaConstraint {
     /// `maxProperties`
     MaxProperties(usize),
     /// `minimum`
-    Minimum(f64),
+    Minimum(Number),
     /// `maximum`
-    Maximum(f64),
+    Maximum(Number),
     /// The field is an object, whose own fields carry these
     Nested(Vec<FieldConstraint>),
     /// The field is an array, whose elements carry these
@@ -157,8 +157,8 @@ impl OpenApiSchema {
             SchemaConstraint::MaxItems(value) => self.max_items = Some(*value),
             SchemaConstraint::MinProperties(value) => self.min_properties = Some(*value),
             SchemaConstraint::MaxProperties(value) => self.max_properties = Some(*value),
-            SchemaConstraint::Minimum(value) => self.minimum = Some(*value),
-            SchemaConstraint::Maximum(value) => self.maximum = Some(*value),
+            SchemaConstraint::Minimum(value) => self.minimum = Some(value.clone()),
+            SchemaConstraint::Maximum(value) => self.maximum = Some(value.clone()),
             SchemaConstraint::Nested(fields) => self.apply_field_constraints(fields),
             SchemaConstraint::Each(fields) => {
                 if let Some(items) = self.items.as_mut() {

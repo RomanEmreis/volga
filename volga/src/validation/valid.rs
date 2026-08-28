@@ -180,10 +180,7 @@ where
             return config;
         };
 
-        let constraints = crate::validation::schema_constraints(
-            T::constraints(),
-            crate::validation::MAX_CONSTRAINT_DEPTH,
-        );
+        let constraints = crate::validation::schema_constraints(T::constraints());
 
         if constraints.is_empty() {
             config

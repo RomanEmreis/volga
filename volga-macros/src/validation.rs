@@ -259,10 +259,10 @@ fn render_constraints(field: &Field<'_>, generics: &[String]) -> Vec<TokenStream
                 }
             }
             Rule::Range { min, max, .. } => {
-                if let Some(min) = min.as_deref().map(bound_as_f64) {
+                if let Some(min) = min.as_deref().map(bound_expr) {
                     push(quote! { Minimum(#min) });
                 }
-                if let Some(max) = max.as_deref().map(bound_as_f64) {
+                if let Some(max) = max.as_deref().map(bound_expr) {
                     push(quote! { Maximum(#max) });
                 }
             }
@@ -565,12 +565,30 @@ fn generic_param_names(generics: &syn::Generics) -> Vec<String> {
 
 /// Renders a numeric bound for the constraint table.
 ///
-/// A literal is rendered as the `f64` it denotes; anything else is left to const evaluation,
-/// which accepts a constant and rejects whatever could not have been known here anyway.
-fn bound_as_f64(expr: &syn::Expr) -> TokenStream {
-    match lit_as_f64(expr) {
-        Some(value) => quote! { #value },
-        None => quote! { (#expr) as f64 },
+/// A whole number stays whole: an `f64` cannot hold an integer past `2^53` without moving it,
+/// while the check at runtime compares the exact value, so publishing every bound as a float
+/// would describe a contract the server does not honour. A bound that is not a literal is
+/// left to const evaluation, which accepts a constant and rejects what could not have been
+/// known here anyway; its shape is unknowable from the tokens, so it is taken as a float.
+fn bound_expr(expr: &syn::Expr) -> TokenStream {
+    let bound = quote! { ::volga::validation::NumericBound };
+    match unwrap_neg(expr) {
+        Some((negative, syn::Lit::Int(lit))) => match lit.base10_parse::<i64>() {
+            Ok(value) => {
+                let value = if negative { -value } else { value };
+                quote! { #bound::Int(#value) }
+            }
+            // Past `i64`, which only an unsigned bound reaches
+            Err(_) => match lit_as_f64(expr) {
+                Some(value) => quote! { #bound::Float(#value) },
+                None => quote! { #bound::Float((#expr) as f64) },
+            },
+        },
+        Some((_, syn::Lit::Float(_))) => match lit_as_f64(expr) {
+            Some(value) => quote! { #bound::Float(#value) },
+            None => quote! { #bound::Float((#expr) as f64) },
+        },
+        _ => quote! { #bound::Float((#expr) as f64) },
     }
 }
 

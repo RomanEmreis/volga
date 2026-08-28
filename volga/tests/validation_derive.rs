@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 use volga::validation::{
-    Constraint, ConstraintKind, Validate, ValidationError, rules::length as len_of,
+    Constraint, ConstraintKind, NumericBound, Validate, ValidationError, rules::length as len_of,
 };
 
 #[derive(Deserialize, Validate)]
@@ -134,10 +134,10 @@ fn it_publishes_the_constraints() {
     assert_eq!(
         Filter::constraints(),
         &[
-            Constraint::new("per_page", ConstraintKind::Minimum(1.0)),
-            Constraint::new("per_page", ConstraintKind::Maximum(100.0)),
-            Constraint::new("offset", ConstraintKind::Minimum(-10.0)),
-            Constraint::new("ratio", ConstraintKind::Maximum(1.5)),
+            Constraint::new("per_page", ConstraintKind::Minimum(NumericBound::Int(1))),
+            Constraint::new("per_page", ConstraintKind::Maximum(NumericBound::Int(100))),
+            Constraint::new("offset", ConstraintKind::Minimum(NumericBound::Int(-10))),
+            Constraint::new("ratio", ConstraintKind::Maximum(NumericBound::Float(1.5))),
             Constraint::new("sort", ConstraintKind::MinLength(1)),
         ]
     );
@@ -351,9 +351,10 @@ async fn it_publishes_the_constraints_in_the_openapi_spec() {
         .map(|p| (p["name"].as_str().unwrap().to_owned(), p["schema"].clone()))
         .collect::<std::collections::HashMap<_, _>>();
 
-    assert_eq!(params["per_page"]["minimum"], 1.0);
-    assert_eq!(params["per_page"]["maximum"], 100.0);
-    assert_eq!(params["offset"]["minimum"], -10.0);
+    // A whole bound is published whole, a fractional one as written
+    assert_eq!(params["per_page"]["minimum"], 1);
+    assert_eq!(params["per_page"]["maximum"], 100);
+    assert_eq!(params["offset"]["minimum"], -10);
     assert_eq!(params["ratio"]["maximum"], 1.5);
     assert_eq!(params["sort"]["minLength"], 1);
 
@@ -500,7 +501,10 @@ struct Constant {
 fn it_publishes_a_constant_bound() {
     assert_eq!(
         Constant::constraints(),
-        &[Constraint::new("page", ConstraintKind::Maximum(100.0))]
+        &[Constraint::new(
+            "page",
+            ConstraintKind::Maximum(NumericBound::Float(100.0)),
+        )]
     );
     assert_eq!(
         Constant { page: 101 }.validate().unwrap_err().to_string(),
@@ -559,8 +563,8 @@ mod spec {
 
         let parameter = &spec["paths"]["/collide"]["post"]["parameters"][0];
         assert_eq!(parameter["name"], "key");
-        assert_eq!(parameter["schema"]["minimum"], 10.0);
-        assert_eq!(parameter["schema"]["maximum"], 20.0);
+        assert_eq!(parameter["schema"]["minimum"], 10);
+        assert_eq!(parameter["schema"]["maximum"], 20);
         // The body's rule for the same name must not have leaked onto the query parameter
         assert!(parameter["schema"]["minLength"].is_null());
 
@@ -590,4 +594,63 @@ mod spec {
         );
         assert_eq!(order["note"]["properties"]["name"]["minLength"], 1);
     }
+}
+
+#[derive(Deserialize, Validate)]
+struct Huge {
+    // Past `2^53`, where an `f64` can no longer hold every whole number
+    #[validate(range(min = 9007199254740993))]
+    id: u64,
+}
+
+#[test]
+fn it_publishes_a_whole_bound_without_moving_it() {
+    assert_eq!(
+        Huge::constraints(),
+        &[Constraint::new(
+            "id",
+            ConstraintKind::Minimum(NumericBound::Int(9007199254740993))
+        )]
+    );
+    // The check compares the exact value, so the published bound has to be exact too
+    assert!(
+        Huge {
+            id: 9007199254740992
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        Huge {
+            id: 9007199254740993
+        }
+        .validate()
+        .is_ok()
+    );
+}
+
+fn is_a_conflict(page: &Page422) -> Result<(), ValidationError> {
+    if page.from > page.to {
+        return Err(ValidationError::field("from", "must not be after `to`")
+            .with_status(volga::http::StatusCode::UNPROCESSABLE_ENTITY));
+    }
+    Ok(())
+}
+
+#[derive(Deserialize, Validate)]
+#[validate(schema = "is_a_conflict")]
+struct Page422 {
+    from: u32,
+    to: u32,
+}
+
+#[test]
+fn it_keeps_the_status_a_merged_rule_asked_for() {
+    let err = Page422 { from: 5, to: 1 }.validate().unwrap_err();
+
+    assert_eq!(err.status(), volga::http::StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        volga::error::Error::from(err).status(),
+        volga::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
 }

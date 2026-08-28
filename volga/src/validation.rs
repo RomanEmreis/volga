@@ -90,6 +90,44 @@ impl Constraint {
     }
 }
 
+/// A numeric bound, kept in the shape it was written in.
+///
+/// An integer bound beyond `2^53` cannot be held by an `f64` without moving, and the check
+/// at runtime compares the exact value - so publishing it as a float would describe a
+/// contract the server does not honour.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum NumericBound {
+    /// A whole number
+    Int(i64),
+    /// A fractional number
+    Float(f64),
+}
+
+impl NumericBound {
+    /// Renders the bound as the JSON number that describes it, if one can hold it
+    #[cfg(feature = "openapi")]
+    fn to_number(self) -> Option<serde_json::Number> {
+        match self {
+            Self::Int(value) => Some(value.into()),
+            Self::Float(value) => serde_json::Number::from_f64(value),
+        }
+    }
+}
+
+impl From<i64> for NumericBound {
+    #[inline]
+    fn from(value: i64) -> Self {
+        Self::Int(value)
+    }
+}
+
+impl From<f64> for NumericBound {
+    #[inline]
+    fn from(value: f64) -> Self {
+        Self::Float(value)
+    }
+}
+
 /// The kinds of constraint that map onto an OpenAPI schema keyword
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
@@ -107,9 +145,9 @@ pub enum ConstraintKind {
     /// `maxProperties`
     MaxProperties(usize),
     /// `minimum`
-    Minimum(f64),
+    Minimum(NumericBound),
     /// `maximum`
-    Maximum(f64),
+    Maximum(NumericBound),
     /// The field validates itself, and these are the constraints its own fields carry
     Nested(fn() -> &'static [Constraint]),
     /// The field is a collection whose elements validate themselves
@@ -242,11 +280,23 @@ impl ValidationError {
             .map(|entry| (entry.field.as_deref(), entry.message.as_ref()))
     }
 
-    /// Merges the failures of `other` in, keeping the fields they name
+    /// Merges the failures of `other` in, keeping the fields they name.
+    ///
+    /// A status `other` asked for is adopted when this error is still answering with the
+    /// default, so a rule that wants `422` gets it whether it ran alone or alongside others.
     #[inline]
     pub fn merge(&mut self, other: Self) -> &mut Self {
+        self.adopt_status(other.status);
         self.entries.extend(other.entries);
         self
+    }
+
+    /// Takes on a status another error asked for, unless one has already been asked for here
+    #[inline]
+    fn adopt_status(&mut self, status: StatusCode) {
+        if self.status == StatusCode::BAD_REQUEST {
+            self.status = status;
+        }
     }
 
     /// Merges the failures of `other` in, prefixing each field with `prefix`.
@@ -255,6 +305,7 @@ impl ValidationError {
     /// type's own message lands on the field that holds it.
     #[inline]
     pub fn merge_at(&mut self, prefix: &str, other: Self) -> &mut Self {
+        self.adopt_status(other.status);
         self.entries.reserve(other.entries.len());
         for entry in other.entries {
             let field = match entry.field {
@@ -331,29 +382,43 @@ impl PartialEq for ConstraintKind {
     }
 }
 
-/// How far [`schema_constraints`] descends into nested types.
-///
-/// A type that nests itself would otherwise describe an endless schema; the schema it is
-/// published into is finite, so cutting the walk off costs nothing a client could observe.
-#[cfg(feature = "openapi")]
-const MAX_CONSTRAINT_DEPTH: usize = 8;
-
 /// Converts a constraint table into the form the OpenAPI layer applies,
 /// descending into the nested types as it goes.
 #[cfg(feature = "openapi")]
 pub(crate) fn schema_constraints(
     constraints: &'static [Constraint],
-    depth: usize,
+) -> Vec<crate::openapi::FieldConstraint> {
+    schema_constraints_within(constraints, &mut Vec::new())
+}
+
+/// Walks a constraint table, carrying the tables already open on this path.
+///
+/// A type that nests itself would describe an endless schema, so a table already being
+/// walked is not entered again. Nothing else is cut off: a model nested as deeply as it
+/// likes is published as deeply as it goes.
+#[cfg(feature = "openapi")]
+fn schema_constraints_within(
+    constraints: &'static [Constraint],
+    open: &mut Vec<fn() -> &'static [Constraint]>,
 ) -> Vec<crate::openapi::FieldConstraint> {
     use crate::openapi::{FieldConstraint, SchemaConstraint};
 
-    if depth == 0 {
-        return Vec::new();
-    }
-
     constraints
         .iter()
-        .map(|constraint| {
+        .filter_map(|constraint| {
+            let mut descend = |table: fn() -> &'static [Constraint]| {
+                if open
+                    .iter()
+                    .any(|walked| std::ptr::fn_addr_eq(*walked, table))
+                {
+                    return Vec::new();
+                }
+                open.push(table);
+                let nested = schema_constraints_within(table(), open);
+                open.pop();
+                nested
+            };
+
             let schema_constraint = match constraint.kind {
                 ConstraintKind::MinLength(value) => SchemaConstraint::MinLength(value),
                 ConstraintKind::MaxLength(value) => SchemaConstraint::MaxLength(value),
@@ -361,16 +426,14 @@ pub(crate) fn schema_constraints(
                 ConstraintKind::MaxItems(value) => SchemaConstraint::MaxItems(value),
                 ConstraintKind::MinProperties(value) => SchemaConstraint::MinProperties(value),
                 ConstraintKind::MaxProperties(value) => SchemaConstraint::MaxProperties(value),
-                ConstraintKind::Minimum(value) => SchemaConstraint::Minimum(value),
-                ConstraintKind::Maximum(value) => SchemaConstraint::Maximum(value),
-                ConstraintKind::Nested(constraints) => {
-                    SchemaConstraint::Nested(schema_constraints(constraints(), depth - 1))
-                }
-                ConstraintKind::Each(constraints) => {
-                    SchemaConstraint::Each(schema_constraints(constraints(), depth - 1))
-                }
+                // A bound no JSON number can hold - an infinity, a NaN - describes nothing
+                // a client could check, so it is left out rather than rounded into a lie
+                ConstraintKind::Minimum(bound) => SchemaConstraint::Minimum(bound.to_number()?),
+                ConstraintKind::Maximum(bound) => SchemaConstraint::Maximum(bound.to_number()?),
+                ConstraintKind::Nested(table) => SchemaConstraint::Nested(descend(table)),
+                ConstraintKind::Each(table) => SchemaConstraint::Each(descend(table)),
             };
-            FieldConstraint::new(constraint.field, schema_constraint)
+            Some(FieldConstraint::new(constraint.field, schema_constraint))
         })
         .collect()
 }
@@ -581,6 +644,35 @@ mod tests {
             problem.extensions["errors"][""],
             serde_json::json!(["payload is inconsistent"])
         );
+    }
+
+    #[cfg(feature = "openapi")]
+    #[test]
+    fn it_stops_walking_a_table_that_names_itself() {
+        // A type holding a collection of itself is a legitimate model, and its constraint
+        // table is genuinely cyclic - the walk has to notice rather than run out of stack
+        use super::{Constraint, ConstraintKind};
+
+        fn node() -> &'static [Constraint] {
+            const NODE: &[Constraint] = &[
+                Constraint::new("name", ConstraintKind::MinLength(1)),
+                Constraint::new("children", ConstraintKind::Each(node)),
+            ];
+            NODE
+        }
+
+        let constraints = super::schema_constraints(node());
+
+        assert_eq!(constraints.len(), 2);
+        let crate::openapi::SchemaConstraint::Each(children) = &constraints[1].constraint else {
+            panic!("expected the collection to be described");
+        };
+        // One level down the cycle is closed, and what is above it is still published
+        assert_eq!(children.len(), 2);
+        assert!(matches!(
+            children[1].constraint,
+            crate::openapi::SchemaConstraint::Each(ref inner) if inner.is_empty()
+        ));
     }
 
     #[cfg(feature = "problem-details")]
