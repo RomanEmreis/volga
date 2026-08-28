@@ -65,8 +65,32 @@ pub struct OpenApiSchema {
     pub(super) maximum: Option<f64>,
 }
 
-/// A constraint on a schema, named the way OpenAPI names it
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A constraint bound to the field it describes
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldConstraint {
+    /// The name of the field, as it appears on the wire
+    pub field: String,
+
+    /// What the constraint says
+    pub constraint: SchemaConstraint,
+}
+
+impl FieldConstraint {
+    /// Creates a new [`FieldConstraint`] for `field`
+    pub fn new(field: impl Into<String>, constraint: SchemaConstraint) -> Self {
+        Self {
+            field: field.into(),
+            constraint,
+        }
+    }
+}
+
+/// A constraint on a schema, named the way OpenAPI names it.
+///
+/// The keywords are not interchangeable: `minLength` counts the characters of a string,
+/// `minItems` the elements of an array and `minProperties` the members of an object,
+/// so a constraint published under the wrong one reads as no constraint at all.
+#[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum SchemaConstraint {
     /// `minLength`
@@ -85,6 +109,10 @@ pub enum SchemaConstraint {
     Minimum(f64),
     /// `maximum`
     Maximum(f64),
+    /// The field is an object, whose own fields carry these
+    Nested(Vec<FieldConstraint>),
+    /// The field is an array, whose elements carry these
+    Each(Vec<FieldConstraint>),
 }
 
 impl OpenApiSchema {
@@ -113,21 +141,44 @@ impl OpenApiSchema {
 
     /// Applies a constraint to this schema
     pub fn with_constraint(mut self, constraint: SchemaConstraint) -> Self {
-        self.apply_constraint(constraint);
+        self.apply_constraint(&constraint);
         self
     }
 
-    /// Applies a constraint to this schema in place
-    pub(super) fn apply_constraint(&mut self, constraint: SchemaConstraint) {
+    /// Applies a constraint to this schema in place.
+    ///
+    /// A constraint describing a shape this schema does not have is dropped rather than
+    /// forced on: `Nested` needs properties to descend into, `Each` an element schema.
+    pub(super) fn apply_constraint(&mut self, constraint: &SchemaConstraint) {
         match constraint {
-            SchemaConstraint::MinLength(value) => self.min_length = Some(value),
-            SchemaConstraint::MaxLength(value) => self.max_length = Some(value),
-            SchemaConstraint::MinItems(value) => self.min_items = Some(value),
-            SchemaConstraint::MaxItems(value) => self.max_items = Some(value),
-            SchemaConstraint::MinProperties(value) => self.min_properties = Some(value),
-            SchemaConstraint::MaxProperties(value) => self.max_properties = Some(value),
-            SchemaConstraint::Minimum(value) => self.minimum = Some(value),
-            SchemaConstraint::Maximum(value) => self.maximum = Some(value),
+            SchemaConstraint::MinLength(value) => self.min_length = Some(*value),
+            SchemaConstraint::MaxLength(value) => self.max_length = Some(*value),
+            SchemaConstraint::MinItems(value) => self.min_items = Some(*value),
+            SchemaConstraint::MaxItems(value) => self.max_items = Some(*value),
+            SchemaConstraint::MinProperties(value) => self.min_properties = Some(*value),
+            SchemaConstraint::MaxProperties(value) => self.max_properties = Some(*value),
+            SchemaConstraint::Minimum(value) => self.minimum = Some(*value),
+            SchemaConstraint::Maximum(value) => self.maximum = Some(*value),
+            SchemaConstraint::Nested(fields) => self.apply_field_constraints(fields),
+            SchemaConstraint::Each(fields) => {
+                if let Some(items) = self.items.as_mut() {
+                    items.apply_field_constraints(fields);
+                }
+            }
+        }
+    }
+
+    /// Applies the constraints of the fields this schema declares as properties.
+    ///
+    /// A field this schema does not describe is ignored.
+    pub(super) fn apply_field_constraints(&mut self, constraints: &[FieldConstraint]) {
+        let Some(properties) = self.properties.as_mut() else {
+            return;
+        };
+        for constraint in constraints {
+            if let Some(property) = properties.get_mut(&constraint.field) {
+                property.apply_constraint(&constraint.constraint);
+            }
         }
     }
 

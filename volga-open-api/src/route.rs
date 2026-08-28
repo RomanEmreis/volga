@@ -13,7 +13,7 @@ use mime::{
 use super::{
     op::OpenApiOperation,
     param::OpenApiParameter,
-    schema::{OpenApiSchema, Probe, SchemaConstraint},
+    schema::{FieldConstraint, OpenApiSchema, Probe},
 };
 
 /// Converts a value into an HTTP status code.
@@ -58,6 +58,18 @@ enum ResponseBody {
         example: Option<Value>,
         content_type: String,
     },
+}
+
+/// What an extractor describes, and therefore what its constraints apply to
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConstraintTarget {
+    /// The request body
+    RequestBody,
+    /// The query parameters
+    QueryParameter,
+    /// The path parameters
+    PathParameter,
 }
 
 /// Per-route OpenAPI metadata.
@@ -429,29 +441,44 @@ impl OpenApiRouteConfig {
         self
     }
 
-    /// Publishes a constraint of `field` on whatever describes it in this operation:
-    /// the property of the request schema, or the query parameter of the same name.
+    /// Publishes the constraints of the extractor that declared them, on the one thing in
+    /// this operation that extractor describes.
     ///
-    /// A field the operation does not describe is ignored.
-    pub fn with_constraint(mut self, field: &str, constraint: SchemaConstraint) -> Self {
-        if let Some(properties) = self
-            .request_schema
-            .as_mut()
-            .and_then(|schema| schema.properties.as_mut())
-            && let Some(property) = properties.get_mut(field)
-        {
-            property.apply_constraint(constraint);
+    /// The target matters: handler arguments are described one after another, so a body and
+    /// a query struct sharing a field name would otherwise hand each other their bounds.
+    /// A field the target does not describe is ignored.
+    pub fn with_constraints(
+        mut self,
+        target: ConstraintTarget,
+        constraints: &[FieldConstraint],
+    ) -> Self {
+        match target {
+            ConstraintTarget::RequestBody => {
+                if let Some(schema) = self.request_schema.as_mut() {
+                    schema.apply_field_constraints(constraints);
+                }
+            }
+            ConstraintTarget::QueryParameter => self.apply_to_parameters("query", constraints),
+            ConstraintTarget::PathParameter => self.apply_to_parameters("path", constraints),
         }
+        self
+    }
 
+    /// Applies the constraints to the parameters of one location, by name
+    fn apply_to_parameters(&mut self, location: &str, constraints: &[FieldConstraint]) {
         for parameter in self
             .extra_parameters
             .iter_mut()
-            .filter(|parameter| parameter.name == field)
+            .filter(|parameter| parameter.location == location)
         {
-            parameter.schema.apply_constraint(constraint);
+            // A field carries more than one constraint - a minimum and a maximum are two
+            for constraint in constraints
+                .iter()
+                .filter(|constraint| constraint.field == parameter.name)
+            {
+                parameter.schema.apply_constraint(&constraint.constraint);
+            }
         }
-
-        self
     }
 
     fn with_query_parameters_from_deserialize<T: DeserializeOwned>(mut self) -> Self {

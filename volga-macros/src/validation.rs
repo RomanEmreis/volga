@@ -73,9 +73,10 @@ pub(super) fn expand_validate(input: &DeriveInput) -> syn::Result<TokenStream> {
         }
     });
 
+    let generics = generic_param_names(&input.generics);
     let constraints = parsed
         .iter()
-        .flat_map(render_constraints)
+        .flat_map(|field| render_constraints(field, &generics))
         .collect::<Vec<_>>();
 
     let name = &input.ident;
@@ -156,11 +157,10 @@ fn render_rule(field: &Field<'_>, rule: &Rule) -> TokenStream {
             }
         }
         Rule::Nested => {
-            // Detect a collection at expansion time, the way the `Option` unwrapping does
-            let is_seq = inner_type(field.ty, "Vec").is_some()
-                || inner_type(field.ty, "Option")
-                    .and_then(|ty| inner_type(ty, "Vec"))
-                    .is_some();
+            // The collection is detected at expansion time, the way the `Option` unwrapping
+            // is - and by the same helper the constraint table uses, so the check and what
+            // it publishes cannot disagree about the shape
+            let (_, is_seq) = nested_element(field.ty);
             if is_seq {
                 quote! { ::volga::validation::rules::nested_each(&mut __errors, #name, __value); }
             } else {
@@ -231,7 +231,7 @@ fn range_condition(min: Option<&syn::Expr>, max: Option<&syn::Expr>) -> (TokenSt
 }
 
 /// Renders the constraints of a field for the OpenAPI schema
-fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
+fn render_constraints(field: &Field<'_>, generics: &[String]) -> Vec<TokenStream> {
     let name = &field.name;
     let mut out = Vec::new();
     let mut push = |kind: TokenStream| {
@@ -259,14 +259,29 @@ fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
                 }
             }
             Rule::Range { min, max, .. } => {
-                if let Some(min) = min.as_deref().and_then(lit_as_f64) {
+                if let Some(min) = min.as_deref().map(bound_as_f64) {
                     push(quote! { Minimum(#min) });
                 }
-                if let Some(max) = max.as_deref().and_then(lit_as_f64) {
+                if let Some(max) = max.as_deref().map(bound_as_f64) {
                     push(quote! { Maximum(#max) });
                 }
             }
-            Rule::Nested | Rule::Custom(_) => {}
+            Rule::Nested => {
+                let (element, is_seq) = nested_element(field.ty);
+                // A nested type named by a generic parameter cannot be reached from the
+                // `const` this table lives in, so it stays enforced but unpublished
+                if !mentions_generic(element, generics) {
+                    let table = quote! {
+                        <#element as ::volga::validation::Validate>::constraints
+                    };
+                    if is_seq {
+                        push(quote! { Each(#table) });
+                    } else {
+                        push(quote! { Nested(#table) });
+                    }
+                }
+            }
+            Rule::Custom(_) => {}
         }
     }
     out
@@ -337,6 +352,20 @@ fn field_rules(attrs: &[syn::Attribute]) -> syn::Result<Vec<Rule>> {
                 })?;
                 if min.is_none() && max.is_none() {
                     return Err(meta.error("`range` needs at least one of `min` or `max`"));
+                }
+                // A bound that is not a literal has no text to put in the default message,
+                // and rendering its tokens would name a constant rather than the value a
+                // client has to satisfy
+                if message.is_none()
+                    && [min.as_deref(), max.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|bound| unwrap_neg(bound).is_none())
+                {
+                    return Err(meta.error(
+                        "a `range` bound that is not a numeric literal cannot be rendered into \
+                         the default message; add `message = \"..\"`",
+                    ));
                 }
                 out.push(Rule::Range { min, max, message });
             } else if meta.path.is_ident("nested") {
@@ -497,6 +526,51 @@ fn capitalize(word: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
+    }
+}
+
+/// Returns the type a `nested` rule validates, and whether the field holds many of them
+fn nested_element(ty: &Type) -> (&Type, bool) {
+    let ty = inner_type(ty, "Option").unwrap_or(ty);
+    match inner_type(ty, "Vec") {
+        Some(element) => (element, true),
+        None => (ty, false),
+    }
+}
+
+/// Reports whether a type names one of the container's generic parameters
+fn mentions_generic(ty: &Type, generics: &[String]) -> bool {
+    if generics.is_empty() {
+        return false;
+    }
+
+    let rendered = quote! { #ty }.to_string();
+    rendered
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .any(|token| generics.iter().any(|name| name == token))
+}
+
+/// Returns the names of the container's type and const parameters
+fn generic_param_names(generics: &syn::Generics) -> Vec<String> {
+    generics
+        .params
+        .iter()
+        .filter_map(|param| match param {
+            syn::GenericParam::Type(param) => Some(param.ident.to_string()),
+            syn::GenericParam::Const(param) => Some(param.ident.to_string()),
+            syn::GenericParam::Lifetime(_) => None,
+        })
+        .collect()
+}
+
+/// Renders a numeric bound for the constraint table.
+///
+/// A literal is rendered as the `f64` it denotes; anything else is left to const evaluation,
+/// which accepts a constant and rejects whatever could not have been known here anyway.
+fn bound_as_f64(expr: &syn::Expr) -> TokenStream {
+    match lit_as_f64(expr) {
+        Some(value) => quote! { #value },
+        None => quote! { (#expr) as f64 },
     }
 }
 

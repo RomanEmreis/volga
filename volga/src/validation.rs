@@ -91,7 +91,7 @@ impl Constraint {
 }
 
 /// The kinds of constraint that map onto an OpenAPI schema keyword
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum ConstraintKind {
     /// `minLength`
@@ -110,6 +110,10 @@ pub enum ConstraintKind {
     Minimum(f64),
     /// `maximum`
     Maximum(f64),
+    /// The field validates itself, and these are the constraints its own fields carry
+    Nested(fn() -> &'static [Constraint]),
+    /// The field is a collection whose elements validate themselves
+    Each(fn() -> &'static [Constraint]),
 }
 
 /// A single validation failure: an optional field name and a message
@@ -303,21 +307,72 @@ impl From<ValidationError> for Error {
     }
 }
 
-#[cfg(feature = "openapi")]
-impl From<ConstraintKind> for crate::openapi::SchemaConstraint {
-    #[inline]
-    fn from(kind: ConstraintKind) -> Self {
-        match kind {
-            ConstraintKind::MinLength(value) => Self::MinLength(value),
-            ConstraintKind::MaxLength(value) => Self::MaxLength(value),
-            ConstraintKind::MinItems(value) => Self::MinItems(value),
-            ConstraintKind::MaxItems(value) => Self::MaxItems(value),
-            ConstraintKind::MinProperties(value) => Self::MinProperties(value),
-            ConstraintKind::MaxProperties(value) => Self::MaxProperties(value),
-            ConstraintKind::Minimum(value) => Self::Minimum(value),
-            ConstraintKind::Maximum(value) => Self::Maximum(value),
+/// Compared by what the constraint says.
+///
+/// The two nesting kinds carry a function rather than a table, since a table cannot name
+/// another type's table in a `const`; those compare by address, which is the most any
+/// comparison of function pointers can promise.
+impl PartialEq for ConstraintKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::MinLength(this), Self::MinLength(that))
+            | (Self::MaxLength(this), Self::MaxLength(that))
+            | (Self::MinItems(this), Self::MinItems(that))
+            | (Self::MaxItems(this), Self::MaxItems(that))
+            | (Self::MinProperties(this), Self::MinProperties(that))
+            | (Self::MaxProperties(this), Self::MaxProperties(that)) => this == that,
+            (Self::Minimum(this), Self::Minimum(that))
+            | (Self::Maximum(this), Self::Maximum(that)) => this == that,
+            (Self::Nested(this), Self::Nested(that)) | (Self::Each(this), Self::Each(that)) => {
+                std::ptr::fn_addr_eq(*this, *that)
+            }
+            _ => false,
         }
     }
+}
+
+/// How far [`schema_constraints`] descends into nested types.
+///
+/// A type that nests itself would otherwise describe an endless schema; the schema it is
+/// published into is finite, so cutting the walk off costs nothing a client could observe.
+#[cfg(feature = "openapi")]
+const MAX_CONSTRAINT_DEPTH: usize = 8;
+
+/// Converts a constraint table into the form the OpenAPI layer applies,
+/// descending into the nested types as it goes.
+#[cfg(feature = "openapi")]
+pub(crate) fn schema_constraints(
+    constraints: &'static [Constraint],
+    depth: usize,
+) -> Vec<crate::openapi::FieldConstraint> {
+    use crate::openapi::{FieldConstraint, SchemaConstraint};
+
+    if depth == 0 {
+        return Vec::new();
+    }
+
+    constraints
+        .iter()
+        .map(|constraint| {
+            let schema_constraint = match constraint.kind {
+                ConstraintKind::MinLength(value) => SchemaConstraint::MinLength(value),
+                ConstraintKind::MaxLength(value) => SchemaConstraint::MaxLength(value),
+                ConstraintKind::MinItems(value) => SchemaConstraint::MinItems(value),
+                ConstraintKind::MaxItems(value) => SchemaConstraint::MaxItems(value),
+                ConstraintKind::MinProperties(value) => SchemaConstraint::MinProperties(value),
+                ConstraintKind::MaxProperties(value) => SchemaConstraint::MaxProperties(value),
+                ConstraintKind::Minimum(value) => SchemaConstraint::Minimum(value),
+                ConstraintKind::Maximum(value) => SchemaConstraint::Maximum(value),
+                ConstraintKind::Nested(constraints) => {
+                    SchemaConstraint::Nested(schema_constraints(constraints(), depth - 1))
+                }
+                ConstraintKind::Each(constraints) => {
+                    SchemaConstraint::Each(schema_constraints(constraints(), depth - 1))
+                }
+            };
+            FieldConstraint::new(constraint.field, schema_constraint)
+        })
+        .collect()
 }
 
 /// Wraps a foreign error into something [`Validate::Error`] accepts.

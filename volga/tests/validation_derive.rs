@@ -485,3 +485,109 @@ fn it_enforces_every_shape_at_runtime() {
         ]
     );
 }
+
+const MAX_PAGE: u32 = 100;
+
+#[derive(Deserialize, Validate)]
+struct Constant {
+    // A non-literal bound has no text for a default message, so one has to be given -
+    // the value itself is still known to const evaluation and still published
+    #[validate(range(max = MAX_PAGE, message = "must be at most one page"))]
+    page: u32,
+}
+
+#[test]
+fn it_publishes_a_constant_bound() {
+    assert_eq!(
+        Constant::constraints(),
+        &[Constraint::new("page", ConstraintKind::Maximum(100.0))]
+    );
+    assert_eq!(
+        Constant { page: 101 }.validate().unwrap_err().to_string(),
+        "page: must be at most one page"
+    );
+    assert!(Constant { page: 100 }.validate().is_ok());
+}
+
+#[cfg(all(feature = "test", feature = "openapi"))]
+mod spec {
+    use super::*;
+    use volga::{ValidJson, ValidQuery, ok, test::TestServer};
+
+    #[derive(Deserialize, Validate)]
+    struct Collide {
+        // Same wire name as `KeyValue::key`, different rule and a different location
+        #[validate(range(min = 10, max = 20))]
+        key: u32,
+    }
+
+    async fn spec_of(setup: impl FnOnce(&mut volga::App) + Send + 'static) -> serde_json::Value {
+        let server = TestServer::builder()
+            .configure(|app| app.with_open_api(|config| config.with_title("Validation")))
+            .setup(|app| {
+                setup(app);
+                app.use_open_api();
+            })
+            .build()
+            .await;
+
+        let spec = server
+            .client()
+            .get(server.url("/openapi.json"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        server.shutdown().await;
+        spec
+    }
+
+    #[tokio::test]
+    async fn it_keeps_each_extractor_s_constraints_to_itself() {
+        let spec = spec_of(|app| {
+            app.map_post(
+                "/collide",
+                async |query: ValidQuery<Collide>, body: ValidJson<KeyValue>| {
+                    ok!("{}{}", query.key, body.key)
+                },
+            );
+        })
+        .await;
+
+        let parameter = &spec["paths"]["/collide"]["post"]["parameters"][0];
+        assert_eq!(parameter["name"], "key");
+        assert_eq!(parameter["schema"]["minimum"], 10.0);
+        assert_eq!(parameter["schema"]["maximum"], 20.0);
+        // The body's rule for the same name must not have leaked onto the query parameter
+        assert!(parameter["schema"]["minLength"].is_null());
+
+        let property = &spec["components"]["schemas"]["KeyValue"]["properties"]["key"];
+        assert_eq!(property["minLength"], 1);
+        assert_eq!(property["maxLength"], 8);
+        // ... nor the query's rule onto the body property
+        assert!(property["minimum"].is_null());
+    }
+
+    #[tokio::test]
+    async fn it_publishes_the_constraints_of_a_nested_type() {
+        let spec = spec_of(|app| {
+            app.map_post("/order", async |order: ValidJson<Order>| {
+                ok!("{}", order.head.name)
+            });
+        })
+        .await;
+
+        let order = &spec["components"]["schemas"]["Order"]["properties"];
+
+        // The nested type enforces its own rule, so the schema has to say so
+        assert_eq!(order["head"]["properties"]["name"]["minLength"], 1);
+        assert_eq!(
+            order["items"]["items"]["properties"]["name"]["minLength"],
+            1
+        );
+        assert_eq!(order["note"]["properties"]["name"]["minLength"], 1);
+    }
+}

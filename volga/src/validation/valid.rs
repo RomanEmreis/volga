@@ -102,6 +102,18 @@ impl<E: Display> Display for Valid<E> {
     }
 }
 
+/// Reports what an extractor describes in the OpenAPI operation, if anything
+#[cfg(feature = "openapi")]
+fn constraint_target(source: Source) -> Option<crate::openapi::ConstraintTarget> {
+    use crate::openapi::ConstraintTarget;
+    match source {
+        Source::Body | Source::Full | Source::Request => Some(ConstraintTarget::RequestBody),
+        Source::Parts => Some(ConstraintTarget::QueryParameter),
+        Source::Path | Source::PathArgs => Some(ConstraintTarget::PathParameter),
+        Source::None => None,
+    }
+}
+
 /// Runs the validation over an already extracted payload
 #[inline]
 fn validate<E, T>(value: E) -> Result<Valid<E>, Error>
@@ -160,9 +172,24 @@ where
         config: crate::openapi::OpenApiRouteConfig,
     ) -> crate::openapi::OpenApiRouteConfig {
         let config = E::describe_openapi(config);
-        T::constraints().iter().fold(config, |config, constraint| {
-            config.with_constraint(constraint.field, constraint.kind.into())
-        })
+
+        // Handler arguments are described one after another into the same operation, so the
+        // constraints have to name what the wrapped extractor describes - otherwise a body
+        // and a query struct sharing a field name would hand each other their bounds.
+        let Some(target) = constraint_target(E::SOURCE) else {
+            return config;
+        };
+
+        let constraints = crate::validation::schema_constraints(
+            T::constraints(),
+            crate::validation::MAX_CONSTRAINT_DEPTH,
+        );
+
+        if constraints.is_empty() {
+            config
+        } else {
+            config.with_constraints(target, &constraints)
+        }
     }
 }
 
