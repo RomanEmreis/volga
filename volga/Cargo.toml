@@ -50,8 +50,8 @@ tempfile = { version = "3.27.0", optional = true }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["tls12", "aws-lc-rs"], optional = true }
 tokio-tungstenite = { version = "0.30.0", optional = true }
 tracing = { version = "0.1.44", default-features = false, optional = true }
-twox-hash = { version = "2.1.3", optional = true }
-uuid = { version = "1.24.1", features = ["v4"], optional = true }
+twox-hash = { version = "2.1.4", optional = true }
+uuid = { version = "1.26.0", features = ["v4"], optional = true }
 
 # volga
 volga-dev-cert     = { workspace = true, optional = true }
@@ -65,11 +65,11 @@ volga-rate-limiter = { workspace = true, optional = true }
 [dev-dependencies]
 base64 = { version = "0.23.1" }
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
-hyper = { version = "1.10.1", features = ["client"] }
+hyper = { version = "1.11.0", features = ["client"] }
 reqwest = { version = "0.13.4", features = ["rustls-no-provider"] }
-serde = { version = "1.0.228", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-uuid = { version = "1.24.1", features = ["v4"] }
+uuid = { version = "1.26.0", features = ["v4"] }
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 tempfile = "3.27.0"
 
