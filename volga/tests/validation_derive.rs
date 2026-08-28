@@ -124,11 +124,11 @@ fn it_publishes_the_constraints() {
     assert_eq!(
         KeyValue::constraints(),
         &[
-            Constraint::new("key", ConstraintKind::MinLength(1)),
-            Constraint::new("key", ConstraintKind::MaxLength(8)),
-            Constraint::new("tags", ConstraintKind::MaxItems(4)),
-            Constraint::new("code", ConstraintKind::MinLength(3)),
-            Constraint::new("code", ConstraintKind::MaxLength(3)),
+            Constraint::new("key", ConstraintKind::MinSize(1)),
+            Constraint::new("key", ConstraintKind::MaxSize(8)),
+            Constraint::new("tags", ConstraintKind::MaxSize(4)),
+            Constraint::new("code", ConstraintKind::MinSize(3)),
+            Constraint::new("code", ConstraintKind::MaxSize(3)),
         ]
     );
     assert_eq!(
@@ -138,7 +138,7 @@ fn it_publishes_the_constraints() {
             Constraint::new("per_page", ConstraintKind::Maximum(NumericBound::Int(100))),
             Constraint::new("offset", ConstraintKind::Minimum(NumericBound::Int(-10))),
             Constraint::new("ratio", ConstraintKind::Maximum(NumericBound::Float(1.5))),
-            Constraint::new("sort", ConstraintKind::MinLength(1)),
+            Constraint::new("sort", ConstraintKind::MinSize(1)),
         ]
     );
 }
@@ -313,7 +313,7 @@ fn it_reports_the_name_the_client_sent() {
     );
     assert_eq!(
         Renamed::constraints()[0],
-        Constraint::new("pageSize", ConstraintKind::MinLength(1))
+        Constraint::new("pageSize", ConstraintKind::MinSize(1))
     );
 }
 
@@ -448,17 +448,18 @@ struct Shapes {
 }
 
 #[test]
-fn it_publishes_the_keyword_the_field_shape_calls_for() {
+fn it_publishes_one_size_rule_per_shape() {
+    // The macro no longer guesses the keyword - it says "size", and the schema, which is
+    // the only place the shape is known, publishes it as length, items or properties
     assert_eq!(
         Shapes::constraints(),
         &[
-            Constraint::new("text", ConstraintKind::MinLength(1)),
-            Constraint::new("text", ConstraintKind::MaxLength(8)),
-            Constraint::new("list", ConstraintKind::MaxItems(4)),
-            Constraint::new("set", ConstraintKind::MaxItems(4)),
-            Constraint::new("map", ConstraintKind::MinProperties(1)),
-            // The keyword is chosen past the `Option`, the way the check itself is
-            Constraint::new("maybe_list", ConstraintKind::MaxItems(2)),
+            Constraint::new("text", ConstraintKind::MinSize(1)),
+            Constraint::new("text", ConstraintKind::MaxSize(8)),
+            Constraint::new("list", ConstraintKind::MaxSize(4)),
+            Constraint::new("set", ConstraintKind::MaxSize(4)),
+            Constraint::new("map", ConstraintKind::MinSize(1)),
+            Constraint::new("maybe_list", ConstraintKind::MaxSize(2)),
         ]
     );
 }
@@ -576,6 +577,44 @@ mod spec {
     }
 
     #[tokio::test]
+    async fn it_publishes_a_collection_hidden_behind_an_alias_as_a_collection() {
+        let spec = spec_of(|app| {
+            app.map_post("/aliased", async |body: ValidJson<Aliased>| {
+                ok!("{}", body.tags.len())
+            });
+        })
+        .await;
+
+        let tags = &spec["components"]["schemas"]["Aliased"]["properties"]["tags"];
+
+        assert_eq!(tags["type"], "array");
+        assert_eq!(tags["maxItems"], 4);
+        assert!(tags["maxLength"].is_null());
+    }
+
+    #[tokio::test]
+    async fn it_publishes_the_constraints_of_a_generic_nested_field() {
+        let spec = spec_of(|app| {
+            app.map_post("/envelope", async |body: ValidJson<Envelope<Item>>| {
+                ok!("{}", body.item.name)
+            });
+        })
+        .await;
+
+        let envelope = spec["components"]["schemas"]
+            .as_object()
+            .expect("components")
+            .values()
+            .find(|schema| schema["properties"]["item"].is_object())
+            .expect("the envelope schema");
+
+        assert_eq!(
+            envelope["properties"]["item"]["properties"]["name"]["minLength"],
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn it_publishes_the_constraints_of_a_nested_type() {
         let spec = spec_of(|app| {
             app.map_post("/order", async |order: ValidJson<Order>| {
@@ -596,36 +635,73 @@ mod spec {
     }
 }
 
+type Tags = Vec<String>;
+
+#[derive(Deserialize, Validate)]
+struct Aliased {
+    // The type is spelled as an alias, so nothing upstream of the schema can tell it is a
+    // collection - the keyword has to be chosen where the shape is known
+    #[validate(length(max = 4))]
+    tags: Tags,
+}
+
+#[derive(Deserialize, Validate)]
+struct Envelope<T>
+where
+    T: Validate<Error = ValidationError>,
+{
+    #[validate(nested)]
+    item: T,
+}
+
 #[derive(Deserialize, Validate)]
 struct Huge {
     // Past `2^53`, where an `f64` can no longer hold every whole number
     #[validate(range(min = 9007199254740993))]
     id: u64,
+
+    // Past `i64::MAX`, where only an unsigned bound reaches
+    #[validate(range(min = 9223372036854775809))]
+    unsigned: u64,
 }
 
 #[test]
 fn it_publishes_a_whole_bound_without_moving_it() {
     assert_eq!(
         Huge::constraints(),
-        &[Constraint::new(
-            "id",
-            ConstraintKind::Minimum(NumericBound::Int(9007199254740993))
-        )]
+        &[
+            Constraint::new(
+                "id",
+                ConstraintKind::Minimum(NumericBound::Int(9007199254740993))
+            ),
+            Constraint::new(
+                "unsigned",
+                ConstraintKind::Minimum(NumericBound::UInt(9223372036854775809))
+            ),
+        ]
     );
+
     // The check compares the exact value, so the published bound has to be exact too
+    let valid = Huge {
+        id: 9007199254740993,
+        unsigned: 9223372036854775809,
+    };
+    assert!(valid.validate().is_ok());
     assert!(
         Huge {
-            id: 9007199254740992
+            id: 9007199254740992,
+            ..valid
         }
         .validate()
         .is_err()
     );
     assert!(
         Huge {
-            id: 9007199254740993
+            unsigned: 9223372036854775808,
+            ..valid
         }
         .validate()
-        .is_ok()
+        .is_err()
     );
 }
 

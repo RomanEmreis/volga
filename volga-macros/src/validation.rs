@@ -73,10 +73,9 @@ pub(super) fn expand_validate(input: &DeriveInput) -> syn::Result<TokenStream> {
         }
     });
 
-    let generics = generic_param_names(&input.generics);
     let constraints = parsed
         .iter()
-        .flat_map(|field| render_constraints(field, &generics))
+        .flat_map(render_constraints)
         .collect::<Vec<_>>();
 
     let name = &input.ident;
@@ -93,9 +92,8 @@ pub(super) fn expand_validate(input: &DeriveInput) -> syn::Result<TokenStream> {
                 __errors.into_result()
             }
 
-            fn constraints() -> &'static [::volga::validation::Constraint] {
-                const __CONSTRAINTS: &[::volga::validation::Constraint] = &[#(#constraints),*];
-                __CONSTRAINTS
+            fn constraints() -> ::std::vec::Vec<::volga::validation::Constraint> {
+                ::std::vec![#(#constraints),*]
             }
         }
     })
@@ -231,7 +229,7 @@ fn range_condition(min: Option<&syn::Expr>, max: Option<&syn::Expr>) -> (TokenSt
 }
 
 /// Renders the constraints of a field for the OpenAPI schema
-fn render_constraints(field: &Field<'_>, generics: &[String]) -> Vec<TokenStream> {
+fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
     let name = &field.name;
     let mut out = Vec::new();
     let mut push = |kind: TokenStream| {
@@ -245,16 +243,17 @@ fn render_constraints(field: &Field<'_>, generics: &[String]) -> Vec<TokenStream
             Rule::Length {
                 min, max, equal, ..
             } => {
-                let (min_kind, max_kind) = length_keywords(field.ty);
+                // Which keyword this becomes is decided against the schema, where the shape
+                // of the field is actually known - an alias or a newtype hides it from here
                 if let Some(equal) = equal {
-                    push(quote! { #min_kind(#equal) });
-                    push(quote! { #max_kind(#equal) });
+                    push(quote! { MinSize(#equal) });
+                    push(quote! { MaxSize(#equal) });
                 } else {
                     if let Some(min) = min {
-                        push(quote! { #min_kind(#min) });
+                        push(quote! { MinSize(#min) });
                     }
                     if let Some(max) = max {
-                        push(quote! { #max_kind(#max) });
+                        push(quote! { MaxSize(#max) });
                     }
                 }
             }
@@ -268,17 +267,13 @@ fn render_constraints(field: &Field<'_>, generics: &[String]) -> Vec<TokenStream
             }
             Rule::Nested => {
                 let (element, is_seq) = nested_element(field.ty);
-                // A nested type named by a generic parameter cannot be reached from the
-                // `const` this table lives in, so it stays enforced but unpublished
-                if !mentions_generic(element, generics) {
-                    let table = quote! {
-                        <#element as ::volga::validation::Validate>::constraints
-                    };
-                    if is_seq {
-                        push(quote! { Each(#table) });
-                    } else {
-                        push(quote! { Nested(#table) });
-                    }
+                let table = quote! {
+                    <#element as ::volga::validation::Validate>::constraints
+                };
+                if is_seq {
+                    push(quote! { Each(#table) });
+                } else {
+                    push(quote! { Nested(#table) });
                 }
             }
             Rule::Custom(_) => {}
@@ -538,31 +533,6 @@ fn nested_element(ty: &Type) -> (&Type, bool) {
     }
 }
 
-/// Reports whether a type names one of the container's generic parameters
-fn mentions_generic(ty: &Type, generics: &[String]) -> bool {
-    if generics.is_empty() {
-        return false;
-    }
-
-    let rendered = quote! { #ty }.to_string();
-    rendered
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .any(|token| generics.iter().any(|name| name == token))
-}
-
-/// Returns the names of the container's type and const parameters
-fn generic_param_names(generics: &syn::Generics) -> Vec<String> {
-    generics
-        .params
-        .iter()
-        .filter_map(|param| match param {
-            syn::GenericParam::Type(param) => Some(param.ident.to_string()),
-            syn::GenericParam::Const(param) => Some(param.ident.to_string()),
-            syn::GenericParam::Lifetime(_) => None,
-        })
-        .collect()
-}
-
 /// Renders a numeric bound for the constraint table.
 ///
 /// A whole number stays whole: an `f64` cannot hold an integer past `2^53` without moving it,
@@ -579,9 +549,12 @@ fn bound_expr(expr: &syn::Expr) -> TokenStream {
                 quote! { #bound::Int(#value) }
             }
             // Past `i64`, which only an unsigned bound reaches
-            Err(_) => match lit_as_f64(expr) {
-                Some(value) => quote! { #bound::Float(#value) },
-                None => quote! { #bound::Float((#expr) as f64) },
+            Err(_) => match lit.base10_parse::<u64>() {
+                Ok(value) if !negative => quote! { #bound::UInt(#value) },
+                _ => match lit_as_f64(expr) {
+                    Some(value) => quote! { #bound::Float(#value) },
+                    None => quote! { #bound::Float((#expr) as f64) },
+                },
             },
         },
         Some((_, syn::Lit::Float(_))) => match lit_as_f64(expr) {
@@ -589,35 +562,6 @@ fn bound_expr(expr: &syn::Expr) -> TokenStream {
             None => quote! { #bound::Float((#expr) as f64) },
         },
         _ => quote! { #bound::Float((#expr) as f64) },
-    }
-}
-
-/// Picks the OpenAPI keywords a `length` rule publishes under.
-///
-/// The keywords are not interchangeable: `minLength` / `maxLength` count the characters of a
-/// string, `minItems` / `maxItems` the elements of an array, and `minProperties` /
-/// `maxProperties` the members of an object. A collection published as `minLength` reads as
-/// unconstrained to a generated client, even though it is enforced at runtime.
-///
-/// The type is read the way the `Option` unwrapping reads it - syntactically. An alias hides
-/// what it names, so anything unrecognized falls back to the string keywords.
-fn length_keywords(ty: &Type) -> (TokenStream, TokenStream) {
-    let ty = inner_type(ty, "Option").unwrap_or(ty);
-    let name = match ty {
-        Type::Slice(_) | Type::Array(_) => "Vec".to_owned(),
-        Type::Path(path) => match path.path.segments.last() {
-            Some(segment) => segment.ident.to_string(),
-            None => String::new(),
-        },
-        _ => String::new(),
-    };
-
-    match name.as_str() {
-        "Vec" | "VecDeque" | "HashSet" | "BTreeSet" | "BinaryHeap" => {
-            (quote! { MinItems }, quote! { MaxItems })
-        }
-        "HashMap" | "BTreeMap" => (quote! { MinProperties }, quote! { MaxProperties }),
-        _ => (quote! { MinLength }, quote! { MaxLength }),
     }
 }
 

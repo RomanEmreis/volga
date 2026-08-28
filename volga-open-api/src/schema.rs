@@ -86,25 +86,16 @@ impl FieldConstraint {
 }
 
 /// A constraint on a schema, named the way OpenAPI names it.
-///
-/// The keywords are not interchangeable: `minLength` counts the characters of a string,
-/// `minItems` the elements of an array and `minProperties` the members of an object,
-/// so a constraint published under the wrong one reads as no constraint at all.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum SchemaConstraint {
-    /// `minLength`
-    MinLength(usize),
-    /// `maxLength`
-    MaxLength(usize),
-    /// `minItems`
-    MinItems(usize),
-    /// `maxItems`
-    MaxItems(usize),
-    /// `minProperties`
-    MinProperties(usize),
-    /// `maxProperties`
-    MaxProperties(usize),
+    /// A lower bound on the size of the value, published under the keyword its schema type
+    /// calls for: `minLength` for a string, `minItems` for an array, `minProperties` for an
+    /// object. The keywords are not interchangeable - one published against the wrong type
+    /// reads as no constraint at all - and only the schema knows which type this is.
+    MinSize(usize),
+    /// An upper bound on the size of the value; see [`SchemaConstraint::MinSize`]
+    MaxSize(usize),
     /// `minimum`
     Minimum(Number),
     /// `maximum`
@@ -113,6 +104,16 @@ pub enum SchemaConstraint {
     Nested(Vec<FieldConstraint>),
     /// The field is an array, whose elements carry these
     Each(Vec<FieldConstraint>),
+}
+
+/// The pair of OpenAPI keywords that bounds the size of one kind of schema
+enum SizeKeyword {
+    /// `minLength` / `maxLength`
+    Length,
+    /// `minItems` / `maxItems`
+    Items,
+    /// `minProperties` / `maxProperties`
+    Properties,
 }
 
 impl OpenApiSchema {
@@ -151,12 +152,16 @@ impl OpenApiSchema {
     /// forced on: `Nested` needs properties to descend into, `Each` an element schema.
     pub(super) fn apply_constraint(&mut self, constraint: &SchemaConstraint) {
         match constraint {
-            SchemaConstraint::MinLength(value) => self.min_length = Some(*value),
-            SchemaConstraint::MaxLength(value) => self.max_length = Some(*value),
-            SchemaConstraint::MinItems(value) => self.min_items = Some(*value),
-            SchemaConstraint::MaxItems(value) => self.max_items = Some(*value),
-            SchemaConstraint::MinProperties(value) => self.min_properties = Some(*value),
-            SchemaConstraint::MaxProperties(value) => self.max_properties = Some(*value),
+            SchemaConstraint::MinSize(value) => match self.size_keyword() {
+                SizeKeyword::Items => self.min_items = Some(*value),
+                SizeKeyword::Properties => self.min_properties = Some(*value),
+                SizeKeyword::Length => self.min_length = Some(*value),
+            },
+            SchemaConstraint::MaxSize(value) => match self.size_keyword() {
+                SizeKeyword::Items => self.max_items = Some(*value),
+                SizeKeyword::Properties => self.max_properties = Some(*value),
+                SizeKeyword::Length => self.max_length = Some(*value),
+            },
             SchemaConstraint::Minimum(value) => self.minimum = Some(value.clone()),
             SchemaConstraint::Maximum(value) => self.maximum = Some(value.clone()),
             SchemaConstraint::Nested(fields) => self.apply_field_constraints(fields),
@@ -165,6 +170,18 @@ impl OpenApiSchema {
                     items.apply_field_constraints(fields);
                 }
             }
+        }
+    }
+
+    /// Reports which pair of size keywords describes this schema.
+    ///
+    /// A schema that names no type is taken for a string, which is what a size rule is
+    /// written against unless the field says otherwise.
+    fn size_keyword(&self) -> SizeKeyword {
+        match self.schema_type.as_deref() {
+            Some("array") => SizeKeyword::Items,
+            Some("object") => SizeKeyword::Properties,
+            _ => SizeKeyword::Length,
         }
     }
 

@@ -64,10 +64,15 @@ pub trait Validate {
     /// published in the OpenAPI schema alongside being enforced.
     ///
     /// Empty by default; `#[derive(Validate)]` fills it in from the field attributes.
-    /// Only the fields of this type are described - a nested type publishes its own.
+    /// Only the fields of this type are described - a nested type publishes its own,
+    /// reached through [`ConstraintKind::Nested`].
+    ///
+    /// Built on each call rather than borrowed from a `const`, because a table naming a
+    /// generic parameter's own table cannot live in one. It is read when a route is
+    /// described, not when a request is served.
     #[inline]
-    fn constraints() -> &'static [Constraint] {
-        &[]
+    fn constraints() -> Vec<Constraint> {
+        Vec::new()
     }
 }
 
@@ -99,6 +104,8 @@ impl Constraint {
 pub enum NumericBound {
     /// A whole number
     Int(i64),
+    /// A whole number past [`i64::MAX`], which only an unsigned bound reaches
+    UInt(u64),
     /// A fractional number
     Float(f64),
 }
@@ -109,6 +116,7 @@ impl NumericBound {
     fn to_number(self) -> Option<serde_json::Number> {
         match self {
             Self::Int(value) => Some(value.into()),
+            Self::UInt(value) => Some(value.into()),
             Self::Float(value) => serde_json::Number::from_f64(value),
         }
     }
@@ -118,6 +126,13 @@ impl From<i64> for NumericBound {
     #[inline]
     fn from(value: i64) -> Self {
         Self::Int(value)
+    }
+}
+
+impl From<u64> for NumericBound {
+    #[inline]
+    fn from(value: u64) -> Self {
+        Self::UInt(value)
     }
 }
 
@@ -132,26 +147,21 @@ impl From<f64> for NumericBound {
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub enum ConstraintKind {
-    /// `minLength`
-    MinLength(usize),
-    /// `maxLength`
-    MaxLength(usize),
-    /// `minItems`
-    MinItems(usize),
-    /// `maxItems`
-    MaxItems(usize),
-    /// `minProperties`
-    MinProperties(usize),
-    /// `maxProperties`
-    MaxProperties(usize),
+    /// A lower bound on the size of the value - the characters of a string, the elements of
+    /// a collection, the members of a map. Which keyword publishes it is decided against the
+    /// schema, which is the only place the shape of the value is actually known: a type
+    /// alias or a newtype hides it from everything upstream.
+    MinSize(usize),
+    /// An upper bound on the size of the value; see [`ConstraintKind::MinSize`]
+    MaxSize(usize),
     /// `minimum`
     Minimum(NumericBound),
     /// `maximum`
     Maximum(NumericBound),
     /// The field validates itself, and these are the constraints its own fields carry
-    Nested(fn() -> &'static [Constraint]),
+    Nested(fn() -> Vec<Constraint>),
     /// The field is a collection whose elements validate themselves
-    Each(fn() -> &'static [Constraint]),
+    Each(fn() -> Vec<Constraint>),
 }
 
 /// A single validation failure: an optional field name and a message
@@ -366,12 +376,8 @@ impl From<ValidationError> for Error {
 impl PartialEq for ConstraintKind {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::MinLength(this), Self::MinLength(that))
-            | (Self::MaxLength(this), Self::MaxLength(that))
-            | (Self::MinItems(this), Self::MinItems(that))
-            | (Self::MaxItems(this), Self::MaxItems(that))
-            | (Self::MinProperties(this), Self::MinProperties(that))
-            | (Self::MaxProperties(this), Self::MaxProperties(that)) => this == that,
+            (Self::MinSize(this), Self::MinSize(that))
+            | (Self::MaxSize(this), Self::MaxSize(that)) => this == that,
             (Self::Minimum(this), Self::Minimum(that))
             | (Self::Maximum(this), Self::Maximum(that)) => this == that,
             (Self::Nested(this), Self::Nested(that)) | (Self::Each(this), Self::Each(that)) => {
@@ -386,7 +392,7 @@ impl PartialEq for ConstraintKind {
 /// descending into the nested types as it goes.
 #[cfg(feature = "openapi")]
 pub(crate) fn schema_constraints(
-    constraints: &'static [Constraint],
+    constraints: Vec<Constraint>,
 ) -> Vec<crate::openapi::FieldConstraint> {
     schema_constraints_within(constraints, &mut Vec::new())
 }
@@ -398,15 +404,15 @@ pub(crate) fn schema_constraints(
 /// likes is published as deeply as it goes.
 #[cfg(feature = "openapi")]
 fn schema_constraints_within(
-    constraints: &'static [Constraint],
-    open: &mut Vec<fn() -> &'static [Constraint]>,
+    constraints: Vec<Constraint>,
+    open: &mut Vec<fn() -> Vec<Constraint>>,
 ) -> Vec<crate::openapi::FieldConstraint> {
     use crate::openapi::{FieldConstraint, SchemaConstraint};
 
     constraints
-        .iter()
+        .into_iter()
         .filter_map(|constraint| {
-            let mut descend = |table: fn() -> &'static [Constraint]| {
+            let mut descend = |table: fn() -> Vec<Constraint>| {
                 if open
                     .iter()
                     .any(|walked| std::ptr::fn_addr_eq(*walked, table))
@@ -420,12 +426,8 @@ fn schema_constraints_within(
             };
 
             let schema_constraint = match constraint.kind {
-                ConstraintKind::MinLength(value) => SchemaConstraint::MinLength(value),
-                ConstraintKind::MaxLength(value) => SchemaConstraint::MaxLength(value),
-                ConstraintKind::MinItems(value) => SchemaConstraint::MinItems(value),
-                ConstraintKind::MaxItems(value) => SchemaConstraint::MaxItems(value),
-                ConstraintKind::MinProperties(value) => SchemaConstraint::MinProperties(value),
-                ConstraintKind::MaxProperties(value) => SchemaConstraint::MaxProperties(value),
+                ConstraintKind::MinSize(value) => SchemaConstraint::MinSize(value),
+                ConstraintKind::MaxSize(value) => SchemaConstraint::MaxSize(value),
                 // A bound no JSON number can hold - an infinity, a NaN - describes nothing
                 // a client could check, so it is left out rather than rounded into a lie
                 ConstraintKind::Minimum(bound) => SchemaConstraint::Minimum(bound.to_number()?),
@@ -653,12 +655,11 @@ mod tests {
         // table is genuinely cyclic - the walk has to notice rather than run out of stack
         use super::{Constraint, ConstraintKind};
 
-        fn node() -> &'static [Constraint] {
-            const NODE: &[Constraint] = &[
-                Constraint::new("name", ConstraintKind::MinLength(1)),
+        fn node() -> Vec<Constraint> {
+            vec![
+                Constraint::new("name", ConstraintKind::MinSize(1)),
                 Constraint::new("children", ConstraintKind::Each(node)),
-            ];
-            NODE
+            ]
         }
 
         let constraints = super::schema_constraints(node());
