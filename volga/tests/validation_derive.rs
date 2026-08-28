@@ -126,7 +126,7 @@ fn it_publishes_the_constraints() {
         &[
             Constraint::new("key", ConstraintKind::MinLength(1)),
             Constraint::new("key", ConstraintKind::MaxLength(8)),
-            Constraint::new("tags", ConstraintKind::MaxLength(4)),
+            Constraint::new("tags", ConstraintKind::MaxItems(4)),
             Constraint::new("code", ConstraintKind::MinLength(3)),
             Constraint::new("code", ConstraintKind::MaxLength(3)),
         ]
@@ -366,7 +366,122 @@ async fn it_publishes_the_constraints_in_the_openapi_spec() {
 
     assert_eq!(body["key"]["minLength"], 1);
     assert_eq!(body["key"]["maxLength"], 8);
-    assert_eq!(body["tags"]["maxLength"], 4);
+    // A collection is published under the array keywords - `maxLength` counts characters
+    assert_eq!(body["tags"]["maxItems"], 4);
+    assert!(body["tags"]["maxLength"].is_null());
 
     server.shutdown().await;
+}
+
+#[derive(Deserialize, Validate)]
+struct Bounded {
+    #[validate(range(min = 0.0))]
+    at_least: f64,
+
+    #[validate(range(max = 1.5))]
+    at_most: f64,
+
+    #[validate(range(min = 0.0, max = 1.0))]
+    between: f64,
+}
+
+#[test]
+fn it_rejects_a_value_no_bound_holds_for() {
+    // Every comparison against `NaN` is false, so a rule phrased as "violates the bound"
+    // would let it through - one-sided rules included
+    let payload = Bounded {
+        at_least: f64::NAN,
+        at_most: f64::NAN,
+        between: f64::NAN,
+    };
+
+    let err = payload.validate().unwrap_err();
+
+    assert_eq!(
+        err.entries().collect::<Vec<_>>(),
+        vec![
+            (Some("at_least"), "must be at least 0.0"),
+            (Some("at_most"), "must be at most 1.5"),
+            (Some("between"), "must be between 0.0 and 1.0"),
+        ]
+    );
+}
+
+#[test]
+fn it_still_accepts_the_bounds_themselves() {
+    let payload = Bounded {
+        at_least: 0.0,
+        at_most: 1.5,
+        between: 1.0,
+    };
+
+    assert!(payload.validate().is_ok());
+
+    let payload = Bounded {
+        at_least: -0.1,
+        ..payload
+    };
+
+    assert_eq!(
+        payload.validate().unwrap_err().to_string(),
+        "at_least: must be at least 0.0"
+    );
+}
+
+#[derive(Deserialize, Validate)]
+struct Shapes {
+    #[validate(length(min = 1, max = 8))]
+    text: String,
+
+    #[validate(length(max = 4))]
+    list: Vec<u8>,
+
+    #[validate(length(max = 4))]
+    set: std::collections::HashSet<u8>,
+
+    #[validate(length(min = 1))]
+    map: std::collections::HashMap<String, u8>,
+
+    #[validate(length(max = 2))]
+    maybe_list: Option<Vec<u8>>,
+}
+
+#[test]
+fn it_publishes_the_keyword_the_field_shape_calls_for() {
+    assert_eq!(
+        Shapes::constraints(),
+        &[
+            Constraint::new("text", ConstraintKind::MinLength(1)),
+            Constraint::new("text", ConstraintKind::MaxLength(8)),
+            Constraint::new("list", ConstraintKind::MaxItems(4)),
+            Constraint::new("set", ConstraintKind::MaxItems(4)),
+            Constraint::new("map", ConstraintKind::MinProperties(1)),
+            // The keyword is chosen past the `Option`, the way the check itself is
+            Constraint::new("maybe_list", ConstraintKind::MaxItems(2)),
+        ]
+    );
+}
+
+#[test]
+fn it_enforces_every_shape_at_runtime() {
+    let payload = Shapes {
+        text: String::new(),
+        list: vec![1, 2, 3, 4, 5],
+        set: std::collections::HashSet::from([1, 2, 3, 4, 5]),
+        map: std::collections::HashMap::new(),
+        maybe_list: Some(vec![1, 2, 3]),
+    };
+
+    let err = payload.validate().unwrap_err();
+
+    assert_eq!(
+        err.entries().map(|(field, _)| field).collect::<Vec<_>>(),
+        vec![
+            Some("text"),
+            Some("list"),
+            Some("set"),
+            Some("map"),
+            Some("maybe_list")
+        ]
+    );
 }

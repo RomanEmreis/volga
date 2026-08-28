@@ -98,6 +98,14 @@ pub enum ConstraintKind {
     MinLength(usize),
     /// `maxLength`
     MaxLength(usize),
+    /// `minItems`
+    MinItems(usize),
+    /// `maxItems`
+    MaxItems(usize),
+    /// `minProperties`
+    MinProperties(usize),
+    /// `maxProperties`
+    MaxProperties(usize),
     /// `minimum`
     Minimum(f64),
     /// `maximum`
@@ -302,6 +310,10 @@ impl From<ConstraintKind> for crate::openapi::SchemaConstraint {
         match kind {
             ConstraintKind::MinLength(value) => Self::MinLength(value),
             ConstraintKind::MaxLength(value) => Self::MaxLength(value),
+            ConstraintKind::MinItems(value) => Self::MinItems(value),
+            ConstraintKind::MaxItems(value) => Self::MaxItems(value),
+            ConstraintKind::MinProperties(value) => Self::MinProperties(value),
+            ConstraintKind::MaxProperties(value) => Self::MaxProperties(value),
             ConstraintKind::Minimum(value) => Self::Minimum(value),
             ConstraintKind::Maximum(value) => Self::Maximum(value),
         }

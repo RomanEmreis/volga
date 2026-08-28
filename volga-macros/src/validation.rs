@@ -215,12 +215,15 @@ fn range_condition(min: Option<&syn::Expr>, max: Option<&syn::Expr>) -> (TokenSt
             quote! { !(#min..=#max).contains(__value) },
             format!("must be between {} and {}", lit_text(min), lit_text(max)),
         ),
+        // Phrased as "does not satisfy the bound" rather than "violates" it, so that a value
+        // no comparison holds for - `NaN` - is rejected here the way the two-sided branch
+        // already rejects it, instead of passing because every comparison against it is false
         (Some(min), None) => (
-            quote! { *__value < #min },
+            quote! { !(#min..).contains(__value) },
             format!("must be at least {}", lit_text(min)),
         ),
         (None, Some(max)) => (
-            quote! { *__value > #max },
+            quote! { !(..=#max).contains(__value) },
             format!("must be at most {}", lit_text(max)),
         ),
         (None, None) => (quote! { false }, String::new()),
@@ -242,15 +245,16 @@ fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
             Rule::Length {
                 min, max, equal, ..
             } => {
+                let (min_kind, max_kind) = length_keywords(field.ty);
                 if let Some(equal) = equal {
-                    push(quote! { MinLength(#equal) });
-                    push(quote! { MaxLength(#equal) });
+                    push(quote! { #min_kind(#equal) });
+                    push(quote! { #max_kind(#equal) });
                 } else {
                     if let Some(min) = min {
-                        push(quote! { MinLength(#min) });
+                        push(quote! { #min_kind(#min) });
                     }
                     if let Some(max) = max {
-                        push(quote! { MaxLength(#max) });
+                        push(quote! { #max_kind(#max) });
                     }
                 }
             }
@@ -493,6 +497,35 @@ fn capitalize(word: &str) -> String {
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
         None => String::new(),
+    }
+}
+
+/// Picks the OpenAPI keywords a `length` rule publishes under.
+///
+/// The keywords are not interchangeable: `minLength` / `maxLength` count the characters of a
+/// string, `minItems` / `maxItems` the elements of an array, and `minProperties` /
+/// `maxProperties` the members of an object. A collection published as `minLength` reads as
+/// unconstrained to a generated client, even though it is enforced at runtime.
+///
+/// The type is read the way the `Option` unwrapping reads it - syntactically. An alias hides
+/// what it names, so anything unrecognized falls back to the string keywords.
+fn length_keywords(ty: &Type) -> (TokenStream, TokenStream) {
+    let ty = inner_type(ty, "Option").unwrap_or(ty);
+    let name = match ty {
+        Type::Slice(_) | Type::Array(_) => "Vec".to_owned(),
+        Type::Path(path) => match path.path.segments.last() {
+            Some(segment) => segment.ident.to_string(),
+            None => String::new(),
+        },
+        _ => String::new(),
+    };
+
+    match name.as_str() {
+        "Vec" | "VecDeque" | "HashSet" | "BTreeSet" | "BinaryHeap" => {
+            (quote! { MinItems }, quote! { MaxItems })
+        }
+        "HashMap" | "BTreeMap" => (quote! { MinProperties }, quote! { MaxProperties }),
+        _ => (quote! { MinLength }, quote! { MaxLength }),
     }
 }
 

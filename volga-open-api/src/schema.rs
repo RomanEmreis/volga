@@ -46,6 +46,18 @@ pub struct OpenApiSchema {
     #[serde(rename = "maxLength", skip_serializing_if = "Option::is_none")]
     pub(super) max_length: Option<usize>,
 
+    #[serde(rename = "minItems", skip_serializing_if = "Option::is_none")]
+    pub(super) min_items: Option<usize>,
+
+    #[serde(rename = "maxItems", skip_serializing_if = "Option::is_none")]
+    pub(super) max_items: Option<usize>,
+
+    #[serde(rename = "minProperties", skip_serializing_if = "Option::is_none")]
+    pub(super) min_properties: Option<usize>,
+
+    #[serde(rename = "maxProperties", skip_serializing_if = "Option::is_none")]
+    pub(super) max_properties: Option<usize>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) minimum: Option<f64>,
 
@@ -61,6 +73,14 @@ pub enum SchemaConstraint {
     MinLength(usize),
     /// `maxLength`
     MaxLength(usize),
+    /// `minItems`
+    MinItems(usize),
+    /// `maxItems`
+    MaxItems(usize),
+    /// `minProperties`
+    MinProperties(usize),
+    /// `maxProperties`
+    MaxProperties(usize),
     /// `minimum`
     Minimum(f64),
     /// `maximum`
@@ -82,6 +102,10 @@ impl OpenApiSchema {
             nullable: None,
             min_length: None,
             max_length: None,
+            min_items: None,
+            max_items: None,
+            min_properties: None,
+            max_properties: None,
             minimum: None,
             maximum: None,
         }
@@ -98,6 +122,10 @@ impl OpenApiSchema {
         match constraint {
             SchemaConstraint::MinLength(value) => self.min_length = Some(value),
             SchemaConstraint::MaxLength(value) => self.max_length = Some(value),
+            SchemaConstraint::MinItems(value) => self.min_items = Some(value),
+            SchemaConstraint::MaxItems(value) => self.max_items = Some(value),
+            SchemaConstraint::MinProperties(value) => self.min_properties = Some(value),
+            SchemaConstraint::MaxProperties(value) => self.max_properties = Some(value),
             SchemaConstraint::Minimum(value) => self.minimum = Some(value),
             SchemaConstraint::Maximum(value) => self.maximum = Some(value),
         }
