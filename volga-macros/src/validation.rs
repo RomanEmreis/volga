@@ -345,6 +345,13 @@ fn field_rules(attrs: &[syn::Attribute]) -> syn::Result<Vec<Rule>> {
                         meta.error("`length` needs at least one of `min`, `max` or `equal`")
                     );
                 }
+                // `equal` decides the check on its own, so a bound written next to it would
+                // be read by nobody - saying so here beats ignoring half the attribute
+                if equal.is_some() && (min.is_some() || max.is_some()) {
+                    return Err(meta.error(
+                        "`length` takes either `equal` or the `min` / `max` bounds, not both",
+                    ));
+                }
                 out.push(Rule::Length {
                     min,
                     max,
@@ -582,8 +589,13 @@ fn bound_expr(expr: &syn::Expr) -> TokenStream {
             None => quote! { #bound::Float((#expr) as f64) },
         },
         // A constant has no shape in the tokens, so the type reports it: an integer stays
-        // an integer, which is what keeps a bound past `2^53` from moving
-        _ => quote! { ::volga::validation::IntoBound::into_bound(#expr) },
+        // an integer, which is what keeps a bound past `2^53` from moving.
+        //
+        // The `const` block is what keeps it a constant. A bound is read twice - once when
+        // the route is described, once per request - and anything that could answer
+        // differently between those two would publish a contract the server does not
+        // enforce. A rule that genuinely varies belongs in `custom`, not in an attribute.
+        _ => quote! { ::volga::validation::IntoBound::into_bound(const { #expr }) },
     }
 }
 

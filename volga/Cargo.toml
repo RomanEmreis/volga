@@ -39,7 +39,7 @@ base64 = { version = "0.23.0", optional = true }
 cookie = { version = "0.18.2", features = ["percent-encode"], optional = true }
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"], optional = true }
 httpdate = { version = "1.0.3", optional = true }
-hyper = { version = "1.11.0", features = ["server"], optional = true }
+hyper = { version = "1.11.1", features = ["server"], optional = true }
 hyper-util = { version = "0.1.20", features = ["server", "server-auto", "server-graceful", "service", "tokio"], optional = true }
 multer = { version = "3.1.0", optional = true }
 rand = { version = "0.10.2", optional = true }
@@ -65,7 +65,7 @@ volga-rate-limiter = { workspace = true, optional = true }
 [dev-dependencies]
 base64 = { version = "0.23.1" }
 jsonwebtoken = { version = "11.0.0", features = ["aws_lc_rs"] }
-hyper = { version = "1.11.0", features = ["client"] }
+hyper = { version = "1.11.1", features = ["client"] }
 reqwest = { version = "0.13.4", features = ["rustls-no-provider"] }
 serde = { version = "1.0.229", features = ["derive"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
