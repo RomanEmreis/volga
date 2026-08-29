@@ -9,5 +9,13 @@
 
 #[test]
 fn it_reports_an_attribute_it_cannot_honour() {
+    // `trybuild` drives a nested `cargo build` per case, which under coverage instrumentation
+    // takes longer than tarpaulin's per-test timeout - and measures nothing while it does:
+    // these cases run the proc-macro and then rustc, never a line of volga's runtime, and
+    // `volga-macros/src` is excluded from the report anyway. The coverage job sets this.
+    if std::env::var_os("SKIP_UI_TESTS").is_some() {
+        return;
+    }
+
     trybuild::TestCases::new().compile_fail("tests/ui/*.rs");
 }
