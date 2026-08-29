@@ -96,6 +96,21 @@ where
     }
 }
 
+/// Runs a nested [`Validate`] whose fields the client sent at this level, merging its
+/// failures as they are.
+///
+/// This is what `#[serde(flatten)]` asks for: the nested type has no field of its own on the
+/// wire, so naming one in the failure would point at something the client never sent.
+#[inline]
+pub fn nested_flat<T>(errors: &mut ValidationError, value: &T)
+where
+    T: Validate<Error = ValidationError> + ?Sized,
+{
+    if let Err(err) = value.validate() {
+        errors.merge(err);
+    }
+}
+
 /// Runs a nested [`Validate`] over every element, merging failures under `field[index]`
 #[inline]
 pub fn nested_each<'a, T, I>(errors: &mut ValidationError, field: &str, values: I)
@@ -153,6 +168,14 @@ mod tests {
         nested(&mut errors, "inner", &Inner { key: String::new() });
 
         assert_eq!(errors.to_string(), "inner.key: key is required");
+    }
+
+    #[test]
+    fn it_merges_flattened_failures_without_naming_a_field() {
+        let mut errors = ValidationError::new();
+        nested_flat(&mut errors, &Inner { key: String::new() });
+
+        assert_eq!(errors.to_string(), "key: key is required");
     }
 
     #[test]

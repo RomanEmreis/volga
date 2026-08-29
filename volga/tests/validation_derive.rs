@@ -489,6 +489,7 @@ fn it_enforces_every_shape_at_runtime() {
 }
 
 const MAX_PAGE: u32 = 100;
+const HUGE_MIN: u64 = 9007199254740993;
 
 #[derive(Deserialize, Validate)]
 struct Constant {
@@ -496,22 +497,48 @@ struct Constant {
     // the value itself is still known to const evaluation and still published
     #[validate(range(max = MAX_PAGE, message = "must be at most one page"))]
     page: u32,
+
+    // A constant past `2^53`, which an `f64` could not have carried
+    #[validate(range(min = HUGE_MIN, message = "too small"))]
+    id: u64,
 }
 
 #[test]
 fn it_publishes_a_constant_bound() {
     assert_eq!(
         Constant::constraints(),
-        &[Constraint::new(
-            "page",
-            ConstraintKind::Maximum(NumericBound::Float(100.0)),
-        )]
+        &[
+            Constraint::new(
+                "page",
+                // A constant carries no shape in the tokens, so its own type reports one
+                ConstraintKind::Maximum(NumericBound::UInt(100)),
+            ),
+            Constraint::new(
+                "id",
+                ConstraintKind::Minimum(NumericBound::UInt(9007199254740993)),
+            ),
+        ]
     );
+    let valid = Constant {
+        page: 100,
+        id: HUGE_MIN,
+    };
+    assert!(valid.validate().is_ok());
     assert_eq!(
-        Constant { page: 101 }.validate().unwrap_err().to_string(),
+        Constant { page: 101, ..valid }
+            .validate()
+            .unwrap_err()
+            .to_string(),
         "page: must be at most one page"
     );
-    assert!(Constant { page: 100 }.validate().is_ok());
+    assert!(
+        Constant {
+            id: 9007199254740992,
+            ..valid
+        }
+        .validate()
+        .is_err()
+    );
 }
 
 #[cfg(all(feature = "test", feature = "openapi"))]
@@ -688,6 +715,38 @@ fn it_enforces_and_publishes_the_tighter_of_two_rules() {
         }
         .validate()
         .is_ok()
+    );
+}
+
+#[derive(Deserialize, Validate)]
+struct Wrapper {
+    // Serde sends `Inner`'s fields at this level, so a failure naming `inner` would point
+    // at something the client never sent
+    #[serde(flatten)]
+    #[validate(nested)]
+    inner: Item,
+
+    #[validate(range(min = 1))]
+    page: u32,
+}
+
+#[test]
+fn it_reports_a_flattened_child_at_this_level() {
+    let payload = Wrapper {
+        inner: Item {
+            name: String::new(),
+        },
+        page: 0,
+    };
+
+    let err = payload.validate().unwrap_err();
+
+    assert_eq!(
+        err.entries().collect::<Vec<_>>(),
+        vec![
+            (Some("name"), "length must be at least 1"),
+            (Some("page"), "must be at least 1"),
+        ]
     );
 }
 

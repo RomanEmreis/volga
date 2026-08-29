@@ -122,6 +122,41 @@ impl NumericBound {
     }
 }
 
+/// Reads a numeric bound off whatever type wrote it.
+///
+/// A bound given as a constant rather than a literal has no shape the macro can see, so the
+/// type decides: an integer stays an integer, which is what keeps a bound past `2^53` from
+/// moving when it is published.
+pub trait IntoBound {
+    /// Converts `self` into the bound that describes it
+    fn into_bound(self) -> NumericBound;
+}
+
+macro_rules! into_bound {
+    ($($signed:ty),* ; $($unsigned:ty),* ; $($float:ty),*) => {
+        $(impl IntoBound for $signed {
+            #[inline]
+            fn into_bound(self) -> NumericBound {
+                NumericBound::Int(self as i64)
+            }
+        })*
+        $(impl IntoBound for $unsigned {
+            #[inline]
+            fn into_bound(self) -> NumericBound {
+                NumericBound::UInt(self as u64)
+            }
+        })*
+        $(impl IntoBound for $float {
+            #[inline]
+            fn into_bound(self) -> NumericBound {
+                NumericBound::Float(self as f64)
+            }
+        })*
+    };
+}
+
+into_bound!(i8, i16, i32, i64, isize ; u8, u16, u32, u64, usize ; f32, f64);
+
 impl From<i64> for NumericBound {
     #[inline]
     fn from(value: i64) -> Self {

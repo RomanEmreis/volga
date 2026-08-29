@@ -27,6 +27,9 @@ struct Field<'a> {
     ty: &'a Type,
     /// The name this field is reported under, matching what the client sent
     name: String,
+    /// `#[serde(flatten)]` - the field has no name of its own on the wire, its contents
+    /// are sent at this level
+    flattened: bool,
     rules: Vec<Rule>,
 }
 
@@ -60,6 +63,7 @@ pub(super) fn expand_validate(input: &DeriveInput) -> syn::Result<TokenStream> {
             ident,
             ty: &field.ty,
             name,
+            flattened: is_flattened(&field.attrs),
             rules,
         });
     }
@@ -93,7 +97,9 @@ pub(super) fn expand_validate(input: &DeriveInput) -> syn::Result<TokenStream> {
             }
 
             fn constraints() -> ::std::vec::Vec<::volga::validation::Constraint> {
-                ::std::vec![#(#constraints),*]
+                let mut __constraints = ::std::vec::Vec::new();
+                #(#constraints)*
+                __constraints
             }
         }
     })
@@ -159,7 +165,9 @@ fn render_rule(field: &Field<'_>, rule: &Rule) -> TokenStream {
             // is - and by the same helper the constraint table uses, so the check and what
             // it publishes cannot disagree about the shape
             let (_, is_seq) = nested_element(field.ty);
-            if is_seq {
+            if field.flattened {
+                quote! { ::volga::validation::rules::nested_flat(&mut __errors, __value); }
+            } else if is_seq {
                 quote! { ::volga::validation::rules::nested_each(&mut __errors, #name, __value); }
             } else {
                 quote! { ::volga::validation::rules::nested(&mut __errors, #name, __value); }
@@ -231,13 +239,18 @@ fn range_condition(min: Option<&syn::Expr>, max: Option<&syn::Expr>) -> (TokenSt
 /// Renders the constraints of a field for the OpenAPI schema
 fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
     let name = &field.name;
-    let mut out = Vec::new();
-    let mut push = |kind: TokenStream| {
-        out.push(quote! {
-            ::volga::validation::Constraint::new(#name, ::volga::validation::ConstraintKind::#kind)
-        });
+
+    // Builds the statement that records one constraint of this field
+    let record = |kind: TokenStream| {
+        quote! {
+            __constraints.push(::volga::validation::Constraint::new(
+                #name,
+                ::volga::validation::ConstraintKind::#kind,
+            ));
+        }
     };
 
+    let mut out = Vec::new();
     for rule in &field.rules {
         match rule {
             Rule::Length {
@@ -246,23 +259,23 @@ fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
                 // Which keyword this becomes is decided against the schema, where the shape
                 // of the field is actually known - an alias or a newtype hides it from here
                 if let Some(equal) = equal {
-                    push(quote! { MinSize(#equal) });
-                    push(quote! { MaxSize(#equal) });
+                    out.push(record(quote! { MinSize(#equal) }));
+                    out.push(record(quote! { MaxSize(#equal) }));
                 } else {
                     if let Some(min) = min {
-                        push(quote! { MinSize(#min) });
+                        out.push(record(quote! { MinSize(#min) }));
                     }
                     if let Some(max) = max {
-                        push(quote! { MaxSize(#max) });
+                        out.push(record(quote! { MaxSize(#max) }));
                     }
                 }
             }
             Rule::Range { min, max, .. } => {
                 if let Some(min) = min.as_deref().map(bound_expr) {
-                    push(quote! { Minimum(#min) });
+                    out.push(record(quote! { Minimum(#min) }));
                 }
                 if let Some(max) = max.as_deref().map(bound_expr) {
-                    push(quote! { Maximum(#max) });
+                    out.push(record(quote! { Maximum(#max) }));
                 }
             }
             Rule::Nested => {
@@ -270,10 +283,17 @@ fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
                 let table = quote! {
                     <#element as ::volga::validation::Validate>::constraints
                 };
-                if is_seq {
-                    push(quote! { Each(#table) });
+                if field.flattened {
+                    // The child has no property of its own to hang them on, so its
+                    // constraints belong to this level the way its fields do. Nothing
+                    // reads them yet: the schema probe does not expand a flattened struct,
+                    // so such a type publishes no properties at all - but when it does,
+                    // these land on the properties the client actually sends
+                    out.push(quote! { __constraints.extend(#table()); });
+                } else if is_seq {
+                    out.push(record(quote! { Each(#table) }));
                 } else {
-                    push(quote! { Nested(#table) });
+                    out.push(record(quote! { Nested(#table) }));
                 }
             }
             Rule::Custom(_) => {}
@@ -561,8 +581,30 @@ fn bound_expr(expr: &syn::Expr) -> TokenStream {
             Some(value) => quote! { #bound::Float(#value) },
             None => quote! { #bound::Float((#expr) as f64) },
         },
-        _ => quote! { #bound::Float((#expr) as f64) },
+        // A constant has no shape in the tokens, so the type reports it: an integer stays
+        // an integer, which is what keeps a bound past `2^53` from moving
+        _ => quote! { ::volga::validation::IntoBound::into_bound(#expr) },
     }
+}
+
+/// Reports whether serde sends this field's contents at the parent level
+fn is_flattened(attrs: &[syn::Attribute]) -> bool {
+    let mut flattened = false;
+    for attr in attrs.iter().filter(|a| a.path().is_ident("serde")) {
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("flatten") {
+                flattened = true;
+            } else if meta.input.peek(syn::Token![=]) {
+                let _: syn::Expr = meta.value()?.parse()?;
+            } else if meta.input.peek(syn::token::Paren) {
+                let content;
+                syn::parenthesized!(content in meta.input);
+                let _: TokenStream = content.parse()?;
+            }
+            Ok(())
+        });
+    }
+    flattened
 }
 
 /// Returns the type argument of `Wrapper<T>` when the type names that wrapper
