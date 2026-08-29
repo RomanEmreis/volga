@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 * `Invalid<E>` - the newtype that lets a foreign error type satisfy `Validate::Error`. A validation crate's own error and `volga::error::Error` are both foreign to a user crate, so no `From` impl can bridge them there; `.map_err(Invalid)` does it in one word. This is the whole of volga's relationship with such crates: no dependency, no feature flag, no blanket impl over anyone else's trait - just enough room to put one behind a hand-written `Validate`.
 
 ## Fixed
+* `volga::auth::permission` is re-exported alongside its four siblings (#216). The singular form was the only one of `role`, `roles`, `permission`, `permissions` and `predicate` missing from `volga::auth`, so copying the list of built-in authorizers out of the documentation did not compile, and the compiler's suggestion - `permissions` - is a different function. It was always reachable as `volga::auth::authorizer::permission`; only the short path was absent. Purely additive.
 * Query parameters vanished from the OpenAPI spec for any handler whose query struct had a typed optional field (`Option<String>`, `Option<u32>`, ...). The schema probe answered the inner type of an `Option` with a unit, which that type's visitor rejects, and one rejected field failed the probe for the whole struct - so the operation was published with no parameters at all rather than with one missing. `Option<()>` happened to work, which is why the existing tests did not catch it.
 
 # 0.9.8
