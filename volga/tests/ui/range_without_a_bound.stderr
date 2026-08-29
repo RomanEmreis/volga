@@ -1,0 +1,5 @@
+error: `range` needs at least one of `min` or `max`
+ --> tests/ui/range_without_a_bound.rs:5:16
+  |
+5 |     #[validate(range(message = "nope"))]
+  |                ^^^^^^^^^^^^^^^^^^^^^^^

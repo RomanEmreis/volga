@@ -4,8 +4,11 @@ use serde::{
     Deserialize, Deserializer, Serialize,
     de::{DeserializeSeed, Error as DeError, IntoDeserializer, MapAccess, SeqAccess, Visitor},
 };
-use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use serde_json::{Map, Number, Value, json};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 /// Represents OpenAPI schema.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,14 +42,147 @@ pub struct OpenApiSchema {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) nullable: Option<bool>,
+
+    #[serde(rename = "minLength", skip_serializing_if = "Option::is_none")]
+    pub(super) min_length: Option<usize>,
+
+    #[serde(rename = "maxLength", skip_serializing_if = "Option::is_none")]
+    pub(super) max_length: Option<usize>,
+
+    #[serde(rename = "minItems", skip_serializing_if = "Option::is_none")]
+    pub(super) min_items: Option<usize>,
+
+    #[serde(rename = "maxItems", skip_serializing_if = "Option::is_none")]
+    pub(super) max_items: Option<usize>,
+
+    #[serde(rename = "minProperties", skip_serializing_if = "Option::is_none")]
+    pub(super) min_properties: Option<usize>,
+
+    #[serde(rename = "maxProperties", skip_serializing_if = "Option::is_none")]
+    pub(super) max_properties: Option<usize>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) minimum: Option<Number>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) maximum: Option<Number>,
+}
+
+/// A constraint bound to the field it describes
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldConstraint {
+    /// The name of the field, as it appears on the wire
+    pub field: String,
+
+    /// What the constraint says
+    pub constraint: SchemaConstraint,
+}
+
+impl FieldConstraint {
+    /// Creates a new [`FieldConstraint`] for `field`
+    pub fn new(field: impl Into<String>, constraint: SchemaConstraint) -> Self {
+        Self {
+            field: field.into(),
+            constraint,
+        }
+    }
+}
+
+/// A constraint on a schema, named the way OpenAPI names it.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum SchemaConstraint {
+    /// A lower bound on the size of the value, published under the keyword its schema type
+    /// calls for: `minLength` for a string, `minItems` for an array, `minProperties` for an
+    /// object. The keywords are not interchangeable - one published against the wrong type
+    /// reads as no constraint at all - and only the schema knows which type this is.
+    MinSize(usize),
+    /// An upper bound on the size of the value; see [`SchemaConstraint::MinSize`]
+    MaxSize(usize),
+    /// `minimum`
+    Minimum(Number),
+    /// `maximum`
+    Maximum(Number),
+    /// The field is an object, whose own fields carry these
+    Nested(Vec<FieldConstraint>),
+    /// The field is an array, whose elements carry these
+    Each(Vec<FieldConstraint>),
+}
+
+/// Keeps the tighter of two lower bounds.
+///
+/// A field carrying a rule twice is checked against both at runtime, so the published bound
+/// is their intersection - which also makes the order the rules arrive in irrelevant.
+fn keep_greatest(slot: &mut Option<usize>, value: usize) {
+    *slot = Some(match *slot {
+        Some(current) => current.max(value),
+        None => value,
+    });
+}
+
+/// Keeps the tighter of two upper bounds; see [`keep_greatest`]
+fn keep_least(slot: &mut Option<usize>, value: usize) {
+    *slot = Some(match *slot {
+        Some(current) => current.min(value),
+        None => value,
+    });
+}
+
+/// Keeps the tighter of two numeric lower bounds; see [`keep_greatest`]
+fn keep_greatest_number(slot: &mut Option<Number>, value: &Number) {
+    let replace = match slot.as_ref() {
+        Some(current) => compare_numbers(value, current) == Some(Ordering::Greater),
+        None => true,
+    };
+    if replace {
+        *slot = Some(value.clone());
+    }
+}
+
+/// Keeps the tighter of two numeric upper bounds; see [`keep_greatest`]
+fn keep_least_number(slot: &mut Option<Number>, value: &Number) {
+    let replace = match slot.as_ref() {
+        Some(current) => compare_numbers(value, current) == Some(Ordering::Less),
+        None => true,
+    };
+    if replace {
+        *slot = Some(value.clone());
+    }
+}
+
+/// Orders two JSON numbers, exactly wherever both are whole
+fn compare_numbers(left: &Number, right: &Number) -> Option<Ordering> {
+    if let (Some(left), Some(right)) = (left.as_u64(), right.as_u64()) {
+        return Some(left.cmp(&right));
+    }
+    if let (Some(left), Some(right)) = (left.as_i64(), right.as_i64()) {
+        return Some(left.cmp(&right));
+    }
+    left.as_f64()?.partial_cmp(&right.as_f64()?)
+}
+
+/// The OpenAPI name for a number carried as an `f32` (registered `format`)
+const FLOAT_FORMAT: &str = "float";
+
+/// The OpenAPI name for a number carried as an `f64`
+const DOUBLE_FORMAT: &str = "double";
+
+/// The pair of OpenAPI keywords that bounds the size of one kind of schema
+enum SizeKeyword {
+    /// `minLength` / `maxLength`
+    Length,
+    /// `minItems` / `maxItems`
+    Items,
+    /// `minProperties` / `maxProperties`
+    Properties,
 }
 
 impl OpenApiSchema {
-    /// Generates schema for object field
-    pub fn object() -> Self {
+    /// An entirely unset schema, which every constructor below starts from
+    fn empty() -> Self {
         Self {
             schema_ref: None,
-            schema_type: Some("object".to_string()),
+            schema_type: None,
             format: None,
             title: None,
             properties: None,
@@ -54,81 +190,148 @@ impl OpenApiSchema {
             additional_properties: None,
             items: None,
             nullable: None,
+            min_length: None,
+            max_length: None,
+            min_items: None,
+            max_items: None,
+            min_properties: None,
+            max_properties: None,
+            minimum: None,
+            maximum: None,
+        }
+    }
+
+    /// Applies a constraint to this schema
+    pub fn with_constraint(mut self, constraint: SchemaConstraint) -> Self {
+        self.apply_constraint(&constraint);
+        self
+    }
+
+    /// Applies a constraint to this schema in place.
+    ///
+    /// A constraint describing a shape this schema does not have is dropped rather than
+    /// forced on: `Nested` needs properties to descend into, `Each` an element schema.
+    pub(super) fn apply_constraint(&mut self, constraint: &SchemaConstraint) {
+        match constraint {
+            SchemaConstraint::MinSize(value) => match self.size_keyword() {
+                SizeKeyword::Items => keep_greatest(&mut self.min_items, *value),
+                SizeKeyword::Properties => keep_greatest(&mut self.min_properties, *value),
+                SizeKeyword::Length => keep_greatest(&mut self.min_length, *value),
+            },
+            SchemaConstraint::MaxSize(value) => match self.size_keyword() {
+                SizeKeyword::Items => keep_least(&mut self.max_items, *value),
+                SizeKeyword::Properties => keep_least(&mut self.max_properties, *value),
+                SizeKeyword::Length => keep_least(&mut self.max_length, *value),
+            },
+            SchemaConstraint::Minimum(value) => {
+                let value = self.narrow(value);
+                keep_greatest_number(&mut self.minimum, &value);
+            }
+            SchemaConstraint::Maximum(value) => {
+                let value = self.narrow(value);
+                keep_least_number(&mut self.maximum, &value);
+            }
+            SchemaConstraint::Nested(fields) => self.apply_field_constraints(fields),
+            SchemaConstraint::Each(fields) => {
+                if let Some(items) = self.items.as_mut() {
+                    items.apply_field_constraints(fields);
+                }
+            }
+        }
+    }
+
+    /// Reads a bound at the width this schema is compared at.
+    ///
+    /// A `0.7` written against an `f32` field is not the `0.7` its digits spell - the check
+    /// rounds it to the nearer `f32` - and the schema is the only place that knows the width,
+    /// since the field's type may be spelled through an alias. Rounding here is the same
+    /// round-to-nearest the literal went through, so the two land on the same number.
+    fn narrow(&self, value: &Number) -> Number {
+        // Only `f32` moves a bound: an `f64` field is compared against the number the
+        // digits already spell, and an integer bound cannot reach a float field at all -
+        // `f64: PartialOrd<{integer}>` does not exist, so such a rule fails to compile
+        let narrowed = match self.format.as_deref() {
+            Some(FLOAT_FORMAT) => value.as_f64().map(|value| f64::from(value as f32)),
+            _ => None,
+        };
+
+        narrowed
+            .and_then(Number::from_f64)
+            .unwrap_or_else(|| value.clone())
+    }
+
+    /// Reports which pair of size keywords describes this schema.
+    ///
+    /// A schema that names no type is taken for a string, which is what a size rule is
+    /// written against unless the field says otherwise.
+    fn size_keyword(&self) -> SizeKeyword {
+        match self.schema_type.as_deref() {
+            Some("array") => SizeKeyword::Items,
+            Some("object") => SizeKeyword::Properties,
+            _ => SizeKeyword::Length,
+        }
+    }
+
+    /// Applies the constraints of the fields this schema declares as properties.
+    ///
+    /// A field this schema does not describe is ignored.
+    pub(super) fn apply_field_constraints(&mut self, constraints: &[FieldConstraint]) {
+        let Some(properties) = self.properties.as_mut() else {
+            return;
+        };
+        for constraint in constraints {
+            if let Some(property) = properties.get_mut(&constraint.field) {
+                property.apply_constraint(&constraint.constraint);
+            }
+        }
+    }
+
+    /// Generates schema for object field
+    pub fn object() -> Self {
+        Self {
+            schema_type: Some("object".to_string()),
+            ..Self::empty()
         }
     }
 
     /// Generates schema for string field
     pub fn string() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("string".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
     /// Generates schema for integer field
     pub fn integer() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("integer".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
     /// Generates schema for number field
     pub fn number() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("number".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
     /// Generates schema for boolean field
     pub fn boolean() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("boolean".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
     /// Generates schema for binary field
     pub fn binary() -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("string".to_string()),
             format: Some("binary".to_string()),
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
+            ..Self::empty()
         }
     }
 
@@ -143,15 +346,9 @@ impl OpenApiSchema {
     /// Generates schema for an array of items
     pub fn array(items: OpenApiSchema) -> Self {
         Self {
-            schema_ref: None,
             schema_type: Some("array".to_string()),
-            format: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
             items: Some(Box::new(items)),
-            nullable: None,
+            ..Self::empty()
         }
     }
 
@@ -159,14 +356,7 @@ impl OpenApiSchema {
     pub fn reference(name: &str) -> Self {
         Self {
             schema_ref: Some(format!("#/components/schemas/{name}")),
-            schema_type: None,
-            title: None,
-            properties: None,
-            required: None,
-            additional_properties: None,
-            items: None,
-            nullable: None,
-            format: None,
+            ..Self::empty()
         }
     }
 
@@ -375,7 +565,10 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
-        self.root = Some((OpenApiSchema::number(), json!(0.0)));
+        self.root = Some((
+            OpenApiSchema::number().with_format(FLOAT_FORMAT),
+            json!(0.0),
+        ));
         visitor.visit_f32(0.0)
     }
 
@@ -415,7 +608,10 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
-        self.root = Some((OpenApiSchema::number(), json!(0.0)));
+        self.root = Some((
+            OpenApiSchema::number().with_format(DOUBLE_FORMAT),
+            json!(0.0),
+        ));
         visitor.visit_f64(0.0)
     }
 
@@ -439,26 +635,10 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
-        struct SomeDeserializer<'a>(&'a mut Probe);
-
-        impl<'de, 'a> Deserializer<'de> for SomeDeserializer<'a> {
-            type Error = ProbeError;
-
-            fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-            where
-                V: Visitor<'de>,
-            {
-                (&mut *self.0).deserialize_any(visitor)
-            }
-
-            serde::forward_to_deserialize_any! {
-                bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
-                bytes byte_buf unit unit_struct newtype_struct seq tuple tuple_struct
-                map struct enum identifier ignored_any option
-            }
-        }
-
-        let out = visitor.visit_some(SomeDeserializer(self))?;
+        // The inner type is probed by this very `Probe`: forwarding it to `deserialize_any`
+        // instead would answer every inner type with a unit, which a `String` (or any other
+        // typed) visitor rejects - and one rejected field drops the whole schema.
+        let out = visitor.visit_some(&mut *self)?;
 
         if let Some((schema, example)) = self.root.take() {
             self.root = Some((schema.nullable(), example));

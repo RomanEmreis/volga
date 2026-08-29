@@ -13,7 +13,7 @@ use mime::{
 use super::{
     op::OpenApiOperation,
     param::OpenApiParameter,
-    schema::{OpenApiSchema, Probe},
+    schema::{FieldConstraint, OpenApiSchema, Probe},
 };
 
 /// Converts a value into an HTTP status code.
@@ -60,6 +60,25 @@ enum ResponseBody {
     },
 }
 
+/// What an extractor describes, and therefore what its constraints apply to
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConstraintTarget {
+    /// The request body
+    RequestBody,
+    /// The query parameters this extractor added, which are the ones from
+    /// `described_before` onward
+    QueryParameter {
+        /// How many parameters the operation already described
+        described_before: usize,
+    },
+    /// The path parameters this extractor added; see [`ConstraintTarget::QueryParameter`]
+    PathParameter {
+        /// How many parameters the operation already described
+        described_before: usize,
+    },
+}
+
 /// Per-route OpenAPI metadata.
 #[derive(Clone, Debug, Default)]
 pub struct OpenApiRouteConfig {
@@ -76,6 +95,14 @@ pub struct OpenApiRouteConfig {
 }
 
 impl OpenApiRouteConfig {
+    /// Returns how many parameters this operation already describes.
+    ///
+    /// Taken before an extractor is described and handed back through [`ConstraintTarget`],
+    /// so its constraints reach its own parameters and no others.
+    pub fn described_parameters(&self) -> usize {
+        self.extra_parameters.len()
+    }
+
     /// Returns a list of docs that this route is assigned to
     pub(crate) fn docs(&self) -> Option<&[String]> {
         self.docs.as_deref()
@@ -429,6 +456,64 @@ impl OpenApiRouteConfig {
         self
     }
 
+    /// Publishes the constraints of the extractor that declared them, on the one thing in
+    /// this operation that extractor describes.
+    ///
+    /// The target matters: handler arguments are described one after another, so a body and
+    /// a query struct sharing a field name would otherwise hand each other their bounds.
+    /// A field the target does not describe is ignored.
+    pub fn with_constraints(
+        mut self,
+        target: ConstraintTarget,
+        constraints: &[FieldConstraint],
+    ) -> Self {
+        match target {
+            ConstraintTarget::RequestBody => {
+                if let Some(schema) = self.request_schema.as_mut() {
+                    schema.apply_field_constraints(constraints);
+                }
+            }
+            ConstraintTarget::QueryParameter { described_before } => {
+                self.apply_to_parameters("query", described_before, constraints);
+            }
+            ConstraintTarget::PathParameter { described_before } => {
+                self.apply_to_parameters("path", described_before, constraints);
+            }
+        }
+        self
+    }
+
+    /// Applies the constraints to the parameters one extractor added, by name.
+    ///
+    /// Parameters are appended as each handler argument is described, so the ones belonging
+    /// to the extractor that declared these constraints are exactly those past
+    /// `described_before`. Searching further back would hand an earlier extractor a bound
+    /// that is not its own - and an extractor whose schema could not be inferred adds no
+    /// parameters at all, so there would be nothing else for the search to find.
+    fn apply_to_parameters(
+        &mut self,
+        location: &str,
+        described_before: usize,
+        constraints: &[FieldConstraint],
+    ) {
+        let Some(described) = self.extra_parameters.get_mut(described_before..) else {
+            return;
+        };
+
+        for parameter in described
+            .iter_mut()
+            .filter(|parameter| parameter.location == location)
+        {
+            // A field carries more than one constraint - a minimum and a maximum are two
+            for constraint in constraints
+                .iter()
+                .filter(|constraint| constraint.field == parameter.name)
+            {
+                parameter.schema.apply_constraint(&constraint.constraint);
+            }
+        }
+    }
+
     fn with_query_parameters_from_deserialize<T: DeserializeOwned>(mut self) -> Self {
         if let Some((schema, _)) = schema_and_example_from_deserialize::<T>()
             && let Some(properties) = schema.properties
@@ -621,8 +706,11 @@ fn type_display_name<T>() -> String {
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
-    use super::{IntoStatusCode, OpenApiRouteConfig, ResponseBody};
-    use crate::{op::OpenApiOperation, schema::OpenApiSchema};
+    use super::{ConstraintTarget, IntoStatusCode, OpenApiRouteConfig, ResponseBody};
+    use crate::{
+        op::OpenApiOperation,
+        schema::{FieldConstraint, OpenApiSchema, SchemaConstraint},
+    };
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -642,6 +730,116 @@ mod tests {
     struct OptionalQuery {
         required_name: String,
         optional_age: Option<()>,
+    }
+
+    #[derive(Deserialize)]
+    #[allow(dead_code)]
+    struct Page {
+        page: u32,
+    }
+
+    #[test]
+    fn with_constraints_touches_only_the_parameter_its_extractor_added() {
+        // Two extractors describing a query parameter of the same name: each is described
+        // in turn, appending its own parameter, and neither may reach into the other's
+        let cfg = OpenApiRouteConfig::default();
+
+        let described_before = cfg.described_parameters();
+        let cfg = cfg.consumes_query::<Page>().with_constraints(
+            ConstraintTarget::QueryParameter { described_before },
+            &[FieldConstraint::new(
+                "page",
+                SchemaConstraint::Minimum(1.into()),
+            )],
+        );
+
+        let described_before = cfg.described_parameters();
+        let cfg = cfg.consumes_query::<Page>().with_constraints(
+            ConstraintTarget::QueryParameter { described_before },
+            &[FieldConstraint::new(
+                "page",
+                SchemaConstraint::Minimum(100.into()),
+            )],
+        );
+
+        let bounds = cfg
+            .extra_parameters
+            .iter()
+            .map(|parameter| parameter.schema.minimum.clone())
+            .collect::<Vec<_>>();
+
+        assert_eq!(bounds, vec![Some(1.into()), Some(100.into())]);
+    }
+
+    #[test]
+    fn with_constraints_of_an_extractor_that_described_nothing_reach_nobody() {
+        // A struct whose schema cannot be inferred - an enum field is enough - adds no
+        // parameters, so its bounds have no target and must not fall back to someone else's
+        let cfg = OpenApiRouteConfig::default();
+        let described_before = cfg.described_parameters();
+        let cfg = cfg.consumes_query::<Page>().with_constraints(
+            ConstraintTarget::QueryParameter { described_before },
+            &[FieldConstraint::new(
+                "page",
+                SchemaConstraint::Minimum(1.into()),
+            )],
+        );
+
+        let described_before = cfg.described_parameters();
+        let cfg = cfg.with_constraints(
+            ConstraintTarget::QueryParameter { described_before },
+            &[FieldConstraint::new(
+                "page",
+                SchemaConstraint::Minimum(100.into()),
+            )],
+        );
+
+        assert_eq!(cfg.extra_parameters.len(), 1);
+        assert_eq!(cfg.extra_parameters[0].schema.minimum, Some(1.into()));
+    }
+
+    #[test]
+    fn with_constraints_intersects_a_bound_declared_twice() {
+        // Both rules run at runtime, so the published bound is the one that survives both
+        let cfg = OpenApiRouteConfig::default()
+            .consumes_query::<Page>()
+            .with_constraints(
+                ConstraintTarget::QueryParameter {
+                    described_before: 0,
+                },
+                &[
+                    FieldConstraint::new("page", SchemaConstraint::Minimum(10.into())),
+                    FieldConstraint::new("page", SchemaConstraint::Minimum(1.into())),
+                    FieldConstraint::new("page", SchemaConstraint::Maximum(50.into())),
+                    FieldConstraint::new("page", SchemaConstraint::Maximum(500.into())),
+                ],
+            );
+
+        let schema = &cfg.extra_parameters[0].schema;
+
+        assert_eq!(schema.minimum, Some(10.into()));
+        assert_eq!(schema.maximum, Some(50.into()));
+    }
+
+    #[test]
+    fn consumes_query_keeps_parameters_of_a_typed_optional_field() {
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct OptionalString {
+            per_page: u32,
+            sort: Option<String>,
+        }
+
+        let cfg = OpenApiRouteConfig::default().consumes_query::<OptionalString>();
+        let names = cfg
+            .extra_parameters
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>();
+
+        // A typed `Option` used to make the whole probe fail, dropping every parameter
+        assert_eq!(names, vec!["per_page", "sort"]);
+        assert!(!cfg.extra_parameters[1].required);
     }
 
     #[test]

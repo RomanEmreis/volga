@@ -1,0 +1,5 @@
+error: `Validate` can only be derived for structs
+ --> tests/ui/not_a_struct.rs:4:1
+  |
+4 | enum Payload {
+  | ^^^^

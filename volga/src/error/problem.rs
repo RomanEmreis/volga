@@ -232,6 +232,10 @@ impl<'a> RouteGroup<'a> {
 /// Default error handler that creates problem details
 #[inline]
 async fn make_problem_details(err: Error) -> Problem {
+    let err = match crate::validation::try_into_problem(err) {
+        Ok(problem) => return problem,
+        Err(err) => err,
+    };
     Problem::from(err)
 }
 

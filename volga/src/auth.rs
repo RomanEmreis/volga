@@ -18,7 +18,7 @@ use {
 pub use {
     algorithm::Algorithm,
     authenticated::Authenticated,
-    authorizer::{Authorizer, permissions, predicate, role, roles},
+    authorizer::{Authorizer, permission, permissions, predicate, role, roles},
     bearer::{Bearer, BearerAuthConfig, BearerTokenService},
     claims::AuthClaims,
     decoding_key::DecodingKey,

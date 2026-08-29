@@ -44,19 +44,13 @@ pub(super) async fn generate_html(
                 .unwrap_or_else(|_| "[Invalid UTF-8]".to_string());
 
             let is_dir = metadata.is_dir();
-            let display_name;
-            let size;
-            if is_dir {
-                display_name = format!("{name}/");
-                size = "-".to_string();
+            let (display_name, size) = if is_dir {
+                (format!("{name}/"), "-".to_string())
+            } else if cfg!(debug_assertions) {
+                (name.clone(), metadata.len().to_string())
             } else {
-                display_name = name.clone();
-                size = if cfg!(debug_assertions) {
-                    metadata.len().to_string()
-                } else {
-                    "-".to_string()
-                };
-            }
+                (name.clone(), "-".to_string())
+            };
 
             #[cfg(not(debug_assertions))]
             let modified = "-".to_string();

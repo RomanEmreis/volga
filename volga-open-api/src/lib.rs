@@ -20,6 +20,7 @@ pub use {
     config::{OpenApiConfig, OpenApiSpec},
     doc::OpenApiDocument,
     registry::OpenApiRegistry,
-    route::{IntoStatusCode, OpenApiRouteConfig},
+    route::{ConstraintTarget, IntoStatusCode, OpenApiRouteConfig},
+    schema::{FieldConstraint, SchemaConstraint},
     ui::ui_html,
 };

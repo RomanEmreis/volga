@@ -119,5 +119,9 @@ jobs:
       - name: Install tarpaulin
         run: cargo install cargo-tarpaulin
       - name: Code coverage check
+        env:
+          # The `trybuild` cases spend minutes in a nested cargo build and cover nothing
+          # measurable; under instrumentation they outlive tarpaulin's per-test timeout
+          SKIP_UI_TESTS: 1
         run: |
           cargo tarpaulin --locked --all-features --workspace --config coverage.toml --fail-under 80

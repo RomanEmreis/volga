@@ -67,6 +67,7 @@ pub mod tls;
 #[cfg(feature = "tracing")]
 pub mod tracing;
 pub mod utils;
+pub mod validation;
 #[cfg(feature = "ws")]
 pub mod ws;
 
@@ -93,6 +94,8 @@ pub use config::{Config, ConfigBuilder};
 pub use http::HttpRequestMut;
 
 pub use limits::Limit;
+
+pub use validation::{Valid, ValidForm, ValidJson, ValidPath, ValidQuery};
 
 #[cfg(feature = "multipart")]
 pub use {

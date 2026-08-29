@@ -9,7 +9,8 @@ use std::{collections::HashMap, sync::Arc};
 use volga_open_api::ui_html;
 
 pub use volga_open_api::{
-    OpenApiConfig, OpenApiDocument, OpenApiRegistry, OpenApiRouteConfig, OpenApiSpec,
+    ConstraintTarget, FieldConstraint, OpenApiConfig, OpenApiDocument, OpenApiRegistry,
+    OpenApiRouteConfig, OpenApiSpec, SchemaConstraint,
 };
 
 pub(super) const OPEN_API_NOT_EXPOSED_WARN: &str =
