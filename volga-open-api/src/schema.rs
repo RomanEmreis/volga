@@ -247,7 +247,7 @@ impl OpenApiSchema {
         if self.format.as_deref() != Some(FLOAT_FORMAT) {
             return value.clone();
         }
-        
+
         match value.as_f64().map(|value| value as f32) {
             Some(narrowed) => {
                 Number::from_f64(f64::from(narrowed)).unwrap_or_else(|| value.clone())
