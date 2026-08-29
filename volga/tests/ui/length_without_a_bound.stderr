@@ -1,0 +1,5 @@
+error: `length` needs at least one of `min`, `max` or `equal`
+ --> tests/ui/length_without_a_bound.rs:5:16
+  |
+5 |     #[validate(length(message = "nope"))]
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: a `range` bound that is not a numeric literal cannot be rendered into the default message; add `message = ".."`
+ --> tests/ui/range_constant_without_a_message.rs:7:16
+  |
+7 |     #[validate(range(min = MIN))]
+  |                ^^^^^^^^^^^^^^^^

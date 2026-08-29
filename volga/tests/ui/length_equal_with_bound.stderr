@@ -1,0 +1,5 @@
+error: `length` takes either `equal` or the `min` / `max` bounds, not both
+ --> tests/ui/length_equal_with_bound.rs:5:16
+  |
+5 |     #[validate(length(equal = 3, min = 5))]
+  |                ^^^^^^^^^^^^^^^^^^^^^^^^^^

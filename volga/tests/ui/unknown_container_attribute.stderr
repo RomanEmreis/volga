@@ -1,0 +1,5 @@
+error: unknown container attribute, expected `schema = "path::to::fn"`
+ --> tests/ui/unknown_container_attribute.rs:4:12
+  |
+4 | #[validate(check = "verify")]
+  |            ^^^^^

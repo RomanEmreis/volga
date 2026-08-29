@@ -1,0 +1,5 @@
+error: unknown rule, expected `length`, `range`, `nested`, `custom` or `rename`
+ --> tests/ui/unknown_rule.rs:5:16
+  |
+5 |     #[validate(email)]
+  |                ^^^^^

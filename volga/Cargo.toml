@@ -72,6 +72,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 uuid = { version = "1.26.0", features = ["v4"] }
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 tempfile = "3.27.0"
+trybuild = "1.0.120"
 
 [features]
 # Default HTTP/1 only server
