@@ -604,6 +604,21 @@ mod spec {
     }
 
     #[tokio::test]
+    async fn it_publishes_the_smallest_signed_bound() {
+        let spec = spec_of(|app| {
+            app.map_post("/signed", async |body: ValidJson<Signed>| {
+                ok!("{}", body.offset)
+            });
+        })
+        .await;
+
+        let offset = &spec["components"]["schemas"]["Signed"]["properties"]["offset"];
+
+        assert_eq!(offset["minimum"], i64::MIN);
+        assert_eq!(offset["maximum"], 0);
+    }
+
+    #[tokio::test]
     async fn it_says_nothing_about_a_bound_it_cannot_publish() {
         let spec = spec_of(|app| {
             app.map_post("/wide", async |body: ValidJson<Wide>| {
@@ -764,6 +779,32 @@ fn it_reports_a_flattened_child_at_this_level() {
             (Some("page"), "must be at least 1"),
         ]
     );
+}
+
+#[derive(Deserialize, Validate)]
+struct Signed {
+    // The magnitude of `i64::MIN` is one past `i64::MAX`, so it reaches the macro as a
+    // literal no signed parse accepts - while the value itself is perfectly representable
+    #[validate(range(min = -9223372036854775808, max = 0))]
+    offset: i64,
+}
+
+#[test]
+fn it_publishes_the_smallest_signed_bound() {
+    assert_eq!(
+        Signed::constraints(),
+        &[
+            Constraint::new(
+                "offset",
+                ConstraintKind::Minimum(NumericBound::Int(i64::MIN))
+            ),
+            Constraint::new("offset", ConstraintKind::Maximum(NumericBound::Int(0))),
+        ]
+    );
+
+    assert!(Signed { offset: i64::MIN }.validate().is_ok());
+    assert!(Signed { offset: 0 }.validate().is_ok());
+    assert!(Signed { offset: 1 }.validate().is_err());
 }
 
 const WIDE_MIN: u128 = 18446744073709551617;

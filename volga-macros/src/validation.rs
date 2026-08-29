@@ -578,6 +578,10 @@ fn bound_expr(expr: &syn::Expr) -> TokenStream {
             // Past `i64`, which only an unsigned bound reaches
             Err(_) => match lit.base10_parse::<u64>() {
                 Ok(value) if !negative => quote! { #bound::UInt(#value) },
+                // `i64::MIN` has no positive counterpart, so the tokens carry its magnitude
+                // one past `i64::MAX` - representable, and dropping it would let a client
+                // send what the server rejects
+                Ok(value) if value == (i64::MAX as u64) + 1 => quote! { #bound::Int(i64::MIN) },
                 // Past `u64` as well: no JSON number holds it, and the check compares the
                 // exact value, so the schema says nothing rather than something else
                 _ => quote! { #bound::Unrepresentable },
