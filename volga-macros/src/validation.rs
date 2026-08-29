@@ -271,10 +271,10 @@ fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
                 }
             }
             Rule::Range { min, max, .. } => {
-                if let Some(min) = min.as_deref().map(|bound| bound_expr(bound, field.ty)) {
+                if let Some(min) = min.as_deref().map(bound_expr) {
                     out.push(record(quote! { Minimum(#min) }));
                 }
-                if let Some(max) = max.as_deref().map(|bound| bound_expr(bound, field.ty)) {
+                if let Some(max) = max.as_deref().map(bound_expr) {
                     out.push(record(quote! { Maximum(#max) }));
                 }
             }
@@ -567,7 +567,7 @@ fn nested_element(ty: &Type) -> (&Type, bool) {
 /// would describe a contract the server does not honour. A bound that is not a literal is
 /// left to const evaluation, which accepts a constant and rejects what could not have been
 /// known here anyway; its shape is unknowable from the tokens, so it is taken as a float.
-fn bound_expr(expr: &syn::Expr, ty: &Type) -> TokenStream {
+fn bound_expr(expr: &syn::Expr) -> TokenStream {
     let bound = quote! { ::volga::validation::NumericBound };
     match unwrap_neg(expr) {
         Some((negative, syn::Lit::Int(lit))) => match lit.base10_parse::<i64>() {
@@ -587,18 +587,9 @@ fn bound_expr(expr: &syn::Expr, ty: &Type) -> TokenStream {
                 _ => quote! { #bound::Unrepresentable },
             },
         },
-        // A bound compared at `f32` is not the number its digits spell: the check rounds it
-        // to the field's width, and publishing the wider reading would describe a bound the
-        // server does not enforce
-        Some((negative, syn::Lit::Float(lit))) if is_f32(lit, ty) => {
-            match lit.base10_parse::<f32>() {
-                Ok(value) => {
-                    let value = f64::from(if negative { -value } else { value });
-                    quote! { #bound::Float(#value) }
-                }
-                Err(_) => quote! { #bound::Unrepresentable },
-            }
-        }
+        // The width a float bound is compared at is settled against the schema, not here:
+        // the field's type may be spelled through an alias, and the schema is derived from
+        // what serde actually does with it
         Some((_, syn::Lit::Float(_))) => match lit_as_f64(expr) {
             Some(value) => quote! { #bound::Float(#value) },
             None => quote! { #bound::Float((#expr) as f64) },
@@ -612,19 +603,6 @@ fn bound_expr(expr: &syn::Expr, ty: &Type) -> TokenStream {
         // enforce. A rule that genuinely varies belongs in `custom`, not in an attribute.
         _ => quote! { ::volga::validation::IntoBound::into_bound(const { #expr }) },
     }
-}
-
-/// Reports whether a float bound is compared at `f32`.
-///
-/// Either the literal says so itself, or the field it is compared against does. A field whose
-/// type is spelled through an alias is not recognised, and keeps the wider reading - which
-/// errs towards a bound at least as tight as the one enforced.
-fn is_f32(lit: &syn::LitFloat, ty: &Type) -> bool {
-    if !lit.suffix().is_empty() {
-        return lit.suffix() == "f32";
-    }
-    let ty = inner_type(ty, "Option").unwrap_or(ty);
-    matches!(ty, Type::Path(path) if path.path.is_ident("f32"))
 }
 
 /// Reports whether serde sends this field's contents at the parent level

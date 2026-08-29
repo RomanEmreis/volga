@@ -109,12 +109,17 @@ impl<E: Display> Display for Valid<E> {
 
 /// Reports what an extractor describes in the OpenAPI operation, if anything
 #[cfg(feature = "openapi")]
-fn constraint_target(source: Source) -> Option<crate::openapi::ConstraintTarget> {
+fn constraint_target(
+    source: Source,
+    described_before: usize,
+) -> Option<crate::openapi::ConstraintTarget> {
     use crate::openapi::ConstraintTarget;
     match source {
         Source::Body | Source::Full | Source::Request => Some(ConstraintTarget::RequestBody),
-        Source::Parts => Some(ConstraintTarget::QueryParameter),
-        Source::Path | Source::PathArgs => Some(ConstraintTarget::PathParameter),
+        Source::Parts => Some(ConstraintTarget::QueryParameter { described_before }),
+        Source::Path | Source::PathArgs => {
+            Some(ConstraintTarget::PathParameter { described_before })
+        }
         Source::None => None,
     }
 }
@@ -176,12 +181,13 @@ where
     fn describe_openapi(
         config: crate::openapi::OpenApiRouteConfig,
     ) -> crate::openapi::OpenApiRouteConfig {
-        let config = E::describe_openapi(config);
-
         // Handler arguments are described one after another into the same operation, so the
         // constraints have to name what the wrapped extractor describes - otherwise a body
         // and a query struct sharing a field name would hand each other their bounds.
-        let Some(target) = constraint_target(E::SOURCE) else {
+        let described_before = config.described_parameters();
+        let config = E::describe_openapi(config);
+
+        let Some(target) = constraint_target(E::SOURCE, described_before) else {
             return config;
         };
 

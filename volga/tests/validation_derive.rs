@@ -604,6 +604,32 @@ mod spec {
     }
 
     #[tokio::test]
+    async fn it_publishes_a_float_bound_at_the_width_it_is_compared_at() {
+        let spec = spec_of(|app| {
+            app.map_post("/narrow", async |body: ValidJson<Narrow>| {
+                ok!("{}", body.wide)
+            });
+        })
+        .await;
+
+        let narrow = &spec["components"]["schemas"]["Narrow"]["properties"];
+        let rounded = f64::from(0.7f32);
+        assert_ne!(rounded, 0.7);
+
+        // Every `f32` field lands on the number its check actually compares against - the
+        // alias included, since the schema is derived from what serde does, not from
+        // how the type is spelled
+        assert_eq!(narrow["score"]["minimum"], rounded);
+        assert_eq!(narrow["suffixed"]["maximum"], rounded);
+        assert_eq!(narrow["aliased"]["minimum"], rounded);
+        assert_eq!(narrow["wide"]["minimum"], 0.7);
+
+        // ... which is exactly the distinction OpenAPI's `format` records
+        assert_eq!(narrow["score"]["format"], "float");
+        assert_eq!(narrow["wide"]["format"], "double");
+    }
+
+    #[tokio::test]
     async fn it_validates_a_named_path() {
         use volga::ValidPath;
 
@@ -846,6 +872,8 @@ struct Params {
     slug: String,
 }
 
+type Score = f32;
+
 #[derive(Deserialize, Validate)]
 struct Narrow {
     // `0.7` is not the same number at `f32` and at `f64`, and the check compares at `f32`
@@ -855,35 +883,35 @@ struct Narrow {
     #[validate(range(max = 0.7f32))]
     suffixed: f32,
 
+    // Spelled through an alias, so nothing but the schema can tell how wide it is
+    #[validate(range(min = 0.7))]
+    aliased: Score,
+
     #[validate(range(min = 0.7))]
     wide: f64,
 }
 
 #[test]
-fn it_publishes_a_float_bound_at_the_width_it_is_compared_at() {
-    let narrow = f64::from(0.7f32);
-    assert_ne!(narrow, 0.7);
-
+fn it_leaves_the_width_of_a_float_bound_to_the_schema() {
+    // The macro publishes what the digits spell; narrowing happens where the width is known
     assert_eq!(
         Narrow::constraints(),
         &[
-            Constraint::new(
-                "score",
-                ConstraintKind::Minimum(NumericBound::Float(narrow))
-            ),
+            Constraint::new("score", ConstraintKind::Minimum(NumericBound::Float(0.7))),
             Constraint::new(
                 "suffixed",
-                ConstraintKind::Maximum(NumericBound::Float(narrow))
+                ConstraintKind::Maximum(NumericBound::Float(0.7))
             ),
+            Constraint::new("aliased", ConstraintKind::Minimum(NumericBound::Float(0.7))),
             Constraint::new("wide", ConstraintKind::Minimum(NumericBound::Float(0.7))),
         ]
     );
 
-    // The published bound is the one the check actually applies
     assert!(
         Narrow {
             score: 0.7,
             suffixed: 0.7,
+            aliased: 0.7,
             wide: 0.7,
         }
         .validate()

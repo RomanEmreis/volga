@@ -161,6 +161,9 @@ fn compare_numbers(left: &Number, right: &Number) -> Option<Ordering> {
     left.as_f64()?.partial_cmp(&right.as_f64()?)
 }
 
+/// The OpenAPI name for a number carried as an `f32` (RFC-registered `format`)
+const FLOAT_FORMAT: &str = "float";
+
 /// The pair of OpenAPI keywords that bounds the size of one kind of schema
 enum SizeKeyword {
     /// `minLength` / `maxLength`
@@ -217,14 +220,39 @@ impl OpenApiSchema {
                 SizeKeyword::Properties => keep_least(&mut self.max_properties, *value),
                 SizeKeyword::Length => keep_least(&mut self.max_length, *value),
             },
-            SchemaConstraint::Minimum(value) => keep_greatest_number(&mut self.minimum, value),
-            SchemaConstraint::Maximum(value) => keep_least_number(&mut self.maximum, value),
+            SchemaConstraint::Minimum(value) => {
+                let value = self.narrow(value);
+                keep_greatest_number(&mut self.minimum, &value);
+            }
+            SchemaConstraint::Maximum(value) => {
+                let value = self.narrow(value);
+                keep_least_number(&mut self.maximum, &value);
+            }
             SchemaConstraint::Nested(fields) => self.apply_field_constraints(fields),
             SchemaConstraint::Each(fields) => {
                 if let Some(items) = self.items.as_mut() {
                     items.apply_field_constraints(fields);
                 }
             }
+        }
+    }
+
+    /// Reads a bound at the width this schema is compared at.
+    ///
+    /// A `0.7` written against an `f32` field is not the `0.7` its digits spell - the check
+    /// rounds it to the nearer `f32` - and the schema is the only place that knows the width,
+    /// since the field's type may be spelled through an alias. Rounding here is the same
+    /// round-to-nearest the literal went through, so the two land on the same number.
+    fn narrow(&self, value: &Number) -> Number {
+        if self.format.as_deref() != Some(FLOAT_FORMAT) {
+            return value.clone();
+        }
+        
+        match value.as_f64().map(|value| value as f32) {
+            Some(narrowed) => {
+                Number::from_f64(f64::from(narrowed)).unwrap_or_else(|| value.clone())
+            }
+            None => value.clone(),
         }
     }
 
@@ -533,7 +561,10 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
-        self.root = Some((OpenApiSchema::number(), json!(0.0)));
+        self.root = Some((
+            OpenApiSchema::number().with_format(FLOAT_FORMAT),
+            json!(0.0),
+        ));
         visitor.visit_f32(0.0)
     }
 
@@ -573,7 +604,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
-        self.root = Some((OpenApiSchema::number(), json!(0.0)));
+        self.root = Some((OpenApiSchema::number().with_format("double"), json!(0.0)));
         visitor.visit_f64(0.0)
     }
 
