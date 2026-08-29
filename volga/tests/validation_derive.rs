@@ -604,6 +604,62 @@ mod spec {
     }
 
     #[tokio::test]
+    async fn it_validates_a_named_path() {
+        use volga::ValidPath;
+
+        let server = TestServer::builder()
+            .configure(|app| app.with_open_api(|config| config.with_title("Validation")))
+            .setup(|app| {
+                app.map_get("/items/{id}/{slug}", async |params: ValidPath<Params>| {
+                    ok!("{}:{}", params.id, params.slug)
+                });
+                app.use_open_api();
+            })
+            .build()
+            .await;
+
+        let client = server.client();
+
+        let response = client
+            .get(server.url("/items/7/widget"))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert_eq!(response.text().await.unwrap(), "7:widget");
+
+        let response = client
+            .get(server.url("/items/0/widget"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400);
+        assert_eq!(response.text().await.unwrap(), "id: must be at least 1");
+
+        let spec: serde_json::Value = client
+            .get(server.url("/openapi.json"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+
+        let params = spec["paths"]["/items/{id}/{slug}"]["get"]["parameters"]
+            .as_array()
+            .expect("path parameters")
+            .iter()
+            .map(|p| (p["name"].as_str().unwrap().to_owned(), p.clone()))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        assert_eq!(params["id"]["in"], "path");
+        assert_eq!(params["id"]["schema"]["minimum"], 1);
+        assert_eq!(params["slug"]["schema"]["maxLength"], 16);
+
+        server.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn it_publishes_the_smallest_signed_bound() {
         let spec = spec_of(|app| {
             app.map_post("/signed", async |body: ValidJson<Signed>| {
@@ -778,6 +834,60 @@ fn it_reports_a_flattened_child_at_this_level() {
             (Some("name"), "length must be at least 1"),
             (Some("page"), "must be at least 1"),
         ]
+    );
+}
+
+#[derive(Deserialize, Validate)]
+struct Params {
+    #[validate(range(min = 1))]
+    id: u32,
+
+    #[validate(length(min = 1, max = 16))]
+    slug: String,
+}
+
+#[derive(Deserialize, Validate)]
+struct Narrow {
+    // `0.7` is not the same number at `f32` and at `f64`, and the check compares at `f32`
+    #[validate(range(min = 0.7))]
+    score: f32,
+
+    #[validate(range(max = 0.7f32))]
+    suffixed: f32,
+
+    #[validate(range(min = 0.7))]
+    wide: f64,
+}
+
+#[test]
+fn it_publishes_a_float_bound_at_the_width_it_is_compared_at() {
+    let narrow = f64::from(0.7f32);
+    assert_ne!(narrow, 0.7);
+
+    assert_eq!(
+        Narrow::constraints(),
+        &[
+            Constraint::new(
+                "score",
+                ConstraintKind::Minimum(NumericBound::Float(narrow))
+            ),
+            Constraint::new(
+                "suffixed",
+                ConstraintKind::Maximum(NumericBound::Float(narrow))
+            ),
+            Constraint::new("wide", ConstraintKind::Minimum(NumericBound::Float(0.7))),
+        ]
+    );
+
+    // The published bound is the one the check actually applies
+    assert!(
+        Narrow {
+            score: 0.7,
+            suffixed: 0.7,
+            wide: 0.7,
+        }
+        .validate()
+        .is_ok()
     );
 }
 

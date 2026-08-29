@@ -18,7 +18,7 @@ use crate::{
         Parts,
         endpoints::args::{
             FromPayload, FromRequestParts, FromRequestRef, Payload, Source, form::Form, json::Json,
-            path::Path, query::Query,
+            path::NamedPath, query::Query,
         },
     },
     validation::Validate,
@@ -68,8 +68,13 @@ pub type ValidQuery<T> = Valid<Query<T>>;
 /// A [`Form<T>`] payload that has been validated
 pub type ValidForm<T> = Valid<Form<T>>;
 
-/// A [`Path<T>`] payload that has been validated
-pub type ValidPath<T> = Valid<Path<T>>;
+/// A [`NamedPath<T>`] payload that has been validated.
+///
+/// Named rather than positional: `Path<T>` reads its payload through `FromPathArgs`, which
+/// is implemented for tuples alone, and a tuple is not a type a downstream crate can
+/// implement [`Validate`] for. `NamedPath<T>` deserializes the parameters into a struct,
+/// which is what a derived `Validate` is written against.
+pub type ValidPath<T> = Valid<NamedPath<T>>;
 
 impl<E> Valid<E> {
     /// Unwraps the inner extractor
