@@ -578,10 +578,9 @@ fn bound_expr(expr: &syn::Expr) -> TokenStream {
             // Past `i64`, which only an unsigned bound reaches
             Err(_) => match lit.base10_parse::<u64>() {
                 Ok(value) if !negative => quote! { #bound::UInt(#value) },
-                _ => match lit_as_f64(expr) {
-                    Some(value) => quote! { #bound::Float(#value) },
-                    None => quote! { #bound::Float((#expr) as f64) },
-                },
+                // Past `u64` as well: no JSON number holds it, and the check compares the
+                // exact value, so the schema says nothing rather than something else
+                _ => quote! { #bound::Unrepresentable },
             },
         },
         Some((_, syn::Lit::Float(_))) => match lit_as_f64(expr) {

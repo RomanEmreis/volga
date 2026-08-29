@@ -108,6 +108,12 @@ pub enum NumericBound {
     UInt(u64),
     /// A fractional number
     Float(f64),
+    /// A bound no JSON number can hold exactly - a 128-bit one past [`u64::MAX`].
+    ///
+    /// Such a bound is left out of the schema rather than rounded into it: a client told
+    /// the minimum is one thing while the server enforces another would send requests the
+    /// server rejects, which is worse than a client told nothing.
+    Unrepresentable,
 }
 
 impl NumericBound {
@@ -118,6 +124,7 @@ impl NumericBound {
             Self::Int(value) => Some(value.into()),
             Self::UInt(value) => Some(value.into()),
             Self::Float(value) => serde_json::Number::from_f64(value),
+            Self::Unrepresentable => None,
         }
     }
 }
@@ -156,6 +163,29 @@ macro_rules! into_bound {
 }
 
 into_bound!(i8, i16, i32, i64, isize ; u8, u16, u32, u64, usize ; f32, f64);
+
+impl IntoBound for i128 {
+    #[inline]
+    fn into_bound(self) -> NumericBound {
+        match i64::try_from(self) {
+            Ok(value) => NumericBound::Int(value),
+            Err(_) => match u64::try_from(self) {
+                Ok(value) => NumericBound::UInt(value),
+                Err(_) => NumericBound::Unrepresentable,
+            },
+        }
+    }
+}
+
+impl IntoBound for u128 {
+    #[inline]
+    fn into_bound(self) -> NumericBound {
+        match u64::try_from(self) {
+            Ok(value) => NumericBound::UInt(value),
+            Err(_) => NumericBound::Unrepresentable,
+        }
+    }
+}
 
 impl From<i64> for NumericBound {
     #[inline]

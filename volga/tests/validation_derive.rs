@@ -604,6 +604,22 @@ mod spec {
     }
 
     #[tokio::test]
+    async fn it_says_nothing_about_a_bound_it_cannot_publish() {
+        let spec = spec_of(|app| {
+            app.map_post("/wide", async |body: ValidJson<Wide>| {
+                ok!("{}", body.literal)
+            });
+        })
+        .await;
+
+        let wide = &spec["components"]["schemas"]["Wide"]["properties"];
+
+        // Silence beats a rounded bound that would let a client send what the server rejects
+        assert!(wide["literal"]["minimum"].is_null());
+        assert!(wide["constant"]["minimum"].is_null());
+    }
+
+    #[tokio::test]
     async fn it_publishes_the_tighter_of_two_rules() {
         let spec = spec_of(|app| {
             app.map_post("/twice", async |body: ValidJson<Twice>| {
@@ -747,6 +763,50 @@ fn it_reports_a_flattened_child_at_this_level() {
             (Some("name"), "length must be at least 1"),
             (Some("page"), "must be at least 1"),
         ]
+    );
+}
+
+const WIDE_MIN: u128 = 18446744073709551617;
+
+#[derive(Deserialize, Validate)]
+struct Wide {
+    // Past `u64::MAX`, where no JSON number can carry the bound
+    #[validate(range(min = 18446744073709551617))]
+    literal: u128,
+
+    #[validate(range(min = WIDE_MIN, message = "too small"))]
+    constant: u128,
+}
+
+#[test]
+fn it_leaves_out_a_bound_no_json_number_can_hold() {
+    assert_eq!(
+        Wide::constraints(),
+        &[
+            Constraint::new(
+                "literal",
+                ConstraintKind::Minimum(NumericBound::Unrepresentable)
+            ),
+            Constraint::new(
+                "constant",
+                ConstraintKind::Minimum(NumericBound::Unrepresentable)
+            ),
+        ]
+    );
+
+    // The check still compares the exact value - only the schema stays silent
+    let valid = Wide {
+        literal: WIDE_MIN,
+        constant: WIDE_MIN,
+    };
+    assert!(valid.validate().is_ok());
+    assert!(
+        Wide {
+            literal: 18446744073709551616,
+            ..valid
+        }
+        .validate()
+        .is_err()
     );
 }
 
