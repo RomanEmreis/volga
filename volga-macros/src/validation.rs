@@ -25,8 +25,12 @@ enum Rule {
 struct Field<'a> {
     ident: &'a syn::Ident,
     ty: &'a Type,
-    /// The name this field is reported under, matching what the client sent
-    name: String,
+    /// The name a failure is reported under
+    report: String,
+    /// The name serde gives this field, which is what the schema calls its property -
+    /// a `#[validate(rename = "..")]` changes how a failure reads, never where the
+    /// constraint lands
+    wire: String,
     /// `#[serde(flatten)]` - the field has no name of its own on the wire, its contents
     /// are sent at this level
     flattened: bool,
@@ -57,12 +61,16 @@ pub(super) fn expand_validate(input: &DeriveInput) -> syn::Result<TokenStream> {
             .ident
             .as_ref()
             .ok_or_else(|| syn::Error::new(field.span(), "expected a named field"))?;
+
         let rules = field_rules(&field.attrs)?;
-        let name = field_name(&field.attrs, ident, rename_all.as_deref())?;
+        let wire = wire_name(&field.attrs, ident, rename_all.as_deref());
+        let report = report_name(&field.attrs)?.unwrap_or_else(|| wire.clone());
+
         parsed.push(Field {
             ident,
             ty: &field.ty,
-            name,
+            report,
+            wire,
             flattened: is_flattened(&field.attrs),
             rules,
         });
@@ -132,7 +140,7 @@ fn render_field(field: &Field<'_>) -> TokenStream {
 
 /// Renders a single rule against `__value`
 fn render_rule(field: &Field<'_>, rule: &Rule) -> TokenStream {
-    let name = &field.name;
+    let name = &field.report;
     match rule {
         Rule::Length {
             min,
@@ -238,7 +246,9 @@ fn range_condition(min: Option<&syn::Expr>, max: Option<&syn::Expr>) -> (TokenSt
 
 /// Renders the constraints of a field for the OpenAPI schema
 fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
-    let name = &field.name;
+    // The schema names its properties the way serde does, so a constraint keyed by a
+    // reporting alias would find nothing to land on
+    let name = &field.wire;
 
     // Builds the statement that records one constraint of this field
     let record = |kind: TokenStream| {
@@ -409,13 +419,8 @@ fn field_rules(attrs: &[syn::Attribute]) -> syn::Result<Vec<Rule>> {
     Ok(out)
 }
 
-/// Resolves the name a field is reported under: an explicit `rename` wins over
-/// what serde renamed it to, which wins over the field's own identifier
-fn field_name(
-    attrs: &[syn::Attribute],
-    ident: &syn::Ident,
-    rename_all: Option<&str>,
-) -> syn::Result<String> {
+/// Reads the `#[validate(rename = "..")]` a failure should be reported under, if any
+fn report_name(attrs: &[syn::Attribute]) -> syn::Result<Option<String>> {
     let mut renamed = None;
     for attr in attrs.iter().filter(|a| a.path().is_ident("validate")) {
         attr.parse_nested_meta(|meta| {
@@ -431,18 +436,20 @@ fn field_name(
             Ok(())
         })?;
     }
-    if let Some(renamed) = renamed {
-        return Ok(renamed);
-    }
+    Ok(renamed)
+}
+
+/// Resolves the name serde gives this field, which is the one on the wire and in the schema
+fn wire_name(attrs: &[syn::Attribute], ident: &syn::Ident, rename_all: Option<&str>) -> String {
     if let Some(renamed) = serde_rename(attrs) {
-        return Ok(renamed);
+        return renamed;
     }
     let ident = ident.to_string();
     let ident = ident.strip_prefix("r#").unwrap_or(&ident);
-    Ok(match rename_all {
+    match rename_all {
         Some(rule) => apply_rename_rule(ident, rule),
         None => ident.to_owned(),
-    })
+    }
 }
 
 /// Reads `#[serde(rename = "..")]` (or its `deserialize` half) off a field

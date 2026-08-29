@@ -311,9 +311,14 @@ fn it_reports_the_name_the_client_sent() {
         err.entries().map(|(field, _)| field).collect::<Vec<_>>(),
         vec![Some("pageSize"), Some("sortOrder"), Some("explicit")]
     );
+    // The constraint is keyed by what serde calls the property, whatever the failure reads
+    // as - a key the schema does not have would silently drop the rule from the spec
     assert_eq!(
-        Renamed::constraints()[0],
-        Constraint::new("pageSize", ConstraintKind::MinSize(1))
+        Renamed::constraints()
+            .iter()
+            .map(|constraint| constraint.field)
+            .collect::<Vec<_>>(),
+        vec!["pageSize", "sortOrder", "ignored"]
     );
 }
 
@@ -627,6 +632,23 @@ mod spec {
         // ... which is exactly the distinction OpenAPI's `format` records
         assert_eq!(narrow["score"]["format"], "float");
         assert_eq!(narrow["wide"]["format"], "double");
+    }
+
+    #[tokio::test]
+    async fn it_lands_a_constraint_on_the_property_serde_named() {
+        let spec = spec_of(|app| {
+            app.map_post("/renamed", async |body: ValidJson<Renamed>| {
+                ok!("{}", body.sort)
+            });
+        })
+        .await;
+
+        // The reporting alias must not have moved the constraint off its property
+        let renamed = &spec["components"]["schemas"]["Renamed"]["properties"];
+
+        assert_eq!(renamed["ignored"]["minLength"], 1);
+        assert_eq!(renamed["pageSize"]["minLength"], 1);
+        assert!(renamed["explicit"].is_null());
     }
 
     #[tokio::test]

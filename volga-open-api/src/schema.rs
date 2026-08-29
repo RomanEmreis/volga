@@ -161,8 +161,11 @@ fn compare_numbers(left: &Number, right: &Number) -> Option<Ordering> {
     left.as_f64()?.partial_cmp(&right.as_f64()?)
 }
 
-/// The OpenAPI name for a number carried as an `f32` (RFC-registered `format`)
+/// The OpenAPI name for a number carried as an `f32` (registered `format`)
 const FLOAT_FORMAT: &str = "float";
+
+/// The OpenAPI name for a number carried as an `f64`
+const DOUBLE_FORMAT: &str = "double";
 
 /// The pair of OpenAPI keywords that bounds the size of one kind of schema
 enum SizeKeyword {
@@ -244,16 +247,17 @@ impl OpenApiSchema {
     /// since the field's type may be spelled through an alias. Rounding here is the same
     /// round-to-nearest the literal went through, so the two land on the same number.
     fn narrow(&self, value: &Number) -> Number {
-        if self.format.as_deref() != Some(FLOAT_FORMAT) {
-            return value.clone();
-        }
+        // Only `f32` moves a bound: an `f64` field is compared against the number the
+        // digits already spell, and an integer bound cannot reach a float field at all -
+        // `f64: PartialOrd<{integer}>` does not exist, so such a rule fails to compile
+        let narrowed = match self.format.as_deref() {
+            Some(FLOAT_FORMAT) => value.as_f64().map(|value| f64::from(value as f32)),
+            _ => None,
+        };
 
-        match value.as_f64().map(|value| value as f32) {
-            Some(narrowed) => {
-                Number::from_f64(f64::from(narrowed)).unwrap_or_else(|| value.clone())
-            }
-            None => value.clone(),
-        }
+        narrowed
+            .and_then(Number::from_f64)
+            .unwrap_or_else(|| value.clone())
     }
 
     /// Reports which pair of size keywords describes this schema.
@@ -604,7 +608,10 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
-        self.root = Some((OpenApiSchema::number().with_format("double"), json!(0.0)));
+        self.root = Some((
+            OpenApiSchema::number().with_format(DOUBLE_FORMAT),
+            json!(0.0),
+        ));
         visitor.visit_f64(0.0)
     }
 
