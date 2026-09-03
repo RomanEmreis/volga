@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.10
+
+## Fixed
+* Static files nested more than one level deep were served non-deterministically (#224). `map_static_assets` registers `/{path_0}`, `/{path_0}/{path_1}`, ... up to the content root's depth, and the handler rebuilt the request path by folding over the *values* of the `HashMap` those parameters were deserialized into. `HashMap` iteration order is unspecified and its `RandomState` differs per map instance, so the segments were joined in an order that changed from request to request: `GET /assets/app.css` reached the filesystem as `assets/app.css` on one request and as `app.css/assets` on the next, answering with the file, a `404`, or the SPA fallback file depending on which. The ordering the route already encodes in the parameter names is now what the path is assembled from, so a nested path resolves to one and only one file. Single-segment paths (`/favicon.svg`) were never affected, which is why this went unseen - and why it hit every Vite/webpack/Parcel build, since they all emit an `assets/` directory.
+
 # 0.9.9
 
 ## Added

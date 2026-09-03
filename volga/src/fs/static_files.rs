@@ -6,6 +6,7 @@ use crate::{
 };
 use std::{
     collections::HashMap,
+    fmt::Write,
     path::{Path, PathBuf},
 };
 use tokio::fs::{File, canonicalize, metadata};
@@ -18,6 +19,10 @@ use crate::headers::{
 mod file_listing;
 
 const ACCESS_DENIED_MESSAGE: &str = "Access is denied.";
+
+/// Prefix of the route parameters that [`App::map_static_assets`] names
+/// the segments of a nested path with: `path_0`, `path_1`, ...
+const PATH_SEGMENT_PREFIX: &str = "path_";
 
 #[inline]
 async fn index(env: HostEnv) -> HttpResult {
@@ -53,11 +58,7 @@ async fn respond_with_file(
     headers: HttpHeaders,
     env: HostEnv,
 ) -> HttpResult {
-    let path = path.values().fold(PathBuf::new(), |mut acc, v| {
-        acc.push(v);
-        acc
-    });
-    let path = env.content_root().join(&path);
+    let path = env.content_root().join(assemble_path(&path));
     let response =
         respond_with_file_or_dir_impl(path, headers, env.content_root(), env.show_files_listing())
             .await;
@@ -66,6 +67,26 @@ async fn respond_with_file(
         Err(err) if err.status == StatusCode::NOT_FOUND => fallback(env).await,
         Err(err) => Err(err),
     }
+}
+
+/// Reassembles a nested request path from the `path_0 .. path_n` route parameters.
+///
+/// The segments are ordered by their parameter name: the map itself has no
+/// meaningful iteration order, so folding over its values would join the
+/// segments arbitrarily and differently from request to request.
+#[inline]
+fn assemble_path(segments: &HashMap<String, String>) -> PathBuf {
+    let mut path = PathBuf::new();
+    let mut name = String::with_capacity(PATH_SEGMENT_PREFIX.len() + 2);
+    for i in 0..segments.len() {
+        name.clear();
+        let _ = write!(&mut name, "{PATH_SEGMENT_PREFIX}{i}");
+        match segments.get(&name) {
+            Some(segment) => path.push(segment),
+            None => break,
+        }
+    }
+    path
 }
 
 #[inline]
@@ -184,7 +205,7 @@ impl RouteGroup<'_> {
         let folder_depth = max_folder_depth(self.app.host_env.content_root());
         let mut segment = String::new();
         for i in 0..folder_depth {
-            segment.push_str(&format!("/{{path_{i}}}"));
+            segment.push_str(&format!("/{{{PATH_SEGMENT_PREFIX}{i}}}"));
             self.map_get(&segment, respond_with_file);
         }
         self.map_get("/", index);
@@ -272,7 +293,7 @@ impl App {
         let folder_depth = max_folder_depth(self.host_env.content_root());
         let mut segment = String::new();
         for i in 0..folder_depth {
-            segment.push_str(&format!("/{{path_{i}}}"));
+            segment.push_str(&format!("/{{{PATH_SEGMENT_PREFIX}{i}}}"));
             self.map_get(&segment, respond_with_file);
         }
         self.map_get("/", index).app
@@ -305,13 +326,14 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::{
-        fallback, index, max_folder_depth, respond_with_file_impl, respond_with_file_or_dir_impl,
-        respond_with_folder_impl,
+        assemble_path, fallback, index, max_folder_depth, respond_with_file_impl,
+        respond_with_file_or_dir_impl, respond_with_folder_impl,
     };
     use crate::app::HostEnv;
     use crate::headers::{
         HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
     };
+    use std::collections::HashMap;
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
     use tokio::fs::metadata;
@@ -485,6 +507,58 @@ mod tests {
     fn it_calculates_max_folder_depth() {
         let depth = max_folder_depth("tests");
 
-        assert_eq!(depth, 2);
+        assert_eq!(depth, 3);
+    }
+
+    fn segments<const N: usize>(values: [&str; N]) -> HashMap<String, String> {
+        values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (format!("path_{i}"), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn it_assembles_empty_path_from_no_segments() {
+        assert_eq!(assemble_path(&HashMap::new()), PathBuf::new());
+    }
+
+    #[test]
+    fn it_assembles_single_segment_path() {
+        assert_eq!(
+            assemble_path(&segments(["favicon.svg"])),
+            PathBuf::from("favicon.svg")
+        );
+    }
+
+    #[test]
+    fn it_assembles_nested_path_in_declaration_order() {
+        assert_eq!(
+            assemble_path(&segments(["assets", "app.css"])),
+            ["assets", "app.css"].iter().collect::<PathBuf>()
+        );
+    }
+
+    #[test]
+    fn it_assembles_deeply_nested_path_in_declaration_order() {
+        // With this many segments an arbitrary iteration order over the map
+        // would practically never reproduce the expected path.
+        let names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+        let expected = names.iter().collect::<PathBuf>();
+
+        // Every map gets its own `RandomState`, so repeat to make an accidental
+        // pass on one particular ordering unlikely.
+        for _ in 0..64 {
+            assert_eq!(assemble_path(&segments(names)), expected);
+        }
+    }
+
+    #[test]
+    fn it_stops_assembling_at_the_first_missing_segment() {
+        let mut segments = segments(["assets", "app.css"]);
+        segments.remove("path_0");
+        segments.insert("unrelated".into(), "value".into());
+
+        assert_eq!(assemble_path(&segments), PathBuf::new());
     }
 }
