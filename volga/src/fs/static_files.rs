@@ -1,11 +1,16 @@
 //! Tools and utilities for handling static files
 
-use crate::{
-    App, HttpResult, NamedPath as RoutePath, app::HostEnv, error::Error, html, html_file,
-    http::StatusCode, routing::RouteGroup, status,
+use crate::http::endpoints::{
+    args::{FromPayload, Payload, Source},
+    route::PathArgs,
 };
+use crate::{
+    App, HttpResult, app::HostEnv, error::Error, html, html_file, http::StatusCode,
+    routing::RouteGroup, status,
+};
+use futures_util::future::{Ready, ready};
 use std::{
-    collections::HashMap,
+    borrow::Cow,
     path::{Path, PathBuf},
 };
 use tokio::fs::{File, canonicalize, metadata};
@@ -18,6 +23,17 @@ use crate::headers::{
 mod file_listing;
 
 const ACCESS_DENIED_MESSAGE: &str = "Access is denied.";
+
+/// Prefix [`App::map_static_assets`] labels the segments of a nested path with:
+/// `path_0`, `path_1`, ...
+///
+/// The names are labels only. The router keeps at most one dynamic child per
+/// node and reuses whichever name got there first, so a name declared here is
+/// not necessarily the name a request arrives under - see [`AssetPath`].
+const PATH_SEGMENT_PREFIX: &str = "path_";
+
+/// The path of a static asset, rebuilt from the segments the router matched.
+struct AssetPath(PathBuf);
 
 #[inline]
 async fn index(env: HostEnv) -> HttpResult {
@@ -49,15 +65,11 @@ async fn fallback(env: HostEnv) -> HttpResult {
 
 #[inline]
 async fn respond_with_file(
-    path: RoutePath<HashMap<String, String>>,
+    AssetPath(path): AssetPath,
     headers: HttpHeaders,
     env: HostEnv,
 ) -> HttpResult {
-    let path = path.values().fold(PathBuf::new(), |mut acc, v| {
-        acc.push(v);
-        acc
-    });
-    let path = env.content_root().join(&path);
+    let path = env.content_root().join(path);
     let response =
         respond_with_file_or_dir_impl(path, headers, env.content_root(), env.show_files_listing())
             .await;
@@ -66,6 +78,79 @@ async fn respond_with_file(
         Err(err) if err.status == StatusCode::NOT_FOUND => fallback(env).await,
         Err(err) => Err(err),
     }
+}
+
+impl FromPayload for AssetPath {
+    type Future = Ready<Result<Self, Error>>;
+
+    const SOURCE: Source = Source::PathArgs;
+
+    #[inline]
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
+        let Payload::PathArgs(args) = payload else {
+            unreachable!()
+        };
+        ready(assemble_path(args))
+    }
+}
+
+/// Rebuilds a nested request path from the segments the router matched.
+///
+/// The segments are joined in the order the router bound them, which is the
+/// order they appear in the path. Neither their names nor their count can be
+/// relied upon: names are rewritten when another route already owns the node
+/// (see [`PATH_SEGMENT_PREFIX`]), and the count varies with the depth of the
+/// matched route.
+#[inline]
+fn assemble_path(args: &PathArgs) -> Result<AssetPath, Error> {
+    let mut path = PathBuf::new();
+    for arg in args.iter() {
+        path.push(percent_decode(arg.value.as_ref())?.as_ref());
+    }
+    Ok(AssetPath(path))
+}
+
+/// Decodes the `%XX` escapes of a single path segment.
+///
+/// Unlike form decoding, `+` is left as it is: in a request target it is a
+/// literal plus sign rather than a space (RFC 3986 Section 3.3).
+#[inline]
+fn percent_decode(segment: &str) -> Result<Cow<'_, str>, Error> {
+    if !segment.contains('%') {
+        return Ok(Cow::Borrowed(segment));
+    }
+
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'%' {
+            decoded.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+
+        let escape = bytes.get(i + 1..i + 3).ok_or_else(malformed_escape)?;
+        let hi = char::from(escape[0])
+            .to_digit(16)
+            .ok_or_else(malformed_escape)?;
+
+        let lo = char::from(escape[1])
+            .to_digit(16)
+            .ok_or_else(malformed_escape)?;
+
+        decoded.push((hi * 16 + lo) as u8);
+        i += 3;
+    }
+
+    String::from_utf8(decoded)
+        .map(Cow::Owned)
+        .map_err(|_| malformed_escape())
+}
+
+#[inline]
+fn malformed_escape() -> Error {
+    Error::client_error("Static files error: malformed percent-encoding in the request path")
 }
 
 #[inline]
@@ -184,7 +269,7 @@ impl RouteGroup<'_> {
         let folder_depth = max_folder_depth(self.app.host_env.content_root());
         let mut segment = String::new();
         for i in 0..folder_depth {
-            segment.push_str(&format!("/{{path_{i}}}"));
+            segment.push_str(&format!("/{{{PATH_SEGMENT_PREFIX}{i}}}"));
             self.map_get(&segment, respond_with_file);
         }
         self.map_get("/", index);
@@ -272,7 +357,7 @@ impl App {
         let folder_depth = max_folder_depth(self.host_env.content_root());
         let mut segment = String::new();
         for i in 0..folder_depth {
-            segment.push_str(&format!("/{{path_{i}}}"));
+            segment.push_str(&format!("/{{{PATH_SEGMENT_PREFIX}{i}}}"));
             self.map_get(&segment, respond_with_file);
         }
         self.map_get("/", index).app
@@ -305,13 +390,14 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::{
-        fallback, index, max_folder_depth, respond_with_file_impl, respond_with_file_or_dir_impl,
-        respond_with_folder_impl,
+        Cow, assemble_path, fallback, index, max_folder_depth, percent_decode,
+        respond_with_file_impl, respond_with_file_or_dir_impl, respond_with_folder_impl,
     };
     use crate::app::HostEnv;
     use crate::headers::{
         HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
     };
+    use crate::http::endpoints::route::{PathArg, PathArgs};
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
     use tokio::fs::metadata;
@@ -485,6 +571,118 @@ mod tests {
     fn it_calculates_max_folder_depth() {
         let depth = max_folder_depth("tests");
 
-        assert_eq!(depth, 2);
+        assert_eq!(depth, 3);
+    }
+
+    fn args<const N: usize>(values: [(&str, &str); N]) -> PathArgs {
+        values
+            .iter()
+            .map(|(name, value)| PathArg {
+                name: (*name).into(),
+                value: (*value).into(),
+            })
+            .collect()
+    }
+
+    fn assembled<const N: usize>(values: [(&str, &str); N]) -> PathBuf {
+        assemble_path(&args(values)).unwrap().0
+    }
+
+    #[test]
+    fn it_assembles_empty_path_from_no_segments() {
+        assert_eq!(assembled([]), PathBuf::new());
+    }
+
+    #[test]
+    fn it_assembles_single_segment_path() {
+        assert_eq!(
+            assembled([("path_0", "favicon.svg")]),
+            PathBuf::from("favicon.svg")
+        );
+    }
+
+    #[test]
+    fn it_assembles_nested_path_in_match_order() {
+        assert_eq!(
+            assembled([("path_0", "assets"), ("path_1", "app.css")]),
+            ["assets", "app.css"].iter().collect::<PathBuf>()
+        );
+    }
+
+    #[test]
+    fn it_assembles_deeply_nested_path_in_match_order() {
+        let names = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+        let args = names
+            .iter()
+            .enumerate()
+            .map(|(i, v)| (format!("path_{i}"), (*v).to_string()))
+            .collect::<Vec<_>>();
+        let args = args
+            .iter()
+            .map(|(name, value)| PathArg {
+                name: name.as_str().into(),
+                value: value.as_str().into(),
+            })
+            .collect::<PathArgs>();
+
+        assert_eq!(
+            assemble_path(&args).unwrap().0,
+            names.iter().collect::<PathBuf>()
+        );
+    }
+
+    #[test]
+    fn it_assembles_path_whatever_the_segments_are_named() {
+        // The router keeps one dynamic child per node and reuses the name that
+        // got there first, so a segment can arrive under any name at all.
+        assert_eq!(
+            assembled([("lang", "assets"), ("path_1", "app.css")]),
+            ["assets", "app.css"].iter().collect::<PathBuf>()
+        );
+        assert_eq!(
+            assembled([("lang", "favicon.svg")]),
+            PathBuf::from("favicon.svg")
+        );
+    }
+
+    #[test]
+    fn it_percent_decodes_segments() {
+        assert_eq!(
+            assembled([("path_0", "my%20file.css")]),
+            PathBuf::from("my file.css")
+        );
+        assert_eq!(
+            assembled([("path_0", "%D1%84%D0%B0%D0%B9%D0%BB.txt")]),
+            PathBuf::from("\u{0444}\u{0430}\u{0439}\u{043b}.txt")
+        );
+    }
+
+    #[test]
+    fn it_leaves_a_plus_alone_when_decoding() {
+        // `+` is a space in a form body, but a literal plus in a request target.
+        assert_eq!(
+            assembled([("path_0", "my+file.css")]),
+            PathBuf::from("my+file.css")
+        );
+    }
+
+    #[test]
+    fn it_borrows_a_segment_that_needs_no_decoding() {
+        assert!(matches!(percent_decode("app.css"), Ok(Cow::Borrowed(_))));
+    }
+
+    #[test]
+    fn it_rejects_malformed_percent_encoding() {
+        for segment in ["%", "%2", "%zz", "%2z", "app%.css"] {
+            assert!(
+                percent_decode(segment).is_err(),
+                "expected `{segment}` to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn it_rejects_percent_encoding_that_is_not_utf8() {
+        assert!(percent_decode("%FF%FE").is_err());
     }
 }

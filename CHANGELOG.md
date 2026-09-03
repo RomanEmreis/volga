@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.10
+
+## Fixed
+* Static files nested more than one level deep were served non-deterministically (#224). `map_static_assets` registers `/{path_0}`, `/{path_0}/{path_1}`, ... up to the content root's depth, and the handler rebuilt the request path by folding over the *values* of the `HashMap` those parameters were deserialized into. `HashMap` iteration order is unspecified and its `RandomState` differs per map instance, so the segments were joined in an order that changed from request to request: `GET /assets/app.css` reached the filesystem as `assets/app.css` on one request and as `app.css/assets` on the next, answering with the file, a `404`, or the SPA fallback file depending on which. The path is now assembled from the order the router matched the segments in, which is the order they appear in the path. Single-segment paths (`/favicon.svg`) were never affected, which is why this went unseen - and why it hit every Vite/webpack/Parcel build, since they all emit an `assets/` directory.
+* The same handler no longer depends on what the matched segments are *named*. A `RouteNode` keeps at most one dynamic child and reuses whichever parameter name reached it first, so an application registering `/{lang}/api` before `use_static_files()` had its static segments arrive under the name `lang`. Nothing about the request says which route registered the node, so the names carry no information the handler can use; the order does, and it is now the only thing read.
+* A `+` in a request target is served as the literal file name rather than as a space. Segments used to be decoded by the form decoder, which reads `+` as a space (`application/x-www-form-urlencoded`); a request target is not a form body, and RFC 3986 Section 3.3 gives `+` no special meaning in a path. `%XX` escapes are still decoded, and one that is malformed or does not decode to UTF-8 is now answered with `400` instead of being looked up on disk verbatim.
+
 # 0.9.9
 
 ## Added
