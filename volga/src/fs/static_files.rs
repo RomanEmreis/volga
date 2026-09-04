@@ -17,7 +17,7 @@ use tokio::fs::{File, canonicalize, metadata};
 
 use crate::headers::{
     CACHE_CONTROL, CacheControl, ETAG, HttpHeaders, LAST_MODIFIED, ResponseCaching,
-    helpers::{validate_etag, validate_last_modified},
+    helpers::validate_preconditions,
 };
 
 mod file_listing;
@@ -211,9 +211,7 @@ async fn respond_with_file_or_304_impl(
     caching: ResponseCaching,
     headers: &HttpHeaders,
 ) -> HttpResult {
-    if validate_etag(&caching.etag, headers)
-        || validate_last_modified(caching.last_modified, headers)
-    {
+    if validate_preconditions(&caching, headers) {
         status!(304; [
             (ETAG, caching.etag()),
             (LAST_MODIFIED, caching.last_modified()),
@@ -501,6 +499,68 @@ mod tests {
             response.headers().get(CACHE_CONTROL).unwrap(),
             "max-age=86400, public, immutable"
         );
+    }
+
+    #[tokio::test]
+    async fn it_ignores_the_date_when_the_etag_says_the_file_changed() {
+        let path = PathBuf::from("tests/static/index.html");
+        let metadata = metadata(&path).await.unwrap();
+        let caching = ResponseCaching::try_from(&metadata).unwrap();
+
+        // A client holding the shell from a build that has since been rolled back: its
+        // `ETag` no longer matches what is on disk, but the date it remembers is newer
+        // than the restored file's `mtime`.
+        let mut headers = HeaderMap::new();
+        headers.insert(IF_NONE_MATCH, "\"not-the-tag-on-disk\"".try_into().unwrap());
+        headers.insert(
+            IF_MODIFIED_SINCE,
+            HeaderValue::from_str(&httpdate::fmt_http_date(
+                caching.last_modified + Duration::from_secs(60),
+            ))
+            .unwrap(),
+        );
+
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &HttpHeaders::from(headers),
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await
+        .unwrap();
+
+        // RFC 9110 Section 13.1.3: `If-Modified-Since` is ignored when `If-None-Match` is
+        // there, so the mismatching tag decides and the client is sent the current file.
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_still_reads_the_date_when_no_etag_was_sent() {
+        let path = PathBuf::from("tests/static/index.html");
+        let metadata = metadata(&path).await.unwrap();
+        let caching = ResponseCaching::try_from(&metadata).unwrap();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            IF_MODIFIED_SINCE,
+            HeaderValue::from_str(&httpdate::fmt_http_date(
+                caching.last_modified + Duration::from_secs(60),
+            ))
+            .unwrap(),
+        );
+
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &HttpHeaders::from(headers),
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), 304);
     }
 
     #[tokio::test]

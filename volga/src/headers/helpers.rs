@@ -1,22 +1,51 @@
 use httpdate::parse_http_date;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::headers::{ETag, ETagRef, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH};
+use crate::headers::{
+    ETag, ETagRef, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
+};
+
+/// Returns `true` when the copy the client already holds is still current, and it may be
+/// answered with a `304`.
+///
+/// `If-None-Match` decides on its own whenever it is present: RFC 9110 Section 13.1.3 has a
+/// recipient ignore `If-Modified-Since` in that case, the entity tag being the more accurate
+/// validator and the date being carried only for intermediaries that predate it. Reading the
+/// two as an either-or would answer `304` off the date alone after the tag has said the
+/// content changed - which is what a client sees when a deploy is rolled back to a build
+/// whose files are older than the response that client cached.
+#[inline]
+#[allow(dead_code)]
+pub(crate) fn validate_preconditions(caching: &ResponseCaching, headers: &HttpHeaders) -> bool {
+    match headers.get_raw(&IF_NONE_MATCH) {
+        Some(if_none_match) => matches_etag(&caching.etag, if_none_match),
+        None => validate_last_modified(caching.last_modified, headers),
+    }
+}
 
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn validate_etag(etag: &ETag, headers: &HttpHeaders) -> bool {
-    let Some(hv) = headers.get_raw(&IF_NONE_MATCH) else {
-        return false;
-    };
+    headers
+        .get_raw(&IF_NONE_MATCH)
+        .is_some_and(|if_none_match| matches_etag(etag, if_none_match))
+}
 
-    let Ok(s) = hv.to_str() else {
+/// Matches an `If-None-Match` field value against the tag of the current representation.
+///
+/// Split out from [`validate_etag`] so that a caller which has already looked the header up -
+/// [`validate_preconditions`] has to, since the header's mere presence decides which
+/// validator applies - does not pay for a second lookup to use it.
+#[inline]
+fn matches_etag(etag: &ETag, if_none_match: &HeaderValue) -> bool {
+    let Ok(candidates) = if_none_match.to_str() else {
         return false;
     };
 
     let target_tag = etag.tag();
 
-    s.split(',')
+    candidates
+        .split(',')
         .map(|v| v.trim())
         .filter(|v| !v.is_empty())
         .filter_map(|raw| ETagRef::parse(raw).ok())
