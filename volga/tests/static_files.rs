@@ -325,3 +325,52 @@ async fn it_serves_static_files_with_configured_cache_control() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn it_revalidates_every_static_file_into_a_304() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    // The shell is served `no-cache`, which promises revalidation - not a full body on
+    // every reload. The index and the fallback are reached by their own handlers, so this
+    // covers all three routes rather than the named-file one alone.
+    for (path, expected) in [
+        ("/", "no-cache"),
+        ("/deep/unknown", "no-cache"),
+        ("/assets/app.css", "max-age=86400, public, immutable"),
+    ] {
+        let first = server.client().get(server.url(path)).send().await.unwrap();
+        assert!(first.status().is_success(), "{path}");
+        let etag = first.headers().get("etag").unwrap().clone();
+
+        let second = server
+            .client()
+            .get(server.url(path))
+            .header("if-none-match", etag)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(second.status(), 304, "{path}");
+        assert_eq!(second.content_length().unwrap_or(0), 0, "{path}");
+        // A cache updates what it stored from the headers of the `304`, so the policy has
+        // to be on it as well - otherwise a file keeps the policy it was first stored with.
+        assert_eq!(
+            second.headers().get("cache-control").unwrap(),
+            expected,
+            "{path}"
+        );
+    }
+
+    server.shutdown().await;
+}
