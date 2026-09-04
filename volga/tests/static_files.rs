@@ -374,3 +374,39 @@ async fn it_revalidates_every_static_file_into_a_304() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn it_revalidates_on_the_last_modified_it_emitted() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    // The checked-in fixtures carry a fractional mtime, as files on any modern filesystem
+    // do, while an HTTP-date carries whole seconds - so this fails unless the two are
+    // compared at the same precision.
+    for path in ["/", "/deep/unknown", "/assets/app.css"] {
+        let first = server.client().get(server.url(path)).send().await.unwrap();
+        let last_modified = first.headers().get("last-modified").unwrap().clone();
+
+        let second = server
+            .client()
+            .get(server.url(path))
+            .header("if-modified-since", last_modified)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(second.status(), 304, "{path}");
+    }
+
+    server.shutdown().await;
+}

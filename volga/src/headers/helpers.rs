@@ -1,5 +1,5 @@
 use httpdate::parse_http_date;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::headers::{ETag, ETagRef, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH};
 
@@ -30,7 +30,23 @@ pub(crate) fn validate_last_modified(last_modified: SystemTime, headers: &HttpHe
         .get_raw(&IF_MODIFIED_SINCE)
         .and_then(|if_modified_since| if_modified_since.to_str().ok())
         .and_then(|if_modified_since| parse_http_date(if_modified_since).ok())
-        .is_some_and(|value| last_modified <= value)
+        .is_some_and(|value| truncate_to_secs(last_modified) <= value)
+}
+
+/// Drops the sub-second part of a timestamp.
+///
+/// An HTTP-date carries whole seconds (RFC 9110 Section 5.6.7), so that is the precision the
+/// client echoes back in `If-Modified-Since` - while a modern filesystem reports an `mtime`
+/// with nanoseconds. Comparing the two as they are makes any file whose `mtime` has a
+/// fractional part look strictly newer than the very `Last-Modified` it was just served
+/// with, and it would never validate.
+#[inline]
+fn truncate_to_secs(time: SystemTime) -> SystemTime {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(since_epoch) => UNIX_EPOCH + Duration::from_secs(since_epoch.as_secs()),
+        // Older than the epoch, so out of range for an HTTP-date anyway.
+        Err(_) => time,
+    }
 }
 
 #[cfg(test)]
@@ -40,6 +56,41 @@ mod tests {
         ETag, HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH,
     };
     use std::time::Duration;
+
+    #[test]
+    fn it_validates_a_last_modified_it_just_emitted() {
+        // A file whose mtime carries nanoseconds - the norm on ext4, APFS and NTFS.
+        let modified = UNIX_EPOCH + Duration::from_nanos(1_700_000_000_721_955_581);
+
+        // The client echoes back exactly what `Last-Modified` carried, whole seconds.
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            IF_MODIFIED_SINCE,
+            HeaderValue::from_str(&httpdate::fmt_http_date(modified)).unwrap(),
+        );
+
+        assert!(validate_last_modified(
+            modified,
+            &HttpHeaders::from(headers)
+        ));
+    }
+
+    #[test]
+    fn it_rejects_a_last_modified_older_than_the_file() {
+        let modified = UNIX_EPOCH + Duration::from_nanos(1_700_000_000_721_955_581);
+        let stale = modified - Duration::from_secs(1);
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            IF_MODIFIED_SINCE,
+            HeaderValue::from_str(&httpdate::fmt_http_date(stale)).unwrap(),
+        );
+
+        assert!(!validate_last_modified(
+            modified,
+            &HttpHeaders::from(headers)
+        ));
+    }
 
     #[test]
     fn it_validates_etag_list() {
