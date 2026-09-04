@@ -5,8 +5,13 @@ use crate::http::endpoints::{
     route::PathArgs,
 };
 use crate::{
-    App, HttpResult, app::HostEnv, error::Error, html, html_file, http::StatusCode,
-    routing::RouteGroup, status,
+    App, HttpResult,
+    app::HostEnv,
+    error::Error,
+    html, html_file,
+    http::{Method, StatusCode},
+    routing::RouteGroup,
+    status,
 };
 use futures_util::future::{Ready, ready};
 use std::{
@@ -16,8 +21,8 @@ use std::{
 use tokio::fs::{File, canonicalize, metadata};
 
 use crate::headers::{
-    CACHE_CONTROL, ETAG, HttpHeaders, LAST_MODIFIED, ResponseCaching,
-    helpers::{validate_etag, validate_last_modified},
+    CACHE_CONTROL, CacheControl, ETAG, HttpHeaders, LAST_MODIFIED, ResponseCaching,
+    helpers::validate_preconditions,
 };
 
 mod file_listing;
@@ -36,46 +41,74 @@ const PATH_SEGMENT_PREFIX: &str = "path_";
 struct AssetPath(PathBuf);
 
 #[inline]
-async fn index(env: HostEnv) -> HttpResult {
+async fn index(method: Method, env: HostEnv, headers: HttpHeaders) -> HttpResult {
     if env.show_files_listing() {
         let path = env.content_root().to_path_buf();
         respond_with_folder_impl(path, env.content_root(), true).await
     } else {
         let index_path = env.index_path().to_path_buf();
-        let metadata = metadata(&index_path).await?;
-        let caching = ResponseCaching::try_from(&metadata)?;
-
-        respond_with_file_impl(index_path, caching).await
+        respond_with_shell_impl(index_path, &method, &headers, env.shell_cache_control()).await
     }
 }
 
 #[inline]
-async fn fallback(env: HostEnv) -> HttpResult {
+async fn fallback(method: Method, env: HostEnv, headers: HttpHeaders) -> HttpResult {
     match env.fallback_path() {
         None => status!(404),
         Some(path) => {
             let path = path.to_path_buf();
-            let metadata = metadata(&path).await?;
-            let caching = ResponseCaching::try_from(&metadata)?;
-
-            respond_with_file_impl(path, caching).await
+            respond_with_shell_impl(path, &method, &headers, env.shell_cache_control()).await
         }
     }
+}
+
+/// Answers with a file addressed by a stable name - the index or the fallback one.
+///
+/// The shell is served `no-cache` by default, which is a promise that it will be revalidated
+/// rather than that it will be re-sent: these two are reached by their own handlers rather
+/// than through [`respond_with_file`], so they have to run the request's validators
+/// themselves or every reload would pay for a full body.
+#[inline]
+async fn respond_with_shell_impl(
+    path: PathBuf,
+    method: &Method,
+    headers: &HttpHeaders,
+    cache_control: CacheControl,
+) -> HttpResult {
+    let metadata = metadata(&path).await?;
+    let caching = ResponseCaching::try_from(&metadata)?.with_cache_control(cache_control);
+
+    respond_with_file_or_304_impl(path, caching, method, headers).await
 }
 
 #[inline]
 async fn respond_with_file(
     AssetPath(path): AssetPath,
+    method: Method,
     headers: HttpHeaders,
     env: HostEnv,
 ) -> HttpResult {
     let path = env.content_root().join(path);
-    let response =
-        respond_with_file_or_dir_impl(path, headers, env.content_root(), env.show_files_listing())
-            .await;
+    // The index and the fallback file keep their own policy even when they are requested
+    // by name, since the name they are addressed by is stable either way.
+    let cache_control = if env.is_shell_path(&path) {
+        env.shell_cache_control()
+    } else {
+        env.asset_cache_control()
+    };
+
+    let response = respond_with_file_or_dir_impl(
+        path,
+        &method,
+        &headers,
+        env.content_root(),
+        env.show_files_listing(),
+        cache_control,
+    )
+    .await;
     match response {
         Ok(response) => Ok(response),
-        Err(err) if err.status == StatusCode::NOT_FOUND => fallback(env).await,
+        Err(err) if err.status == StatusCode::NOT_FOUND => fallback(method, env, headers).await,
         Err(err) => Err(err),
     }
 }
@@ -156,9 +189,11 @@ fn malformed_escape() -> Error {
 #[inline]
 async fn respond_with_file_or_dir_impl(
     path: PathBuf,
-    headers: HttpHeaders,
+    method: &Method,
+    headers: &HttpHeaders,
     content_root: &Path,
     show_files_listing: bool,
+    cache_control: CacheControl,
 ) -> HttpResult {
     let (path, content_root) = sanitize_path(path, content_root).await?;
     let metadata = metadata(&path).await?;
@@ -166,18 +201,34 @@ async fn respond_with_file_or_dir_impl(
         (true, false) => status!(403, text: ACCESS_DENIED_MESSAGE),
         (true, true) => respond_with_folder_impl(path, &content_root, false).await,
         (false, _) => {
-            let caching = ResponseCaching::try_from(&metadata)?;
-            if validate_etag(&caching.etag, &headers)
-                || validate_last_modified(caching.last_modified, &headers)
-            {
-                status!(304; [
-                    (ETAG, caching.etag()),
-                    (LAST_MODIFIED, caching.last_modified())
-                ])
-            } else {
-                respond_with_file_impl(path, caching).await
-            }
+            let caching = ResponseCaching::try_from(&metadata)?.with_cache_control(cache_control);
+            respond_with_file_or_304_impl(path, caching, method, headers).await
         }
+    }
+}
+
+/// Answers with a `304` when the request's validators still match the file, and with the
+/// file itself otherwise.
+///
+/// The `304` carries the `Cache-Control` as well: RFC 9111 Section 4.3.4 has a cache update
+/// the stored response from the headers of the `304`, so leaving it out would let a cache
+/// keep serving a file under the policy it was first stored with - which is exactly what a
+/// change to the [`HostEnv`] policy is meant to replace.
+#[inline]
+async fn respond_with_file_or_304_impl(
+    path: PathBuf,
+    caching: ResponseCaching,
+    method: &Method,
+    headers: &HttpHeaders,
+) -> HttpResult {
+    if validate_preconditions(method, &caching, headers) {
+        status!(304; [
+            (ETAG, caching.etag()),
+            (LAST_MODIFIED, caching.last_modified()),
+            (CACHE_CONTROL, caching.cache_control()),
+        ])
+    } else {
+        respond_with_file_impl(path, caching).await
     }
 }
 
@@ -395,18 +446,146 @@ mod tests {
     };
     use crate::app::HostEnv;
     use crate::headers::{
-        HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
+        CACHE_CONTROL, CacheControl, HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE,
+        IF_NONE_MATCH, ResponseCaching,
     };
+    use crate::http::Method;
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
     use tokio::fs::metadata;
 
+    fn no_headers() -> HttpHeaders {
+        HttpHeaders::from(HeaderMap::new())
+    }
+
+    fn if_none_match(etag: &str) -> HttpHeaders {
+        let mut headers = HeaderMap::new();
+        headers.insert(IF_NONE_MATCH, etag.try_into().unwrap());
+        HttpHeaders::from(headers)
+    }
+
+    #[tokio::test]
+    async fn it_returns_304_for_an_index_whose_etag_still_matches() {
+        let env = HostEnv::new("tests/static");
+        let metadata = metadata(env.index_path()).await.unwrap();
+        let caching = ResponseCaching::try_from(&metadata).unwrap();
+
+        let response = index(Method::GET, env, if_none_match(caching.etag()))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 304);
+        assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-cache");
+    }
+
+    #[tokio::test]
+    async fn it_returns_304_for_a_fallback_whose_etag_still_matches() {
+        let env = HostEnv::new("tests/static").with_fallback_file("index.html");
+        let metadata = metadata(env.fallback_path().unwrap()).await.unwrap();
+        let caching = ResponseCaching::try_from(&metadata).unwrap();
+
+        let response = fallback(Method::GET, env, if_none_match(caching.etag()))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 304);
+        assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-cache");
+    }
+
+    #[tokio::test]
+    async fn it_returns_the_cache_control_on_a_304() {
+        let path = PathBuf::from("tests/static/index.html");
+        let metadata = metadata(&path).await.unwrap();
+        let caching = ResponseCaching::try_from(&metadata).unwrap();
+
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &if_none_match(caching.etag()),
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), 304);
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL).unwrap(),
+            "max-age=86400, public, immutable"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_ignores_the_date_when_the_etag_says_the_file_changed() {
+        let path = PathBuf::from("tests/static/index.html");
+        let metadata = metadata(&path).await.unwrap();
+        let caching = ResponseCaching::try_from(&metadata).unwrap();
+
+        // A client holding the shell from a build that has since been rolled back: its
+        // `ETag` no longer matches what is on disk, but the date it remembers is newer
+        // than the restored file's `mtime`.
+        let mut headers = HeaderMap::new();
+        headers.insert(IF_NONE_MATCH, "\"not-the-tag-on-disk\"".try_into().unwrap());
+        headers.insert(
+            IF_MODIFIED_SINCE,
+            HeaderValue::from_str(&httpdate::fmt_http_date(
+                caching.last_modified + Duration::from_secs(60),
+            ))
+            .unwrap(),
+        );
+
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &HttpHeaders::from(headers),
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await
+        .unwrap();
+
+        // RFC 9110 Section 13.1.3: `If-Modified-Since` is ignored when `If-None-Match` is
+        // there, so the mismatching tag decides and the client is sent the current file.
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_still_reads_the_date_when_no_etag_was_sent() {
+        let path = PathBuf::from("tests/static/index.html");
+        let metadata = metadata(&path).await.unwrap();
+        let caching = ResponseCaching::try_from(&metadata).unwrap();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            IF_MODIFIED_SINCE,
+            HeaderValue::from_str(&httpdate::fmt_http_date(
+                caching.last_modified + Duration::from_secs(60),
+            ))
+            .unwrap(),
+        );
+
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &HttpHeaders::from(headers),
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status(), 304);
+    }
+
     #[tokio::test]
     async fn it_returns_index() {
         let env = HostEnv::new("tests/static");
 
-        let index_response = index(env).await;
+        let index_response = index(Method::GET, env, no_headers()).await;
 
         assert!(index_response.is_ok());
         assert_eq!(
@@ -423,7 +602,7 @@ mod tests {
     async fn it_returns_root_folder_files_listing() {
         let env = HostEnv::new("tests/static").with_files_listing();
 
-        let index_response = index(env).await;
+        let index_response = index(Method::GET, env, no_headers()).await;
 
         assert!(index_response.is_ok());
         assert_eq!(
@@ -440,7 +619,7 @@ mod tests {
     async fn it_returns_fallback() {
         let env = HostEnv::new("tests/static").with_fallback_file("index.html");
 
-        let index_response = fallback(env).await;
+        let index_response = fallback(Method::GET, env, no_headers()).await;
 
         assert!(index_response.is_ok());
         assert_eq!(
@@ -454,10 +633,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_returns_index_with_the_shell_cache_control() {
+        let env = HostEnv::new("tests/static");
+
+        let response = index(Method::GET, env, no_headers()).await.unwrap();
+
+        assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-cache");
+    }
+
+    #[tokio::test]
+    async fn it_returns_index_with_a_configured_cache_control() {
+        let env = HostEnv::new("tests/static")
+            .with_shell_cache_control(|cc| cc.with_no_store().with_private());
+
+        let response = index(Method::GET, env, no_headers()).await.unwrap();
+
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL).unwrap(),
+            "no-cache, no-store, private"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_returns_fallback_with_the_shell_cache_control() {
+        let env = HostEnv::new("tests/static").with_fallback_file("index.html");
+
+        let response = fallback(Method::GET, env, no_headers()).await.unwrap();
+
+        assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-cache");
+    }
+
+    #[tokio::test]
+    async fn it_responds_with_the_given_cache_control() {
+        let path = PathBuf::from("tests/static/index.html");
+        let headers = HttpHeaders::from(HeaderMap::new());
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &headers,
+            &path,
+            false,
+            CacheControl::default().with_max_age(60).with_public(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            response.headers().get(CACHE_CONTROL).unwrap(),
+            "max-age=60, public"
+        );
+    }
+
+    #[tokio::test]
     async fn it_returns_no_fallback() {
         let env = HostEnv::new("tests/static");
 
-        let index_response = fallback(env).await;
+        let index_response = fallback(Method::GET, env, no_headers()).await;
 
         assert!(index_response.is_ok());
         assert_eq!(index_response.unwrap().status(), 404);
@@ -501,7 +732,15 @@ mod tests {
     async fn it_responds_with_directory_listing() {
         let path = PathBuf::from("tests/static");
         let headers = HttpHeaders::from(HeaderMap::new());
-        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, true).await;
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &headers,
+            &path,
+            true,
+            CacheControl::ASSET,
+        )
+        .await;
 
         assert!(response.is_ok());
         assert_eq!(
@@ -514,7 +753,15 @@ mod tests {
     async fn it_responds_with_403_as_shows_files_is_false() {
         let path = PathBuf::from("tests/static");
         let headers = HttpHeaders::from(HeaderMap::new());
-        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &headers,
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await;
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().status(), 403);
@@ -525,7 +772,15 @@ mod tests {
         let path = PathBuf::from("tests/static/index.html");
         let headers = HeaderMap::new();
         let headers = HttpHeaders::from(headers);
-        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &headers,
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await;
 
         assert!(response.is_ok());
         assert_eq!(
@@ -546,7 +801,15 @@ mod tests {
         );
 
         let headers = HttpHeaders::from(headers);
-        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &headers,
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await;
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().status(), 304);
@@ -561,7 +824,15 @@ mod tests {
         headers.insert(IF_NONE_MATCH, caching.etag().try_into().unwrap());
 
         let headers = HttpHeaders::from(headers);
-        let response = respond_with_file_or_dir_impl(path.clone(), headers, &path, false).await;
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &headers,
+            &path,
+            false,
+            CacheControl::ASSET,
+        )
+        .await;
 
         assert!(response.is_ok());
         assert_eq!(response.unwrap().status(), 304);

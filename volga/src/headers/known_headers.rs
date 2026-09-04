@@ -5,6 +5,9 @@ use super::{
     cache_control::{NO_CACHE, NO_STORE, PRIVATE, PUBLIC},
 };
 
+#[cfg(feature = "static-files")]
+use {super::HeaderValue, std::sync::LazyLock};
+
 use mime::{
     APPLICATION_JSON, APPLICATION_OCTET_STREAM, APPLICATION_WWW_FORM_URLENCODED, TEXT_EVENT_STREAM,
     TEXT_HTML, TEXT_HTML_UTF_8, TEXT_PLAIN, TEXT_PLAIN_UTF_8,
@@ -164,6 +167,55 @@ impl CacheControl {
     }
 }
 
+/// The rendered form of [`CacheControl::ASSET`].
+///
+/// The policy is the single source of truth, so this is built from it rather than spelled
+/// out. Rendering allocates, which the `from_static` presets around here do not, so it is
+/// done once on first use and handed out as a [`HeaderValue`] clone - a refcount bump.
+#[cfg(feature = "static-files")]
+static ASSET: LazyLock<HeaderValue> = LazyLock::new(|| render(CacheControl::ASSET));
+
+/// The rendered form of [`CacheControl::SHELL`], see [`ASSET`].
+#[cfg(feature = "static-files")]
+static SHELL: LazyLock<HeaderValue> = LazyLock::new(|| render(CacheControl::SHELL));
+
+/// Renders a [`CacheControl`] into the header value it describes.
+///
+/// [`CacheControl`] writes out nothing but directive names, `=` and decimal digits, so the
+/// result is always a valid header value and the failure branch is unreachable.
+#[cfg(feature = "static-files")]
+fn render(cache_control: CacheControl) -> HeaderValue {
+    cache_control
+        .try_into()
+        .expect("`CacheControl` renders only visible ASCII")
+}
+
+#[cfg(feature = "static-files")]
+impl CacheControl {
+    /// `Cache-Control: max-age=86400, public, immutable`
+    ///
+    /// The ready header form of [`CacheControl::ASSET`] - what the static file server applies
+    /// to a file addressed by a content-hashed name. Reach for the constant instead when the
+    /// policy is to be narrowed before it is sent.
+    #[inline]
+    pub fn asset() -> Header<Self> {
+        Header::from_ref(&ASSET)
+    }
+
+    /// `Cache-Control: no-cache`
+    ///
+    /// The ready header form of [`CacheControl::SHELL`] - what the static file server applies
+    /// to a file addressed by a stable name, the index and the fallback one. Reach for the
+    /// constant instead when the policy is to be narrowed before it is sent.
+    ///
+    /// This renders the same as [`CacheControl::no_cache`] today, and is not an alias for it:
+    /// that one names a directive, this one names the role the directive was chosen for.
+    #[inline]
+    pub fn shell() -> Header<Self> {
+        Header::from_ref(&SHELL)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::headers::{CacheControl, ContentType, FromHeaders, Header};
@@ -241,6 +293,18 @@ mod tests {
     #[test]
     fn it_creates_cache_control_private() {
         assert_header_value(CacheControl::private(), "private");
+    }
+
+    #[cfg(feature = "static-files")]
+    #[test]
+    fn it_creates_cache_control_asset() {
+        assert_header_value(CacheControl::asset(), "max-age=86400, public, immutable");
+    }
+
+    #[cfg(feature = "static-files")]
+    #[test]
+    fn it_creates_cache_control_shell() {
+        assert_header_value(CacheControl::shell(), "no-cache");
     }
 }
 

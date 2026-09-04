@@ -237,3 +237,236 @@ async fn it_rejects_a_malformed_percent_encoded_path() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn it_serves_the_shell_and_the_assets_with_different_cache_control() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    // The index file, the fallback file and the index file requested by name are all
+    // addressed by a stable name, so none of them may be immutable.
+    for path in ["/", "/index.html", "/deep/unknown"] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert!(response.status().is_success(), "{path}");
+        assert_eq!(
+            response.headers().get("cache-control").unwrap(),
+            "no-cache",
+            "{path}"
+        );
+        assert!(response.headers().contains_key("etag"), "{path}");
+    }
+
+    // A content-hashed asset keeps the long-lived immutable policy.
+    let response = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "max-age=86400, public, immutable"
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_serves_static_files_with_configured_cache_control() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+                    .with_asset_cache_control(|cc| cc.with_max_age(60))
+                    .with_shell_cache_control(|cc| cc.with_no_store())
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    for path in ["/", "/deep/unknown"] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert_eq!(
+            response.headers().get("cache-control").unwrap(),
+            "no-cache, no-store",
+            "{path}"
+        );
+    }
+
+    let response = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "max-age=60, public, immutable"
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_revalidates_every_static_file_into_a_304() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    // The shell is served `no-cache`, which promises revalidation - not a full body on
+    // every reload. The index and the fallback are reached by their own handlers, so this
+    // covers all three routes rather than the named-file one alone.
+    for (path, expected) in [
+        ("/", "no-cache"),
+        ("/deep/unknown", "no-cache"),
+        ("/assets/app.css", "max-age=86400, public, immutable"),
+    ] {
+        let first = server.client().get(server.url(path)).send().await.unwrap();
+        assert!(first.status().is_success(), "{path}");
+        let etag = first.headers().get("etag").unwrap().clone();
+
+        let second = server
+            .client()
+            .get(server.url(path))
+            .header("if-none-match", etag)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(second.status(), 304, "{path}");
+        assert_eq!(second.content_length().unwrap_or(0), 0, "{path}");
+        // A cache updates what it stored from the headers of the `304`, so the policy has
+        // to be on it as well - otherwise a file keeps the policy it was first stored with.
+        assert_eq!(
+            second.headers().get("cache-control").unwrap(),
+            expected,
+            "{path}"
+        );
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_revalidates_on_the_last_modified_it_emitted() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    // The checked-in fixtures carry a fractional mtime, as files on any modern filesystem
+    // do, while an HTTP-date carries whole seconds - so this fails unless the two are
+    // compared at the same precision.
+    for path in ["/", "/deep/unknown", "/assets/app.css"] {
+        let first = server.client().get(server.url(path)).send().await.unwrap();
+        let last_modified = first.headers().get("last-modified").unwrap().clone();
+
+        let second = server
+            .client()
+            .get(server.url(path))
+            .header("if-modified-since", last_modified)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(second.status(), 304, "{path}");
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_does_not_report_a_conditional_write_as_not_modified() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let shell = server.client().get(server.url("/")).send().await.unwrap();
+    let etag = shell.headers().get("etag").unwrap().clone();
+    let last_modified = shell.headers().get("last-modified").unwrap().clone();
+
+    // The fallback answers a route that was not found whatever the method was, so a write to
+    // an unknown path reaches the shell too. A validator answers "your copy is current",
+    // which is no answer to a `POST` - and the tag it would match describes the shell rather
+    // than anything this request was aimed at. The path has to be deeper than the segments
+    // `map_static_assets` registers, or the router answers `405` before the fallback runs.
+    let posted = server
+        .client()
+        .post(server.url("/api/v1/orders/new"))
+        .header("if-none-match", etag.clone())
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+
+    assert_ne!(posted.status(), 304);
+
+    let put = server
+        .client()
+        .put(server.url("/api/v1/orders/new"))
+        .header("if-modified-since", last_modified)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+
+    assert_ne!(put.status(), 304);
+
+    // HEAD is a request for a representation, so it still validates.
+    let head = server
+        .client()
+        .head(server.url("/"))
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(head.status(), 304);
+
+    server.shutdown().await;
+}

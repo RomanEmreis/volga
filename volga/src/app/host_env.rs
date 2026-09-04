@@ -1,6 +1,6 @@
 //! Application Host Environment configuration
 
-use crate::App;
+use crate::{App, headers::CacheControl};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -29,6 +29,17 @@ pub struct HostEnv {
     ///
     /// Default: `false`
     show_directory: bool,
+
+    /// `Cache-Control` for the files addressed by a content-hashed name
+    ///
+    /// Default: `max-age=86400, public, immutable`
+    asset_cache_control: CacheControl,
+
+    /// `Cache-Control` for the files addressed by a stable name - the index file
+    /// and the fallback file
+    ///
+    /// Default: `no-cache`
+    shell_cache_control: CacheControl,
 }
 
 impl Default for HostEnv {
@@ -49,6 +60,8 @@ impl HostEnv {
         Self {
             show_directory: false,
             fallback_path: None,
+            asset_cache_control: CacheControl::ASSET,
+            shell_cache_control: CacheControl::SHELL,
             content_root,
             index_path,
         }
@@ -118,6 +131,52 @@ impl HostEnv {
         self
     }
 
+    /// Configures the `Cache-Control` header of the static files that are addressed
+    /// by a content-hashed name, which is every file but the index and the fallback one.
+    ///
+    /// The closure receives the policy currently configured, which starts as
+    /// [`CacheControl::ASSET`] - `max-age=86400, public, immutable`.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use volga::app::HostEnv;
+    ///
+    /// // Keeps the assets fresh for an hour instead of a day
+    /// let env = HostEnv::new("static")
+    ///     .with_asset_cache_control(|cc| cc.with_max_age(60 * 60));
+    /// ```
+    pub fn with_asset_cache_control<F>(mut self, config: F) -> Self
+    where
+        F: FnOnce(CacheControl) -> CacheControl,
+    {
+        self.asset_cache_control = config(self.asset_cache_control);
+        self
+    }
+
+    /// Configures the `Cache-Control` header of the static files that are addressed
+    /// by a stable name - the index file and the fallback file.
+    ///
+    /// The closure receives the policy currently configured, which starts as
+    /// [`CacheControl::SHELL`] - `no-cache`, so that a deploy is picked up on the next
+    /// request rather than after the `max-age` of the previous one.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use volga::app::HostEnv;
+    ///
+    /// // Never stores the shell at all
+    /// let env = HostEnv::new("static")
+    ///     .with_fallback_file("index.html")
+    ///     .with_shell_cache_control(|cc| cc.with_no_store());
+    /// ```
+    pub fn with_shell_cache_control<F>(mut self, config: F) -> Self
+    where
+        F: FnOnce(CacheControl) -> CacheControl,
+    {
+        self.shell_cache_control = config(self.shell_cache_control);
+        self
+    }
+
     /// Enables showing a list of files when root "/static" is requested
     ///
     /// Default: `false`
@@ -160,6 +219,25 @@ impl HostEnv {
     pub fn show_files_listing(&self) -> bool {
         self.show_directory
     }
+
+    /// Returns the `Cache-Control` policy of the files addressed by a content-hashed name
+    #[inline]
+    pub fn asset_cache_control(&self) -> CacheControl {
+        self.asset_cache_control
+    }
+
+    /// Returns the `Cache-Control` policy of the index and the fallback files
+    #[inline]
+    pub fn shell_cache_control(&self) -> CacheControl {
+        self.shell_cache_control
+    }
+
+    /// Returns `true` if `path` is addressed by a stable name - the index file
+    /// or the fallback file - and so must not be served as immutable.
+    #[inline]
+    pub(crate) fn is_shell_path(&self, path: &Path) -> bool {
+        path == self.index_path || self.fallback_path.as_deref() == Some(path)
+    }
 }
 
 impl App {
@@ -189,10 +267,9 @@ impl App {
 
 #[inline]
 fn warn_if_root_is_fs_root(path: &Path) {
-    #[cfg(feature = "tracing")]
     if path == Path::new("/") {
-        tracing::warn!(
-            "HostEnv content_root is set to '/', which can expose the entire filesystem. Consider using a dedicated static directory."
+        warn(
+            "HostEnv content_root is set to '/', which can expose the entire filesystem. Consider using a dedicated static directory.",
         );
     }
 }
@@ -200,12 +277,23 @@ fn warn_if_root_is_fs_root(path: &Path) {
 #[inline]
 fn warn_if_listing_enabled_in_release() {
     #[cfg(not(debug_assertions))]
-    {
-        #[cfg(feature = "tracing")]
-        tracing::warn!(
-            "Static files listing is enabled in release mode; this may leak file metadata. Consider disabling it for production."
-        );
-    }
+    warn(
+        "Static files listing is enabled in release mode; this may leak file metadata. Consider disabling it for production.",
+    );
+}
+
+/// Reports a hosting configuration hazard.
+///
+/// These are found while the [`HostEnv`] is being built, long before a request is served,
+/// and they describe a setup that is unlikely to be intended - so they are reported through
+/// `tracing` when the feature is on, and on `stderr` when it is off, rather than being
+/// dropped along with the feature.
+#[inline]
+fn warn(message: &str) {
+    #[cfg(feature = "tracing")]
+    tracing::warn!("{message}");
+    #[cfg(not(feature = "tracing"))]
+    eprintln!("WARN: {message}");
 }
 
 #[cfg(test)]
@@ -213,6 +301,56 @@ mod tests {
     use super::*;
     use crate::App;
     use std::path::PathBuf;
+
+    #[test]
+    fn it_defaults_to_immutable_assets_and_a_revalidated_shell() {
+        let env = HostEnv::new("/root");
+
+        assert_eq!(
+            env.asset_cache_control().to_string(),
+            "max-age=86400, public, immutable"
+        );
+        assert_eq!(env.shell_cache_control().to_string(), "no-cache");
+    }
+
+    #[test]
+    fn it_configures_asset_cache_control() {
+        let env = HostEnv::new("/root").with_asset_cache_control(|cc| cc.with_max_age(60));
+
+        assert_eq!(
+            env.asset_cache_control().to_string(),
+            "max-age=60, public, immutable"
+        );
+        assert_eq!(env.shell_cache_control().to_string(), "no-cache");
+    }
+
+    #[test]
+    fn it_configures_shell_cache_control() {
+        let env = HostEnv::new("/root").with_shell_cache_control(|cc| cc.with_no_store());
+
+        assert_eq!(env.shell_cache_control().to_string(), "no-cache, no-store");
+        assert_eq!(
+            env.asset_cache_control().to_string(),
+            "max-age=86400, public, immutable"
+        );
+    }
+
+    #[test]
+    fn it_recognizes_the_shell_paths() {
+        let env = HostEnv::new("/root").with_fallback_file("404.html");
+
+        assert!(env.is_shell_path(Path::new("/root/index.html")));
+        assert!(env.is_shell_path(Path::new("/root/404.html")));
+        assert!(!env.is_shell_path(Path::new("/root/assets/app.css")));
+    }
+
+    #[test]
+    fn it_recognizes_no_fallback_as_a_shell_path() {
+        let env = HostEnv::new("/root");
+
+        assert!(env.is_shell_path(Path::new("/root/index.html")));
+        assert!(!env.is_shell_path(Path::new("/root/404.html")));
+    }
 
     #[test]
     fn it_creates_default_host_env() {
