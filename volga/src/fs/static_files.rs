@@ -5,8 +5,13 @@ use crate::http::endpoints::{
     route::PathArgs,
 };
 use crate::{
-    App, HttpResult, app::HostEnv, error::Error, html, html_file, http::StatusCode,
-    routing::RouteGroup, status,
+    App, HttpResult,
+    app::HostEnv,
+    error::Error,
+    html, html_file,
+    http::{Method, StatusCode},
+    routing::RouteGroup,
+    status,
 };
 use futures_util::future::{Ready, ready};
 use std::{
@@ -36,23 +41,23 @@ const PATH_SEGMENT_PREFIX: &str = "path_";
 struct AssetPath(PathBuf);
 
 #[inline]
-async fn index(env: HostEnv, headers: HttpHeaders) -> HttpResult {
+async fn index(method: Method, env: HostEnv, headers: HttpHeaders) -> HttpResult {
     if env.show_files_listing() {
         let path = env.content_root().to_path_buf();
         respond_with_folder_impl(path, env.content_root(), true).await
     } else {
         let index_path = env.index_path().to_path_buf();
-        respond_with_shell_impl(index_path, &headers, env.shell_cache_control()).await
+        respond_with_shell_impl(index_path, &method, &headers, env.shell_cache_control()).await
     }
 }
 
 #[inline]
-async fn fallback(env: HostEnv, headers: HttpHeaders) -> HttpResult {
+async fn fallback(method: Method, env: HostEnv, headers: HttpHeaders) -> HttpResult {
     match env.fallback_path() {
         None => status!(404),
         Some(path) => {
             let path = path.to_path_buf();
-            respond_with_shell_impl(path, &headers, env.shell_cache_control()).await
+            respond_with_shell_impl(path, &method, &headers, env.shell_cache_control()).await
         }
     }
 }
@@ -66,18 +71,20 @@ async fn fallback(env: HostEnv, headers: HttpHeaders) -> HttpResult {
 #[inline]
 async fn respond_with_shell_impl(
     path: PathBuf,
+    method: &Method,
     headers: &HttpHeaders,
     cache_control: CacheControl,
 ) -> HttpResult {
     let metadata = metadata(&path).await?;
     let caching = ResponseCaching::try_from(&metadata)?.with_cache_control(cache_control);
 
-    respond_with_file_or_304_impl(path, caching, headers).await
+    respond_with_file_or_304_impl(path, caching, method, headers).await
 }
 
 #[inline]
 async fn respond_with_file(
     AssetPath(path): AssetPath,
+    method: Method,
     headers: HttpHeaders,
     env: HostEnv,
 ) -> HttpResult {
@@ -92,6 +99,7 @@ async fn respond_with_file(
 
     let response = respond_with_file_or_dir_impl(
         path,
+        &method,
         &headers,
         env.content_root(),
         env.show_files_listing(),
@@ -100,7 +108,7 @@ async fn respond_with_file(
     .await;
     match response {
         Ok(response) => Ok(response),
-        Err(err) if err.status == StatusCode::NOT_FOUND => fallback(env, headers).await,
+        Err(err) if err.status == StatusCode::NOT_FOUND => fallback(method, env, headers).await,
         Err(err) => Err(err),
     }
 }
@@ -181,6 +189,7 @@ fn malformed_escape() -> Error {
 #[inline]
 async fn respond_with_file_or_dir_impl(
     path: PathBuf,
+    method: &Method,
     headers: &HttpHeaders,
     content_root: &Path,
     show_files_listing: bool,
@@ -193,7 +202,7 @@ async fn respond_with_file_or_dir_impl(
         (true, true) => respond_with_folder_impl(path, &content_root, false).await,
         (false, _) => {
             let caching = ResponseCaching::try_from(&metadata)?.with_cache_control(cache_control);
-            respond_with_file_or_304_impl(path, caching, headers).await
+            respond_with_file_or_304_impl(path, caching, method, headers).await
         }
     }
 }
@@ -209,9 +218,10 @@ async fn respond_with_file_or_dir_impl(
 async fn respond_with_file_or_304_impl(
     path: PathBuf,
     caching: ResponseCaching,
+    method: &Method,
     headers: &HttpHeaders,
 ) -> HttpResult {
-    if validate_preconditions(&caching, headers) {
+    if validate_preconditions(method, &caching, headers) {
         status!(304; [
             (ETAG, caching.etag()),
             (LAST_MODIFIED, caching.last_modified()),
@@ -439,6 +449,7 @@ mod tests {
         CACHE_CONTROL, CacheControl, HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE,
         IF_NONE_MATCH, ResponseCaching,
     };
+    use crate::http::Method;
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
@@ -460,7 +471,9 @@ mod tests {
         let metadata = metadata(env.index_path()).await.unwrap();
         let caching = ResponseCaching::try_from(&metadata).unwrap();
 
-        let response = index(env, if_none_match(caching.etag())).await.unwrap();
+        let response = index(Method::GET, env, if_none_match(caching.etag()))
+            .await
+            .unwrap();
 
         assert_eq!(response.status(), 304);
         assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-cache");
@@ -472,7 +485,9 @@ mod tests {
         let metadata = metadata(env.fallback_path().unwrap()).await.unwrap();
         let caching = ResponseCaching::try_from(&metadata).unwrap();
 
-        let response = fallback(env, if_none_match(caching.etag())).await.unwrap();
+        let response = fallback(Method::GET, env, if_none_match(caching.etag()))
+            .await
+            .unwrap();
 
         assert_eq!(response.status(), 304);
         assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-cache");
@@ -486,6 +501,7 @@ mod tests {
 
         let response = respond_with_file_or_dir_impl(
             path.clone(),
+            &Method::GET,
             &if_none_match(caching.etag()),
             &path,
             false,
@@ -522,6 +538,7 @@ mod tests {
 
         let response = respond_with_file_or_dir_impl(
             path.clone(),
+            &Method::GET,
             &HttpHeaders::from(headers),
             &path,
             false,
@@ -552,6 +569,7 @@ mod tests {
 
         let response = respond_with_file_or_dir_impl(
             path.clone(),
+            &Method::GET,
             &HttpHeaders::from(headers),
             &path,
             false,
@@ -567,7 +585,7 @@ mod tests {
     async fn it_returns_index() {
         let env = HostEnv::new("tests/static");
 
-        let index_response = index(env, no_headers()).await;
+        let index_response = index(Method::GET, env, no_headers()).await;
 
         assert!(index_response.is_ok());
         assert_eq!(
@@ -584,7 +602,7 @@ mod tests {
     async fn it_returns_root_folder_files_listing() {
         let env = HostEnv::new("tests/static").with_files_listing();
 
-        let index_response = index(env, no_headers()).await;
+        let index_response = index(Method::GET, env, no_headers()).await;
 
         assert!(index_response.is_ok());
         assert_eq!(
@@ -601,7 +619,7 @@ mod tests {
     async fn it_returns_fallback() {
         let env = HostEnv::new("tests/static").with_fallback_file("index.html");
 
-        let index_response = fallback(env, no_headers()).await;
+        let index_response = fallback(Method::GET, env, no_headers()).await;
 
         assert!(index_response.is_ok());
         assert_eq!(
@@ -618,7 +636,7 @@ mod tests {
     async fn it_returns_index_with_the_shell_cache_control() {
         let env = HostEnv::new("tests/static");
 
-        let response = index(env, no_headers()).await.unwrap();
+        let response = index(Method::GET, env, no_headers()).await.unwrap();
 
         assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-cache");
     }
@@ -628,7 +646,7 @@ mod tests {
         let env = HostEnv::new("tests/static")
             .with_shell_cache_control(|cc| cc.with_no_store().with_private());
 
-        let response = index(env, no_headers()).await.unwrap();
+        let response = index(Method::GET, env, no_headers()).await.unwrap();
 
         assert_eq!(
             response.headers().get(CACHE_CONTROL).unwrap(),
@@ -640,7 +658,7 @@ mod tests {
     async fn it_returns_fallback_with_the_shell_cache_control() {
         let env = HostEnv::new("tests/static").with_fallback_file("index.html");
 
-        let response = fallback(env, no_headers()).await.unwrap();
+        let response = fallback(Method::GET, env, no_headers()).await.unwrap();
 
         assert_eq!(response.headers().get(CACHE_CONTROL).unwrap(), "no-cache");
     }
@@ -651,6 +669,7 @@ mod tests {
         let headers = HttpHeaders::from(HeaderMap::new());
         let response = respond_with_file_or_dir_impl(
             path.clone(),
+            &Method::GET,
             &headers,
             &path,
             false,
@@ -669,7 +688,7 @@ mod tests {
     async fn it_returns_no_fallback() {
         let env = HostEnv::new("tests/static");
 
-        let index_response = fallback(env, no_headers()).await;
+        let index_response = fallback(Method::GET, env, no_headers()).await;
 
         assert!(index_response.is_ok());
         assert_eq!(index_response.unwrap().status(), 404);
@@ -713,9 +732,15 @@ mod tests {
     async fn it_responds_with_directory_listing() {
         let path = PathBuf::from("tests/static");
         let headers = HttpHeaders::from(HeaderMap::new());
-        let response =
-            respond_with_file_or_dir_impl(path.clone(), &headers, &path, true, CacheControl::ASSET)
-                .await;
+        let response = respond_with_file_or_dir_impl(
+            path.clone(),
+            &Method::GET,
+            &headers,
+            &path,
+            true,
+            CacheControl::ASSET,
+        )
+        .await;
 
         assert!(response.is_ok());
         assert_eq!(
@@ -730,6 +755,7 @@ mod tests {
         let headers = HttpHeaders::from(HeaderMap::new());
         let response = respond_with_file_or_dir_impl(
             path.clone(),
+            &Method::GET,
             &headers,
             &path,
             false,
@@ -748,6 +774,7 @@ mod tests {
         let headers = HttpHeaders::from(headers);
         let response = respond_with_file_or_dir_impl(
             path.clone(),
+            &Method::GET,
             &headers,
             &path,
             false,
@@ -776,6 +803,7 @@ mod tests {
         let headers = HttpHeaders::from(headers);
         let response = respond_with_file_or_dir_impl(
             path.clone(),
+            &Method::GET,
             &headers,
             &path,
             false,
@@ -798,6 +826,7 @@ mod tests {
         let headers = HttpHeaders::from(headers);
         let response = respond_with_file_or_dir_impl(
             path.clone(),
+            &Method::GET,
             &headers,
             &path,
             false,

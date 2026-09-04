@@ -1,6 +1,8 @@
 use httpdate::parse_http_date;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::http::Method;
+
 use crate::headers::{
     ETag, ETagRef, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
 };
@@ -8,15 +10,31 @@ use crate::headers::{
 /// Returns `true` when the copy the client already holds is still current, and it may be
 /// answered with a `304`.
 ///
-/// `If-None-Match` decides on its own whenever it is present: RFC 9110 Section 13.1.3 has a
-/// recipient ignore `If-Modified-Since` in that case, the entity tag being the more accurate
-/// validator and the date being carried only for intermediaries that predate it. Reading the
-/// two as an either-or would answer `304` off the date alone after the tag has said the
-/// content changed - which is what a client sees when a deploy is rolled back to a build
-/// whose files are older than the response that client cached.
+/// Only `GET` and `HEAD` are answered this way. A validator says the client's *copy* is
+/// current, which is an answer to a request for a representation and to nothing else - RFC
+/// 9110 Section 13.1.3 has `If-Modified-Since` ignored outright on any other method. This
+/// matters because the fallback file is served for a route that was not found whatever the
+/// method was, so without the guard a conditional `POST` to an unknown path would be told
+/// `304 Not Modified` - a write reported as a cache hit, against a tag describing the shell
+/// rather than anything the request was aimed at.
+///
+/// `If-None-Match` then decides on its own whenever it is present: RFC 9110 Section 13.1.3
+/// has a recipient ignore `If-Modified-Since` in that case, the entity tag being the more
+/// accurate validator and the date being carried only for intermediaries that predate it.
+/// Reading the two as an either-or would answer `304` off the date alone after the tag has
+/// said the content changed - which is what a client sees when a deploy is rolled back to a
+/// build whose files are older than the response that client cached.
 #[inline]
 #[allow(dead_code)]
-pub(crate) fn validate_preconditions(caching: &ResponseCaching, headers: &HttpHeaders) -> bool {
+pub(crate) fn validate_preconditions(
+    method: &Method,
+    caching: &ResponseCaching,
+    headers: &HttpHeaders,
+) -> bool {
+    if !matches!(*method, Method::GET | Method::HEAD) {
+        return false;
+    }
+
     match headers.get_raw(&IF_NONE_MATCH) {
         Some(if_none_match) => matches_etag(&caching.etag, if_none_match),
         None => validate_last_modified(caching.last_modified, headers),

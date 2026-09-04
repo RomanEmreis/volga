@@ -410,3 +410,63 @@ async fn it_revalidates_on_the_last_modified_it_emitted() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn it_does_not_report_a_conditional_write_as_not_modified() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let shell = server.client().get(server.url("/")).send().await.unwrap();
+    let etag = shell.headers().get("etag").unwrap().clone();
+    let last_modified = shell.headers().get("last-modified").unwrap().clone();
+
+    // The fallback answers a route that was not found whatever the method was, so a write to
+    // an unknown path reaches the shell too. A validator answers "your copy is current",
+    // which is no answer to a `POST` - and the tag it would match describes the shell rather
+    // than anything this request was aimed at. The path has to be deeper than the segments
+    // `map_static_assets` registers, or the router answers `405` before the fallback runs.
+    let posted = server
+        .client()
+        .post(server.url("/api/v1/orders/new"))
+        .header("if-none-match", etag.clone())
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+
+    assert_ne!(posted.status(), 304);
+
+    let put = server
+        .client()
+        .put(server.url("/api/v1/orders/new"))
+        .header("if-modified-since", last_modified)
+        .body("{}")
+        .send()
+        .await
+        .unwrap();
+
+    assert_ne!(put.status(), 304);
+
+    // HEAD is a request for a representation, so it still validates.
+    let head = server
+        .client()
+        .head(server.url("/"))
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(head.status(), 304);
+
+    server.shutdown().await;
+}
