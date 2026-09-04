@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.9.11
+
+## Added
+* `HostEnv::with_asset_cache_control` and `HostEnv::with_shell_cache_control` (#230) - the static file server's `Cache-Control` is now configured where the rest of the static file server is configured, rather than being a constant. Each takes the policy currently in effect and returns the one to use, so narrowing a single directive does not mean restating the others. `HostEnv::asset_cache_control` and `HostEnv::shell_cache_control` read them back, and the two defaults are named by the `CacheControl::ASSET` / `CacheControl::SHELL` constants for anyone building one from scratch. They are constants rather than the `CacheControl::public()`-style constructors next to them because those hand back a ready `Header<CacheControl>`, which is a serialized value - it cannot be narrowed, and narrowing is the whole point here.
+* `CacheControl::asset()` and `CacheControl::shell()` - the same two defaults as ready `Header<CacheControl>` presets, for a handler attaching one to a response rather than configuring a server. They sit with `no_cache()`, `public()` and the rest in `known_headers`, under the `static-files` feature that gives them their meaning, and are rendered from the constants above rather than spelled out a second time - once, on first use, since a `Header<CacheControl>` is a serialized value and the constants are not. `shell()` renders what `no_cache()` does and is deliberately not an alias: one names a directive, the other names the role the directive was chosen for.
+* `ResponseCaching::with_cache_control` - replaces the policy of a `ResponseCaching` built from a file's `Metadata`, leaving the `ETag` and the `Last-Modified` derived from that file as they are.
+* `CacheControl::EMPTY` - the `const` equivalent of `CacheControl::default()`, which now delegates to it so the two cannot drift.
+
+## Fixed
+* The index file and the fallback file are no longer served `immutable` (#230). Every static file was answered with one policy - `max-age=86400, public, immutable` - which is right for a file addressed by a content-hashed name and wrong for the two that are addressed by a stable one. `immutable` tells a browser not to revalidate even on a reload, so for the ordinary SPA layout - an `index.html` pointing at `assets/index-<hash>.js` - a user who reloaded after a deploy kept yesterday's shell for up to a day, and yesterday's shell points at asset URLs that no longer exist. The shell now defaults to `no-cache`: it is still validated against the `ETag` that was always emitted, so an unchanged shell costs a `304` and no body, and a deploy is picked up on the next request instead of a day later. Assets keep the policy they had. The index file requested by its own name (`GET /index.html`) is treated as the shell too, since the name it is addressed by is stable either way.
+* `App::with_cache_control` documents that it does not reach the static file server, which sets the header itself. That was already true, and the previous wording - "if they are not explicitly configured for the route or route group" - suggested otherwise; the static files' policy is configured on `HostEnv`. The note is attached only under the `static-files` feature, since without it there is nothing to describe and nothing for its links to resolve to.
+* `HostEnv` reports a hazardous hosting configuration - a content root of `/`, or directory listing left on in a release build - on `stderr` when the `tracing` feature is off, instead of dropping the warning along with the feature. Both are found while the `HostEnv` is built, long before a request is served, and neither is likely to be intended.
+
 # 0.9.10
 
 ## Fixed

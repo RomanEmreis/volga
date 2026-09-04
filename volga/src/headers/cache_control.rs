@@ -47,7 +47,7 @@ pub const STALE_WHILE_REVALIDATE: &str = "stale-while-revalidate";
 /// Represents the HTTP [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
 /// header holds directives (instructions) in both requests and responses that control caching
 /// in browsers and shared caches (e.g., Proxies, CDNs).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CacheControl {
     /// The `no-cache` response directive indicates that the response can be stored in caches,
     /// but the response must be validated with the origin server before each reuse,
@@ -104,6 +104,13 @@ pub struct CacheControl {
     /// The `immutable` response directive indicates that the response will not be updated
     /// while it's fresh.
     immutable: bool,
+}
+
+impl Default for CacheControl {
+    #[inline]
+    fn default() -> Self {
+        Self::EMPTY
+    }
 }
 
 impl FromHeaders for CacheControl {
@@ -306,6 +313,78 @@ impl CacheControl {
     }
 }
 
+impl CacheControl {
+    /// A [`CacheControl`] with no directives set - the `const` equivalent of
+    /// [`CacheControl::default`], and the value every preset below is built from.
+    pub const EMPTY: Self = Self {
+        no_cache: false,
+        no_store: false,
+        max_age: None,
+        s_max_age: None,
+        must_revalidate: false,
+        proxy_revalidate: false,
+        stale_while_revalidate: None,
+        stale_if_error: None,
+        public: false,
+        private: false,
+        immutable: false,
+    };
+
+    /// The default policy of a static file addressed by a content-hashed name:
+    /// `max-age=86400, public, immutable`.
+    ///
+    /// Such a file never changes under the same URL, so it does not need to be revalidated.
+    ///
+    /// This is a policy rather than a ready header - see [`CacheControl::public`] and its
+    /// siblings for those - so it can be narrowed before it is used, which is what
+    /// [`HostEnv::with_asset_cache_control`] does with it.
+    ///
+    /// # Example
+    /// ```
+    /// use volga::headers::CacheControl;
+    ///
+    /// let cc = CacheControl::ASSET.with_max_age(60 * 60);
+    ///
+    /// assert_eq!(cc.to_string(), "max-age=3600, public, immutable");
+    /// ```
+    ///
+    /// [`HostEnv::with_asset_cache_control`]: crate::app::HostEnv::with_asset_cache_control
+    #[cfg(feature = "static-files")]
+    pub const ASSET: Self = Self {
+        max_age: Some(DEFAULT_MAX_AGE),
+        public: true,
+        immutable: true,
+        ..Self::EMPTY
+    };
+
+    /// The default policy of a static file addressed by a stable name - the index file
+    /// and the fallback file: `no-cache`.
+    ///
+    /// The response still carries an `ETag` and a `Last-Modified`, so an unchanged file
+    /// costs a `304` and no body, while a deploy is picked up on the next request instead
+    /// of after the `max-age` of the previous one.
+    ///
+    /// This is a policy rather than a ready header - see [`CacheControl::no_cache`] and its
+    /// siblings for those - so it can be narrowed before it is used, which is what
+    /// [`HostEnv::with_shell_cache_control`] does with it.
+    ///
+    /// # Example
+    /// ```
+    /// use volga::headers::CacheControl;
+    ///
+    /// let cc = CacheControl::SHELL.with_no_store();
+    ///
+    /// assert_eq!(cc.to_string(), "no-cache, no-store");
+    /// ```
+    ///
+    /// [`HostEnv::with_shell_cache_control`]: crate::app::HostEnv::with_shell_cache_control
+    #[cfg(feature = "static-files")]
+    pub const SHELL: Self = Self {
+        no_cache: true,
+        ..Self::EMPTY
+    };
+}
+
 /// Represents a response caching data that is a composition of:
 /// [`ETag`](https://developer.mozilla.org/ru/docs/Web/HTTP/Headers/ETag),
 /// [`Last-Modified`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Last-Modified) and
@@ -333,15 +412,9 @@ impl TryFrom<&Metadata> for ResponseCaching {
     fn try_from(meta: &Metadata) -> Result<Self, Self::Error> {
         let last_modified = meta.modified()?;
         let etag: ETag = meta.try_into()?;
-        let cache_control = CacheControl {
-            public: true,
-            immutable: true,
-            max_age: Some(DEFAULT_MAX_AGE),
-            ..Default::default()
-        };
 
         let this = Self {
-            cache_control,
+            cache_control: CacheControl::ASSET,
             etag,
             last_modified,
         };
@@ -350,6 +423,15 @@ impl TryFrom<&Metadata> for ResponseCaching {
 }
 
 impl ResponseCaching {
+    /// Replaces the
+    /// [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
+    /// policy, leaving the `ETag` and the `Last-Modified` as they are.
+    #[must_use]
+    pub fn with_cache_control(mut self, cache_control: CacheControl) -> Self {
+        self.cache_control = cache_control;
+        self
+    }
+
     /// Returns a [`ETag`](https://developer.mozilla.org/ru/docs/Web/HTTP/Headers/ETag) value as `&str`
     #[inline]
     pub fn etag(&self) -> &str {
@@ -376,6 +458,19 @@ impl App {
     /// Configures a `cache-control` header that will be added for all responses from this server
     /// if they are not explicitly configured for the route or route group.
     ///
+    // The static file server sets the header itself, so this default never reaches it. The note
+    // is attached only when that server is compiled in - without the `static-files` feature it
+    // describes nothing, and the items it links to do not exist.
+    #[cfg_attr(
+        feature = "static-files",
+        doc = r"> ***Note:*** the static file server always sets the header itself, so this default
+> does not reach it. Configure it through [`HostEnv::with_asset_cache_control`] and
+> [`HostEnv::with_shell_cache_control`] instead.
+
+[`HostEnv::with_asset_cache_control`]: crate::app::HostEnv::with_asset_cache_control
+[`HostEnv::with_shell_cache_control`]: crate::app::HostEnv::with_shell_cache_control
+"
+    )]
     /// # Example
     /// ```no_run
     /// use volga::{App, headers::CacheControl};
@@ -631,6 +726,44 @@ mod tests {
     fn it_tests_stale_if_error() {
         let cc = CacheControl::default().with_stale_if_error(600);
         assert_eq!(cc.stale_if_error, Some(600));
+    }
+
+    #[test]
+    fn it_defaults_to_the_empty_policy() {
+        assert_eq!(CacheControl::default(), CacheControl::EMPTY);
+        assert_eq!(CacheControl::EMPTY.to_string(), "");
+    }
+
+    #[cfg(feature = "static-files")]
+    #[test]
+    fn it_declares_the_default_asset_policy() {
+        assert_eq!(
+            CacheControl::ASSET.to_string(),
+            "max-age=86400, public, immutable"
+        );
+    }
+
+    #[cfg(feature = "static-files")]
+    #[test]
+    fn it_declares_the_default_shell_policy() {
+        // The rendered form is the contract: `immutable` must not appear, or the shell
+        // would not be revalidated on a reload.
+        assert_eq!(CacheControl::SHELL.to_string(), "no-cache");
+    }
+
+    #[test]
+    fn it_replaces_the_cache_control_of_response_caching() {
+        let now = SystemTime::now();
+        let caching = ResponseCaching {
+            etag: ETag::strong("123"),
+            last_modified: now,
+            cache_control: CacheControl::default().with_max_age(60),
+        }
+        .with_cache_control(CacheControl::default().with_no_cache());
+
+        assert_eq!(caching.cache_control(), "no-cache");
+        assert_eq!(caching.etag(), "\"123\"");
+        assert_eq!(caching.last_modified(), httpdate::fmt_http_date(now));
     }
 
     #[test]

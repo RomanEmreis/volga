@@ -237,3 +237,91 @@ async fn it_rejects_a_malformed_percent_encoded_path() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn it_serves_the_shell_and_the_assets_with_different_cache_control() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    // The index file, the fallback file and the index file requested by name are all
+    // addressed by a stable name, so none of them may be immutable.
+    for path in ["/", "/index.html", "/deep/unknown"] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert!(response.status().is_success(), "{path}");
+        assert_eq!(
+            response.headers().get("cache-control").unwrap(),
+            "no-cache",
+            "{path}"
+        );
+        assert!(response.headers().contains_key("etag"), "{path}");
+    }
+
+    // A content-hashed asset keeps the long-lived immutable policy.
+    let response = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "max-age=86400, public, immutable"
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_serves_static_files_with_configured_cache_control() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+                    .with_asset_cache_control(|cc| cc.with_max_age(60))
+                    .with_shell_cache_control(|cc| cc.with_no_store())
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    for path in ["/", "/deep/unknown"] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert_eq!(
+            response.headers().get("cache-control").unwrap(),
+            "no-cache, no-store",
+            "{path}"
+        );
+    }
+
+    let response = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "max-age=60, public, immutable"
+    );
+
+    server.shutdown().await;
+}
