@@ -49,7 +49,7 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 
 #[cfg(feature = "middleware")]
-use crate::http::cors::CorsOverride;
+use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
 pub(crate) use layer::{Layer, RoutePipeline};
 pub(crate) use path_args::{PathArg, PathArgs};
@@ -70,8 +70,9 @@ const DEFAULT_DEPTH: usize = 4;
 pub(super) struct RouteEndpoint {
     pub(super) method: Method,
     pub(super) pipeline: RoutePipeline,
+    /// The CORS policy bound to this route, `None` while nothing has bound one
     #[cfg(feature = "middleware")]
-    pub(super) cors: CorsOverride,
+    pub(super) cors: Option<CorsOverride>,
 }
 
 /// Represents route path node
@@ -128,7 +129,7 @@ impl RouteEndpoint {
             method,
             pipeline: RoutePipeline::new(),
             #[cfg(feature = "middleware")]
-            cors: CorsOverride::Inherit,
+            cors: None,
         }
     }
 
@@ -136,6 +137,13 @@ impl RouteEndpoint {
     #[inline]
     fn insert(&mut self, handler: Layer) {
         self.pipeline.insert(handler);
+    }
+
+    /// Inserts middleware ahead of the layers this endpoint already holds
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(super) fn prepend(&mut self, layers: &[MiddlewareFn]) {
+        self.pipeline.prepend(layers);
     }
 
     /// Compares two route endpoints

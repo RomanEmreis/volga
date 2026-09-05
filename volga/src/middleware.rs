@@ -15,7 +15,7 @@
 
 use crate::{
     App, HttpResult,
-    http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult},
+    http::{FromRequestRef, IntoResponse, MapErr, Method, request::IntoTapResult},
     not_found,
     routing::{Route, RouteGroup},
 };
@@ -91,6 +91,15 @@ impl Middlewares {
     #[inline]
     pub(super) fn add(&mut self, middleware: MiddlewareFn) {
         self.pipeline.push(middleware);
+    }
+
+    /// Inserts middleware right after the route handler that heads a route pipeline,
+    /// keeping the order of both the inserted middleware and the middleware already there
+    #[inline]
+    pub(super) fn insert_after_handler(&mut self, middlewares: &[MiddlewareFn]) {
+        let head = self.pipeline.len().min(1);
+        self.pipeline
+            .splice(head..head, middlewares.iter().cloned());
     }
 
     /// Composes middlewares into a "Linked List" and returns head
@@ -774,11 +783,20 @@ impl<'a> Route<'a> {
 
     #[inline]
     pub(crate) fn map_middleware(self, mw: MiddlewareFn) -> Self {
-        self.app.pipeline.endpoints_mut().map_layer(
+        let endpoints = self.app.pipeline.endpoints_mut();
+
+        endpoints.map_layer(
             self.method.clone(),
             self.pattern.as_ref(),
-            mw.into(),
+            mw.clone().into(),
         );
+
+        // The implicit HEAD endpoint answers this very route with this very handler,
+        // so it runs what this route runs - otherwise a HEAD request is a way around
+        // the middleware guarding the GET
+        if self.implicit_head {
+            endpoints.map_layer(Method::HEAD, self.pattern.as_ref(), mw.into());
+        }
         self
     }
 }
@@ -806,7 +824,7 @@ impl<'a> RouteGroup<'a> {
         F: Fn(HttpContext, NextFn) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = HttpResult> + Send + 'static,
     {
-        self.attach_as("wrap", middleware)
+        self.attach(middleware)
     }
 
     /// Attaches a middleware to this route group request pipeline.
@@ -876,20 +894,6 @@ impl<'a> RouteGroup<'a> {
     where
         F: Middleware,
     {
-        self.attach_as("attach", middleware)
-    }
-
-    /// [`attach`](Self::attach) that reports `method` rather than `attach` when the
-    /// middleware arrives too late to reach the routes already mapped in this group.
-    ///
-    /// Group-level helpers such as `token_bucket` or `authorize` are thin wrappers over
-    /// `attach`, and a warning naming `attach` points at a method the caller never wrote.
-    #[inline]
-    pub(crate) fn attach_as<F>(&mut self, method: &str, middleware: F) -> &mut Self
-    where
-        F: Middleware,
-    {
-        self.warn_if_routes_mapped(method);
         self.middleware.push(make_fn(middleware));
         self
     }
@@ -928,7 +932,6 @@ impl<'a> RouteGroup<'a> {
         F: Filter<Args>,
         Args: FromRequestRef + Send + 'static,
     {
-        self.warn_if_routes_mapped("filter");
         let filter_fn = make_filter_fn(filter);
         self.middleware.push(filter_fn);
         self
@@ -966,19 +969,6 @@ impl<'a> RouteGroup<'a> {
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
-        self.map_ok_as("map_ok", map)
-    }
-
-    /// [`map_ok`](Self::map_ok) that reports `method` rather than `map_ok` when the
-    /// middleware arrives too late to reach the routes already mapped in this group.
-    #[inline]
-    pub(crate) fn map_ok_as<F, R, Args>(&mut self, method: &str, map: F) -> &mut Self
-    where
-        F: MapOk<Args, Output = R>,
-        R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + 'static,
-    {
-        self.warn_if_routes_mapped(method);
         let map_ok_fn = make_map_ok_fn(map);
         self.middleware.push(map_ok_fn);
         self
@@ -1012,19 +1002,6 @@ impl<'a> RouteGroup<'a> {
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
-        self.map_err_as("map_err", map)
-    }
-
-    /// [`map_err`](Self::map_err) that reports `method` rather than `map_err` when the
-    /// middleware arrives too late to reach the routes already mapped in this group.
-    #[inline]
-    pub(crate) fn map_err_as<F, R, Args>(&mut self, method: &str, map: F) -> &mut Self
-    where
-        F: MapErr<Args, Output = R>,
-        R: IntoResponse + 'static,
-        Args: FromRequestRef + Send + 'static,
-    {
-        self.warn_if_routes_mapped(method);
         let map_err_fn = make_map_err_fn(map);
         self.middleware.push(map_err_fn);
         self
@@ -1080,7 +1057,6 @@ impl<'a> RouteGroup<'a> {
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
     {
-        self.warn_if_routes_mapped("tap_req");
         let tap_req_fn = make_tap_req_fn(map);
         self.middleware.push(tap_req_fn);
         self
@@ -1135,7 +1111,6 @@ impl<'a> RouteGroup<'a> {
         F: TapReq<Output = R>,
         R: IntoTapResult,
     {
-        self.warn_if_routes_mapped("tap_req");
         let tap_req_fn = make_tap_req_fn(map);
         self.middleware.push(tap_req_fn);
         self
@@ -1173,7 +1148,6 @@ impl<'a> RouteGroup<'a> {
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
-        self.warn_if_routes_mapped("with");
         let with_fn = make_with_fn(middleware);
         self.middleware.push(with_fn);
         self

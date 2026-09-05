@@ -1,186 +1,267 @@
 #![allow(missing_docs)]
-#![cfg(all(feature = "middleware", feature = "tracing"))]
+#![cfg(all(feature = "test", feature = "middleware"))]
 
-use std::{
-    io,
-    sync::{Arc, Mutex},
-};
-use tracing::Level;
-use tracing_subscriber::fmt::MakeWriter;
-use volga::App;
+//! A route group is a scope: what it configures reaches every route it registered,
+//! whether the route was mapped before or after the configuration.
 
-/// Collects everything a `tracing` subscriber writes so a test can assert on it.
-#[derive(Clone, Default)]
-struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+use std::sync::{Arc, Mutex};
+use volga::headers::{ACCESS_CONTROL_ALLOW_ORIGIN, ORIGIN};
+use volga::http::Method;
+use volga::test::TestServer;
 
-impl LogBuffer {
-    fn contents(&self) -> String {
-        let bytes = self.0.lock().expect("log buffer is not poisoned").clone();
-        String::from_utf8(bytes).expect("log output is valid UTF-8")
-    }
+/// Records the order in which middleware entered the pipeline.
+type Trace = Arc<Mutex<Vec<&'static str>>>;
+
+/// Builds middleware that notes its own name on the way in.
+macro_rules! mark {
+    ($trace:expr, $name:literal) => {{
+        let trace: Trace = Arc::clone($trace);
+        move |ctx: volga::middleware::HttpContext, next: volga::middleware::NextFn| {
+            let trace = Arc::clone(&trace);
+            async move {
+                trace.lock().expect("trace is not poisoned").push($name);
+                next(ctx).await
+            }
+        }
+    }};
 }
 
-impl io::Write for LogBuffer {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0
-            .lock()
-            .map_err(|_| io::Error::other("poisoned log buffer"))?
-            .extend_from_slice(buf);
-        Ok(buf.len())
-    }
+/// Returns what the middleware recorded while serving `path`.
+async fn trace_of(server: &TestServer, trace: &Trace, path: &str) -> Vec<&'static str> {
+    let response = server.client().get(server.url(path)).send().await.unwrap();
+    assert!(response.status().is_success(), "{path}: {response:?}");
 
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
+    let recorded = trace.lock().expect("trace is not poisoned").clone();
+    trace.lock().expect("trace is not poisoned").clear();
+    recorded
 }
 
-impl<'a> MakeWriter<'a> for LogBuffer {
-    type Writer = Self;
+#[tokio::test]
+async fn it_applies_group_middleware_registered_after_a_route() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
 
-    fn make_writer(&'a self) -> Self::Writer {
-        self.clone()
-    }
-}
-
-/// Runs `setup` with a subscriber that captures warnings and returns what it logged.
-fn capture_warnings<F: FnOnce(&mut App)>(setup: F) -> String {
-    let buffer = LogBuffer::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(buffer.clone())
-        .with_max_level(Level::WARN)
-        .finish();
-
-    tracing::subscriber::with_default(subscriber, || {
-        let mut app = App::new();
-        setup(&mut app);
-    });
-
-    buffer.contents()
-}
-
-#[test]
-fn it_warns_when_group_middleware_is_registered_after_a_route() {
-    let logs = capture_warnings(|app| {
+    let server = TestServer::spawn(move |app| {
         app.group("/api", |api| {
             api.map_get("/hello", || async { "Hello, World!" });
-            api.wrap(|ctx, next| async move { next(ctx).await });
+            api.wrap(mark!(&group_trace, "group"));
         });
-    });
+    })
+    .await;
 
-    assert!(
-        logs.contains("RouteGroup::wrap must be called before any map_* in the group"),
-        "unexpected logs: {logs}"
-    );
-    assert!(
-        logs.contains("1 route(s) already mapped under '/api' will not be affected"),
-        "unexpected logs: {logs}"
-    );
+    assert_eq!(trace_of(&server, &trace, "/api/hello").await, ["group"]);
+
+    server.shutdown().await;
 }
 
-#[test]
-fn it_does_not_warn_when_group_middleware_is_registered_before_a_route() {
-    let logs = capture_warnings(|app| {
+#[tokio::test]
+async fn it_keeps_the_registration_order_of_group_middleware_interleaved_with_routes() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
         app.group("/api", |api| {
-            api.wrap(|ctx, next| async move { next(ctx).await });
+            api.wrap(mark!(&group_trace, "first"));
             api.map_get("/hello", || async { "Hello, World!" });
+            api.wrap(mark!(&group_trace, "second"));
         });
-    });
+    })
+    .await;
 
-    assert!(logs.is_empty(), "unexpected logs: {logs}");
+    assert_eq!(
+        trace_of(&server, &trace, "/api/hello").await,
+        ["first", "second"]
+    );
+
+    server.shutdown().await;
 }
 
-#[test]
-fn it_warns_when_group_middleware_is_registered_after_a_sub_group() {
-    let logs = capture_warnings(|app| {
+#[tokio::test]
+async fn it_runs_group_middleware_before_route_middleware() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", |api| {
+            api.map_get("/hello", || async { "Hello, World!" })
+                .wrap(mark!(&group_trace, "route"));
+            api.wrap(mark!(&group_trace, "group"));
+        });
+    })
+    .await;
+
+    assert_eq!(
+        trace_of(&server, &trace, "/api/hello").await,
+        ["group", "route"]
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_inherits_parent_middleware_in_a_sub_group_declared_before_it() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", |api| {
+            api.group("/early", |sub| {
+                sub.wrap(mark!(&group_trace, "early"));
+                sub.map_get("/hello", || async { "Hello, World!" });
+            });
+
+            api.wrap(mark!(&group_trace, "parent"));
+
+            api.group("/late", |sub| {
+                sub.wrap(mark!(&group_trace, "late"));
+                sub.map_get("/hello", || async { "Hello, World!" });
+            });
+        });
+    })
+    .await;
+
+    assert_eq!(
+        trace_of(&server, &trace, "/api/early/hello").await,
+        ["parent", "early"]
+    );
+    assert_eq!(
+        trace_of(&server, &trace, "/api/late/hello").await,
+        ["parent", "late"]
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_runs_an_outer_group_before_every_scope_nested_in_it() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
         app.group("/api", |api| {
             api.group("/users", |users| {
-                users.map_get("/{id}", || async { "Hello, World!" });
+                users
+                    .map_get("/{id}", |id: i32| async move { id })
+                    .wrap(mark!(&group_trace, "route"));
+                users.wrap(mark!(&group_trace, "sub-group"));
             });
-            api.filter(|| async { true });
+            api.wrap(mark!(&group_trace, "group"));
         });
-    });
+    })
+    .await;
 
-    assert!(
-        logs.contains("RouteGroup::filter must be called before any map_* in the group"),
-        "unexpected logs: {logs}"
+    assert_eq!(
+        trace_of(&server, &trace, "/api/users/1").await,
+        ["group", "sub-group", "route"]
     );
+
+    server.shutdown().await;
 }
 
-#[test]
-fn it_warns_when_group_cors_is_registered_after_a_route() {
-    let logs = capture_warnings(|app| {
-        app.group("/api", |api| {
-            api.map_get("/hello", || async { "Hello, World!" });
-            api.disable_cors();
-        });
-    });
+/// The CORS policy of a group reaches the routes above it, and the one a route or a
+/// sub-group chose for itself is not replaced by the one the enclosing scope chose.
+#[tokio::test]
+async fn it_applies_group_cors_registered_after_a_route() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_cors(|cors| {
+                cors.with_name("api")
+                    .with_origins(["https://example.test"])
+                    .with_methods([Method::GET])
+            })
+            .with_cors(|cors| {
+                cors.with_name("other")
+                    .with_origins(["https://other.test"])
+                    .with_methods([Method::GET])
+            })
+        })
+        .setup(|app| {
+            app.use_cors();
 
-    assert!(
-        logs.contains("RouteGroup::disable_cors must be called before any map_* in the group"),
-        "unexpected logs: {logs}"
-    );
+            app.group("/api", |api| {
+                api.map_get("/hello", || async { "Hello, World!" });
+                api.map_get("/own", || async { "Hello, World!" })
+                    .cors_with("other");
+
+                api.group("/users", |users| {
+                    users.map_get("/{id}", |id: i32| async move { id });
+                    users.cors_with("other");
+                });
+
+                api.cors_with("api");
+            });
+        })
+        .build()
+        .await;
+
+    for (path, origin, expected) in [
+        (
+            "/api/hello",
+            "https://example.test",
+            Some("https://example.test"),
+        ),
+        ("/api/own", "https://example.test", None),
+        ("/api/own", "https://other.test", Some("https://other.test")),
+        (
+            "/api/users/1",
+            "https://other.test",
+            Some("https://other.test"),
+        ),
+    ] {
+        let response = server
+            .client()
+            .get(server.url(path))
+            .header(&ORIGIN, origin)
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.status().is_success(), "{path}: {response:?}");
+        assert_eq!(
+            response
+                .headers()
+                .get(&ACCESS_CONTROL_ALLOW_ORIGIN)
+                .map(|value| value.to_str().unwrap()),
+            expected,
+            "{path} from {origin}"
+        );
+    }
+
+    server.shutdown().await;
 }
 
-/// Group-level helpers are thin wrappers over `attach` / `wrap` / `map_ok` / `map_err`,
-/// so the warning has to name the helper the caller actually wrote, once.
-#[cfg(feature = "rate-limiting")]
-#[test]
-fn it_names_the_rate_limiting_method_that_came_too_late() {
-    use volga::rate_limiting::by;
+#[cfg(feature = "openapi")]
+#[tokio::test]
+async fn it_applies_group_open_api_config_registered_after_a_route() {
+    let server = TestServer::builder()
+        .configure(|app| app.with_open_api(|open_api| open_api))
+        .setup(|app| {
+            app.use_open_api();
 
-    let logs = capture_warnings(|app| {
-        app.group("/api", |api| {
-            api.map_get("/hello", || async { "Hello, World!" });
-            api.token_bucket(by::ip());
-        });
-    });
+            app.group("/api", |api| {
+                api.map_get("/hello", || async { "Hello, World!" })
+                    .open_api(|op| op.with_summary("Says hello"));
+                api.open_api(|op| op.with_description("The API"));
+            });
+        })
+        .build()
+        .await;
 
-    assert!(
-        logs.contains("RouteGroup::token_bucket must be called before any map_* in the group"),
-        "unexpected logs: {logs}"
-    );
-    assert!(
-        !logs.contains("RouteGroup::attach"),
-        "the warning should not name the method the caller went through: {logs}"
-    );
-    assert_eq!(logs.lines().count(), 1, "unexpected logs: {logs}");
-}
+    let spec: serde_json::Value = server
+        .client()
+        .get(server.url("/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
 
-#[cfg(feature = "problem-details")]
-#[test]
-fn it_names_the_error_handler_that_came_too_late() {
-    let logs = capture_warnings(|app| {
-        app.group("/api", |api| {
-            api.map_get("/hello", || async { "Hello, World!" });
-            api.map_problem();
-        });
-    });
+    let operation = &spec["paths"]["/api/hello"]["get"];
 
-    assert!(
-        logs.contains("RouteGroup::map_problem must be called before any map_* in the group"),
-        "unexpected logs: {logs}"
-    );
-    assert!(
-        !logs.contains("RouteGroup::map_err"),
-        "unexpected logs: {logs}"
-    );
-}
+    assert_eq!(operation["summary"], "Says hello");
+    assert_eq!(operation["description"], "The API");
+    assert_eq!(operation["tags"][0], "/api");
 
-#[test]
-fn it_names_the_response_mapping_that_came_too_late() {
-    let logs = capture_warnings(|app| {
-        app.group("/api", |api| {
-            api.map_get("/hello", || async { "Hello, World!" });
-            api.cache_control(|cache_control| cache_control.with_max_age(60));
-        });
-    });
-
-    assert!(
-        logs.contains("RouteGroup::cache_control must be called before any map_* in the group"),
-        "unexpected logs: {logs}"
-    );
-    assert!(
-        !logs.contains("RouteGroup::map_ok"),
-        "unexpected logs: {logs}"
-    );
+    server.shutdown().await;
 }

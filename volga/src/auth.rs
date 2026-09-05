@@ -320,7 +320,7 @@ impl<'a> RouteGroup<'a> {
         authorizer: Authorizer<C>,
     ) -> &mut Self {
         self.app.ensure_bearer_auth_configured();
-        self.attach_as("authorize", Authorize::new(authorizer))
+        self.attach(Authorize::new(authorizer))
     }
 }
 

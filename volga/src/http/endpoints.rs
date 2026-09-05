@@ -12,6 +12,7 @@ use {
     super::endpoints::route::Layer,
     crate::headers::{ACCESS_CONTROL_REQUEST_METHOD, HeaderMap, ORIGIN},
     crate::http::cors::CorsOverride,
+    crate::middleware::MiddlewareFn,
 };
 
 pub mod args;
@@ -122,7 +123,7 @@ impl Endpoints {
                                 handler.pipeline.clone(),
                                 route_params.params,
                                 #[cfg(feature = "middleware")]
-                                handler.cors.clone(),
+                                handler.cors.clone().unwrap_or_default(),
                             ))
                         },
                     );
@@ -138,7 +139,7 @@ impl Endpoints {
                     handler.pipeline.clone(),
                     route_params.params,
                     #[cfg(feature = "middleware")]
-                    handler.cors.clone(),
+                    handler.cors.clone().unwrap_or_default(),
                 ))
             },
         )
@@ -163,7 +164,33 @@ impl Endpoints {
     pub(crate) fn bind_cors(&mut self, method: &Method, pattern: &str, cors: CorsOverride) {
         self.routes
             .find_mut(pattern)
-            .map(|route| route.handler_mut(method).map(|h| h.cors = cors));
+            .map(|route| route.handler_mut(method).map(|h| h.cors = Some(cors)));
+    }
+
+    /// Binds a route group's CORS policy to the route handler, unless the route or a
+    /// nested group has already bound one of its own
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn bind_group_cors(&mut self, method: &Method, pattern: &str, cors: CorsOverride) {
+        self.routes.find_mut(pattern).map(|route| {
+            route
+                .handler_mut(method)
+                .map(|h| h.cors.get_or_insert(cors))
+        });
+    }
+
+    /// Inserts a route group's middleware ahead of the layers the route already holds
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn prepend_layers(
+        &mut self,
+        method: &Method,
+        pattern: &str,
+        layers: &[MiddlewareFn],
+    ) {
+        self.routes
+            .find_mut(pattern)
+            .map(|route| route.handler_mut(method).map(|h| h.prepend(layers)));
     }
 
     #[inline]

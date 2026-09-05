@@ -539,6 +539,18 @@ impl OpenApiRouteConfig {
         self
     }
 
+    /// Merges the configuration of an enclosing scope - a route group - into this one.
+    ///
+    /// Whatever the route describes for itself wins, exactly as in [`merge`](Self::merge);
+    /// the difference is the order of the tags, which read outermost first no matter when
+    /// the group's configuration was registered.
+    pub fn merge_outer(mut self, outer: &Self) -> Self {
+        let own_tags = std::mem::take(&mut self.tags);
+        let mut merged = self.merge(outer);
+        merged.tags.extend(own_tags);
+        merged
+    }
+
     /// Merges configurations.
     pub fn merge(mut self, other: &Self) -> Self {
         if self.tags.is_empty() {
