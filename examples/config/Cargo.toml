@@ -6,8 +6,8 @@ publish = false
 
 [dependencies]
 volga = { path = "../../volga", features = ["config"]  }
-serde = { version = "1.0.228", features = ["derive"] }
-tokio = "1.50.0"
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
 workspace = true

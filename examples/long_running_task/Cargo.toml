@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 volga = { path = "../../volga" }
-tokio = "1.46.1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

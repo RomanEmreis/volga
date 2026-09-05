@@ -14,7 +14,7 @@ categories.workspace = true
 keywords = ["volga", "container", "dependency", "injection", "di"]
 
 [dependencies]
-http = "1.5.0"
+http = { workspace = true }
 
 [features]
 default = []
