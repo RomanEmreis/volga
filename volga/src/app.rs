@@ -215,6 +215,15 @@ pub struct App {
     /// for this `GET` handler.
     implicit_head: bool,
 
+    /// Patterns whose `HEAD` endpoint stands in for their `GET` handler.
+    ///
+    /// Such an endpoint is not a route the caller wrote: it answers the `GET` route, so
+    /// it is bound to whatever that route is bound to. A `HEAD` mapped by hand takes the
+    /// pattern out of here and becomes a route of its own. Registration state only - the
+    /// running server has the routes themselves.
+    #[cfg(feature = "middleware")]
+    implicit_head_patterns: std::collections::HashSet<Box<str>>,
+
     /// Maximum total size of all HTTP request headers, in bytes.
     max_header_size: Limit<usize>,
 
@@ -303,6 +312,8 @@ impl App {
             body_limit: Default::default(),
             no_delay: false,
             implicit_head: true,
+            #[cfg(feature = "middleware")]
+            implicit_head_patterns: std::collections::HashSet::new(),
             max_header_count: Limit::Default,
             max_header_size: Limit::Default,
             max_connections: Limit::Default,

@@ -780,14 +780,17 @@ impl<'a> Route<'a> {
 
     #[inline]
     pub(crate) fn cors_override(self, cors: CorsOverride) -> Self {
+        let pattern = self.pattern.as_ref();
+
+        // The HEAD endpoint standing in for this route is this route under another verb,
+        // and answers with the headers this route answers with
+        let implicit_head = self.app.has_implicit_head(&self.method, pattern);
         let endpoints = self.app.pipeline.endpoints_mut();
 
-        endpoints.bind_cors(&self.method, self.pattern.as_ref(), cors.clone());
+        endpoints.bind_cors(&self.method, pattern, cors.clone());
 
-        // The implicit HEAD endpoint is this route under another verb, and answers with
-        // the headers this route answers with
-        if self.implicit_head {
-            endpoints.bind_cors(&Method::HEAD, self.pattern.as_ref(), cors);
+        if implicit_head {
+            endpoints.bind_cors(&Method::HEAD, pattern, cors);
         }
         self
     }

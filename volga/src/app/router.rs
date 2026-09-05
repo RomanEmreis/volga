@@ -406,20 +406,17 @@ impl App {
         self.map_route_impl(method, Cow::Owned(pattern), handler)
     }
 
-    /// Returns `true` if mapping `method` for `pattern` also registers the implicit
-    /// `HEAD` endpoint that answers a `GET` route.
+    /// Returns `true` if `pattern` is answered under `HEAD` by an endpoint standing in
+    /// for the `GET` route `method` names.
     ///
-    /// The twin is a route of its own, so whatever is bound to the `GET` - middleware,
-    /// a CORS policy, the configuration of the group it belongs to - has to be bound to
-    /// it as well, or a `HEAD` request reaches the handler through none of it.
+    /// Such an endpoint is the `GET` route under another verb, so whatever is bound to
+    /// that route - middleware, a CORS policy, the configuration of the group it belongs
+    /// to - is bound to it as well. A `HEAD` mapped by hand is a route of its own and is
+    /// bound to none of it.
     #[inline]
-    pub(crate) fn maps_implicit_head(&mut self, method: &Method, pattern: &str) -> bool {
-        self.implicit_head
-            && method == Method::GET
-            && !self
-                .pipeline
-                .endpoints_mut()
-                .contains(&Method::HEAD, pattern)
+    #[cfg(feature = "middleware")]
+    pub(crate) fn has_implicit_head(&self, method: &Method, pattern: &str) -> bool {
+        method == Method::GET && self.implicit_head_patterns.contains(pattern)
     }
 
     #[inline]
@@ -438,13 +435,27 @@ impl App {
 
         // use &str view only for registration
         let path: &str = pattern.as_ref();
-        let implicit_head = self.maps_implicit_head(&method, path);
+
+        // A HEAD mapped by hand takes the pattern over from the endpoint that was
+        // standing in for the GET, rather than stacking its handler on top of it
+        #[cfg(feature = "middleware")]
+        if method == Method::HEAD && self.implicit_head_patterns.remove(path) {
+            self.pipeline.endpoints_mut().remove_route(&method, path);
+        }
+
+        let implicit_head = self.implicit_head;
         let endpoints = self.pipeline.endpoints_mut();
 
         endpoints.map_route(method.clone(), path, handler.clone());
 
-        if implicit_head {
+        // Asked after the route is in the tree: a lookup for a static path before that
+        // resolves through the dynamic route covering it, and reports its HEAD as this
+        // one's
+        if implicit_head && method == Method::GET && !endpoints.contains(&Method::HEAD, path) {
             endpoints.map_route(Method::HEAD, path, handler.clone());
+
+            #[cfg(feature = "middleware")]
+            self.implicit_head_patterns.insert(Box::from(path));
         }
 
         #[cfg(feature = "openapi")]
@@ -467,8 +478,6 @@ impl App {
             method,
             #[cfg(feature = "middleware")]
             pattern,
-            #[cfg(feature = "middleware")]
-            implicit_head,
             #[cfg(feature = "openapi")]
             openapi_key,
         }
@@ -482,10 +491,6 @@ pub struct Route<'a> {
     pub(crate) method: Method,
     #[cfg(feature = "middleware")]
     pub(crate) pattern: Cow<'a, str>,
-    /// `true` when this route also registered the implicit `HEAD` endpoint, which is
-    /// then bound to whatever this route is bound to
-    #[cfg(feature = "middleware")]
-    pub(crate) implicit_head: bool,
     #[cfg(feature = "openapi")]
     openapi_key: RouteKey,
 }
@@ -497,10 +502,6 @@ pub struct Route<'a> {
 pub(crate) struct GroupRoute {
     method: Method,
     pattern: Box<str>,
-    /// `true` when this is the implicit `HEAD` twin of a `GET` route: it takes the
-    /// group's middleware and CORS policy, and has no OpenAPI operation of its own
-    #[cfg(feature = "openapi")]
-    implicit_head: bool,
 }
 
 /// Represents a group of routes
@@ -565,38 +566,17 @@ impl<'a> Route<'a> {
 impl<'a> RouteGroup<'a> {
     /// Remembers a route registered by this group so that the group's configuration
     /// reaches it when the group closure returns.
-    ///
-    /// `implicit_head` tells the implicit `HEAD` twin of a `GET` route from a route the
-    /// caller mapped, which is what keeps the twin out of the OpenAPI spec.
     #[inline]
     #[cfg_attr(
-        not(all(feature = "middleware", feature = "openapi")),
+        not(any(feature = "middleware", feature = "openapi")),
         allow(unused_variables)
     )]
-    fn record(&mut self, method: &Method, pattern: &str, implicit_head: bool) {
+    fn record(&mut self, method: &Method, pattern: &str) {
         #[cfg(any(feature = "middleware", feature = "openapi"))]
         self.routes.push(GroupRoute {
             method: method.clone(),
             pattern: Box::from(pattern),
-            #[cfg(feature = "openapi")]
-            implicit_head,
         });
-    }
-
-    /// Remembers a route about to be registered by this group, along with the implicit
-    /// `HEAD` endpoint that comes with a `GET`, so the group's configuration reaches
-    /// both.
-    #[inline]
-    fn record_with_implicit_head(&mut self, method: &Method, pattern: &str) {
-        #[cfg(feature = "middleware")]
-        let implicit_head = self.app.maps_implicit_head(method, pattern);
-
-        self.record(method, pattern, false);
-
-        #[cfg(feature = "middleware")]
-        if implicit_head {
-            self.record(&Method::HEAD, pattern, true);
-        }
     }
 
     /// Applies the group's configuration to every route it registered.
@@ -617,17 +597,32 @@ impl<'a> RouteGroup<'a> {
             for route in routes.iter() {
                 #[cfg(feature = "middleware")]
                 {
+                    // The HEAD endpoint standing in for a GET route in this group
+                    // belongs to the group as much as the route does. It is asked about
+                    // here rather than remembered at map time, so a HEAD mapped by hand
+                    // later - which takes the pattern over, and is a route of the group
+                    // in its own right - is not configured twice
+                    let methods = [
+                        Some(&route.method),
+                        self.app
+                            .has_implicit_head(&route.method, &route.pattern)
+                            .then_some(&Method::HEAD),
+                    ];
+
                     let endpoints = self.app.pipeline.endpoints_mut();
-                    if !self.middleware.is_empty() {
-                        endpoints.prepend_layers(&route.method, &route.pattern, &self.middleware);
-                    }
-                    if let Some(cors) = self.cors.clone() {
-                        endpoints.bind_group_cors(&route.method, &route.pattern, cors);
+
+                    for method in methods.into_iter().flatten() {
+                        if !self.middleware.is_empty() {
+                            endpoints.prepend_layers(method, &route.pattern, &self.middleware);
+                        }
+                        if let Some(cors) = self.cors.clone() {
+                            endpoints.bind_cors_if_unset(method, &route.pattern, cors);
+                        }
                     }
                 }
 
                 #[cfg(feature = "openapi")]
-                if !route.implicit_head {
+                {
                     let key = RouteKey {
                         method: route.method.clone(),
                         pattern: route.pattern.as_ref().into(),
@@ -737,7 +732,7 @@ impl<'a> RouteGroup<'a> {
         let method = method.try_into().expect("invalid HTTP method");
         let pattern = [self.prefix.as_str(), pattern.as_ref()].concat();
 
-        self.record_with_implicit_head(&method, &pattern);
+        self.record(&method, &pattern);
         self.app.map_route_owned(method, pattern, handler)
     }
 }
@@ -771,7 +766,7 @@ macro_rules! define_route_group_methods {
                 let method = $http_method;
                 let pattern = [self.prefix.as_str(), pattern].concat();
 
-                self.record_with_implicit_head(&method, &pattern);
+                self.record(&method, &pattern);
                 self.app.map_route_owned(method, pattern, handler)
             }
             )*
@@ -813,17 +808,16 @@ mod tests {
             .map(|route| (route.method.clone(), route.pattern.to_string()))
             .collect::<Vec<_>>();
 
-        // The implicit HEAD twin of the GET is one of the group's routes as well:
-        // it is the same handler under another verb, and takes the same configuration
-        let mut expected = vec![
-            (Method::GET, "/api/hello".to_string()),
-            (Method::POST, "/api/hello".to_string()),
-        ];
-        if cfg!(feature = "middleware") {
-            expected.insert(1, (Method::HEAD, "/api/hello".to_string()));
-        }
-
-        assert_eq!(mapped, expected);
+        // The implicit HEAD twin is not recorded: the group looks it up when it
+        // applies its configuration, so a HEAD mapped by hand later - which replaces
+        // the twin - is not configured twice
+        assert_eq!(
+            mapped,
+            vec![
+                (Method::GET, "/api/hello".to_string()),
+                (Method::POST, "/api/hello".to_string()),
+            ]
+        );
     }
 
     #[cfg(any(feature = "middleware", feature = "openapi"))]
@@ -839,8 +833,7 @@ mod tests {
             count = api.routes.len();
         });
 
-        // The route and, where middleware can be bound to it, its implicit HEAD twin
-        assert_eq!(count, if cfg!(feature = "middleware") { 2 } else { 1 });
+        assert_eq!(count, 1);
     }
 
     #[cfg(any(feature = "middleware", feature = "openapi"))]

@@ -151,6 +151,16 @@ impl Endpoints {
         self.routes.insert(pattern, method, handler.into());
     }
 
+    /// Drops everything mapped for `method` and `pattern` - the handler, its middleware
+    /// pipeline and its CORS policy
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn remove_route(&mut self, method: &Method, pattern: &str) {
+        if let Some(route) = self.routes.find_mut(pattern) {
+            route.remove_handler(method);
+        }
+    }
+
     /// Maps the request layer to the current HTTP Verb and route pattern
     #[inline]
     #[cfg(feature = "middleware")]
@@ -167,11 +177,16 @@ impl Endpoints {
             .map(|route| route.handler_mut(method).map(|h| h.cors = Some(cors)));
     }
 
-    /// Binds a route group's CORS policy to the route handler, unless the route or a
-    /// nested group has already bound one of its own
+    /// Binds CORS headers to the route handler, unless something has already bound a
+    /// policy of its own to it
     #[inline]
     #[cfg(feature = "middleware")]
-    pub(crate) fn bind_group_cors(&mut self, method: &Method, pattern: &str, cors: CorsOverride) {
+    pub(crate) fn bind_cors_if_unset(
+        &mut self,
+        method: &Method,
+        pattern: &str,
+        cors: CorsOverride,
+    ) {
         self.routes.find_mut(pattern).map(|route| {
             route
                 .handler_mut(method)

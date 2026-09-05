@@ -546,8 +546,14 @@ impl OpenApiRouteConfig {
     /// the group's configuration was registered.
     pub fn merge_outer(mut self, outer: &Self) -> Self {
         let own_tags = std::mem::take(&mut self.tags);
+        let own_parameters = std::mem::take(&mut self.extra_parameters);
+
         let mut merged = self.merge(outer);
+
         merged.tags.extend(own_tags);
+        // Same-name parameters replace one another in the order they reach the
+        // operation, so the route's have to come last to win
+        merged.extra_parameters.extend(own_parameters);
         merged
     }
 
@@ -899,6 +905,26 @@ mod tests {
         assert!(cfg.extra_parameters.iter().any(|p| p.name == "name"));
         assert!(cfg.extra_parameters.iter().any(|p| p.name == "age"));
         assert!(cfg.extra_parameters.iter().all(|p| p.location == "query"));
+    }
+
+    #[test]
+    fn merge_outer_keeps_the_route_ahead_of_the_scope_it_is_in() {
+        let group = OpenApiRouteConfig::default()
+            .with_tag("group")
+            .with_summary("group summary")
+            .with_query_parameter("id".into(), OpenApiSchema::string(), false);
+        let route = OpenApiRouteConfig::default()
+            .with_tag("route")
+            .with_query_parameter("id".into(), OpenApiSchema::integer(), true);
+
+        let merged = route.merge_outer(&group);
+
+        // The scope reads outermost first, and the route's own values win: a parameter
+        // replaces a same-name one applied before it, so the route's has to come last
+        assert_eq!(merged.tags, vec!["group".to_string(), "route".to_string()]);
+        assert_eq!(merged.summary.as_deref(), Some("group summary"));
+        assert_eq!(merged.extra_parameters.len(), 2);
+        assert!(merged.extra_parameters[1].required);
     }
 
     #[test]

@@ -239,6 +239,20 @@ impl RouteNode {
         (!current.handlers.as_ref().is_none_or(|h| h.is_empty())).then_some(current)
     }
 
+    /// Removes the handler for the given method, along with its pipeline and CORS policy
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(super) fn remove_handler(&mut self, method: &Method) {
+        let Some(handlers) = self.handlers.as_mut() else {
+            return;
+        };
+
+        if let Ok(i) = handlers.binary_search_by(|h| h.cmp(method)) {
+            handlers.remove(i);
+            self.allowed_methods = Some(make_allowed_str(handlers));
+        }
+    }
+
     /// Returns a reference to the handler for the given method
     #[inline]
     #[allow(unused)]
