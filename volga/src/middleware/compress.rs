@@ -82,7 +82,7 @@ impl App {
 impl<'a> RouteGroup<'a> {
     /// Registers a middleware that applies a default compression algorithm for this group of routes
     pub fn with_compression(&mut self) -> &mut Self {
-        self.wrap(make_compression_fn)
+        self.attach_as("with_compression", make_compression_fn)
     }
 }
 

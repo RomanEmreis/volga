@@ -791,18 +791,21 @@ impl<'a> Route<'a> {
 impl<'a> RouteGroup<'a> {
     /// Disables CORS for this route
     pub fn disable_cors(&mut self) -> &mut Self {
+        self.warn_if_routes_mapped("disable_cors");
         self.cors = CorsOverride::Disabled;
         self
     }
 
     /// Sets the default CORS policy for this route
     pub fn cors(&mut self) -> &mut Self {
+        self.warn_if_routes_mapped("cors");
         self.cors = CorsOverride::Inherit;
         self
     }
 
     /// Sets the named CORS policy for this route
     pub fn cors_with(&mut self, name: &str) -> &mut Self {
+        self.warn_if_routes_mapped("cors_with");
         let policy = self.app.cors.get_named(name).expect("cors policy").clone();
 
         self.cors = CorsOverride::Named(policy);

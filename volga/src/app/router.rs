@@ -22,6 +22,12 @@ const QUERY: &[u8] = b"QUERY";
 impl App {
     /// Maps a group of request handlers combined by `prefix`
     ///
+    /// # Ordering
+    /// A group's middleware, CORS policy and OpenAPI configuration are captured when
+    /// each route is mapped, so they must be registered **before** the `map_*` calls
+    /// they should apply to. Registering them later leaves the already mapped routes
+    /// untouched and logs a warning at startup.
+    ///
     /// # Examples
     /// ```no_run
     /// use volga::{App, Json, ok};
@@ -516,6 +522,38 @@ impl<'a> Route<'a> {
     }
 }
 
+#[cfg(any(feature = "middleware", feature = "openapi"))]
+impl<'a> RouteGroup<'a> {
+    /// Warns that a group-level setting is being registered too late to have any effect.
+    ///
+    /// A group captures its middleware, CORS policy and OpenAPI configuration at the
+    /// moment each route is mapped, so anything registered after a `map_*` call - or
+    /// after a nested `group` that mapped routes of its own - silently does not apply
+    /// to those routes.
+    #[inline]
+    pub(crate) fn warn_if_routes_mapped(&self, method: &str) {
+        if self.route_count == 0 {
+            return;
+        }
+
+        let message = late_group_config_message(method, &self.prefix, self.route_count);
+
+        #[cfg(feature = "tracing")]
+        tracing::warn!("{message}");
+        #[cfg(not(feature = "tracing"))]
+        eprintln!("{message}");
+    }
+}
+
+/// Builds the warning text for a group-level setting registered after `map_*`.
+#[cfg(any(feature = "middleware", feature = "openapi"))]
+fn late_group_config_message(method: &str, prefix: &str, route_count: usize) -> String {
+    format!(
+        "RouteGroup::{method} must be called before any map_* in the group; \
+         {route_count} route(s) already mapped under '{prefix}' will not be affected"
+    )
+}
+
 #[cfg(feature = "openapi")]
 impl<'a> RouteGroup<'a> {
     /// Configures OpenAPI metadata for this route group.
@@ -523,13 +561,7 @@ impl<'a> RouteGroup<'a> {
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
-        if self.route_count > 0 {
-            #[cfg(feature = "tracing")]
-            tracing::warn!("RouteGroup::open_api must be called before any map_* in the group");
-            #[cfg(not(feature = "tracing"))]
-            eprintln!("RouteGroup::open_api must be called before any map_* in the group");
-        }
-
+        self.warn_if_routes_mapped("open_api");
         self.openapi_config = config(self.openapi_config.clone());
         self
     }
@@ -542,6 +574,11 @@ impl<'a> RouteGroup<'a> {
     /// configuration. Any middleware or settings added to the sub-group
     /// apply only to routes within it (and any further nested groups),
     /// running after the parent's middleware.
+    ///
+    /// # Ordering
+    /// The sub-group inherits what the parent has registered **so far**, so the parent's
+    /// middleware and CORS policy must come before the sub-group. Registering them later
+    /// leaves the sub-group's routes untouched and logs a warning at startup.
     ///
     /// # Examples
     /// ```no_run
@@ -585,6 +622,11 @@ impl<'a> RouteGroup<'a> {
         }
 
         f(&mut child);
+
+        // Routes mapped by the sub-group count as routes of this group: they took a
+        // snapshot of the current configuration, so anything registered on the parent
+        // from here on will not reach them.
+        self.route_count += child.route_count;
     }
 
     /// Maps a request handler that matches the given HTTP `method` for the specified pattern.
@@ -715,4 +757,63 @@ define_route_group_methods! {
     (map_trace, Method::TRACE)
     (map_connect, Method::CONNECT)
     (map_query, Method::from_bytes(QUERY).expect("invalid QUERY verb"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
+    #[test]
+    fn it_builds_a_late_group_config_warning() {
+        let message = late_group_config_message("with", "/api", 2);
+
+        assert_eq!(
+            message,
+            "RouteGroup::with must be called before any map_* in the group; \
+             2 route(s) already mapped under '/api' will not be affected"
+        );
+    }
+
+    #[test]
+    fn it_counts_routes_mapped_in_a_group() {
+        let mut app = App::new();
+        let mut count = 0;
+
+        app.group("/api", |api| {
+            api.map_get("/hello", || async { "Hello, World!" });
+            api.map_post("/hello", || async { "Hello, World!" });
+            count = api.route_count;
+        });
+
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn it_counts_routes_mapped_by_a_sub_group_in_the_parent() {
+        let mut app = App::new();
+        let mut count = 0;
+
+        app.group("/api", |api| {
+            api.group("/users", |users| {
+                users.map_get("/{id}", || async { "Hello, World!" });
+            });
+            count = api.route_count;
+        });
+
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn it_does_not_count_an_empty_sub_group_in_the_parent() {
+        let mut app = App::new();
+        let mut count = 0;
+
+        app.group("/api", |api| {
+            api.group("/users", |_users| {});
+            count = api.route_count;
+        });
+
+        assert_eq!(count, 0);
+    }
 }

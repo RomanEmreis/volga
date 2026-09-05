@@ -563,7 +563,7 @@ impl<'a> RouteGroup<'a> {
             .try_into()
             .expect("valid cache-control header");
 
-        self.map_ok(move |resp: HttpResponse| {
+        self.map_ok_as("cache_control", move |resp: HttpResponse| {
             make_cache_control_fn(resp, hv.clone(), HeaderInsertMode::IfAbsent)
         })
     }

@@ -1011,7 +1011,7 @@ impl<'a> RouteGroup<'a> {
     /// });
     /// ```
     pub fn fixed_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        self.attach(RateLimiting::<FixedWindow>::new(source))
+        self.attach_as("fixed_window", RateLimiting::<FixedWindow>::new(source))
     }
 
     /// Enables sliding-window rate limiting for all routes in this group.
@@ -1048,7 +1048,7 @@ impl<'a> RouteGroup<'a> {
     /// });
     /// ```
     pub fn sliding_window<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        self.attach(RateLimiting::<SlidingWindow>::new(source))
+        self.attach_as("sliding_window", RateLimiting::<SlidingWindow>::new(source))
     }
 
     /// Enables token bucket rate limiting for all routes in this group.
@@ -1085,7 +1085,7 @@ impl<'a> RouteGroup<'a> {
     /// });
     /// ```
     pub fn token_bucket<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        self.attach(RateLimiting::<TokenBucket>::new(source))
+        self.attach_as("token_bucket", RateLimiting::<TokenBucket>::new(source))
     }
 
     /// Enables GCRA rate limiting for all routes in this group.
@@ -1122,7 +1122,7 @@ impl<'a> RouteGroup<'a> {
     /// });
     /// ```
     pub fn gcra<K: RateLimitKeyExt>(&mut self, source: K) -> &mut Self {
-        self.attach(RateLimiting::<Gcra>::new(source))
+        self.attach_as("gcra", RateLimiting::<Gcra>::new(source))
     }
 }
 
