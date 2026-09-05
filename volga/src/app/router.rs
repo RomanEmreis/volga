@@ -406,19 +406,6 @@ impl App {
         self.map_route_impl(method, Cow::Owned(pattern), handler)
     }
 
-    /// Returns `true` if `pattern` is answered under `HEAD` by an endpoint standing in
-    /// for the `GET` route `method` names.
-    ///
-    /// Such an endpoint is the `GET` route under another verb, so whatever is bound to
-    /// that route - middleware, a CORS policy, the configuration of the group it belongs
-    /// to - is bound to it as well. A `HEAD` mapped by hand is a route of its own and is
-    /// bound to none of it.
-    #[inline]
-    #[cfg(feature = "middleware")]
-    pub(crate) fn has_implicit_head(&self, method: &Method, pattern: &str) -> bool {
-        method == Method::GET && self.implicit_head_patterns.contains(pattern)
-    }
-
     #[inline]
     fn map_route_impl<'a, F, R, Args>(
         &'a mut self,
@@ -436,27 +423,12 @@ impl App {
         // use &str view only for registration
         let path: &str = pattern.as_ref();
 
-        // A HEAD mapped by hand takes the pattern over from the endpoint that was
-        // standing in for the GET, rather than stacking its handler on top of it
-        #[cfg(feature = "middleware")]
-        if method == Method::HEAD && self.implicit_head_patterns.remove(path) {
-            self.pipeline.endpoints_mut().remove_route(&method, path);
-        }
-
-        let implicit_head = self.implicit_head;
-        let endpoints = self.pipeline.endpoints_mut();
-
-        endpoints.map_route(method.clone(), path, handler.clone());
-
-        // Asked after the route is in the tree: a lookup for a static path before that
-        // resolves through the dynamic route covering it, and reports its HEAD as this
-        // one's
-        if implicit_head && method == Method::GET && !endpoints.contains(&Method::HEAD, path) {
-            endpoints.map_route(Method::HEAD, path, handler.clone());
-
-            #[cfg(feature = "middleware")]
-            self.implicit_head_patterns.insert(Box::from(path));
-        }
+        // A GET route answers HEAD requests as well, and is not mapped a second time for
+        // it: routing hands a HEAD request with no route of its own to the GET route, so
+        // that request travels through everything this one travels through
+        self.pipeline
+            .endpoints_mut()
+            .map_route(method.clone(), path, handler.clone());
 
         #[cfg(feature = "openapi")]
         let openapi_key = {
@@ -597,27 +569,13 @@ impl<'a> RouteGroup<'a> {
             for route in routes.iter() {
                 #[cfg(feature = "middleware")]
                 {
-                    // The HEAD endpoint standing in for a GET route in this group
-                    // belongs to the group as much as the route does. It is asked about
-                    // here rather than remembered at map time, so a HEAD mapped by hand
-                    // later - which takes the pattern over, and is a route of the group
-                    // in its own right - is not configured twice
-                    let methods = [
-                        Some(&route.method),
-                        self.app
-                            .has_implicit_head(&route.method, &route.pattern)
-                            .then_some(&Method::HEAD),
-                    ];
-
                     let endpoints = self.app.pipeline.endpoints_mut();
 
-                    for method in methods.into_iter().flatten() {
-                        if !self.middleware.is_empty() {
-                            endpoints.prepend_layers(method, &route.pattern, &self.middleware);
-                        }
-                        if let Some(cors) = self.cors.clone() {
-                            endpoints.bind_cors_if_unset(method, &route.pattern, cors);
-                        }
+                    if !self.middleware.is_empty() {
+                        endpoints.prepend_layers(&route.method, &route.pattern, &self.middleware);
+                    }
+                    if let Some(cors) = self.cors.clone() {
+                        endpoints.bind_cors_if_unset(&route.method, &route.pattern, cors);
                     }
                 }
 

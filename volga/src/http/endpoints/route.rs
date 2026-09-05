@@ -168,7 +168,13 @@ impl RouteNode {
     }
 
     /// Inserts a handler to the route tree
-    pub(super) fn insert(&mut self, path: &str, method: Method, handler: Layer) {
+    pub(super) fn insert(
+        &mut self,
+        path: &str,
+        method: Method,
+        handler: Layer,
+        implicit_head: bool,
+    ) {
         let mut current = self;
         let path_segments = split_path(path);
 
@@ -181,7 +187,7 @@ impl RouteNode {
             }
         }
 
-        current.insert_handler(method, handler);
+        current.insert_handler(method, handler, implicit_head);
     }
 
     /// Finds handlers by path
@@ -239,20 +245,6 @@ impl RouteNode {
         (!current.handlers.as_ref().is_none_or(|h| h.is_empty())).then_some(current)
     }
 
-    /// Removes the handler for the given method, along with its pipeline and CORS policy
-    #[inline]
-    #[cfg(feature = "middleware")]
-    pub(super) fn remove_handler(&mut self, method: &Method) {
-        let Some(handlers) = self.handlers.as_mut() else {
-            return;
-        };
-
-        if let Ok(i) = handlers.binary_search_by(|h| h.cmp(method)) {
-            handlers.remove(i);
-            self.allowed_methods = Some(make_allowed_str(handlers));
-        }
-    }
-
     /// Returns a reference to the handler for the given method
     #[inline]
     #[allow(unused)]
@@ -288,6 +280,22 @@ impl RouteNode {
         // Compose oute endpoint pipeline if present
         if let Some(handlers) = self.handlers.as_mut() {
             handlers.iter_mut().for_each(|r| r.pipeline.compose());
+        }
+    }
+
+    /// Rebuilds the cached `Allow` value of every route, for when the implicit `HEAD`
+    /// policy changes after routes were mapped
+    pub(super) fn recompute_allowed_methods(&mut self, implicit_head: bool) {
+        self.static_routes
+            .iter_mut()
+            .for_each(|route| route.node.recompute_allowed_methods(implicit_head));
+
+        if let Some(route) = self.dynamic_route.as_mut() {
+            route.node.recompute_allowed_methods(implicit_head);
+        }
+
+        if let Some(handlers) = self.handlers.as_ref() {
+            self.allowed_methods = Some(make_allowed_str(handlers, implicit_head));
         }
     }
 
@@ -367,7 +375,7 @@ impl RouteNode {
     }
 
     #[inline(always)]
-    fn insert_handler(&mut self, method: Method, handler: Layer) {
+    fn insert_handler(&mut self, method: Method, handler: Layer, implicit_head: bool) {
         let handlers = self.handlers.get_or_insert_with(SmallVec::new);
 
         let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
@@ -378,7 +386,7 @@ impl RouteNode {
             }
         };
         endpoint.insert(handler);
-        self.allowed_methods = Some(make_allowed_str(handlers));
+        self.allowed_methods = Some(make_allowed_str(handlers, implicit_head));
     }
 
     #[inline(always)]
@@ -408,13 +416,23 @@ impl RouteNode {
 #[inline(always)]
 pub(super) fn make_allowed_str<const N: usize>(
     handlers: &SmallVec<[RouteEndpoint; N]>,
+    implicit_head: bool,
 ) -> Arc<str> {
     if handlers.is_empty() {
         return Arc::from("");
     }
 
+    // A GET route answers HEAD requests too, and `Allow` names the methods the resource
+    // supports rather than the ones that were mapped
+    let implied_head = implicit_head
+        && handlers.iter().any(|h| h.method == Method::GET)
+        && !handlers.iter().any(|h| h.method == Method::HEAD);
+
     let mut allowed = String::with_capacity(handlers.len() * DEFAULT_DEPTH);
-    let mut iter = handlers.iter().map(|h| h.method.as_str());
+    let mut iter = handlers
+        .iter()
+        .map(|h| h.method.as_str())
+        .chain(implied_head.then_some(Method::HEAD.as_str()));
     if let Some(first) = iter.next() {
         allowed.push_str(first);
         for s in iter {
@@ -470,7 +488,7 @@ mod tests {
         let path = "test";
 
         let mut route = RouteNode::new();
-        route.insert(path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into(), false);
 
         let route_params = route.find(path);
 
@@ -485,7 +503,7 @@ mod tests {
         let path = "test/{value}";
 
         let mut route = RouteNode::new();
-        route.insert(path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into(), false);
 
         let path = "test/some";
 
@@ -504,7 +522,7 @@ mod tests {
         let path = "/users";
 
         let mut route = RouteNode::new();
-        route.insert(path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into(), false);
 
         let routes = route.collect();
 
@@ -521,8 +539,8 @@ mod tests {
         let path = "/users";
 
         let mut route = RouteNode::new();
-        route.insert(path, Method::GET, handler.clone().into());
-        route.insert(path, Method::POST, handler.into());
+        route.insert(path, Method::GET, handler.clone().into(), false);
+        route.insert(path, Method::POST, handler.into(), false);
 
         let routes = route.collect();
 
@@ -541,8 +559,8 @@ mod tests {
         let path2 = "/users/profile";
 
         let mut route = RouteNode::new();
-        route.insert(path1, Method::GET, handler.clone().into());
-        route.insert(path2, Method::GET, handler.into());
+        route.insert(path1, Method::GET, handler.clone().into(), false);
+        route.insert(path2, Method::GET, handler.into(), false);
 
         let routes = route.collect();
 
@@ -560,7 +578,7 @@ mod tests {
         let path = "/users/{id}";
 
         let mut route = RouteNode::new();
-        route.insert(path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into(), false);
 
         let routes = route.collect();
 
@@ -579,9 +597,9 @@ mod tests {
         let path3 = "/users/{id}/posts";
 
         let mut route = RouteNode::new();
-        route.insert(path1, Method::GET, handler.clone().into());
-        route.insert(path2, Method::GET, handler.clone().into());
-        route.insert(path3, Method::GET, handler.into());
+        route.insert(path1, Method::GET, handler.clone().into(), false);
+        route.insert(path2, Method::GET, handler.clone().into(), false);
+        route.insert(path3, Method::GET, handler.into(), false);
 
         let routes = route.collect();
 
@@ -600,7 +618,7 @@ mod tests {
         let path = "";
 
         let mut route = RouteNode::new();
-        route.insert(path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into(), false);
 
         let routes = route.collect();
 
@@ -617,17 +635,28 @@ mod tests {
         let mut route = RouteNode::new();
 
         // Add various routes
-        route.insert("/api/v1/users", Method::GET, handler.clone().into());
-        route.insert("/api/v1/users", Method::POST, handler.clone().into());
+        route.insert("/api/v1/users", Method::GET, handler.clone().into(), false);
+        route.insert("/api/v1/users", Method::POST, handler.clone().into(), false);
         route.insert(
             "/api/v1/users/{id:integer}",
             Method::GET,
             handler.clone().into(),
+            false,
         );
-        route.insert("/api/v1/users/{id}", Method::PUT, handler.clone().into());
-        route.insert("/api/v1/users/{id}", Method::DELETE, handler.clone().into());
-        route.insert("/api/v1/posts", Method::GET, handler.clone().into());
-        route.insert("/api/v2/users", Method::GET, handler.into());
+        route.insert(
+            "/api/v1/users/{id}",
+            Method::PUT,
+            handler.clone().into(),
+            false,
+        );
+        route.insert(
+            "/api/v1/users/{id}",
+            Method::DELETE,
+            handler.clone().into(),
+            false,
+        );
+        route.insert("/api/v1/posts", Method::GET, handler.clone().into(), false);
+        route.insert("/api/v2/users", Method::GET, handler.into(), false);
 
         let routes = route.collect();
 
@@ -660,7 +689,7 @@ mod tests {
         let path = "/users/{userId}/posts/{postId}/comments";
 
         let mut route = RouteNode::new();
-        route.insert(path, Method::GET, handler.into());
+        route.insert(path, Method::GET, handler.into(), false);
 
         let routes = route.collect();
 
@@ -677,11 +706,11 @@ mod tests {
         let path = "resource";
 
         let mut route = RouteNode::new();
-        route.insert(path, Method::GET, handler.clone().into());
-        route.insert(path, Method::POST, handler.clone().into());
-        route.insert(path, Method::PUT, handler.clone().into());
-        route.insert(path, Method::DELETE, handler.clone().into());
-        route.insert(path, Method::PATCH, handler.into());
+        route.insert(path, Method::GET, handler.clone().into(), false);
+        route.insert(path, Method::POST, handler.clone().into(), false);
+        route.insert(path, Method::PUT, handler.clone().into(), false);
+        route.insert(path, Method::DELETE, handler.clone().into(), false);
+        route.insert(path, Method::PATCH, handler.into(), false);
 
         let routes = route.collect();
 
@@ -745,14 +774,14 @@ mod tests {
             RouteEndpoint::new(Method::HEAD),
         ];
 
-        let allowed = make_allowed_str(&handlers);
+        let allowed = make_allowed_str(&handlers, false);
         assert_eq!(allowed.as_ref(), "GET,HEAD");
     }
 
     #[test]
     fn it_makes_empty_allowed_str_if_no_handlers() {
         let handlers: SmallVec<[RouteEndpoint; DEFAULT_DEPTH]> = smallvec::smallvec![];
-        let allowed = make_allowed_str(&handlers);
+        let allowed = make_allowed_str(&handlers, false);
         assert_eq!(allowed.as_ref(), "");
     }
 }

@@ -15,7 +15,7 @@
 
 use crate::{
     App, HttpResult,
-    http::{FromRequestRef, IntoResponse, MapErr, Method, request::IntoTapResult},
+    http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult},
     not_found,
     routing::{Route, RouteGroup},
 };
@@ -783,19 +783,11 @@ impl<'a> Route<'a> {
 
     #[inline]
     pub(crate) fn map_middleware(self, mw: MiddlewareFn) -> Self {
-        let pattern = self.pattern.as_ref();
-
-        // The HEAD endpoint standing in for this route answers it with this very
-        // handler, so it runs what this route runs - otherwise a HEAD request is a way
-        // around the middleware guarding the GET
-        let implicit_head = self.app.has_implicit_head(&self.method, pattern);
-        let endpoints = self.app.pipeline.endpoints_mut();
-
-        endpoints.map_layer(self.method.clone(), pattern, mw.clone().into());
-
-        if implicit_head {
-            endpoints.map_layer(Method::HEAD, pattern, mw.into());
-        }
+        self.app.pipeline.endpoints_mut().map_layer(
+            self.method.clone(),
+            self.pattern.as_ref(),
+            mw.into(),
+        );
         self
     }
 }

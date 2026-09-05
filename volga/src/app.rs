@@ -211,18 +211,9 @@ pub struct App {
     /// Default: `true`
     show_greeter: bool,
 
-    /// Controls whether a `HEAD` route is automatically registered
-    /// for this `GET` handler.
+    /// Controls whether a `GET` route answers `HEAD` requests that have no route
+    /// of their own.
     implicit_head: bool,
-
-    /// Patterns whose `HEAD` endpoint stands in for their `GET` handler.
-    ///
-    /// Such an endpoint is not a route the caller wrote: it answers the `GET` route, so
-    /// it is bound to whatever that route is bound to. A `HEAD` mapped by hand takes the
-    /// pattern out of here and becomes a route of its own. Registration state only - the
-    /// running server has the routes themselves.
-    #[cfg(feature = "middleware")]
-    implicit_head_patterns: std::collections::HashSet<Box<str>>,
 
     /// Maximum total size of all HTTP request headers, in bytes.
     max_header_size: Limit<usize>,
@@ -312,8 +303,6 @@ impl App {
             body_limit: Default::default(),
             no_delay: false,
             implicit_head: true,
-            #[cfg(feature = "middleware")]
-            implicit_head_patterns: std::collections::HashSet::new(),
             max_header_count: Limit::Default,
             max_header_size: Limit::Default,
             max_connections: Limit::Default,
@@ -521,16 +510,19 @@ impl App {
         self
     }
 
-    /// Disables automatic registration of a `HEAD` route
-    /// for the `GET` handler.
+    /// Stops a `GET` route from answering `HEAD` requests.
     ///
-    /// When enabled, `HEAD` requests follow the same routing,
-    /// validation, and authorization logic as `GET`, but must not
-    /// produce a response body.
+    /// When enabled, a `HEAD` request with no route of its own is answered by the `GET`
+    /// route for the same path: it runs that route's middleware, its CORS policy and the
+    /// configuration of the group it belongs to, and the response carries no body.
+    /// Mapping `HEAD` explicitly takes precedence and shares none of that.
+    ///
+    /// When disabled, such a request is answered `405`.
     ///
     /// Default: `true`
     pub fn without_implicit_head(mut self) -> Self {
         self.implicit_head = false;
+        self.pipeline.endpoints_mut().set_implicit_head(false);
         self
     }
 
