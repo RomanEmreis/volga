@@ -119,6 +119,67 @@ async fn it_short_circuits_an_unmatched_path_from_a_filter() {
     server.shutdown().await;
 }
 
+#[cfg(feature = "middleware")]
+#[tokio::test]
+async fn it_reports_a_matched_route_at_every_middleware_layer() {
+    use std::sync::{Arc, Mutex};
+
+    // The route pipeline is taken out of the context before it runs, so the
+    // route's own middleware must not read that handoff as "nothing matched".
+    let seen: Arc<Mutex<Vec<(&'static str, bool)>>> = Arc::new(Mutex::new(Vec::new()));
+    let global = Arc::clone(&seen);
+    let route = Arc::clone(&seen);
+
+    let server = TestServer::builder()
+        .setup(move |app| {
+            let global = Arc::clone(&global);
+            app.wrap(move |ctx, next| {
+                let global = Arc::clone(&global);
+                async move {
+                    global.lock().unwrap().push(("global", ctx.matched_route()));
+                    next(ctx).await
+                }
+            });
+
+            let route = Arc::clone(&route);
+            app.map_get(MAPPED, || async { ok!(text: "mapped") })
+                .wrap(move |ctx, next| {
+                    let route = Arc::clone(&route);
+                    async move {
+                        route.lock().unwrap().push(("route", ctx.matched_route()));
+                        next(ctx).await
+                    }
+                });
+        })
+        .build()
+        .await;
+
+    let response = server
+        .client()
+        .get(server.url(MAPPED))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![("global", true), ("route", true)]
+    );
+
+    seen.lock().unwrap().clear();
+
+    let response = server
+        .client()
+        .get(server.url(UNMATCHED))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 404);
+    assert_eq!(*seen.lock().unwrap(), vec![("global", false)]);
+
+    server.shutdown().await;
+}
+
 #[cfg(all(feature = "middleware", feature = "rate-limiting"))]
 #[tokio::test]
 async fn it_rate_limits_an_unmatched_path() {

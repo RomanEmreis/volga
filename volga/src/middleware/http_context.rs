@@ -85,7 +85,9 @@ impl HttpContext {
     /// that matched no route or matched a path but not a method - the fallback
     /// or a `405` answers those. Middleware that should only do its work for a
     /// real endpoint, or that answers on an endpoint's behalf, reads this to
-    /// tell the two apart.
+    /// tell the two apart. It answers the same at every layer: a route's or a
+    /// group's own middleware runs after the route pipeline has been taken and
+    /// still sees `true`.
     ///
     /// # Example
     /// ```no_run
@@ -107,7 +109,10 @@ impl HttpContext {
     /// ```
     #[inline]
     pub fn matched_route(&self) -> bool {
-        matches!(self.terminal, Some(Terminal::Route(_)))
+        matches!(
+            self.terminal,
+            Some(Terminal::Route(_) | Terminal::RouteTaken)
+        )
     }
 
     /// Extracts a payload from request parts
@@ -243,7 +248,7 @@ impl HttpContext {
                     .call(Self {
                         request,
                         cors,
-                        terminal: None,
+                        terminal: Some(Terminal::RouteTaken),
                     })
                     .await
             }
@@ -251,7 +256,7 @@ impl HttpContext {
             Some(Terminal::MethodNotAllowed(allowed)) => status!(405; [
                 (ALLOW, allowed.as_ref())
             ]),
-            None => status!(405),
+            Some(Terminal::RouteTaken) | None => status!(405),
         }
     }
 }

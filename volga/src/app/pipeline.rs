@@ -32,6 +32,13 @@ pub(crate) enum Terminal {
     /// The path matched but the method did not: `405` with an `Allow` header
     /// listing the methods the path does have.
     MethodNotAllowed(Arc<str>),
+
+    /// The matched route's pipeline has been handed off and is running. The
+    /// pipeline is consumable, the fact that routing matched is not - the
+    /// route's own middleware runs in this state and still has to see that it
+    /// is serving an endpoint.
+    #[cfg(feature = "middleware")]
+    RouteTaken,
 }
 
 pub(crate) struct PipelineBuilder {
