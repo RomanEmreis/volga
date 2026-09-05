@@ -1,6 +1,6 @@
 //! Extractors for HTTP request parts and body
 
-use hyper::{Request, body::Incoming, http::request::Parts};
+use hyper::http::request::Parts;
 use std::future::Future;
 
 use crate::{
@@ -71,12 +71,6 @@ pub trait FromRequest: Sized {
     }
 }
 
-/// Specifies extractors to read data from raw HTTP request
-pub trait FromRawRequest: Sized {
-    /// Extracts data from raw HTTP request
-    fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send;
-}
-
 /// Specifies extractors to read data from a borrowed HTTP request
 pub trait FromRequestRef: Sized {
     /// Extracts data from HTTP request reference
@@ -142,27 +136,8 @@ impl FromRequestParts for () {
     }
 }
 
-impl FromRawRequest for () {
-    #[inline]
-    async fn from_request(_: Request<Incoming>) -> Result<Self, Error> {
-        Ok(())
-    }
-}
-
 macro_rules! define_generic_from_request {
     ($($T: ident),*) => {
-        impl<$($T: FromRequestParts),+> FromRawRequest for ($($T,)+) {
-            #[inline]
-            async fn from_request(req: Request<Incoming>) -> Result<Self, Error> {
-                let (parts, _) = req.into_parts();
-                let tuple = (
-                    $(
-                    $T::from_parts(&parts)?,
-                    )*
-                );
-                Ok(tuple)
-            }
-        }
         impl<$($T: FromRequestRef),+> FromRequestRef for ($($T,)+) {
             #[inline]
             fn from_request(req: &HttpRequest) -> Result<Self, Error> {

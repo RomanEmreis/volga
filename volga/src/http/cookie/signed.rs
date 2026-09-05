@@ -6,12 +6,9 @@ use crate::{
     error::Error,
     headers::HeaderMap,
     http::{
-        Extensions, Parts, Request,
-        body::Incoming,
+        Extensions, Parts,
         cookie::get_cookies,
-        endpoints::args::{
-            FromPayload, FromRawRequest, FromRequestParts, FromRequestRef, Payload, Source,
-        },
+        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
     },
 };
 use cookie::{CookieJar, Key, SignedJar};
@@ -180,13 +177,6 @@ impl FromRequestRef for SignedCookies {
     #[inline]
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         Self::try_from((req.extensions(), req.headers()))
-    }
-}
-
-impl FromRawRequest for SignedCookies {
-    #[inline]
-    fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send {
-        ready(Self::try_from((req.extensions(), req.headers())))
     }
 }
 

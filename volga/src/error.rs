@@ -11,7 +11,7 @@ use std::{
 
 use super::{
     App,
-    http::{FromRawRequest, FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
+    http::{FromRequest, FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
 };
 
 pub use self::{
@@ -285,6 +285,13 @@ impl App {
 
     /// Adds a special fallback handler that handles the unregistered paths
     ///
+    /// The fallback sits at the end of the global middleware pipeline, in the
+    /// place a matched route's handler would occupy, so it takes the same
+    /// extractors any handler does and the middleware around it runs as usual.
+    /// The one thing it cannot have is path parameters: nothing matched, so
+    /// [`Path`](crate::Path) and [`NamedPath`](crate::NamedPath) have nothing
+    /// to read.
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, error::Error, not_found};
@@ -299,10 +306,25 @@ impl App {
     /// # app.run().await
     /// # }
     /// ```
+    ///
+    /// # Example with extractors
+    /// ```no_run
+    /// use volga::{App, ClientIp, http::Uri, not_found};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    ///  let mut app = App::new();
+    ///
+    ///  app.map_fallback(|uri: Uri, ip: ClientIp| async move {
+    ///     not_found!("no route for {uri} (from {ip})")
+    ///  });
+    /// # app.run().await
+    /// # }
+    /// ```
     pub fn map_fallback<F, Args, R>(&mut self, handler: F) -> &mut Self
     where
         F: GenericHandler<Args, Output = R>,
-        Args: FromRawRequest + Send + 'static,
+        Args: FromRequest + Send + 'static,
         R: IntoResponse,
     {
         self.pipeline

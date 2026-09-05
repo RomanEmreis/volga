@@ -1,20 +1,18 @@
 //! Fallback handler
 
 use futures_util::future::BoxFuture;
-use hyper::{Request, body::Incoming};
 use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
-    HttpResult,
-    error::handler::default_error_handler,
-    http::{FromRawRequest, GenericHandler, IntoResponse},
+    HttpRequest, HttpResult,
+    http::{FromRequest, GenericHandler, IntoResponse},
     status,
 };
 
 /// Trait for types that represents a fallback handler
 pub trait FallbackHandler {
     /// Calls the fallback handler function for the given request
-    fn call(&self, req: Request<Incoming>) -> BoxFuture<'_, HttpResult>;
+    fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult>;
 }
 
 /// Owns a closure that handles a 404
@@ -24,7 +22,7 @@ pub struct FallbackFunc<F, Args>(pub(crate) F, PhantomData<fn(Args)>);
 impl<F, Args, R> FallbackFunc<F, Args>
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRawRequest + Send + 'static,
+    Args: FromRequest + Send + 'static,
     R: IntoResponse,
 {
     pub(crate) fn new(func: F) -> Self {
@@ -35,20 +33,14 @@ where
 impl<F, Args, R> FallbackHandler for FallbackFunc<F, Args>
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRawRequest + Send + 'static,
+    Args: FromRequest + Send + 'static,
     R: IntoResponse,
 {
     #[inline]
-    fn call(&self, req: Request<Incoming>) -> BoxFuture<'_, HttpResult> {
+    fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult> {
         Box::pin(async move {
-            let args = match Args::from_request(req).await {
-                Ok(args) => args,
-                Err(err) => return default_error_handler(err).await,
-            };
-            match self.0.call(args).await.into_response() {
-                Ok(resp) => Ok(resp),
-                Err(err) => default_error_handler(err).await,
-            }
+            let args = Args::from_request(req).await?;
+            self.0.call(args).await.into_response()
         })
     }
 }
@@ -56,7 +48,7 @@ where
 impl<F, Args, R> From<FallbackFunc<F, Args>> for PipelineFallbackHandler
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRawRequest + Send + 'static,
+    Args: FromRequest + Send + 'static,
     R: IntoResponse,
 {
     #[inline]

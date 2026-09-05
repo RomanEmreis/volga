@@ -1,4 +1,17 @@
 //! Middleware tools
+//!
+//! # Unmatched requests
+//!
+//! Routing decides *what* answers a request, not *whether* the pipeline runs.
+//! A request that matched no route, or matched a path but not a method, goes
+//! through the same global chain as any other and is answered at the end of it
+//! by the fallback handler or by a `405`. That is what keeps rate limiting,
+//! CORS, compression and tracing on the requests a scanner or a stray link
+//! produces - and it also means a short-circuiting `filter`, `with` or
+//! `authorize` decides those requests too, so a global authorization
+//! middleware answers `401` where the router alone would have answered `404`.
+//! [`HttpContext::matched_route`] tells the two apart for middleware that
+//! needs to.
 
 use crate::{
     App, HttpResult,

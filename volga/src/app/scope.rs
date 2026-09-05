@@ -6,16 +6,22 @@ use tokio_util::sync::CancellationToken;
 use hyper::{
     HeaderMap, Method, Request, Response,
     body::{Incoming, SizeHint},
-    header::{ALLOW, CONTENT_LENGTH, HeaderValue},
+    header::{CONTENT_LENGTH, HeaderValue},
     service::Service,
 };
 
+#[cfg(not(feature = "middleware"))]
+use hyper::header::ALLOW;
+
 use crate::{
     ClientIp, HttpBody, HttpRequest, HttpResult, Limit,
-    app::AppEnv,
+    app::{AppEnv, pipeline::Terminal},
     error::{Error, handler::extract_error_args},
     headers::CACHE_CONTROL,
-    http::{endpoints::FindResult, request_scope::HttpRequestScope},
+    http::{
+        endpoints::{FindResult, route::PathArgs},
+        request_scope::HttpRequestScope,
+    },
     status,
 };
 
@@ -32,7 +38,7 @@ use {
 };
 
 #[cfg(feature = "middleware")]
-use crate::middleware::HttpContext;
+use crate::{http::cors::CorsOverride, middleware::HttpContext};
 
 const REQUEST_HEADERS_TOO_LARGE_MESSAGE: &str = "Request headers too large.";
 
@@ -163,76 +169,101 @@ async fn handle_impl(
     };
 
     let pipeline = &env.pipeline;
-    match pipeline.endpoints().find(
+    let found = pipeline.endpoints().find(
         request.method(),
         request.uri(),
         #[cfg(feature = "middleware")]
         env.cors.is_enabled,
         #[cfg(feature = "middleware")]
         request.headers(),
-    ) {
-        FindResult::RouteNotFound => pipeline.fallback(request).await,
-        FindResult::MethodNotFound(allowed) => status!(405; [
+    );
+
+    // Routing decides *what* answers the request, not *whether* the pipeline
+    // runs: all three outcomes are carried through the same chain, so global
+    // middleware and the request scope reach an unmatched path as well.
+    #[cfg(feature = "middleware")]
+    let (terminal, params, cors) = match found {
+        FindResult::Ok(endpoint) => {
+            let (route_pipeline, params, cors) = endpoint.into_parts();
+            (Terminal::Route(route_pipeline), params, cors)
+        }
+        FindResult::RouteNotFound => (
+            Terminal::Fallback(pipeline.fallback_handler().clone()),
+            PathArgs::default(),
+            CorsOverride::Inherit,
+        ),
+        FindResult::MethodNotFound(allowed) => (
+            Terminal::MethodNotAllowed(allowed),
+            PathArgs::default(),
+            CorsOverride::Inherit,
+        ),
+    };
+
+    #[cfg(not(feature = "middleware"))]
+    let (terminal, params) = match found {
+        FindResult::Ok(endpoint) => {
+            let (route_pipeline, params) = endpoint.into_parts();
+            (Terminal::Route(route_pipeline), params)
+        }
+        FindResult::RouteNotFound => (
+            Terminal::Fallback(pipeline.fallback_handler().clone()),
+            PathArgs::default(),
+        ),
+        FindResult::MethodNotFound(allowed) => {
+            (Terminal::MethodNotAllowed(allowed), PathArgs::default())
+        }
+    };
+
+    let error_handler = pipeline.error_handler();
+    let (mut parts, body) = request.into_parts();
+
+    parts.extensions.insert(HttpRequestScope {
+        client_ip: ClientIp(peer_addr),
+        cancellation_token,
+        body_limit: env.body_limit,
+        params,
+        #[cfg(feature = "ws")]
+        error_handler: Arc::clone(error_handler),
+        #[cfg(feature = "jwt-auth")]
+        bearer_token_service: env.bearer_token_service.clone(),
+        #[cfg(feature = "jwt-auth")]
+        bearer: None,
+        #[cfg(any(
+            feature = "decompression-brotli",
+            feature = "decompression-gzip",
+            feature = "decompression-zstd",
+            feature = "decompression-full"
+        ))]
+        decompression_limits: env.decompression_limits,
+        #[cfg(feature = "rate-limiting")]
+        rate_limiter: env.rate_limiter.clone(),
+        #[cfg(feature = "rate-limiting")]
+        trusted_proxies: env.trusted_proxies.clone(),
+        #[cfg(feature = "config")]
+        config: env.config.clone(),
+    });
+
+    // Pre-extract error handler args from parts before consuming them.
+    let error_args = extract_error_args(error_handler, &parts);
+
+    let request = HttpRequest::new(Request::from_parts(parts, body)).into_limited(env.body_limit);
+
+    #[cfg(feature = "middleware")]
+    let response = pipeline
+        .execute(HttpContext::new(request, Some(terminal), cors))
+        .await;
+    #[cfg(not(feature = "middleware"))]
+    let response = match terminal {
+        Terminal::Route(route_pipeline) => route_pipeline.call(request).await,
+        Terminal::Fallback(fallback) => fallback.call(request).await,
+        Terminal::MethodNotAllowed(allowed) => status!(405; [
             (ALLOW, allowed.as_ref())
         ]),
-        FindResult::Ok(endpoint) => {
-            #[cfg(feature = "middleware")]
-            let (route_pipeline, params, cors) = endpoint.into_parts();
-            #[cfg(not(feature = "middleware"))]
-            let (route_pipeline, params) = endpoint.into_parts();
+    };
 
-            let error_handler = pipeline.error_handler();
-            let (mut parts, body) = request.into_parts();
-
-            parts.extensions.insert(HttpRequestScope {
-                client_ip: ClientIp(peer_addr),
-                cancellation_token,
-                body_limit: env.body_limit,
-                params,
-                #[cfg(feature = "ws")]
-                error_handler: Arc::clone(error_handler),
-                #[cfg(feature = "jwt-auth")]
-                bearer_token_service: env.bearer_token_service.clone(),
-                #[cfg(feature = "jwt-auth")]
-                bearer: None,
-                #[cfg(any(
-                    feature = "decompression-brotli",
-                    feature = "decompression-gzip",
-                    feature = "decompression-zstd",
-                    feature = "decompression-full"
-                ))]
-                decompression_limits: env.decompression_limits,
-                #[cfg(feature = "rate-limiting")]
-                rate_limiter: env.rate_limiter.clone(),
-                #[cfg(feature = "rate-limiting")]
-                trusted_proxies: env.trusted_proxies.clone(),
-                #[cfg(feature = "config")]
-                config: env.config.clone(),
-            });
-
-            // Pre-extract error handler args from parts before consuming them.
-            let error_args = extract_error_args(error_handler, &parts);
-
-            let request =
-                HttpRequest::new(Request::from_parts(parts, body)).into_limited(env.body_limit);
-
-            #[cfg(feature = "middleware")]
-            let response = if pipeline.has_middleware_pipeline() {
-                let ctx = HttpContext::new(request, Some(route_pipeline), cors);
-                pipeline.execute(ctx).await
-            } else {
-                route_pipeline
-                    .call(HttpContext::new(request, None, cors))
-                    .await
-            };
-            #[cfg(not(feature = "middleware"))]
-            let response = route_pipeline.call(request).await;
-
-            match response {
-                Ok(response) => Ok(response),
-                Err(err) => error_args.call(err).await,
-            }
-        }
+    match response {
+        Ok(response) => Ok(response),
+        Err(err) => error_args.call(err).await,
     }
 }
 

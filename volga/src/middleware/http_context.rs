@@ -1,13 +1,15 @@
 //! Utilities for managing HTTP request scope
 
-use crate::http::endpoints::{args::FromRequestRef, route::RoutePipeline};
+use crate::http::endpoints::args::FromRequestRef;
 use crate::{
     HttpRequest, HttpRequestMut, HttpResult,
+    app::pipeline::Terminal,
     error::Error,
     http::cors::{CorsHeaders, CorsOverride},
     status,
 };
 
+use hyper::header::ALLOW;
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
@@ -25,8 +27,10 @@ pub struct HttpContext {
     /// Current HTTP request
     request: HttpRequestMut,
 
-    /// Current route middleware pipeline or handler that mapped to handle the HTTP request
-    pipeline: Option<RoutePipeline>,
+    /// What answers this request once the middleware chain has run: the matched
+    /// route's pipeline, the application fallback, or a `405`. `None` once the
+    /// terminal has been taken, so a second execution has nothing left to run.
+    terminal: Option<Terminal>,
 
     /// CORS headers for this route
     cors: CorsOverride,
@@ -44,35 +48,66 @@ impl HttpContext {
     #[inline]
     pub(crate) fn new(
         request: HttpRequest,
-        pipeline: Option<RoutePipeline>,
+        terminal: Option<Terminal>,
         cors: CorsOverride,
     ) -> Self {
         Self {
             request: HttpRequestMut::new(request),
-            pipeline,
+            terminal,
             cors,
         }
     }
 
-    /// Splits [`HttpContext`] into request parts and pipeline
+    /// Splits [`HttpContext`] into request parts and the pipeline terminal
     #[inline]
     #[allow(dead_code)]
-    pub(crate) fn into_parts(self) -> (HttpRequestMut, Option<RoutePipeline>, CorsOverride) {
-        (self.request, self.pipeline, self.cors)
+    pub(crate) fn into_parts(self) -> (HttpRequestMut, Option<Terminal>, CorsOverride) {
+        (self.request, self.terminal, self.cors)
     }
 
-    /// Creates a new [`HttpContext`] from request parts and pipeline
+    /// Creates a new [`HttpContext`] from request parts and the pipeline terminal
     #[inline]
     pub(crate) fn from_parts(
         request: HttpRequestMut,
-        pipeline: Option<RoutePipeline>,
+        terminal: Option<Terminal>,
         cors: CorsOverride,
     ) -> Self {
         Self {
             request,
-            pipeline,
+            terminal,
             cors,
         }
+    }
+
+    /// Returns `true` when routing matched an endpoint for this request.
+    ///
+    /// The pipeline runs for every request, so a middleware also sees the ones
+    /// that matched no route or matched a path but not a method - the fallback
+    /// or a `405` answers those. Middleware that should only do its work for a
+    /// real endpoint, or that answers on an endpoint's behalf, reads this to
+    /// tell the two apart.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.wrap(|ctx, next| async move {
+    ///     if !ctx.matched_route() {
+    ///         // nothing to meter for a request no route will answer
+    ///         return next(ctx).await;
+    ///     }
+    ///     next(ctx).await
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    #[inline]
+    pub fn matched_route(&self) -> bool {
+        matches!(self.terminal, Some(Terminal::Route(_)))
     }
 
     /// Extracts a payload from request parts
@@ -198,20 +233,25 @@ impl HttpContext {
         }
     }
 
-    /// Executes the request handler for the current HTTP request
+    /// Executes the terminal stage of the pipeline for the current HTTP request
     #[inline]
     pub(crate) async fn execute(self) -> HttpResult {
-        let (request, pipeline, cors) = self.into_parts();
-        if let Some(pipeline) = pipeline {
-            pipeline
-                .call(Self {
-                    request,
-                    cors,
-                    pipeline: None,
-                })
-                .await
-        } else {
-            status!(405)
+        let (request, terminal, cors) = self.into_parts();
+        match terminal {
+            Some(Terminal::Route(pipeline)) => {
+                pipeline
+                    .call(Self {
+                        request,
+                        cors,
+                        terminal: None,
+                    })
+                    .await
+            }
+            Some(Terminal::Fallback(fallback)) => fallback.call(request.freeze()).await,
+            Some(Terminal::MethodNotAllowed(allowed)) => status!(405; [
+                (ALLOW, allowed.as_ref())
+            ]),
+            None => status!(405),
         }
     }
 }

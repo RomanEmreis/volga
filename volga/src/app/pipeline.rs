@@ -1,18 +1,38 @@
-use hyper::{Request, body::Incoming};
 use std::sync::Arc;
 
 use crate::{
-    HttpResult,
     error::{
         FallbackFunc,
         fallback::{PipelineFallbackHandler, default_fallback_handler},
         handler::{DefaultErrorHandler, PipelineErrorHandler},
     },
-    http::endpoints::Endpoints,
+    http::endpoints::{Endpoints, route::RoutePipeline},
 };
 
 #[cfg(feature = "middleware")]
-use crate::middleware::{HttpContext, Middlewares, NextFn};
+use crate::{
+    HttpResult,
+    middleware::{HttpContext, Middlewares, NextFn},
+};
+
+/// The terminal stage of the request pipeline: whatever answers the request
+/// once the global middleware chain has run.
+///
+/// Routing happens before that chain, so which of the three answers is decided
+/// up front. Carrying the decision through the chain instead of acting on it
+/// immediately is what keeps global middleware - and the per-request scope it
+/// reads - on requests that match no route.
+pub(crate) enum Terminal {
+    /// The matched route's own middleware pipeline and handler.
+    Route(RoutePipeline),
+
+    /// No route matched the path: the application fallback answers.
+    Fallback(PipelineFallbackHandler),
+
+    /// The path matched but the method did not: `405` with an `Allow` header
+    /// listing the methods the path does have.
+    MethodNotAllowed(Arc<str>),
+}
 
 pub(crate) struct PipelineBuilder {
     #[cfg(feature = "middleware")]
@@ -117,13 +137,8 @@ impl Pipeline {
     }
 
     #[inline]
-    pub(super) async fn fallback(&self, req: Request<Incoming>) -> HttpResult {
-        self.fallback_handler.call(req).await
-    }
-
-    #[cfg(feature = "middleware")]
-    pub(crate) fn has_middleware_pipeline(&self) -> bool {
-        self.start.is_some()
+    pub(super) fn fallback_handler(&self) -> &PipelineFallbackHandler {
+        &self.fallback_handler
     }
 
     #[cfg(feature = "middleware")]
@@ -172,6 +187,6 @@ mod tests {
         assert!(!builder.has_middleware_pipeline());
 
         let pipeline = builder.build();
-        assert!(!pipeline.has_middleware_pipeline());
+        assert!(pipeline.start.is_none());
     }
 }
