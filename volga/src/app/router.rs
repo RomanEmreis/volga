@@ -23,10 +23,12 @@ impl App {
     /// Maps a group of request handlers combined by `prefix`
     ///
     /// # Ordering
-    /// A group's middleware, CORS policy and OpenAPI configuration are captured when
-    /// each route is mapped, so they must be registered **before** the `map_*` calls
-    /// they should apply to. Registering them later leaves the already mapped routes
-    /// untouched and logs a warning at startup.
+    /// A group is a scope: its middleware, CORS policy and OpenAPI configuration are
+    /// applied to every route the group registered once the closure returns, so they
+    /// may be registered before or after the `map_*` calls they apply to.
+    ///
+    /// Middleware still runs in the order it was registered on the group, and a group's
+    /// middleware runs before the middleware of a route or a sub-group inside it.
     ///
     /// # Examples
     /// ```no_run
@@ -64,6 +66,7 @@ impl App {
         group.open_api(|cfg| cfg.with_tag(prefix));
 
         f(&mut group);
+        group.apply();
     }
 
     /// Adds a request handler that matches HTTP GET requests for the specified pattern.
@@ -416,18 +419,16 @@ impl App {
         Args: FromRequest + Send + 'static,
     {
         let handler = Func::new(handler);
-        let endpoints = self.pipeline.endpoints_mut();
 
         // use &str view only for registration
         let path: &str = pattern.as_ref();
-        endpoints.map_route(method.clone(), path, handler.clone());
 
-        if self.implicit_head && method == Method::GET {
-            let head = Method::HEAD;
-            if !endpoints.contains(&head, path) {
-                endpoints.map_route(head, path, handler.clone());
-            }
-        }
+        // A GET route answers HEAD requests as well, and is not mapped a second time for
+        // it: routing hands a HEAD request with no route of its own to the GET route, so
+        // that request travels through everything this one travels through
+        self.pipeline
+            .endpoints_mut()
+            .map_route(method.clone(), path, handler.clone());
 
         #[cfg(feature = "openapi")]
         let openapi_key = {
@@ -466,15 +467,27 @@ pub struct Route<'a> {
     openapi_key: RouteKey,
 }
 
+/// A route registered by a [`RouteGroup`], remembered until the group closure returns
+/// so that the group's configuration can be applied to it whatever the declaration order
+#[cfg(any(feature = "middleware", feature = "openapi"))]
+#[derive(Debug, Clone)]
+pub(crate) struct GroupRoute {
+    method: Method,
+    pattern: Box<str>,
+}
+
 /// Represents a group of routes
 pub struct RouteGroup<'a> {
     pub(crate) app: &'a mut App,
     pub(crate) prefix: String,
-    pub(crate) route_count: usize,
+    /// Routes registered by this group and by its sub-groups
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
+    pub(crate) routes: Vec<GroupRoute>,
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
+    /// The CORS policy of this group, if it configured one
     #[cfg(feature = "middleware")]
-    pub(crate) cors: CorsOverride,
+    pub(crate) cors: Option<CorsOverride>,
     #[cfg(feature = "openapi")]
     pub(crate) openapi_config: OpenApiRouteConfig,
 }
@@ -522,36 +535,66 @@ impl<'a> Route<'a> {
     }
 }
 
-#[cfg(any(feature = "middleware", feature = "openapi"))]
 impl<'a> RouteGroup<'a> {
-    /// Warns that a group-level setting is being registered too late to have any effect.
-    ///
-    /// A group captures its middleware, CORS policy and OpenAPI configuration at the
-    /// moment each route is mapped, so anything registered after a `map_*` call - or
-    /// after a nested `group` that mapped routes of its own - silently does not apply
-    /// to those routes.
+    /// Remembers a route registered by this group so that the group's configuration
+    /// reaches it when the group closure returns.
     #[inline]
-    pub(crate) fn warn_if_routes_mapped(&self, method: &str) {
-        if self.route_count == 0 {
-            return;
-        }
-
-        let message = late_group_config_message(method, &self.prefix, self.route_count);
-
-        #[cfg(feature = "tracing")]
-        tracing::warn!("{message}");
-        #[cfg(not(feature = "tracing"))]
-        eprintln!("{message}");
+    #[cfg_attr(
+        not(any(feature = "middleware", feature = "openapi")),
+        allow(unused_variables)
+    )]
+    fn record(&mut self, method: &Method, pattern: &str) {
+        #[cfg(any(feature = "middleware", feature = "openapi"))]
+        self.routes.push(GroupRoute {
+            method: method.clone(),
+            pattern: Box::from(pattern),
+        });
     }
-}
 
-/// Builds the warning text for a group-level setting registered after `map_*`.
-#[cfg(any(feature = "middleware", feature = "openapi"))]
-fn late_group_config_message(method: &str, prefix: &str, route_count: usize) -> String {
-    format!(
-        "RouteGroup::{method} must be called before any map_* in the group; \
-         {route_count} route(s) already mapped under '{prefix}' will not be affected"
-    )
+    /// Applies the group's configuration to every route it registered.
+    ///
+    /// Called once the group closure has returned, so a `wrap` / `with` / `cors_with` /
+    /// `open_api` call reaches the routes above it as well as the ones below it.
+    /// Middleware is inserted ahead of whatever the route already carries - the
+    /// middleware of a route or of a nested group, which applied itself first - so an
+    /// outer scope always wraps an inner one.
+    pub(crate) fn apply(&mut self) {
+        #[cfg(any(feature = "middleware", feature = "openapi"))]
+        {
+            // Taken out of `self` for the walk, so the routes can be read while the
+            // application state they configure is borrowed mutably, and put back for
+            // a parent group that has yet to apply its own configuration to them.
+            let routes = std::mem::take(&mut self.routes);
+
+            for route in routes.iter() {
+                #[cfg(feature = "middleware")]
+                {
+                    let endpoints = self.app.pipeline.endpoints_mut();
+
+                    if !self.middleware.is_empty() {
+                        endpoints.prepend_layers(&route.method, &route.pattern, &self.middleware);
+                    }
+                    if let Some(cors) = self.cors.clone() {
+                        endpoints.bind_cors_if_unset(&route.method, &route.pattern, cors);
+                    }
+                }
+
+                #[cfg(feature = "openapi")]
+                {
+                    let key = RouteKey {
+                        method: route.method.clone(),
+                        pattern: route.pattern.as_ref().into(),
+                    };
+                    let group_config = self.openapi_config.clone();
+                    self.app
+                        .openapi
+                        .update_route_config(&key, |cfg| cfg.merge_outer(&group_config));
+                }
+            }
+
+            self.routes = routes;
+        }
+    }
 }
 
 #[cfg(feature = "openapi")]
@@ -561,7 +604,6 @@ impl<'a> RouteGroup<'a> {
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
-        self.warn_if_routes_mapped("open_api");
         self.openapi_config = config(self.openapi_config.clone());
         self
     }
@@ -576,9 +618,11 @@ impl<'a> RouteGroup<'a> {
     /// running after the parent's middleware.
     ///
     /// # Ordering
-    /// The sub-group inherits what the parent has registered **so far**, so the parent's
-    /// middleware and CORS policy must come before the sub-group. Registering them later
-    /// leaves the sub-group's routes untouched and logs a warning at startup.
+    /// Inheritance does not depend on where the sub-group sits: the parent applies its
+    /// configuration to every route it and its sub-groups registered once its own
+    /// closure returns, so a sub-group declared before the parent's `with` or
+    /// `cors_with` inherits it all the same. A sub-group's own CORS policy replaces the
+    /// parent's for its routes rather than being replaced by it.
     ///
     /// # Examples
     /// ```no_run
@@ -606,13 +650,14 @@ impl<'a> RouteGroup<'a> {
         let mut child = RouteGroup {
             app: self.app,
             prefix: full_prefix,
-            route_count: 0,
+            #[cfg(any(feature = "middleware", feature = "openapi"))]
+            routes: Vec::new(),
             #[cfg(feature = "middleware")]
-            middleware: self.middleware.clone(),
+            middleware: Vec::new(),
             #[cfg(feature = "middleware")]
-            cors: self.cors.clone(),
+            cors: None,
             #[cfg(feature = "openapi")]
-            openapi_config: self.openapi_config.clone(),
+            openapi_config: OpenApiRouteConfig::default(),
         };
 
         #[cfg(feature = "openapi")]
@@ -622,11 +667,12 @@ impl<'a> RouteGroup<'a> {
         }
 
         f(&mut child);
+        child.apply();
 
-        // Routes mapped by the sub-group count as routes of this group: they took a
-        // snapshot of the current configuration, so anything registered on the parent
-        // from here on will not reach them.
-        self.route_count += child.route_count;
+        // Routes mapped by the sub-group belong to this group as well: this group's
+        // configuration wraps whatever the sub-group has just applied to them.
+        #[cfg(any(feature = "middleware", feature = "openapi"))]
+        self.routes.append(&mut child.routes);
     }
 
     /// Maps a request handler that matches the given HTTP `method` for the specified pattern.
@@ -642,41 +688,10 @@ impl<'a> RouteGroup<'a> {
         Args: FromRequest + Send + 'static,
     {
         let method = method.try_into().expect("invalid HTTP method");
-        self.route_count += 1;
         let pattern = [self.prefix.as_str(), pattern.as_ref()].concat();
 
-        #[cfg(feature = "middleware")]
-        {
-            let mut route = self
-                .app
-                .map_route_owned(method, pattern, handler)
-                .cors_override(self.cors.clone());
-
-            for filter in self.middleware.iter() {
-                route = route.map_middleware(filter.clone());
-            }
-
-            #[cfg(feature = "openapi")]
-            {
-                let openapi_config = self.openapi_config.clone();
-                route = route.open_api(|config| config.merge(&openapi_config));
-            }
-
-            route
-        }
-
-        #[cfg(not(feature = "middleware"))]
-        {
-            let route = self.app.map_route_owned(method, pattern, handler);
-
-            #[cfg(feature = "openapi")]
-            let route = {
-                let openapi_config = self.openapi_config.clone();
-                route.open_api(|config| config.merge(&openapi_config))
-            };
-
-            route
-        }
+        self.record(&method, &pattern);
+        self.app.map_route_owned(method, pattern, handler)
     }
 }
 
@@ -687,11 +702,12 @@ macro_rules! define_route_group_methods {
                 RouteGroup {
                     app,
                     prefix: prefix.to_string(),
-                    route_count: 0,
+                    #[cfg(any(feature = "middleware", feature = "openapi"))]
+                    routes: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
                     middleware: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
-                    cors: CorsOverride::Inherit,
+                    cors: None,
                     #[cfg(feature = "openapi")]
                     openapi_config: OpenApiRouteConfig::default(),
                 }
@@ -705,41 +721,11 @@ macro_rules! define_route_group_methods {
                 R: IntoResponse + 'static,
                 Args: FromRequest + Send + 'static,
             {
-                self.route_count += 1;
+                let method = $http_method;
                 let pattern = [self.prefix.as_str(), pattern].concat();
 
-                #[cfg(feature = "middleware")]
-                {
-                    let mut route = self
-                        .app
-                        .map_route_owned($http_method, pattern, handler)
-                        .cors_override(self.cors.clone());
-
-                    for filter in self.middleware.iter() {
-                        route = route.map_middleware(filter.clone());
-                    }
-
-                    #[cfg(feature = "openapi")]
-                    {
-                        let openapi_config = self.openapi_config.clone();
-                        route = route.open_api(|config| config.merge(&openapi_config));
-                    }
-
-                    route
-                }
-
-                #[cfg(not(feature = "middleware"))]
-                {
-                    let route = self.app.map_route_owned($http_method, pattern, handler);
-
-                    #[cfg(feature = "openapi")]
-                    let route = {
-                        let openapi_config = self.openapi_config.clone();
-                        route.open_api(|config| config.merge(&openapi_config))
-                    };
-
-                    route
-                }
+                self.record(&method, &pattern);
+                self.app.map_route_owned(method, pattern, handler)
             }
             )*
         }
@@ -765,32 +751,36 @@ mod tests {
 
     #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]
-    fn it_builds_a_late_group_config_warning() {
-        let message = late_group_config_message("with", "/api", 2);
-
-        assert_eq!(
-            message,
-            "RouteGroup::with must be called before any map_* in the group; \
-             2 route(s) already mapped under '/api' will not be affected"
-        );
-    }
-
-    #[test]
-    fn it_counts_routes_mapped_in_a_group() {
+    fn it_records_routes_mapped_in_a_group() {
         let mut app = App::new();
-        let mut count = 0;
+        let mut routes = Vec::new();
 
         app.group("/api", |api| {
             api.map_get("/hello", || async { "Hello, World!" });
             api.map_post("/hello", || async { "Hello, World!" });
-            count = api.route_count;
+            routes = api.routes.clone();
         });
 
-        assert_eq!(count, 2);
+        let mapped = routes
+            .iter()
+            .map(|route| (route.method.clone(), route.pattern.to_string()))
+            .collect::<Vec<_>>();
+
+        // The implicit HEAD twin is not recorded: the group looks it up when it
+        // applies its configuration, so a HEAD mapped by hand later - which replaces
+        // the twin - is not configured twice
+        assert_eq!(
+            mapped,
+            vec![
+                (Method::GET, "/api/hello".to_string()),
+                (Method::POST, "/api/hello".to_string()),
+            ]
+        );
     }
 
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]
-    fn it_counts_routes_mapped_by_a_sub_group_in_the_parent() {
+    fn it_records_routes_mapped_by_a_sub_group_in_the_parent() {
         let mut app = App::new();
         let mut count = 0;
 
@@ -798,20 +788,21 @@ mod tests {
             api.group("/users", |users| {
                 users.map_get("/{id}", || async { "Hello, World!" });
             });
-            count = api.route_count;
+            count = api.routes.len();
         });
 
         assert_eq!(count, 1);
     }
 
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]
-    fn it_does_not_count_an_empty_sub_group_in_the_parent() {
+    fn it_does_not_record_an_empty_sub_group_in_the_parent() {
         let mut app = App::new();
         let mut count = 0;
 
         app.group("/api", |api| {
             api.group("/users", |_users| {});
-            count = api.route_count;
+            count = api.routes.len();
         });
 
         assert_eq!(count, 0);

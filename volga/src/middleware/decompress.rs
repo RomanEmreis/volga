@@ -121,7 +121,7 @@ impl App {
 impl<'a> RouteGroup<'a> {
     /// Registers a middleware that applies a default decompression algorithm for this group of routes
     pub fn with_decompression(&mut self) -> &mut Self {
-        self.attach_as("with_decompression", make_decompression_fn)
+        self.attach(make_decompression_fn)
     }
 }
 
