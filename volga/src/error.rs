@@ -290,12 +290,12 @@ impl App {
     /// it runs as usual and the per-request scope is there to read.
     ///
     /// It takes the same arguments [`map_err`](Self::map_err) does - anything
-    /// implementing [`FromRequestParts`](crate::http::FromRequestParts), which
-    /// covers headers, the URI, cookies, [`ClientIp`](crate::ClientIp) and
-    /// [`Dc<T>`](crate::di::Dc). Not the body: nothing matched, so there is no
-    /// route to say how a body should be read. Path parameters are out for the
-    /// same reason - [`Path`](crate::Path) and [`NamedPath`](crate::NamedPath)
-    /// have nothing to read.
+    /// implementing [`FromRequestParts`], which covers headers, the URI,
+    /// cookies, [`ClientIp`](crate::ClientIp) and [`Dc<T>`](crate::di::Dc).
+    /// Not the body: nothing matched, so there is no route to say how a body
+    /// should be read. Path parameters are out for the same reason -
+    /// [`Path`](crate::Path) and [`NamedPath`](crate::NamedPath) have nothing
+    /// to read.
     ///
     /// # Example
     /// ```no_run
