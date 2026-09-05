@@ -5,8 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-uuid = { version = "1.17.0", features = ["v4"] }
-tokio = "1.46.1"
+uuid = { workspace = true, features = ["v4"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 volga = { path = "../../volga", features = ["cookie","signed-cookie","di"] }
 
 [lints]

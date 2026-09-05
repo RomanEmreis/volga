@@ -5,8 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-tokio = "1.49.0"
-serde = { version = "1.0.228", features = ["serde_derive"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+serde = { workspace = true, features = ["derive"] }
 volga = { path = "../../volga" }
 
 [lints]

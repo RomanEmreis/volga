@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.10.0
+
+## Fixed
+* Global middleware and the per-request scope reach every request, not only the ones that matched a route (#229). The pipeline was entered from a single arm of the dispatcher, so a path no route matched - and a path that matched on a method nothing was mapped for - skipped it entirely: `wrap`, `with`, `filter` and `map_ok` never ran, CORS headers were not emitted, compression and tracing were absent, and **rate limiting did not apply at all**. That last one is what made this worth fixing rather than living with: a global `use_token_bucket(by::ip())` was bypassed completely by asking for a path that does not exist, which is what a scanner or a naive flood does by default - and for an app whose fallback serves an SPA shell (`map_fallback_to_file`), each of those unmetered requests is a filesystem read plus a full HTML body rather than a cheap `404`. Routing still runs first and still decides *what* answers a request; what changed is that all three of its outcomes now travel through the same chain, answered at the end of it by the matched route's pipeline, by the fallback handler, or by a `405` carrying the `Allow` header it always carried.
+* `HttpRequestScope` is built for those requests as well, so the extractors that read it - `ClientIp`, `CancellationToken`, `Config<T>`, `HostEnv`, `Dc<T>` - work inside a fallback handler instead of failing it with a `500`. The configured request body limit applies there too; a fallback used to receive the connection's body unmetered.
+* An error returned by a fallback handler is answered by the application's `map_err` handler, as an error from any other handler is. It used to go to the built-in one, so a service that shaped its errors got one response for a failing route and a different one for a failing fallback.
+* A `404` and a `405` carry the CORS headers the configured policy would have put on a `200`. A preflight is still answered `204` only for a route that exists - answering one for a path or a method the router did not match would advertise an endpoint that is not there - so those requests fall through to the `404` / `405` and pick the headers up on the way out.
+
+## Added
+* `HttpContext::matched_route` - `true` when routing matched an endpoint for this request. Middleware now sees the requests nothing matched, and some of it should treat them differently; this is how it tells them apart. The CORS middleware is the first caller, gating the preflight short-circuit on it.
+
+## Breaking Changes
+* A short-circuiting global middleware now decides unmatched requests too. `filter`, a `with` that returns early, and `authorize` run before routing's answer is known, so a global authorization middleware answers `401` where the router alone used to answer `404`. That leaks less about which paths exist, but it is a change in what a client sees; per-route and per-group middleware are unaffected, since those belong to a route that by definition matched.
+* Rate limiting counts requests that match no route. This is the point of the change, and it means a limiter's budget is now spent by traffic that previously did not touch it - a service sized against its own routes may see clients hit the limit sooner than before.
+* `FallbackHandler::call` takes an `HttpRequest` rather than a `Request<Incoming>`, so a hand-written `impl FallbackHandler` has to take the new argument type. `App::map_fallback` is bound by `FromRequestParts` - the same public trait `App::map_err` uses - so every fallback signature that compiled before still compiles, a custom extractor defined outside this crate included. A fallback still reads only the request parts and not the body: nothing matched, so there is no route to say how a body should be read.
+* `FromRawRequest` is removed. It existed only to describe what a fallback handler could take, and it accepted exactly what `FromRequestParts` accepts - its one implementation over handler arguments was a blanket over tuples of that trait - so `map_fallback` takes the same set without it. The `Cookies`, `SignedCookies` and `PrivateCookies` impls of it went with it; all three still implement `FromRequestParts`, `FromRequestRef` and `FromPayload`, so every use of them as an extractor is unchanged.
+
 # 0.9.11
 
 ## Added

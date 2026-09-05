@@ -11,7 +11,7 @@ use std::{
 
 use super::{
     App,
-    http::{FromRawRequest, FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
+    http::{FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
 };
 
 pub use self::{
@@ -285,6 +285,18 @@ impl App {
 
     /// Adds a special fallback handler that handles the unregistered paths
     ///
+    /// The fallback sits at the end of the global middleware pipeline, in the
+    /// place a matched route's handler would occupy, so the middleware around
+    /// it runs as usual and the per-request scope is there to read.
+    ///
+    /// It takes the same arguments [`map_err`](Self::map_err) does - anything
+    /// implementing [`FromRequestParts`], which covers headers, the URI,
+    /// cookies, [`ClientIp`](crate::ClientIp) and [`Dc<T>`](crate::di::Dc).
+    /// Not the body: nothing matched, so there is no route to say how a body
+    /// should be read. Path parameters are out for the same reason -
+    /// [`Path`](crate::Path) and [`NamedPath`](crate::NamedPath) have nothing
+    /// to read.
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, error::Error, not_found};
@@ -299,10 +311,25 @@ impl App {
     /// # app.run().await
     /// # }
     /// ```
+    ///
+    /// # Example with extractors
+    /// ```no_run
+    /// use volga::{App, ClientIp, http::Uri, not_found};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    ///  let mut app = App::new();
+    ///
+    ///  app.map_fallback(|uri: Uri, ip: ClientIp| async move {
+    ///     not_found!("no route for {uri} (from {ip})")
+    ///  });
+    /// # app.run().await
+    /// # }
+    /// ```
     pub fn map_fallback<F, Args, R>(&mut self, handler: F) -> &mut Self
     where
         F: GenericHandler<Args, Output = R>,
-        Args: FromRawRequest + Send + 'static,
+        Args: FromRequestParts + Send + 'static,
         R: IntoResponse,
     {
         self.pipeline

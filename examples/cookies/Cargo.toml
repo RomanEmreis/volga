@@ -6,5 +6,5 @@ publish = false
 
 [dependencies]
 volga = { path = "../../volga", features = ["cookie", "basic-auth"] }
-tokio = "1.46.1"
-uuid = { version = "1.17.0", features = ["v4"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+uuid = { workspace = true, features = ["v4"] }

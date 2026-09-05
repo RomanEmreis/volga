@@ -6,10 +6,10 @@ publish = false
 
 [dependencies]
 volga = { path = "../../volga", features = ["middleware","static-files","tracing"] }
-serde = { version = "1.0.219", features = ["serde_derive"] }
-tokio = "1.46.1"
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [lints]
 workspace = true

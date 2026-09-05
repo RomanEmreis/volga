@@ -28,11 +28,17 @@ impl Middleware for Cors {
                 return next(ctx).await;
             };
 
+            // Preflight is only possible for OPTIONS, and only for a route that
+            // exists. Routing runs before this chain, so answering `204` for a
+            // path or a method it did not match would advertise an endpoint that
+            // is not there; those fall through to the `404` / `405` terminal and
+            // pick up the normal CORS headers on the way out instead.
+            let matched_route = ctx.matched_route();
+
             let request = ctx.request();
             let method = request.method();
 
-            // Preflight is only possible for OPTIONS
-            if method == Method::OPTIONS {
+            if matched_route && method == Method::OPTIONS {
                 let origin = request.headers().get(&ORIGIN);
                 let acrm = request
                     .headers()

@@ -5,11 +5,8 @@ use crate::{
     error::Error,
     headers::{COOKIE, HeaderMap, SET_COOKIE},
     http::{
-        HttpRequest, Request,
-        body::Incoming,
-        endpoints::args::{
-            FromPayload, FromRawRequest, FromRequestParts, FromRequestRef, Payload, Source,
-        },
+        HttpRequest,
+        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
     },
 };
 use cookie::CookieJar;
@@ -118,13 +115,6 @@ impl FromRequestParts for Cookies {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         Ok(Cookies::from(&parts.headers))
-    }
-}
-
-impl FromRawRequest for Cookies {
-    #[inline]
-    fn from_request(req: Request<Incoming>) -> impl Future<Output = Result<Self, Error>> + Send {
-        ready(Ok(Cookies::from(req.headers())))
     }
 }
 

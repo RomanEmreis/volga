@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-tokio = "1.46.1"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 volga = { path = "../../volga", features = ["middleware"] }
 
 [lints]

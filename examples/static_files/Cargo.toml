@@ -5,8 +5,8 @@ edition = "2024"
 publish = false
 
 [dependencies]
-tokio = "1.46.1"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 volga = { path = "../../volga", features = ["static-files", "tracing"] }
 
 [lints]
