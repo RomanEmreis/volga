@@ -110,6 +110,12 @@ jobs:
       run: cargo test --locked --features http1
     - name: Run tests - http2
       run: cargo test --locked --features http2
+    - name: Run tests - http1 with test utilities
+      # The two steps above compile the `#[cfg(feature = "test")]` suites away, and
+      # `--all-features` turns http2 on, which sends the WebSocket test helper down
+      # its HTTP/2 path - so without this combination the HTTP/1 upgrade is never
+      # exercised anywhere in the matrix.
+      run: cargo test --locked --features "http1,ws,test"
 
   coverage:
     runs-on: ubuntu-latest

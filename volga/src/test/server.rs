@@ -320,10 +320,16 @@ impl TestServer {
     ) -> TestWebSocket {
         let uri = format!("ws://127.0.0.1:{}{}", self.port, path);
 
-        let req = ClientRequestBuilder::new(Uri::try_from(uri).unwrap()).with_header(
-            SEC_WEBSOCKET_PROTOCOL.to_string(),
-            known_protocols.join(","),
-        );
+        // An empty `Sec-WebSocket-Protocol` is not "no subprotocol": it asks for
+        // one and names none, and tungstenite then fails the handshake because
+        // the server answered without naming one back.
+        let mut req = ClientRequestBuilder::new(Uri::try_from(uri).unwrap());
+        if N > 0 {
+            req = req.with_header(
+                SEC_WEBSOCKET_PROTOCOL.to_string(),
+                known_protocols.join(","),
+            );
+        }
         let (ws, _) = tokio_tungstenite::connect_async(req)
             .await
             .expect("WebSocket handshake failed");
@@ -352,13 +358,14 @@ impl TestServer {
             let _ = conn.await;
         });
 
-        let request = Request::builder()
+        let mut request = Request::builder()
             .method(Method::CONNECT)
             .extension(hyper::ext::Protocol::from_static("websocket"))
-            .header(SEC_WEBSOCKET_PROTOCOL, known_protocols.join(","))
-            .uri(path)
-            .body(HttpBody::empty())
-            .unwrap();
+            .uri(path);
+        if N > 0 {
+            request = request.header(SEC_WEBSOCKET_PROTOCOL, known_protocols.join(","));
+        }
+        let request = request.body(HttpBody::empty()).unwrap();
 
         let mut response = sender.send_request(request).await.unwrap();
         let upgraded = hyper::upgrade::on(&mut response).await.unwrap();
