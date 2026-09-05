@@ -5,7 +5,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
     HttpRequest, HttpResult,
-    http::{FromRequest, GenericHandler, IntoResponse},
+    http::{FromRequestParts, GenericHandler, IntoResponse},
     status,
 };
 
@@ -22,7 +22,7 @@ pub struct FallbackFunc<F, Args>(pub(crate) F, PhantomData<fn(Args)>);
 impl<F, Args, R> FallbackFunc<F, Args>
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRequest + Send + 'static,
+    Args: FromRequestParts + Send + 'static,
     R: IntoResponse,
 {
     pub(crate) fn new(func: F) -> Self {
@@ -33,13 +33,18 @@ where
 impl<F, Args, R> FallbackHandler for FallbackFunc<F, Args>
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRequest + Send + 'static,
+    Args: FromRequestParts + Send + 'static,
     R: IntoResponse,
 {
     #[inline]
     fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult> {
         Box::pin(async move {
-            let args = Args::from_request(req).await?;
+            // Nothing matched, so there is no route to read a body for; the
+            // parts carry everything a fallback can act on, and unlike the
+            // payload trait behind `FromRequest` this one is public, so an
+            // extractor defined outside the crate works here.
+            let (parts, _) = req.into_parts();
+            let args = Args::from_parts(&parts)?;
             self.0.call(args).await.into_response()
         })
     }
@@ -48,7 +53,7 @@ where
 impl<F, Args, R> From<FallbackFunc<F, Args>> for PipelineFallbackHandler
 where
     F: GenericHandler<Args, Output = R>,
-    Args: FromRequest + Send + 'static,
+    Args: FromRequestParts + Send + 'static,
     R: IntoResponse,
 {
     #[inline]

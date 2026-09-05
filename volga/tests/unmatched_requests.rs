@@ -285,31 +285,6 @@ async fn it_extracts_the_request_scope_in_a_fallback() {
 }
 
 #[tokio::test]
-async fn it_reads_the_body_in_a_fallback() {
-    use volga::Json;
-
-    let server = TestServer::spawn(|app| {
-        app.map_fallback(|body: Json<serde_json::Value>| async move {
-            ok!("{}", body["name"].as_str().unwrap_or_default())
-        });
-    })
-    .await;
-
-    let response = server
-        .client()
-        .post(server.url("/unmatched"))
-        .json(&serde_json::json!({ "name": "volga" }))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status().as_u16(), 200);
-    assert_eq!(response.text().await.unwrap(), "volga");
-
-    server.shutdown().await;
-}
-
-#[tokio::test]
 async fn it_routes_a_fallback_error_to_the_error_handler() {
     use volga::{error::Error, status};
 

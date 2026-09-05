@@ -11,7 +11,7 @@ use std::{
 
 use super::{
     App,
-    http::{FromRequest, FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
+    http::{FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
 };
 
 pub use self::{
@@ -286,11 +286,16 @@ impl App {
     /// Adds a special fallback handler that handles the unregistered paths
     ///
     /// The fallback sits at the end of the global middleware pipeline, in the
-    /// place a matched route's handler would occupy, so it takes the same
-    /// extractors any handler does and the middleware around it runs as usual.
-    /// The one thing it cannot have is path parameters: nothing matched, so
-    /// [`Path`](crate::Path) and [`NamedPath`](crate::NamedPath) have nothing
-    /// to read.
+    /// place a matched route's handler would occupy, so the middleware around
+    /// it runs as usual and the per-request scope is there to read.
+    ///
+    /// It takes the same arguments [`map_err`](Self::map_err) does - anything
+    /// implementing [`FromRequestParts`](crate::http::FromRequestParts), which
+    /// covers headers, the URI, cookies, [`ClientIp`](crate::ClientIp) and
+    /// [`Dc<T>`](crate::di::Dc). Not the body: nothing matched, so there is no
+    /// route to say how a body should be read. Path parameters are out for the
+    /// same reason - [`Path`](crate::Path) and [`NamedPath`](crate::NamedPath)
+    /// have nothing to read.
     ///
     /// # Example
     /// ```no_run
@@ -324,7 +329,7 @@ impl App {
     pub fn map_fallback<F, Args, R>(&mut self, handler: F) -> &mut Self
     where
         F: GenericHandler<Args, Output = R>,
-        Args: FromRequest + Send + 'static,
+        Args: FromRequestParts + Send + 'static,
         R: IntoResponse,
     {
         self.pipeline
