@@ -158,6 +158,26 @@ async fn it_runs_an_outer_group_before_every_scope_nested_in_it() {
     server.shutdown().await;
 }
 
+/// A route mapped twice is one route, and the group configures it once.
+#[tokio::test]
+async fn it_configures_a_route_mapped_twice_only_once() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", |api| {
+            api.map_get("/hello", || async { "first" });
+            api.map_get("/hello", || async { "second" });
+            api.wrap(mark!(&group_trace, "group"));
+        });
+    })
+    .await;
+
+    assert_eq!(trace_of(&server, &trace, "/api/hello").await, ["group"]);
+
+    server.shutdown().await;
+}
+
 /// The CORS policy of a group reaches the routes above it, and the one a route or a
 /// sub-group chose for itself is not replaced by the one the enclosing scope chose.
 #[tokio::test]
@@ -226,6 +246,40 @@ async fn it_applies_group_cors_registered_after_a_route() {
             "{path} from {origin}"
         );
     }
+
+    server.shutdown().await;
+}
+
+#[cfg(feature = "openapi")]
+#[tokio::test]
+async fn it_tags_a_route_mapped_twice_only_once() {
+    let server = TestServer::builder()
+        .configure(|app| app.with_open_api(|open_api| open_api))
+        .setup(|app| {
+            app.use_open_api();
+
+            app.group("/api", |api| {
+                api.map_get("/hello", || async { "first" });
+                api.map_get("/hello", || async { "second" });
+            });
+        })
+        .build()
+        .await;
+
+    let spec: serde_json::Value = server
+        .client()
+        .get(server.url("/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        spec["paths"]["/api/hello"]["get"]["tags"],
+        serde_json::json!(["/api"])
+    );
 
     server.shutdown().await;
 }

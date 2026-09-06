@@ -545,10 +545,24 @@ impl<'a> RouteGroup<'a> {
     )]
     fn record(&mut self, method: &Method, pattern: &str) {
         #[cfg(any(feature = "middleware", feature = "openapi"))]
-        self.routes.push(GroupRoute {
-            method: method.clone(),
-            pattern: Box::from(pattern),
-        });
+        {
+            // Mapping the same method and pattern twice registers one route - the second
+            // handler lands on the endpoint the first one made - so the group configures
+            // it once. Two spellings of one dynamic route are not caught here: that
+            // ambiguity is a problem of its own, and this is not the place to hide it
+            if self
+                .routes
+                .iter()
+                .any(|route| route.method == *method && route.pattern.as_ref() == pattern)
+            {
+                return;
+            }
+
+            self.routes.push(GroupRoute {
+                method: method.clone(),
+                pattern: Box::from(pattern),
+            });
+        }
     }
 
     /// Applies the group's configuration to every route it registered.
