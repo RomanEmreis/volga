@@ -61,6 +61,8 @@ use crate::openapi::OpenApiState;
 
 #[cfg(feature = "static-files")]
 pub use self::host_env::HostEnv;
+#[cfg(feature = "static-files")]
+pub(crate) use self::host_env::warn;
 
 #[cfg(feature = "http2")]
 pub use crate::limits::Http2Limits;

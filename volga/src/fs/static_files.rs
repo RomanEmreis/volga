@@ -27,7 +27,7 @@
 
 use crate::{
     App, HttpResult,
-    app::HostEnv,
+    app::{HostEnv, warn},
     error::Error,
     html, html_file,
     http::{
@@ -118,6 +118,13 @@ impl Middleware for StaticMount {
     }
 }
 
+/// Spells a mount's prefix for a message to a human, where the empty prefix of an
+/// application-wide mount would read as nothing at all.
+#[inline]
+fn mount_name(prefix: &str) -> &str {
+    if prefix.is_empty() { "/" } else { prefix }
+}
+
 /// The layer that answers with the file, and the tail of every mount's pipeline.
 ///
 /// It reads back what [`probe`] decided, so that the layers a group put in front of it - its
@@ -162,8 +169,22 @@ impl StaticMount {
     }
 
     /// Composes this mount's pipeline and registers it in the application's.
+    ///
+    /// A prefix already answered by a mount is left to that mount: a second one there would
+    /// answer nothing the first did not, and the middleware it carries would never run, so
+    /// registering it would only cost every request a second look at the filesystem while
+    /// looking like a second policy applies.
     #[inline]
     pub(crate) fn mount(mut self, app: &mut App) {
+        if !app.pipeline.claim_static_mount(&self.prefix) {
+            warn(&format!(
+                "Static files are already served under '{}'; this registration does nothing. \
+                 Remove it, or move what it carries to the one that answers.",
+                mount_name(&self.prefix)
+            ));
+            return;
+        }
+
         self.pipeline.compose();
         app.attach(self);
     }
@@ -544,13 +565,13 @@ mod tests {
         Serving, StaticMount, fallback, is_retrieval, probe, resolve, respond,
         respond_with_file_impl, respond_with_folder_impl, sanitize_path,
     };
-    use crate::HttpResult;
     use crate::app::HostEnv;
     use crate::headers::{
         CACHE_CONTROL, CacheControl, HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE,
         IF_NONE_MATCH, ResponseCaching,
     };
     use crate::http::{Method, StatusCode};
+    use crate::{App, HttpResult};
     use std::path::{Path, PathBuf};
     use std::time::{Duration, SystemTime};
     use tokio::fs::metadata;
@@ -962,6 +983,50 @@ mod tests {
                 .await
                 .is_none()
         );
+    }
+
+    /// The number of middlewares registered in the application pipeline. Nothing but the
+    /// mounts registers one in these tests, so this counts them.
+    fn registered(app: &mut App) -> usize {
+        app.pipeline.middlewares_mut().pipeline.len()
+    }
+
+    #[test]
+    fn it_registers_one_mount_per_prefix() {
+        let mut app = App::new();
+        app.use_static_assets();
+        app.use_static_assets();
+
+        assert_eq!(registered(&mut app), 1);
+    }
+
+    #[test]
+    fn it_registers_one_mount_per_prefix_asked_for_by_a_group() {
+        let mut app = App::new();
+        app.group("/static", |g| {
+            g.use_static_assets();
+            g.use_static_assets();
+        });
+        // A second group over the same prefix asks for the mount that is already there.
+        app.group("/static", |g| {
+            g.use_static_assets();
+        });
+
+        assert_eq!(registered(&mut app), 1);
+    }
+
+    #[test]
+    fn it_registers_a_mount_for_every_prefix_that_has_none() {
+        let mut app = App::new();
+        app.use_static_assets();
+        app.group("/static", |g| {
+            g.use_static_assets();
+            g.group("/inner", |inner| {
+                inner.use_static_assets();
+            });
+        });
+
+        assert_eq!(registered(&mut app), 3);
     }
 
     #[test]

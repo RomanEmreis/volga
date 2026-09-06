@@ -44,6 +44,9 @@ pub(crate) enum Terminal {
 pub(crate) struct PipelineBuilder {
     #[cfg(feature = "middleware")]
     middlewares: Middlewares,
+    /// The prefixes the static file mounts already in the chain answer under
+    #[cfg(feature = "static-files")]
+    static_mounts: Vec<Box<str>>,
     endpoints: Endpoints,
     error_handler: PipelineErrorHandler,
     fallback_handler: PipelineFallbackHandler,
@@ -69,6 +72,8 @@ impl PipelineBuilder {
     pub(super) fn new() -> Self {
         Self {
             middlewares: Middlewares::new(),
+            #[cfg(feature = "static-files")]
+            static_mounts: Vec::new(),
             endpoints: Endpoints::new(),
             error_handler: Arc::new(DefaultErrorHandler),
             fallback_handler: FallbackFunc::new(default_fallback_handler).into(),
@@ -113,6 +118,28 @@ impl PipelineBuilder {
     #[cfg(feature = "middleware")]
     pub(crate) fn middlewares_mut(&mut self) -> &mut Middlewares {
         &mut self.middlewares
+    }
+
+    /// Takes the `prefix` for a static file mount, and returns `false` when a mount already
+    /// answers under it.
+    ///
+    /// A mount is one middleware in the chain and it answers everything under its prefix, so
+    /// a second one there would answer nothing the first did not - it would only cost every
+    /// request a second look at the filesystem, and the middleware it carries would never
+    /// run. Turning the static file server on is a switch, and turning a switch on twice is
+    /// on.
+    #[cfg(feature = "static-files")]
+    pub(crate) fn claim_static_mount(&mut self, prefix: &str) -> bool {
+        if self
+            .static_mounts
+            .iter()
+            .any(|mounted| mounted.as_ref() == prefix)
+        {
+            return false;
+        }
+
+        self.static_mounts.push(prefix.into());
+        true
     }
 
     pub(crate) fn endpoints_mut(&mut self) -> &mut Endpoints {

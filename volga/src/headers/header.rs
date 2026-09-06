@@ -81,7 +81,11 @@ impl HttpHeaders {
 
     /// Borrows the underlying [`HeaderMap`], for a caller that reads it and does not
     /// need a copy of it.
+    ///
+    /// Read by the static file server and by the Swagger UI handler, so it is dead code in
+    /// a build with neither.
     #[inline]
+    #[allow(dead_code)]
     pub(crate) fn as_map(&self) -> &HeaderMap {
         &self.inner
     }
