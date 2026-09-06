@@ -366,7 +366,7 @@ impl RouteNode {
                 if matches!(handler, Layer::Handler(_)) {
                     handlers[i] = RouteEndpoint::new(method);
                 }
-                
+
                 &mut handlers[i]
             }
             Err(i) => {
@@ -474,7 +474,7 @@ mod tests {
     use super::RouteEndpoint;
     use crate::http::endpoints::handlers::{Func, RouteHandler};
     use crate::http::endpoints::route::{
-        DEFAULT_DEPTH, RouteNode, make_allowed_str, method_order, split_path,
+        DEFAULT_DEPTH, RouteNode, join_path, make_allowed_str, method_order, split_path,
     };
     use crate::ok;
     use hyper::Method;
@@ -757,6 +757,66 @@ mod tests {
         let path = "a/b/c/d";
         let split = split_path(path);
         assert_eq!(split.collect::<Vec<_>>(), vec!["a", "b", "c", "d"])
+    }
+
+    #[test]
+    fn it_joins_a_prefix_and_a_pattern() {
+        assert_eq!(join_path("/api", "/users"), "/api/users");
+        assert_eq!(join_path("/api/v1", "/users/{id}"), "/api/v1/users/{id}");
+    }
+
+    #[test]
+    fn it_joins_a_prefix_and_a_pattern_written_without_separators() {
+        assert_eq!(join_path("api", "users"), "/api/users");
+        assert_eq!(join_path("/api", "users"), "/api/users");
+        assert_eq!(join_path("api/", "/users"), "/api/users");
+    }
+
+    #[test]
+    fn it_drops_empty_segments_when_joining() {
+        assert_eq!(join_path("/api/", "/users/"), "/api/users");
+        assert_eq!(join_path("/api//", "//users//{id}//"), "/api/users/{id}");
+    }
+
+    #[test]
+    fn it_joins_an_empty_prefix_or_pattern() {
+        assert_eq!(join_path("", "/users"), "/users");
+        assert_eq!(join_path("/api", ""), "/api");
+        assert_eq!(join_path("/api", "/"), "/api");
+        assert_eq!(join_path("", ""), "");
+        assert_eq!(join_path("/", "/"), "");
+    }
+
+    #[test]
+    fn it_keeps_typed_and_dynamic_segments_when_joining() {
+        assert_eq!(
+            join_path("/api", "/users/{id:integer}/roles/{role}"),
+            "/api/users/{id:integer}/roles/{role}"
+        );
+    }
+
+    /// The point of joining this way: paths that name one route read as one string, so
+    /// anything keyed by that string counts the route once.
+    #[test]
+    fn it_reads_one_path_for_spellings_that_name_one_route() {
+        assert_eq!(join_path("/api", "/hello"), join_path("/api", "/hello/"));
+        assert_eq!(join_path("/api", "/hello"), join_path("/api/", "hello"));
+        assert_eq!(join_path("/api", "/hello"), join_path("/api", "//hello"));
+    }
+
+    /// ... and the string it produces addresses the route the caller wrote.
+    #[test]
+    fn it_joins_a_path_that_finds_the_route_it_names() {
+        let mut route = RouteNode::new();
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        route.insert(
+            &join_path("/api/", "/users//{id}/"),
+            Method::GET,
+            handler.into(),
+        );
+
+        assert!(route.find("/api/users/7").is_some());
     }
 
     #[test]
