@@ -784,6 +784,9 @@ define_route_group_methods! {
 
 #[cfg(test)]
 mod tests {
+    // Every test here is about what a group records, which is only tracked when there is
+    // something to configure with it
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
     use super::*;
 
     #[cfg(any(feature = "middleware", feature = "openapi"))]
