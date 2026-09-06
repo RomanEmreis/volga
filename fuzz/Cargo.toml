@@ -40,3 +40,10 @@ path = "fuzz_targets/fuzz_openapi_gen.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_static_path"
+path = "fuzz_targets/fuzz_static_path.rs"
+test = false
+doc = false
+bench = false

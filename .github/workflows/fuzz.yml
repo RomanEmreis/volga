@@ -92,6 +92,8 @@ jobs:
             max_len: 4096
           - target: fuzz_openapi_gen
             max_len: 256
+          - target: fuzz_static_path
+            max_len: 1024
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly

@@ -1,8 +1,15 @@
 #![allow(missing_docs)]
 #![cfg(all(feature = "test", feature = "static-files"))]
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use volga::app::HostEnv;
-use volga::{ok, test::TestServer};
+use volga::headers::{Header, HttpHeaders, headers};
+use volga::{HttpResponse, ok, test::TestServer};
+
+headers! {
+    (ServedBy, "x-served-by"),
+    (Scope, "x-scope")
+}
 
 #[tokio::test]
 async fn it_responds_with_index_file() {
@@ -433,8 +440,7 @@ async fn it_does_not_report_a_conditional_write_as_not_modified() {
     // The fallback answers a route that was not found whatever the method was, so a write to
     // an unknown path reaches the shell too. A validator answers "your copy is current",
     // which is no answer to a `POST` - and the tag it would match describes the shell rather
-    // than anything this request was aimed at. The path has to be deeper than the segments
-    // `map_static_assets` registers, or the router answers `405` before the fallback runs.
+    // than anything this request was aimed at.
     let posted = server
         .client()
         .post(server.url("/api/v1/orders/new"))
@@ -467,6 +473,313 @@ async fn it_does_not_report_a_conditional_write_as_not_modified() {
         .unwrap();
 
     assert_eq!(head.status(), 304);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_serves_a_file_and_a_dynamic_route_side_by_side() {
+    // The static file server used to be routing, and a dynamic route at the same level
+    // silently took its place - or was taken by it, depending on which was registered
+    // last (#226). It is middleware now, so the router has nothing to collide with.
+    let server = TestServer::builder()
+        .configure(|app| app.set_host_env(HostEnv::new("tests/static")))
+        .setup(|app| {
+            app.map_get("/{id}", |id: String| async move { ok!("user:{id}") });
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let file = server
+        .client()
+        .get(server.url("/index.html"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(file.status().is_success());
+    assert_eq!(file.headers().get("Content-Type").unwrap(), "text/html");
+
+    let route = server.client().get(server.url("/42")).send().await.unwrap();
+
+    assert!(route.status().is_success());
+    assert_eq!(route.text().await.unwrap(), "user:42");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_serves_a_directory_created_after_the_server_started() {
+    // The number of routes to register used to be decided by walking the content root at
+    // startup, so anything deeper than the tree was then could never be served.
+    let content_root = tempfile::tempdir().unwrap();
+    let root_path = content_root.path().to_path_buf();
+
+    let server = TestServer::builder()
+        .configure(move |app| app.set_host_env(HostEnv::new(&root_path)))
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let nested = content_root.path().join("assets/vendor/theme");
+    std::fs::create_dir_all(&nested).unwrap();
+    std::fs::write(nested.join("app.css"), "body { color: red }").unwrap();
+
+    let response = server
+        .client()
+        .get(server.url("/assets/vendor/theme/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.headers().get("Content-Type").unwrap(), "text/css");
+    assert_eq!(response.text().await.unwrap(), "body { color: red }");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_serves_files_under_the_group_prefix_only() {
+    let server = TestServer::builder()
+        .configure(|app| app.set_host_env(HostEnv::new("tests/static")))
+        .setup(|app| {
+            app.group("/static", |g| {
+                g.use_static_files();
+            });
+        })
+        .build()
+        .await;
+
+    let mounted = server
+        .client()
+        .get(server.url("/static/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(mounted.status().is_success());
+
+    // The same file, addressed outside the prefix the group mounted it under.
+    for path in ["/assets/app.css", "/", "/staticky/assets/app.css"] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert_eq!(response.status(), 404, "{path}");
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_runs_the_group_middleware_around_a_file_it_serves() {
+    let server = TestServer::builder()
+        .configure(|app| app.set_host_env(HostEnv::new("tests/static")))
+        .setup(|app| {
+            app.group("/static", |g| {
+                g.filter(
+                    |headers: HttpHeaders| async move { headers.get_raw("x-api-key").is_some() },
+                );
+                g.map_ok(|mut resp: HttpResponse| async move {
+                    resp.insert_header(Header::<ServedBy>::from_static("the-group"));
+                    resp
+                });
+                g.use_static_files();
+            });
+        })
+        .build()
+        .await;
+
+    // A group carries the policy of everything under its prefix, and a file the group
+    // serves is under it as much as a route the group mapped.
+    let denied = server
+        .client()
+        .get(server.url("/static/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(denied.status(), 400);
+
+    let allowed = server
+        .client()
+        .get(server.url("/static/assets/app.css"))
+        .header("x-api-key", "secret")
+        .send()
+        .await
+        .unwrap();
+
+    assert!(allowed.status().is_success());
+    assert_eq!(allowed.headers().get("x-served-by").unwrap(), "the-group");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_runs_the_middleware_of_every_group_around_a_nested_mount() {
+    let server = TestServer::builder()
+        .configure(|app| app.set_host_env(HostEnv::new("tests/static")))
+        .setup(|app| {
+            app.group("/app", |outer| {
+                outer.map_ok(|mut resp: HttpResponse| async move {
+                    resp.insert_header(Header::<ServedBy>::from_static("outer"));
+                    resp
+                });
+                outer.group("/static", |inner| {
+                    inner.map_ok(|mut resp: HttpResponse| async move {
+                        resp.insert_header(Header::<Scope>::from_static("inner"));
+                        resp
+                    });
+                    inner.use_static_files();
+                });
+            });
+        })
+        .build()
+        .await;
+
+    let response = server
+        .client()
+        .get(server.url("/app/static/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.headers().get("x-served-by").unwrap(), "outer");
+    assert_eq!(response.headers().get("x-scope").unwrap(), "inner");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_runs_the_group_middleware_once_for_a_request_it_declines() {
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    let server = TestServer::builder()
+        .configure(|app| app.set_host_env(HostEnv::new("tests/static")))
+        .setup(|app| {
+            app.group("/static", |g| {
+                g.map_ok(|resp: HttpResponse| async move {
+                    CALLS.fetch_add(1, Ordering::SeqCst);
+                    resp
+                });
+                g.map_get("/info", || async { ok!("info") });
+                g.use_static_files();
+            });
+        })
+        .build()
+        .await;
+
+    // The mount declines this one - there is no `info` file - so the route answers it,
+    // wrapped in the group's middleware. That middleware must not also run for the
+    // request on its way past the mount.
+    let route = server
+        .client()
+        .get(server.url("/static/info"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(route.status().is_success());
+    assert_eq!(CALLS.load(Ordering::SeqCst), 1);
+
+    let file = server
+        .client()
+        .get(server.url("/static/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(file.status().is_success());
+    assert_eq!(CALLS.load(Ordering::SeqCst), 2);
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_leaves_a_write_to_the_path_of_a_file_to_the_router() {
+    let server = TestServer::builder()
+        .configure(|app| app.set_host_env(HostEnv::new("tests/static")))
+        .setup(|app| {
+            app.use_static_files();
+            app.map_post("/index.html", || async { ok!("posted") });
+        })
+        .build()
+        .await;
+
+    let response = server
+        .client()
+        .post(server.url("/index.html"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "posted");
+
+    server.shutdown().await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn it_denies_a_file_that_leaves_the_content_root_through_a_symlink() {
+    let outside = tempfile::tempdir().unwrap();
+    let secret = outside.path().join("secret.txt");
+    std::fs::write(&secret, "secret").unwrap();
+
+    let content_root = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(&secret, content_root.path().join("secret.txt")).unwrap();
+
+    let root_path = content_root.path().to_path_buf();
+    let server = TestServer::builder()
+        .configure(move |app| app.set_host_env(HostEnv::new(&root_path)))
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let response = server
+        .client()
+        .get(server.url("/secret.txt"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 403);
+
+    server.shutdown().await;
+}
+
+#[cfg(feature = "compression-full")]
+#[tokio::test]
+async fn it_compresses_a_file_it_serves() {
+    let server = TestServer::builder()
+        .configure(|app| app.set_host_env(HostEnv::new("tests/static")))
+        .setup(|app| {
+            // Registered first, so it wraps everything the mount answers with.
+            app.use_compression();
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let response = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .header("accept-encoding", "gzip")
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.headers().get("vary").unwrap(), "accept-encoding");
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "max-age=86400, public, immutable"
+    );
 
     server.shutdown().await;
 }

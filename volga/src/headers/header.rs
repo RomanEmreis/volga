@@ -78,6 +78,13 @@ impl HttpHeaders {
     pub fn to_map(&self) -> HeaderMap {
         self.inner.clone()
     }
+
+    /// Borrows the underlying [`HeaderMap`], for a caller that reads it and does not
+    /// need a copy of it.
+    #[inline]
+    pub(crate) fn as_map(&self) -> &HeaderMap {
+        &self.inner
+    }
 }
 
 impl From<HeaderMap<HeaderValue>> for HttpHeaders {

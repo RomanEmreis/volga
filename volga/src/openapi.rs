@@ -167,7 +167,7 @@ impl App {
                 let html = html.clone();
 
                 async move {
-                    if crate::headers::helpers::validate_etag(&etag, &headers) {
+                    if crate::headers::helpers::validate_etag(&etag, headers.as_map()) {
                         return crate::status!(304; [Header::<ETag>::try_from(etag)?]);
                     }
 
