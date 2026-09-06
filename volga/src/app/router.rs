@@ -5,7 +5,7 @@ use crate::http::IntoResponse;
 use crate::http::endpoints::{
     args::FromRequest,
     handlers::{Func, GenericHandler},
-    route::join_path,
+    route::{canonical_path, is_canonical_path, join_path},
 };
 use hyper::Method;
 use std::borrow::Cow;
@@ -420,6 +420,15 @@ impl App {
         Args: FromRequest + Send + 'static,
     {
         let handler = Func::new(handler);
+
+        // A route is keyed by this string in more places than the route tree - the
+        // OpenAPI operation among them - and the tree reads two spellings of one route as
+        // one. Registering the name it reads keeps those places agreeing with it
+        let pattern = if is_canonical_path(pattern.as_ref()) {
+            pattern
+        } else {
+            Cow::Owned(canonical_path(pattern.as_ref()))
+        };
 
         // use &str view only for registration
         let path: &str = pattern.as_ref();

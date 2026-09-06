@@ -120,21 +120,21 @@ impl OpenApiRegistry {
             return;
         }
 
-        let mut op_opt: Option<OpenApiOperation> = None;
         for doc in docs.values_mut() {
             if let Some(methods) = doc.paths.get_mut(&spec_path)
-                && let Some(op) = methods.remove(&method_lc)
+                && methods.remove(&method_lc).is_some()
+                && methods.is_empty()
             {
-                op_opt = Some(op);
-                if methods.is_empty() {
-                    doc.paths.remove(&spec_path);
-                }
+                doc.paths.remove(&spec_path);
             }
         }
 
-        let mut op = op_opt.unwrap_or_default();
+        // Built from `cfg` alone rather than from the operation that was there: `cfg`
+        // describes the route as it stands, and a field it no longer carries - a summary
+        // written for a handler that has since been replaced - is not part of it
+        let mut op = OpenApiOperation::default();
 
-        if op.parameters.is_none() && !path_params.is_empty() {
+        if !path_params.is_empty() {
             op.parameters = Some(path_params.clone());
         }
 
@@ -314,6 +314,22 @@ mod tests {
         assert!(!v1_doc.paths.contains_key("/pets"));
         assert!(admin_doc.paths.contains_key("/pets"));
         assert!(admin_doc.paths["/pets"].contains_key("post"));
+    }
+
+    #[test]
+    fn rebind_route_describes_the_route_the_config_describes() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        let described = OpenApiRouteConfig::default().with_summary("first registration");
+        registry.register_route(&Method::GET, "/users", &described);
+        registry.apply_route_config(&Method::GET, "/users", &described);
+
+        // What replaced it says nothing about a summary, so neither does the operation
+        registry.rebind_route(&Method::GET, "/users", &OpenApiRouteConfig::default());
+
+        let v1_doc = registry.document_by_name("v1").expect("v1 document");
+
+        assert!(v1_doc.paths["/users"]["get"].summary.is_none());
     }
 
     #[test]

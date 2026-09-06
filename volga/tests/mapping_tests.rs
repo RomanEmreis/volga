@@ -130,6 +130,53 @@ async fn it_replaces_a_route_that_is_mapped_again() {
     server.shutdown().await;
 }
 
+/// Two paths that name one route are one route everywhere it is remembered, so the
+/// operation describes the registration that answers rather than one it replaced.
+#[cfg(all(feature = "middleware", feature = "openapi"))]
+#[tokio::test]
+async fn it_describes_the_route_that_answers_when_a_path_is_mapped_again() {
+    let server = TestServer::builder()
+        .configure(|app| app.with_open_api(|open_api| open_api))
+        .setup(|app| {
+            app.use_open_api();
+
+            app.map_get("/test", || async { "first" })
+                .open_api(|op| op.with_summary("first registration"));
+            app.map_get("/test/", || async { "second" });
+        })
+        .build()
+        .await;
+
+    let response = server
+        .client()
+        .get(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "second");
+
+    let spec: serde_json::Value = server
+        .client()
+        .get(server.url("/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert!(spec["paths"]["/test"]["get"].is_object());
+    assert_eq!(spec["paths"]["/test/"], serde_json::Value::Null);
+    assert_eq!(
+        spec["paths"]["/test"]["get"]["summary"],
+        serde_json::Value::Null
+    );
+
+    server.shutdown().await;
+}
+
 #[tokio::test]
 async fn it_maps_to_head_request() {
     let server = TestServer::spawn(|app| {

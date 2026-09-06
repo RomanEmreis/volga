@@ -60,6 +60,8 @@ pub(crate) mod path_args;
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const PATH_SEPARATOR: u8 = b'/';
+const DOUBLE_PATH_SEPARATOR: &str = "//";
+const ROOT_PATH: &str = "/";
 const TYPE_SEPARATOR: char = ':';
 const ALLOW_METHOD_SEPARATOR: char = ',';
 const DEFAULT_DEPTH: usize = 4;
@@ -431,23 +433,52 @@ pub(super) fn make_allowed_str<const N: usize>(
     Arc::from(allowed)
 }
 
-/// Joins a route group's prefix and a route's pattern the way the router reads them
+/// Returns `true` if `path` already names a route the way the router reads it
 ///
-/// Empty segments carry no meaning to [`RouteNode`] - `split_path` drops them - so
-/// `/api` and `//users/` name the route `/api/users`, and anything that keys a route by
-/// the string it was written as has to say so the same way.
+/// Empty segments carry no meaning to [`RouteNode`] - `split_path` drops them - so a
+/// path holding any is a second name for a route that already has one. A route is keyed
+/// by the string it was written as in more places than the tree, and two names for one
+/// route are two entries in every one of them.
+#[inline]
+pub(crate) fn is_canonical_path(path: &str) -> bool {
+    path == ROOT_PATH
+        || (path.starts_with(PATH_SEPARATOR as char)
+            && !path.ends_with(PATH_SEPARATOR as char)
+            && !path.contains(DOUBLE_PATH_SEPARATOR))
+}
+
+/// Names the route `path` names, the way the router reads it
+#[inline]
+pub(crate) fn canonical_path(path: &str) -> String {
+    let mut canonical = String::with_capacity(path.len() + 1);
+
+    write_path(&mut canonical, path);
+    finish_path(canonical)
+}
+
+/// Joins a route group's prefix and a route's pattern into the name of the route they
+/// address together
 #[inline]
 pub(crate) fn join_path(prefix: &str, pattern: &str) -> String {
-    let mut path = String::with_capacity(prefix.len() + pattern.len());
+    let mut path = String::with_capacity(prefix.len() + pattern.len() + 1);
 
-    for segment in split_path(prefix).chain(split_path(pattern)) {
+    write_path(&mut path, prefix);
+    write_path(&mut path, pattern);
+    finish_path(path)
+}
+
+/// Appends the segments of `source` that name something
+#[inline]
+fn write_path(path: &mut String, source: &str) {
+    for segment in split_path(source) {
         path.push(PATH_SEPARATOR as char);
         path.push_str(segment);
     }
+}
 
-    // Nothing but empty segments names the root, and every other route spells that `/`.
-    // An empty string would address the same route under a second name - one that a
-    // route mapped outside the group, or the key it is remembered by, would not match
+/// Spells a path with no segments as the root, which is how every route names it
+#[inline]
+fn finish_path(mut path: String) -> String {
     if path.is_empty() {
         path.push(PATH_SEPARATOR as char);
     }
