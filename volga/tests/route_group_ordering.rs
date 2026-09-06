@@ -265,6 +265,48 @@ async fn it_configures_one_route_for_paths_that_differ_only_in_empty_segments() 
     server.shutdown().await;
 }
 
+/// A group whose prefix and route are both the root names the root route, the same one
+/// a `map_get("/")` outside the group names.
+#[cfg(feature = "openapi")]
+#[tokio::test]
+async fn it_names_the_root_route_the_way_a_route_outside_a_group_does() {
+    let server = TestServer::builder()
+        .configure(|app| app.with_open_api(|open_api| open_api))
+        .setup(|app| {
+            app.use_open_api();
+
+            app.group("/", |root| {
+                root.map_get("/", || async { "grouped" });
+            });
+
+            app.map_get("/", || async { "direct" });
+        })
+        .build()
+        .await;
+
+    // The later registration replaces the earlier one, as it would without a group
+    let response = server.client().get(server.url("/")).send().await.unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "direct");
+
+    let spec: serde_json::Value = server
+        .client()
+        .get(server.url("/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    // ... and both registrations describe one operation, under the path they share
+    assert!(spec["paths"]["/"]["get"].is_object());
+    assert_eq!(spec["paths"][""], serde_json::Value::Null);
+
+    server.shutdown().await;
+}
+
 /// The CORS policy of a group reaches the routes above it, and the one a route or a
 /// sub-group chose for itself is not replaced by the one the enclosing scope chose.
 #[tokio::test]

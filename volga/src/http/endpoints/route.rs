@@ -444,6 +444,13 @@ pub(crate) fn join_path(prefix: &str, pattern: &str) -> String {
         path.push(PATH_SEPARATOR as char);
         path.push_str(segment);
     }
+
+    // Nothing but empty segments names the root, and every other route spells that `/`.
+    // An empty string would address the same route under a second name - one that a
+    // route mapped outside the group, or the key it is remembered by, would not match
+    if path.is_empty() {
+        path.push(PATH_SEPARATOR as char);
+    }
     path
 }
 
@@ -783,8 +790,15 @@ mod tests {
         assert_eq!(join_path("", "/users"), "/users");
         assert_eq!(join_path("/api", ""), "/api");
         assert_eq!(join_path("/api", "/"), "/api");
-        assert_eq!(join_path("", ""), "");
-        assert_eq!(join_path("/", "/"), "");
+    }
+
+    /// The root is spelled the way a route mapped outside a group spells it, so both
+    /// name one route rather than two.
+    #[test]
+    fn it_spells_the_root_the_way_every_other_route_does() {
+        assert_eq!(join_path("", ""), "/");
+        assert_eq!(join_path("/", "/"), "/");
+        assert_eq!(join_path("/", "//"), "/");
     }
 
     #[test]
