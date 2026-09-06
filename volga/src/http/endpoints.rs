@@ -23,8 +23,6 @@ pub(crate) mod route;
 /// Describes a mapping between HTTP Verbs, routes and request handlers
 pub(crate) struct Endpoints {
     routes: RouteNode,
-    /// Whether a `GET` route answers `HEAD` requests that have no route of their own
-    implicit_head: bool,
 }
 
 /// Specifies statuses that could be returned after route matching
@@ -83,15 +81,7 @@ impl Endpoints {
     pub(crate) fn new() -> Self {
         Self {
             routes: RouteNode::new(),
-            implicit_head: true,
         }
-    }
-
-    /// Sets whether a `GET` route answers `HEAD` requests that have no route of their own
-    #[inline]
-    pub(crate) fn set_implicit_head(&mut self, enabled: bool) {
-        self.implicit_head = enabled;
-        self.routes.recompute_allowed_methods(enabled);
     }
 
     /// Gets a context of the executing route by its `HttpRequest`
@@ -123,7 +113,7 @@ impl Endpoints {
 
             if origin_present && let Some(target_method) = acrm {
                 // Check if the target method exists for this path
-                return self.endpoint_for(handlers, &target_method).map_or_else(
+                return endpoint_for(handlers, &target_method).map_or_else(
                     || FindResult::MethodNotFound(route_params.route.allowed_methods()),
                     |handler| {
                         FindResult::Ok(Endpoint::new(
@@ -138,7 +128,7 @@ impl Endpoints {
         }
 
         // Normal OPTIONS: keep existing behavior (likely 405 unless the user actually mapped OPTIONS)
-        self.endpoint_for(handlers, method).map_or_else(
+        endpoint_for(handlers, method).map_or_else(
             || FindResult::MethodNotFound(route_params.route.allowed_methods()),
             |handler| {
                 FindResult::Ok(Endpoint::new(
@@ -151,41 +141,17 @@ impl Endpoints {
         )
     }
 
-    /// Picks the endpoint that answers `method`
-    ///
-    /// A `GET` route answers a `HEAD` request that has no route of its own - the response
-    /// is the one that route would send, and the body is dropped on the way out - so a
-    /// `HEAD` request is answered through everything that route is answered through. A
-    /// `HEAD` mapped by hand is found here first and keeps `GET` out of it.
-    #[inline]
-    fn endpoint_for<'route>(
-        &self,
-        handlers: &'route [RouteEndpoint],
-        method: &Method,
-    ) -> Option<&'route RouteEndpoint> {
-        match handlers.binary_search_by(|handler| handler.cmp(method)) {
-            Ok(i) => Some(&handlers[i]),
-            Err(_) if self.implicit_head && method == Method::HEAD => handlers
-                .binary_search_by(|handler| handler.cmp(&Method::GET))
-                .ok()
-                .map(|i| &handlers[i]),
-            Err(_) => None,
-        }
-    }
-
     /// Maps the request handler to the current HTTP Verb and route pattern
     #[inline]
     pub(crate) fn map_route(&mut self, method: Method, pattern: &str, handler: RouteHandler) {
-        self.routes
-            .insert(pattern, method, handler.into(), self.implicit_head);
+        self.routes.insert(pattern, method, handler.into());
     }
 
     /// Maps the request layer to the current HTTP Verb and route pattern
     #[inline]
     #[cfg(feature = "middleware")]
     pub(crate) fn map_layer(&mut self, method: Method, pattern: &str, handler: Layer) {
-        self.routes
-            .insert(pattern, method, handler, self.implicit_head);
+        self.routes.insert(pattern, method, handler);
     }
 
     /// Binds CORS headers to the route handler
@@ -253,6 +219,27 @@ impl Endpoints {
     #[cfg(feature = "middleware")]
     pub(crate) fn compose(&mut self) {
         self.routes.compose();
+    }
+}
+
+/// Picks the endpoint that answers `method`
+///
+/// A `GET` route answers a `HEAD` request that has no route of its own: `HEAD` is `GET`
+/// without content (RFC 9110 Section 9.3.2), so the request travels through everything
+/// that route travels through, and the body is dropped on the way out. A `HEAD` mapped by
+/// hand is found here first and keeps the `GET` route out of it.
+#[inline]
+fn endpoint_for<'route>(
+    handlers: &'route [RouteEndpoint],
+    method: &Method,
+) -> Option<&'route RouteEndpoint> {
+    match handlers.binary_search_by(|handler| handler.cmp(method)) {
+        Ok(i) => Some(&handlers[i]),
+        Err(_) if method == Method::HEAD => handlers
+            .binary_search_by(|handler| handler.cmp(&Method::GET))
+            .ok()
+            .map(|i| &handlers[i]),
+        Err(_) => None,
     }
 }
 

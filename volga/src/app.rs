@@ -211,10 +211,6 @@ pub struct App {
     /// Default: `true`
     show_greeter: bool,
 
-    /// Controls whether a `GET` route answers `HEAD` requests that have no route
-    /// of their own.
-    implicit_head: bool,
-
     /// Maximum total size of all HTTP request headers, in bytes.
     max_header_size: Limit<usize>,
 
@@ -302,7 +298,6 @@ impl App {
             connection: Default::default(),
             body_limit: Default::default(),
             no_delay: false,
-            implicit_head: true,
             max_header_count: Limit::Default,
             max_header_size: Limit::Default,
             max_connections: Limit::Default,
@@ -507,22 +502,6 @@ impl App {
     /// Default (release): *disabled*
     pub fn with_greeter(mut self) -> Self {
         self.show_greeter = true;
-        self
-    }
-
-    /// Stops a `GET` route from answering `HEAD` requests.
-    ///
-    /// When enabled, a `HEAD` request with no route of its own is answered by the `GET`
-    /// route for the same path: it runs that route's middleware, its CORS policy and the
-    /// configuration of the group it belongs to, and the response carries no body.
-    /// Mapping `HEAD` explicitly takes precedence and shares none of that.
-    ///
-    /// When disabled, such a request is answered `405`.
-    ///
-    /// Default: `true`
-    pub fn without_implicit_head(mut self) -> Self {
-        self.implicit_head = false;
-        self.pipeline.endpoints_mut().set_implicit_head(false);
         self
     }
 
@@ -1198,13 +1177,6 @@ mod tests {
         };
 
         assert_eq!(limit, 10)
-    }
-
-    #[test]
-    fn it_disables_implicit_head() {
-        let app = App::new().without_implicit_head();
-
-        assert!(!app.implicit_head)
     }
 
     #[test]

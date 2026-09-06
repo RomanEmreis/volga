@@ -766,9 +766,6 @@ mod tests {
             .map(|route| (route.method.clone(), route.pattern.to_string()))
             .collect::<Vec<_>>();
 
-        // The implicit HEAD twin is not recorded: the group looks it up when it
-        // applies its configuration, so a HEAD mapped by hand later - which replaces
-        // the twin - is not configured twice
         assert_eq!(
             mapped,
             vec![

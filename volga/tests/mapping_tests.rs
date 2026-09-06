@@ -319,29 +319,6 @@ async fn it_maps_to_head_along_with_get_request() {
 }
 
 #[tokio::test]
-async fn it_ignores_head_along_with_get_request_if_disabled_explicitly() {
-    let server = TestServer::builder()
-        .configure(|app| app.without_implicit_head())
-        .setup(|app| {
-            app.map_get("/test", async || "Pass!");
-        })
-        .build()
-        .await;
-
-    let response = server
-        .client()
-        .head(server.url("/test"))
-        .send()
-        .await
-        .unwrap();
-
-    assert!(response.status().is_client_error());
-    assert_eq!(response.status(), 405);
-
-    server.shutdown().await;
-}
-
-#[tokio::test]
 async fn it_overrides_default_head_map() {
     let server = TestServer::spawn(|app| {
         app.map_head("/test", || async {

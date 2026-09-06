@@ -304,28 +304,3 @@ async fn it_maps_a_twin_for_a_static_route_shadowed_by_a_dynamic_one() {
 
     server.shutdown().await;
 }
-
-#[tokio::test]
-async fn it_maps_no_implicit_head_when_disabled_explicitly() {
-    let server = TestServer::builder()
-        .configure(|app| app.without_implicit_head())
-        .setup(|app| {
-            app.group("/api", |api| {
-                api.map_get("/test", || async { "Pass!" });
-                api.wrap(|_ctx, _next| async move { volga::status!(403) });
-            });
-        })
-        .build()
-        .await;
-
-    let response = server
-        .client()
-        .head(server.url("/api/test"))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
-
-    server.shutdown().await;
-}
