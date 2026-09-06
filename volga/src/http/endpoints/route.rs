@@ -357,7 +357,18 @@ impl RouteNode {
         let handlers = self.handlers.get_or_insert_with(SmallVec::new);
 
         let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
-            Ok(i) => &mut handlers[i],
+            Ok(i) => {
+                // Mapping a handler where one is already mapped replaces the route, and
+                // takes with it every layer bound to the registration being replaced: a
+                // handler and its middleware are written together, and answering with one
+                // while running the other's middleware is a pipeline nobody wrote.
+                // Layers added to a route do not replace it - only another handler does
+                if matches!(handler, Layer::Handler(_)) {
+                    handlers[i] = RouteEndpoint::new(method);
+                }
+                
+                &mut handlers[i]
+            }
             Err(i) => {
                 handlers.insert(i, RouteEndpoint::new(method));
                 &mut handlers[i]
@@ -418,6 +429,22 @@ pub(super) fn make_allowed_str<const N: usize>(
     }
 
     Arc::from(allowed)
+}
+
+/// Joins a route group's prefix and a route's pattern the way the router reads them
+///
+/// Empty segments carry no meaning to [`RouteNode`] - `split_path` drops them - so
+/// `/api` and `//users/` name the route `/api/users`, and anything that keys a route by
+/// the string it was written as has to say so the same way.
+#[inline]
+pub(crate) fn join_path(prefix: &str, pattern: &str) -> String {
+    let mut path = String::with_capacity(prefix.len() + pattern.len());
+
+    for segment in split_path(prefix).chain(split_path(pattern)) {
+        path.push(PATH_SEPARATOR as char);
+        path.push_str(segment);
+    }
+    path
 }
 
 #[inline(always)]

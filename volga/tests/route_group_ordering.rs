@@ -203,6 +203,68 @@ async fn it_configures_a_route_mapped_by_a_sub_group_too_only_once() {
     server.shutdown().await;
 }
 
+/// A route a sub-group maps over one the parent already mapped replaces it whole - its
+/// own handler and its own middleware - while both scopes still wrap what is left.
+#[tokio::test]
+async fn it_replaces_a_parent_route_a_sub_group_maps_again() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", |api| {
+            api.map_get("/users/{id}", || async { "parent" })
+                .wrap(mark!(&group_trace, "parent-route"));
+
+            api.group("/users", |users| {
+                users
+                    .map_get("/{id}", || async { "child" })
+                    .wrap(mark!(&group_trace, "child-route"));
+                users.wrap(mark!(&group_trace, "sub-group"));
+            });
+
+            api.wrap(mark!(&group_trace, "group"));
+        });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .get(server.url("/api/users/7"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "child");
+    assert_eq!(
+        trace.lock().expect("trace is not poisoned").as_slice(),
+        ["group", "sub-group", "child-route"]
+    );
+
+    server.shutdown().await;
+}
+
+/// Empty segments name no route of their own, so `/x` and `/x/` are one route and the
+/// group configures it once.
+#[tokio::test]
+async fn it_configures_one_route_for_paths_that_differ_only_in_empty_segments() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", |api| {
+            api.map_get("/hello", || async { "first" });
+            api.map_get("/hello/", || async { "second" });
+            api.wrap(mark!(&group_trace, "group"));
+        });
+    })
+    .await;
+
+    assert_eq!(trace_of(&server, &trace, "/api/hello").await, ["group"]);
+
+    server.shutdown().await;
+}
+
 /// The CORS policy of a group reaches the routes above it, and the one a route or a
 /// sub-group chose for itself is not replaced by the one the enclosing scope chose.
 #[tokio::test]

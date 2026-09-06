@@ -5,6 +5,7 @@ use crate::http::IntoResponse;
 use crate::http::endpoints::{
     args::FromRequest,
     handlers::{Func, GenericHandler},
+    route::join_path,
 };
 use hyper::Method;
 use std::borrow::Cow;
@@ -715,7 +716,7 @@ impl<'a> RouteGroup<'a> {
         Args: FromRequest + Send + 'static,
     {
         let method = method.try_into().expect("invalid HTTP method");
-        let pattern = [self.prefix.as_str(), pattern.as_ref()].concat();
+        let pattern = join_path(&self.prefix, pattern.as_ref());
 
         self.record(&method, &pattern);
         self.app.map_route_owned(method, pattern, handler)
@@ -749,7 +750,7 @@ macro_rules! define_route_group_methods {
                 Args: FromRequest + Send + 'static,
             {
                 let method = $http_method;
-                let pattern = [self.prefix.as_str(), pattern].concat();
+                let pattern = join_path(&self.prefix, pattern);
 
                 self.record(&method, &pattern);
                 self.app.map_route_owned(method, pattern, handler)

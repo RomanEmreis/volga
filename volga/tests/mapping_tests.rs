@@ -105,6 +105,31 @@ async fn it_maps_to_delete_request() {
     server.shutdown().await;
 }
 
+/// Mapping a route that is already mapped replaces it, and the layers bound to the
+/// registration being replaced go with it.
+#[cfg(feature = "middleware")]
+#[tokio::test]
+async fn it_replaces_a_route_that_is_mapped_again() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/test", || async { "first" })
+            .wrap(|_ctx, _next| async move { volga::status!(403) });
+        app.map_get("/test", || async { "second" });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .get(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "second");
+
+    server.shutdown().await;
+}
+
 #[tokio::test]
 async fn it_maps_to_head_request() {
     let server = TestServer::spawn(|app| {
