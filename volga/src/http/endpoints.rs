@@ -2,7 +2,7 @@
 
 use super::endpoints::{
     handlers::RouteHandler,
-    route::{PathArgs, RouteNode, RoutePipeline},
+    route::{PathArgs, RouteEndpoint, RouteNode, RoutePipeline},
 };
 use hyper::{Method, Uri};
 use std::sync::Arc;
@@ -12,6 +12,7 @@ use {
     super::endpoints::route::Layer,
     crate::headers::{ACCESS_CONTROL_REQUEST_METHOD, HeaderMap, ORIGIN},
     crate::http::cors::CorsOverride,
+    crate::middleware::MiddlewareFn,
 };
 
 pub mod args;
@@ -112,33 +113,29 @@ impl Endpoints {
 
             if origin_present && let Some(target_method) = acrm {
                 // Check if the target method exists for this path
-                return handlers
-                    .binary_search_by(|h| h.cmp(&target_method))
-                    .map_or_else(
-                        |_| FindResult::MethodNotFound(route_params.route.allowed_methods()),
-                        |i| {
-                            let handler = &handlers[i];
-                            FindResult::Ok(Endpoint::new(
-                                handler.pipeline.clone(),
-                                route_params.params,
-                                #[cfg(feature = "middleware")]
-                                handler.cors.clone(),
-                            ))
-                        },
-                    );
+                return endpoint_for(handlers, &target_method).map_or_else(
+                    || FindResult::MethodNotFound(route_params.route.allowed_methods()),
+                    |handler| {
+                        FindResult::Ok(Endpoint::new(
+                            handler.pipeline.clone(),
+                            route_params.params,
+                            #[cfg(feature = "middleware")]
+                            handler.cors.clone().unwrap_or_default(),
+                        ))
+                    },
+                );
             }
         }
 
         // Normal OPTIONS: keep existing behavior (likely 405 unless the user actually mapped OPTIONS)
-        handlers.binary_search_by(|h| h.cmp(method)).map_or_else(
-            |_| FindResult::MethodNotFound(route_params.route.allowed_methods()),
-            |i| {
-                let handler = &handlers[i];
+        endpoint_for(handlers, method).map_or_else(
+            || FindResult::MethodNotFound(route_params.route.allowed_methods()),
+            |handler| {
                 FindResult::Ok(Endpoint::new(
                     handler.pipeline.clone(),
                     route_params.params,
                     #[cfg(feature = "middleware")]
-                    handler.cors.clone(),
+                    handler.cors.clone().unwrap_or_default(),
                 ))
             },
         )
@@ -163,10 +160,43 @@ impl Endpoints {
     pub(crate) fn bind_cors(&mut self, method: &Method, pattern: &str, cors: CorsOverride) {
         self.routes
             .find_mut(pattern)
-            .map(|route| route.handler_mut(method).map(|h| h.cors = cors));
+            .map(|route| route.handler_mut(method).map(|h| h.cors = Some(cors)));
     }
 
+    /// Binds CORS headers to the route handler, unless something has already bound a
+    /// policy of its own to it
     #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn bind_cors_if_unset(
+        &mut self,
+        method: &Method,
+        pattern: &str,
+        cors: CorsOverride,
+    ) {
+        self.routes.find_mut(pattern).map(|route| {
+            route
+                .handler_mut(method)
+                .map(|h| h.cors.get_or_insert(cors))
+        });
+    }
+
+    /// Inserts a route group's middleware ahead of the layers the route already holds
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn prepend_layers(
+        &mut self,
+        method: &Method,
+        pattern: &str,
+        layers: &[MiddlewareFn],
+    ) {
+        self.routes
+            .find_mut(pattern)
+            .map(|route| route.handler_mut(method).map(|h| h.prepend(layers)));
+    }
+
+    /// Returns `true` if `pattern` is mapped for `method`
+    #[inline]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn contains(&mut self, method: &Method, pattern: &str) -> bool {
         self.routes
             .find(pattern)
@@ -189,6 +219,27 @@ impl Endpoints {
     #[cfg(feature = "middleware")]
     pub(crate) fn compose(&mut self) {
         self.routes.compose();
+    }
+}
+
+/// Picks the endpoint that answers `method`
+///
+/// A `GET` route answers a `HEAD` request that has no route of its own: `HEAD` is `GET`
+/// without content (RFC 9110 Section 9.3.2), so the request travels through everything
+/// that route travels through, and the body is dropped on the way out. A `HEAD` mapped by
+/// hand is found here first and keeps the `GET` route out of it.
+#[inline]
+fn endpoint_for<'route>(
+    handlers: &'route [RouteEndpoint],
+    method: &Method,
+) -> Option<&'route RouteEndpoint> {
+    match handlers.binary_search_by(|handler| handler.cmp(method)) {
+        Ok(i) => Some(&handlers[i]),
+        Err(_) if method == Method::HEAD => handlers
+            .binary_search_by(|handler| handler.cmp(&Method::GET))
+            .ok()
+            .map(|i| &handlers[i]),
+        Err(_) => None,
     }
 }
 
@@ -273,7 +324,8 @@ mod tests {
         );
 
         match post_handler {
-            FindResult::MethodNotFound(allow) => assert_eq!(allow.as_ref(), "GET"),
+            // HEAD is answered by the GET route, so the resource supports it
+            FindResult::MethodNotFound(allow) => assert_eq!(allow.as_ref(), "GET,HEAD"),
             _ => panic!("`post_handler` must be is the `MethodNotFound` state"),
         }
     }

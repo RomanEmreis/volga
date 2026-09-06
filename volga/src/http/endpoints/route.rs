@@ -49,7 +49,7 @@ use smallvec::SmallVec;
 use std::sync::Arc;
 
 #[cfg(feature = "middleware")]
-use crate::http::cors::CorsOverride;
+use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
 pub(crate) use layer::{Layer, RoutePipeline};
 pub(crate) use path_args::{PathArg, PathArgs};
@@ -60,6 +60,8 @@ pub(crate) mod path_args;
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
 const PATH_SEPARATOR: u8 = b'/';
+const DOUBLE_PATH_SEPARATOR: &str = "//";
+const ROOT_PATH: &str = "/";
 const TYPE_SEPARATOR: char = ':';
 const ALLOW_METHOD_SEPARATOR: char = ',';
 const DEFAULT_DEPTH: usize = 4;
@@ -70,8 +72,9 @@ const DEFAULT_DEPTH: usize = 4;
 pub(super) struct RouteEndpoint {
     pub(super) method: Method,
     pub(super) pipeline: RoutePipeline,
+    /// The CORS policy bound to this route, `None` while nothing has bound one
     #[cfg(feature = "middleware")]
-    pub(super) cors: CorsOverride,
+    pub(super) cors: Option<CorsOverride>,
 }
 
 /// Represents route path node
@@ -128,7 +131,7 @@ impl RouteEndpoint {
             method,
             pipeline: RoutePipeline::new(),
             #[cfg(feature = "middleware")]
-            cors: CorsOverride::Inherit,
+            cors: None,
         }
     }
 
@@ -136,6 +139,13 @@ impl RouteEndpoint {
     #[inline]
     fn insert(&mut self, handler: Layer) {
         self.pipeline.insert(handler);
+    }
+
+    /// Inserts middleware ahead of the layers this endpoint already holds
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(super) fn prepend(&mut self, layers: &[MiddlewareFn]) {
+        self.pipeline.prepend(layers);
     }
 
     /// Compares two route endpoints
@@ -349,7 +359,18 @@ impl RouteNode {
         let handlers = self.handlers.get_or_insert_with(SmallVec::new);
 
         let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
-            Ok(i) => &mut handlers[i],
+            Ok(i) => {
+                // Mapping a handler where one is already mapped replaces the route, and
+                // takes with it every layer bound to the registration being replaced: a
+                // handler and its middleware are written together, and answering with one
+                // while running the other's middleware is a pipeline nobody wrote.
+                // Layers added to a route do not replace it - only another handler does
+                if matches!(handler, Layer::Handler(_)) {
+                    handlers[i] = RouteEndpoint::new(method);
+                }
+
+                &mut handlers[i]
+            }
             Err(i) => {
                 handlers.insert(i, RouteEndpoint::new(method));
                 &mut handlers[i]
@@ -391,8 +412,16 @@ pub(super) fn make_allowed_str<const N: usize>(
         return Arc::from("");
     }
 
+    // A GET route answers HEAD requests too, and `Allow` names the methods the resource
+    // supports rather than the ones that were mapped
+    let implied_head = handlers.iter().any(|h| h.method == Method::GET)
+        && !handlers.iter().any(|h| h.method == Method::HEAD);
+
     let mut allowed = String::with_capacity(handlers.len() * DEFAULT_DEPTH);
-    let mut iter = handlers.iter().map(|h| h.method.as_str());
+    let mut iter = handlers
+        .iter()
+        .map(|h| h.method.as_str())
+        .chain(implied_head.then_some(Method::HEAD.as_str()));
     if let Some(first) = iter.next() {
         allowed.push_str(first);
         for s in iter {
@@ -402,6 +431,58 @@ pub(super) fn make_allowed_str<const N: usize>(
     }
 
     Arc::from(allowed)
+}
+
+/// Returns `true` if `path` already names a route the way the router reads it
+///
+/// Empty segments carry no meaning to [`RouteNode`] - `split_path` drops them - so a
+/// path holding any is a second name for a route that already has one. A route is keyed
+/// by the string it was written as in more places than the tree, and two names for one
+/// route are two entries in every one of them.
+#[inline]
+pub(crate) fn is_canonical_path(path: &str) -> bool {
+    path == ROOT_PATH
+        || (path.starts_with(PATH_SEPARATOR as char)
+            && !path.ends_with(PATH_SEPARATOR as char)
+            && !path.contains(DOUBLE_PATH_SEPARATOR))
+}
+
+/// Names the route `path` names, the way the router reads it
+#[inline]
+pub(crate) fn canonical_path(path: &str) -> String {
+    let mut canonical = String::with_capacity(path.len() + 1);
+
+    write_path(&mut canonical, path);
+    finish_path(canonical)
+}
+
+/// Joins a route group's prefix and a route's pattern into the name of the route they
+/// address together
+#[inline]
+pub(crate) fn join_path(prefix: &str, pattern: &str) -> String {
+    let mut path = String::with_capacity(prefix.len() + pattern.len() + 1);
+
+    write_path(&mut path, prefix);
+    write_path(&mut path, pattern);
+    finish_path(path)
+}
+
+/// Appends the segments of `source` that name something
+#[inline]
+fn write_path(path: &mut String, source: &str) {
+    for segment in split_path(source) {
+        path.push(PATH_SEPARATOR as char);
+        path.push_str(segment);
+    }
+}
+
+/// Spells a path with no segments as the root, which is how every route names it
+#[inline]
+fn finish_path(mut path: String) -> String {
+    if path.is_empty() {
+        path.push(PATH_SEPARATOR as char);
+    }
+    path
 }
 
 #[inline(always)]
@@ -431,7 +512,7 @@ mod tests {
     use super::RouteEndpoint;
     use crate::http::endpoints::handlers::{Func, RouteHandler};
     use crate::http::endpoints::route::{
-        DEFAULT_DEPTH, RouteNode, make_allowed_str, method_order, split_path,
+        DEFAULT_DEPTH, RouteNode, join_path, make_allowed_str, method_order, split_path,
     };
     use crate::ok;
     use hyper::Method;
@@ -714,6 +795,73 @@ mod tests {
         let path = "a/b/c/d";
         let split = split_path(path);
         assert_eq!(split.collect::<Vec<_>>(), vec!["a", "b", "c", "d"])
+    }
+
+    #[test]
+    fn it_joins_a_prefix_and_a_pattern() {
+        assert_eq!(join_path("/api", "/users"), "/api/users");
+        assert_eq!(join_path("/api/v1", "/users/{id}"), "/api/v1/users/{id}");
+    }
+
+    #[test]
+    fn it_joins_a_prefix_and_a_pattern_written_without_separators() {
+        assert_eq!(join_path("api", "users"), "/api/users");
+        assert_eq!(join_path("/api", "users"), "/api/users");
+        assert_eq!(join_path("api/", "/users"), "/api/users");
+    }
+
+    #[test]
+    fn it_drops_empty_segments_when_joining() {
+        assert_eq!(join_path("/api/", "/users/"), "/api/users");
+        assert_eq!(join_path("/api//", "//users//{id}//"), "/api/users/{id}");
+    }
+
+    #[test]
+    fn it_joins_an_empty_prefix_or_pattern() {
+        assert_eq!(join_path("", "/users"), "/users");
+        assert_eq!(join_path("/api", ""), "/api");
+        assert_eq!(join_path("/api", "/"), "/api");
+    }
+
+    /// The root is spelled the way a route mapped outside a group spells it, so both
+    /// name one route rather than two.
+    #[test]
+    fn it_spells_the_root_the_way_every_other_route_does() {
+        assert_eq!(join_path("", ""), "/");
+        assert_eq!(join_path("/", "/"), "/");
+        assert_eq!(join_path("/", "//"), "/");
+    }
+
+    #[test]
+    fn it_keeps_typed_and_dynamic_segments_when_joining() {
+        assert_eq!(
+            join_path("/api", "/users/{id:integer}/roles/{role}"),
+            "/api/users/{id:integer}/roles/{role}"
+        );
+    }
+
+    /// The point of joining this way: paths that name one route read as one string, so
+    /// anything keyed by that string counts the route once.
+    #[test]
+    fn it_reads_one_path_for_spellings_that_name_one_route() {
+        assert_eq!(join_path("/api", "/hello"), join_path("/api", "/hello/"));
+        assert_eq!(join_path("/api", "/hello"), join_path("/api/", "hello"));
+        assert_eq!(join_path("/api", "/hello"), join_path("/api", "//hello"));
+    }
+
+    /// ... and the string it produces addresses the route the caller wrote.
+    #[test]
+    fn it_joins_a_path_that_finds_the_route_it_names() {
+        let mut route = RouteNode::new();
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        route.insert(
+            &join_path("/api/", "/users//{id}/"),
+            Method::GET,
+            handler.into(),
+        );
+
+        assert!(route.find("/api/users/7").is_some());
     }
 
     #[test]

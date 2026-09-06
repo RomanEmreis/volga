@@ -105,6 +105,78 @@ async fn it_maps_to_delete_request() {
     server.shutdown().await;
 }
 
+/// Mapping a route that is already mapped replaces it, and the layers bound to the
+/// registration being replaced go with it.
+#[cfg(feature = "middleware")]
+#[tokio::test]
+async fn it_replaces_a_route_that_is_mapped_again() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/test", || async { "first" })
+            .wrap(|_ctx, _next| async move { volga::status!(403) });
+        app.map_get("/test", || async { "second" });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .get(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "second");
+
+    server.shutdown().await;
+}
+
+/// Two paths that name one route are one route everywhere it is remembered, so the
+/// operation describes the registration that answers rather than one it replaced.
+#[cfg(all(feature = "middleware", feature = "openapi"))]
+#[tokio::test]
+async fn it_describes_the_route_that_answers_when_a_path_is_mapped_again() {
+    let server = TestServer::builder()
+        .configure(|app| app.with_open_api(|open_api| open_api))
+        .setup(|app| {
+            app.use_open_api();
+
+            app.map_get("/test", || async { "first" })
+                .open_api(|op| op.with_summary("first registration"));
+            app.map_get("/test/", || async { "second" });
+        })
+        .build()
+        .await;
+
+    let response = server
+        .client()
+        .get(server.url("/test"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "second");
+
+    let spec: serde_json::Value = server
+        .client()
+        .get(server.url("/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert!(spec["paths"]["/test"]["get"].is_object());
+    assert_eq!(spec["paths"]["/test/"], serde_json::Value::Null);
+    assert_eq!(
+        spec["paths"]["/test"]["get"]["summary"],
+        serde_json::Value::Null
+    );
+
+    server.shutdown().await;
+}
+
 #[tokio::test]
 async fn it_maps_to_head_request() {
     let server = TestServer::spawn(|app| {
@@ -314,29 +386,6 @@ async fn it_maps_to_head_along_with_get_request() {
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("Content-Length").unwrap(), "5");
     assert_eq!(response.text().await.unwrap(), "");
-
-    server.shutdown().await;
-}
-
-#[tokio::test]
-async fn it_ignores_head_along_with_get_request_if_disabled_explicitly() {
-    let server = TestServer::builder()
-        .configure(|app| app.without_implicit_head())
-        .setup(|app| {
-            app.map_get("/test", async || "Pass!");
-        })
-        .build()
-        .await;
-
-    let response = server
-        .client()
-        .head(server.url("/test"))
-        .send()
-        .await
-        .unwrap();
-
-    assert!(response.status().is_client_error());
-    assert_eq!(response.status(), 405);
 
     server.shutdown().await;
 }

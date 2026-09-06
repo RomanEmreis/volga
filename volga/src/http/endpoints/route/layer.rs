@@ -85,6 +85,22 @@ impl RoutePipeline {
         pipeline
     }
 
+    /// Inserts middleware right after the route handler, ahead of the layers
+    /// the pipeline already holds
+    ///
+    /// The handler sits at the head of a route pipeline until [`compose`](Self::compose)
+    /// rotates it to the tail, so position 1 is the front of the middleware chain. This
+    /// is how a route group applies its middleware once its closure returns: the layers
+    /// already there belong to the route itself or to a nested group, and both run
+    /// inside the group's.
+    #[cfg(feature = "middleware")]
+    pub(super) fn prepend(&mut self, layers: &[MiddlewareFn]) {
+        match self {
+            Self::Builder(mx) => mx.insert_after_handler(layers),
+            Self::Middleware(_) => (),
+        }
+    }
+
     /// Inserts a layer into the pipeline
     pub(super) fn insert(&mut self, layer: Layer) {
         match self {

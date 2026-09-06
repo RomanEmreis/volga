@@ -789,26 +789,32 @@ impl<'a> Route<'a> {
 }
 
 impl<'a> RouteGroup<'a> {
-    /// Disables CORS for this route
+    /// Disables CORS for every route of this group
+    ///
+    /// Applies to the routes mapped before this call as well as after it, and a route
+    /// or a nested group that set a policy of its own keeps it.
     pub fn disable_cors(&mut self) -> &mut Self {
-        self.warn_if_routes_mapped("disable_cors");
-        self.cors = CorsOverride::Disabled;
+        self.cors = Some(CorsOverride::Disabled);
         self
     }
 
-    /// Sets the default CORS policy for this route
+    /// Sets the default CORS policy for every route of this group
+    ///
+    /// Applies to the routes mapped before this call as well as after it, and a route
+    /// or a nested group that set a policy of its own keeps it.
     pub fn cors(&mut self) -> &mut Self {
-        self.warn_if_routes_mapped("cors");
-        self.cors = CorsOverride::Inherit;
+        self.cors = Some(CorsOverride::Inherit);
         self
     }
 
-    /// Sets the named CORS policy for this route
+    /// Sets the named CORS policy for every route of this group
+    ///
+    /// Applies to the routes mapped before this call as well as after it, and a route
+    /// or a nested group that set a policy of its own keeps it.
     pub fn cors_with(&mut self, name: &str) -> &mut Self {
-        self.warn_if_routes_mapped("cors_with");
         let policy = self.app.cors.get_named(name).expect("cors policy").clone();
 
-        self.cors = CorsOverride::Named(policy);
+        self.cors = Some(CorsOverride::Named(policy));
         self
     }
 }

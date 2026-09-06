@@ -362,8 +362,7 @@ fn keep_content_length(size_hint: SizeHint, headers: &mut HeaderMap) {
         let content_length = if size == 0 {
             HeaderValue::from_static("0")
         } else {
-            let mut buffer = itoa::Buffer::new();
-            HeaderValue::from_str(buffer.format(size)).unwrap()
+            HeaderValue::from(size)
         };
         headers.insert(CONTENT_LENGTH, content_length);
     }

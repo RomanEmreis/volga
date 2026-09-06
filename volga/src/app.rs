@@ -211,10 +211,6 @@ pub struct App {
     /// Default: `true`
     show_greeter: bool,
 
-    /// Controls whether a `HEAD` route is automatically registered
-    /// for this `GET` handler.
-    implicit_head: bool,
-
     /// Maximum total size of all HTTP request headers, in bytes.
     max_header_size: Limit<usize>,
 
@@ -302,7 +298,6 @@ impl App {
             connection: Default::default(),
             body_limit: Default::default(),
             no_delay: false,
-            implicit_head: true,
             max_header_count: Limit::Default,
             max_header_size: Limit::Default,
             max_connections: Limit::Default,
@@ -507,19 +502,6 @@ impl App {
     /// Default (release): *disabled*
     pub fn with_greeter(mut self) -> Self {
         self.show_greeter = true;
-        self
-    }
-
-    /// Disables automatic registration of a `HEAD` route
-    /// for the `GET` handler.
-    ///
-    /// When enabled, `HEAD` requests follow the same routing,
-    /// validation, and authorization logic as `GET`, but must not
-    /// produce a response body.
-    ///
-    /// Default: `true`
-    pub fn without_implicit_head(mut self) -> Self {
-        self.implicit_head = false;
         self
     }
 
@@ -1195,13 +1177,6 @@ mod tests {
         };
 
         assert_eq!(limit, 10)
-    }
-
-    #[test]
-    fn it_disables_implicit_head() {
-        let app = App::new().without_implicit_head();
-
-        assert!(!app.implicit_head)
     }
 
     #[test]

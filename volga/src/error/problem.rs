@@ -225,7 +225,7 @@ impl<'a> RouteGroup<'a> {
     /// ```
     #[inline]
     pub fn map_problem(&mut self) -> &mut Self {
-        self.map_err_as("map_problem", make_problem_details)
+        self.map_err(make_problem_details)
     }
 }
 

@@ -49,7 +49,6 @@ fn benchmark(c: &mut Criterion) {
             let mut app = App::new()
                 .with_no_delay()
                 .without_body_limit()
-                .without_implicit_head()
                 .without_greeter()
                 .with_bearer_auth(|auth| {
                     auth.validate_exp(false)
