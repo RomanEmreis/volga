@@ -546,15 +546,7 @@ impl<'a> RouteGroup<'a> {
     fn record(&mut self, method: &Method, pattern: &str) {
         #[cfg(any(feature = "middleware", feature = "openapi"))]
         {
-            // Mapping the same method and pattern twice registers one route - the second
-            // handler lands on the endpoint the first one made - so the group configures
-            // it once. Two spellings of one dynamic route are not caught here: that
-            // ambiguity is a problem of its own, and this is not the place to hide it
-            if self
-                .routes
-                .iter()
-                .any(|route| route.method == *method && route.pattern.as_ref() == pattern)
-            {
+            if self.is_recorded(method, pattern) {
                 return;
             }
 
@@ -563,6 +555,21 @@ impl<'a> RouteGroup<'a> {
                 pattern: Box::from(pattern),
             });
         }
+    }
+
+    /// Returns `true` if this group has already recorded the route `method` and `pattern`
+    /// name, whether it mapped it itself or a sub-group did.
+    ///
+    /// Mapping the same method and pattern twice registers one route - the second handler
+    /// lands on the endpoint the first one made - so the group configures it once. Two
+    /// spellings of one dynamic route are not caught here: that ambiguity is a problem of
+    /// its own, and this is not the place to hide it.
+    #[inline]
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
+    fn is_recorded(&self, method: &Method, pattern: &str) -> bool {
+        self.routes
+            .iter()
+            .any(|route| route.method == *method && route.pattern.as_ref() == pattern)
     }
 
     /// Applies the group's configuration to every route it registered.
@@ -684,9 +691,15 @@ impl<'a> RouteGroup<'a> {
         child.apply();
 
         // Routes mapped by the sub-group belong to this group as well: this group's
-        // configuration wraps whatever the sub-group has just applied to them.
+        // configuration wraps whatever the sub-group has just applied to them. A route
+        // both of them mapped is still one route, so it arrives here through the same
+        // check as one this group mapped itself.
         #[cfg(any(feature = "middleware", feature = "openapi"))]
-        self.routes.append(&mut child.routes);
+        for route in child.routes.drain(..) {
+            if !self.is_recorded(&route.method, &route.pattern) {
+                self.routes.push(route);
+            }
+        }
     }
 
     /// Maps a request handler that matches the given HTTP `method` for the specified pattern.

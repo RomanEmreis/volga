@@ -178,6 +178,31 @@ async fn it_configures_a_route_mapped_twice_only_once() {
     server.shutdown().await;
 }
 
+/// A route a group and its sub-group both map is one route, and the outer group
+/// configures it once.
+#[tokio::test]
+async fn it_configures_a_route_mapped_by_a_sub_group_too_only_once() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", |api| {
+            api.map_get("/users/x", || async { "parent" });
+
+            api.group("/users", |users| {
+                users.map_get("/x", || async { "child" });
+            });
+
+            api.wrap(mark!(&group_trace, "group"));
+        });
+    })
+    .await;
+
+    assert_eq!(trace_of(&server, &trace, "/api/users/x").await, ["group"]);
+
+    server.shutdown().await;
+}
+
 /// The CORS policy of a group reaches the routes above it, and the one a route or a
 /// sub-group chose for itself is not replaced by the one the enclosing scope chose.
 #[tokio::test]
