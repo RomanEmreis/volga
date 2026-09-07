@@ -120,3 +120,29 @@ pub fn fuzz_openapi_gen(selector: u16) {
         }
     }
 }
+
+/// Exercises the static file server's path resolution.
+///
+/// The property under test is the one the static file mount stands on: whatever the request
+/// target is, what comes out of the resolver addresses something *under* the content root.
+/// A `..`, a root, a drive prefix or a separator smuggled in through an escape has to be
+/// declined rather than resolved, since the path is joined onto the content root as it is.
+pub fn fuzz_static_path(path: &str, prefix: &str) {
+    #[cfg(feature = "static-files")]
+    {
+        use crate::fs::static_files::path::{Target, resolve};
+        use std::path::Component;
+
+        let Ok(Some(Target::Relative(relative))) = resolve(path, prefix) else {
+            return;
+        };
+
+        assert!(
+            relative
+                .components()
+                .all(|component| matches!(component, Component::Normal(_))),
+            "`{path}` under `{prefix}` resolved to `{}`",
+            relative.display()
+        );
+    }
+}

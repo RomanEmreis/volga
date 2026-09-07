@@ -146,6 +146,17 @@ mod tests {
     use super::*;
     use std::net::SocketAddr;
 
+    /// A scope carrying values a test can recognise in the four fields every build has,
+    /// and the defaults in the ones a build may not have.
+    ///
+    /// Whether the `..default()` tail fills anything depends on the enabled features: with
+    /// all of them it fills the seven that are gated, and with none of them the four listed
+    /// here are the whole struct and the tail is a no-op - which is what the lint reports,
+    /// truthfully, for that one build. Spelling those four out is the point of the helper,
+    /// and the alternatives - listing every gated field behind its own `cfg`, or assigning
+    /// onto a default - trade this lint for a copy of the `Default` impl or for
+    /// `field_reassign_with_default`.
+    #[allow(clippy::needless_update)]
     fn make_scope() -> HttpRequestScope {
         HttpRequestScope {
             client_ip: ClientIp(SocketAddr::from(([127, 0, 0, 1], 4321))),

@@ -284,12 +284,12 @@ fn warn_if_listing_enabled_in_release() {
 
 /// Reports a hosting configuration hazard.
 ///
-/// These are found while the [`HostEnv`] is being built, long before a request is served,
-/// and they describe a setup that is unlikely to be intended - so they are reported through
-/// `tracing` when the feature is on, and on `stderr` when it is off, rather than being
-/// dropped along with the feature.
+/// These are found while the hosting environment is being configured, long before a request
+/// is served, and they describe a setup that is unlikely to be intended - so they are
+/// reported through `tracing` when the feature is on, and on `stderr` when it is off, rather
+/// than being dropped along with the feature.
 #[inline]
-fn warn(message: &str) {
+pub(crate) fn warn(message: &str) {
     #[cfg(feature = "tracing")]
     tracing::warn!("{message}");
     #[cfg(not(feature = "tracing"))]

@@ -17,6 +17,9 @@ use crate::openapi::{OpenApiRouteConfig, RouteKey};
 #[cfg(feature = "middleware")]
 use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
+#[cfg(feature = "static-files")]
+use crate::fs::static_files::StaticMount;
+
 const QUERY: &[u8] = b"QUERY";
 
 /// Routes mapping
@@ -68,6 +71,9 @@ impl App {
 
         f(&mut group);
         group.apply();
+
+        #[cfg(feature = "static-files")]
+        group.mount_static();
     }
 
     /// Adds a request handler that matches HTTP GET requests for the specified pattern.
@@ -498,6 +504,9 @@ pub struct RouteGroup<'a> {
     /// The CORS policy of this group, if it configured one
     #[cfg(feature = "middleware")]
     pub(crate) cors: Option<CorsOverride>,
+    /// Static file mounts this group asked for, registered once its closure returns
+    #[cfg(feature = "static-files")]
+    pub(crate) mounts: Vec<StaticMount>,
     #[cfg(feature = "openapi")]
     pub(crate) openapi_config: OpenApiRouteConfig,
 }
@@ -625,6 +634,27 @@ impl<'a> RouteGroup<'a> {
 
             self.routes = routes;
         }
+
+        // A mount answers under this group's prefix rather than through a route, so it
+        // takes the group's middleware here instead of having it attached to a route. It
+        // carries the same pipeline a route carries, so an outer scope wraps an inner one
+        // by the same rule.
+        #[cfg(feature = "static-files")]
+        for mount in self.mounts.iter_mut() {
+            mount.prepend(&self.middleware);
+        }
+    }
+
+    /// Registers the static file mounts this group asked for in the application's
+    /// middleware pipeline.
+    ///
+    /// Called once the group's configuration has been applied, so every mount carries the
+    /// middleware of the group that asked for it and of every group around it.
+    #[cfg(feature = "static-files")]
+    fn mount_static(&mut self) {
+        for mount in std::mem::take(&mut self.mounts) {
+            mount.mount(self.app);
+        }
     }
 }
 
@@ -687,6 +717,8 @@ impl<'a> RouteGroup<'a> {
             middleware: Vec::new(),
             #[cfg(feature = "middleware")]
             cors: None,
+            #[cfg(feature = "static-files")]
+            mounts: Vec::new(),
             #[cfg(feature = "openapi")]
             openapi_config: OpenApiRouteConfig::default(),
         };
@@ -699,6 +731,12 @@ impl<'a> RouteGroup<'a> {
 
         f(&mut child);
         child.apply();
+
+        // A static file mount the sub-group asked for belongs to this group as well. It is
+        // taken over before the routes below, so that the sub-group is done being read
+        // before this group is read again.
+        #[cfg(feature = "static-files")]
+        self.mounts.append(&mut child.mounts);
 
         // Routes mapped by the sub-group belong to this group as well: this group's
         // configuration wraps whatever the sub-group has just applied to them. A route
@@ -745,6 +783,8 @@ macro_rules! define_route_group_methods {
                     middleware: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
                     cors: None,
+                    #[cfg(feature = "static-files")]
+                    mounts: Vec::new(),
                     #[cfg(feature = "openapi")]
                     openapi_config: OpenApiRouteConfig::default(),
                 }
@@ -788,6 +828,43 @@ mod tests {
     // something to configure with it
     #[cfg(any(feature = "middleware", feature = "openapi"))]
     use super::*;
+
+    /// A group holds one mount for itself and one for each nested group that asked for
+    /// one, which is what the `Vec` is for: a parent and a child mount different prefixes
+    /// and both have to reach the application pipeline.
+    #[cfg(feature = "static-files")]
+    #[test]
+    fn it_holds_a_mount_for_itself_and_for_each_nested_group() {
+        let mut app = App::new();
+        let mut counts = Vec::new();
+
+        app.group("/self", |g| {
+            g.use_static_assets();
+            counts.push(g.mounts.len());
+        });
+
+        app.group("/child", |g| {
+            g.group("/inner", |inner| {
+                inner.use_static_assets();
+            });
+            counts.push(g.mounts.len());
+        });
+
+        app.group("/both", |g| {
+            g.use_static_assets();
+            g.group("/inner", |inner| {
+                inner.use_static_assets();
+            });
+            counts.push(g.mounts.len());
+        });
+
+        app.group("/neither", |g| {
+            g.map_get("/route", || async { "a route and nothing else" });
+            counts.push(g.mounts.len());
+        });
+
+        assert_eq!(counts, vec![1, 1, 2, 0]);
+    }
 
     #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]

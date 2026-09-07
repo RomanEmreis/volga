@@ -175,7 +175,7 @@ impl RouteNode {
         let path_segments = split_path(path);
 
         for segment in path_segments {
-            if Self::is_dynamic_segment(segment) {
+            if is_dynamic_segment(segment) {
                 let name = Self::dynamic_name(segment);
                 current = current.insert_dynamic_node(name);
             } else {
@@ -397,11 +397,12 @@ impl RouteNode {
             segment
         }
     }
+}
 
-    #[inline(always)]
-    fn is_dynamic_segment(segment: &str) -> bool {
-        segment.starts_with(OPEN_BRACKET) && segment.ends_with(CLOSE_BRACKET)
-    }
+/// Returns `true` when `segment` names a route parameter rather than a literal segment.
+#[inline(always)]
+pub(crate) fn is_dynamic_segment(segment: &str) -> bool {
+    segment.starts_with(OPEN_BRACKET) && segment.ends_with(CLOSE_BRACKET)
 }
 
 #[inline(always)]
@@ -485,8 +486,10 @@ fn finish_path(mut path: String) -> String {
     path
 }
 
+/// Splits a path into the segments that name something, dropping the empty ones so that
+/// `/x`, `/x/` and `//x` are read as the one path they are.
 #[inline(always)]
-fn split_path(path: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn split_path(path: &str) -> impl Iterator<Item = &str> {
     memchr_split_nonempty(PATH_SEPARATOR, path.as_bytes())
         .map(|s| std::str::from_utf8(s).expect("Invalid UTF-8 sequence in path"))
 }

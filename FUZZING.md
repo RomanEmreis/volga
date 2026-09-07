@@ -10,6 +10,7 @@ Volga uses `cargo-fuzz` (libFuzzer) with deterministic, bounded fuzz targets.
 - `fuzz_query_decode`: exercises percent-decoding + query parsing through `serde_urlencoded` and `Query<T>`.
 - `fuzz_extractor_typed`: exercises typed JSON extraction using bounded random headers/body.
 - `fuzz_openapi_gen`: exercises OpenAPI route registration/document generation using bounded selectors.
+- `fuzz_static_path`: exercises the static file server's path resolution, asserting a resolved target never leaves the content root.
 
 ## Local usage
 
@@ -32,14 +33,18 @@ ASAN_OPTIONS=quarantine_size_mb=1:malloc_context_size=0 \
 ASAN_OPTIONS=quarantine_size_mb=1:malloc_context_size=0 \
   cargo +nightly fuzz run fuzz_openapi_gen -- \
   -max_len=512 -max_total_time=20 -rss_limit_mb=512
+
+ASAN_OPTIONS=quarantine_size_mb=1:malloc_context_size=0 \
+  cargo +nightly fuzz run fuzz_static_path -- \
+  -max_len=1024 -max_total_time=20 -rss_limit_mb=512
 ```
 
 ## CI behavior
 
 - PRs: `cargo fuzz build` + smoke fuzz runs for `fuzz_router_match` and `fuzz_query_decode`.
-- Nightly schedule: all four targets run for longer windows.
+- Nightly schedule: all five targets run for longer windows.
 - All jobs set `ASAN_OPTIONS=quarantine_size_mb=1:malloc_context_size=0` and `-rss_limit_mb=512`.
 
 ## Corpus
 
-Seed corpora live in `fuzz/corpus/<target>` and include common router/query edge cases, extractor payloads, and OpenAPI selectors.
+Seed corpora live in `fuzz/corpus/<target>` and include common router/query edge cases, extractor payloads, OpenAPI selectors, and static file request targets.
