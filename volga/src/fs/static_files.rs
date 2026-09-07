@@ -32,7 +32,7 @@ use crate::{
     html, html_file,
     http::{
         IntoResponse, Method, StatusCode,
-        endpoints::route::{Layer, RoutePipeline, join_path},
+        endpoints::route::{Layer, RoutePipeline, is_dynamic_segment, join_path},
     },
     middleware::{HttpContext, Middleware, MiddlewareFn, NextFn},
     routing::RouteGroup,
@@ -170,12 +170,27 @@ impl StaticMount {
 
     /// Composes this mount's pipeline and registers it in the application's.
     ///
-    /// A prefix already answered by a mount is left to that mount: a second one there would
-    /// answer nothing the first did not, and the middleware it carries would never run, so
-    /// registering it would only cost every request a second look at the filesystem while
-    /// looking like a second policy applies.
+    /// A mount that could never answer is reported and left out of the chain: a prefix that
+    /// carries a route parameter, and a prefix another mount already answers. A second mount
+    /// on one prefix would answer nothing the first did not, and the middleware it carries
+    /// would never run, so registering it would only cost every request a second look at the
+    /// filesystem while looking like a second policy applies.
     #[inline]
     pub(crate) fn mount(mut self, app: &mut App) {
+        // A mount is matched against the request target as it is written. A route parameter
+        // is matched by the router, which knows nothing about this mount, and there is one
+        // content root either way - so there is nothing for `/{tenant}` to answer under.
+        if self.prefix.split('/').any(is_dynamic_segment) {
+            warn(&format!(
+                "Static files are not served under '{}': a mount answers a literal path \
+                 prefix, and this one carries a route parameter. Mount them under a literal \
+                 prefix instead.",
+                mount_name(&self.prefix)
+            ));
+
+            return;
+        }
+
         if !app.pipeline.claim_static_mount(&self.prefix) {
             warn(&format!(
                 "Static files are already served under '{}'; this registration does nothing. \
@@ -989,6 +1004,21 @@ mod tests {
     /// mounts registers one in these tests, so this counts them.
     fn registered(app: &mut App) -> usize {
         app.pipeline.middlewares_mut().pipeline.len()
+    }
+
+    #[test]
+    fn it_does_not_register_a_mount_under_a_parameterized_prefix() {
+        let mut app = App::new();
+        app.group("/{tenant}", |g| {
+            g.use_static_assets();
+        });
+        app.group("/{tenant}", |tenant| {
+            tenant.group("/assets", |g| {
+                g.use_static_assets();
+            });
+        });
+
+        assert_eq!(registered(&mut app), 0);
     }
 
     #[test]

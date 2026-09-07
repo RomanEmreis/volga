@@ -175,7 +175,7 @@ impl RouteNode {
         let path_segments = split_path(path);
 
         for segment in path_segments {
-            if Self::is_dynamic_segment(segment) {
+            if is_dynamic_segment(segment) {
                 let name = Self::dynamic_name(segment);
                 current = current.insert_dynamic_node(name);
             } else {
@@ -397,11 +397,12 @@ impl RouteNode {
             segment
         }
     }
+}
 
-    #[inline(always)]
-    fn is_dynamic_segment(segment: &str) -> bool {
-        segment.starts_with(OPEN_BRACKET) && segment.ends_with(CLOSE_BRACKET)
-    }
+/// Returns `true` when `segment` names a route parameter rather than a literal segment.
+#[inline(always)]
+pub(crate) fn is_dynamic_segment(segment: &str) -> bool {
+    segment.starts_with(OPEN_BRACKET) && segment.ends_with(CLOSE_BRACKET)
 }
 
 #[inline(always)]
