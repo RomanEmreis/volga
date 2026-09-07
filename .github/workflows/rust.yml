@@ -26,6 +26,12 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
+      # `--all-features` turns on `test`, so every integration test compiles and every
+      # fixture is used. `full` leaves `test` off while keeping the features those
+      # fixtures are written against, which is the shape that let #238 through.
+      - name: Run Clippy on the `full` feature set
+        run: cargo clippy --all-targets --no-default-features --features full --locked -- -D warnings
+
   msrv_check:
     runs-on: ubuntu-latest
     needs: format_check

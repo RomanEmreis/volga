@@ -885,6 +885,7 @@ fn it_reports_a_flattened_child_at_this_level() {
     );
 }
 
+#[cfg(all(feature = "test", feature = "openapi"))]
 #[derive(Deserialize, Validate)]
 struct Params {
     #[validate(range(min = 1))]
@@ -1011,8 +1012,10 @@ fn it_leaves_out_a_bound_no_json_number_can_hold() {
     );
 }
 
+#[cfg(all(feature = "test", feature = "openapi"))]
 type Tags = Vec<String>;
 
+#[cfg(all(feature = "test", feature = "openapi"))]
 #[derive(Deserialize, Validate)]
 struct Aliased {
     // The type is spelled as an alias, so nothing upstream of the schema can tell it is a
@@ -1021,6 +1024,7 @@ struct Aliased {
     tags: Tags,
 }
 
+#[cfg(all(feature = "test", feature = "openapi"))]
 #[derive(Deserialize, Validate)]
 struct Envelope<T>
 where

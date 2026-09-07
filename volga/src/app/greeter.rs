@@ -3,6 +3,43 @@
 use super::App;
 use std::net::SocketAddr;
 
+/// Inner width of the greeter box, borders excluded.
+///
+/// The box grows past this when a long version or address needs the room, and never
+/// shrinks below it.
+const BOX_WIDTH: usize = 47;
+
+/// Left indent of the address line inside the box.
+const URL_INDENT: usize = 5;
+
+/// Draws the greeter box around a centered `title` and an indented `subtitle`.
+///
+/// The width is computed instead of being baked into the border literals, so a version
+/// or an address wider than the default widens the whole box rather than pushing the
+/// right edge out of line.
+fn draw_box(title: &str, subtitle: &str) -> String {
+    let title_len = title.chars().count();
+    let subtitle_len = subtitle.chars().count();
+
+    // Both content lines keep at least one space before the right border
+    let width = BOX_WIDTH
+        .max(title_len + 2)
+        .max(URL_INDENT + subtitle_len + 1);
+
+    let border = "─".repeat(width);
+    let title_left = " ".repeat((width - title_len) / 2);
+    let title_right = " ".repeat(width - title_len - title_left.len());
+    let subtitle_left = " ".repeat(URL_INDENT);
+    let subtitle_right = " ".repeat(width - URL_INDENT - subtitle_len);
+
+    format!(
+        "╭{border}╮\n\
+         │{title_left}{title}{title_right}│\n\
+         │{subtitle_left}{subtitle}{subtitle_right}│\n\
+         ╰{border}╯"
+    )
+}
+
 impl App {
     /// Prints a greeter message
     pub(super) fn print_welcome(&self, addr: SocketAddr) {
@@ -28,22 +65,15 @@ impl App {
             format!("http://{addr}")
         };
 
-        let box_plain = format!(
-            "\n╭───────────────────────────────────────────────╮\n\
-             │                >> Volga v{version:<5}                │\n\
-             │     Listening on: {url:<28}│\n\
-             ╰───────────────────────────────────────────────╯\n"
+        let content = draw_box(
+            &format!(">> Volga v{version}"),
+            &format!("Listening on: {url}"),
         );
 
         let header = if no_color {
-            box_plain
+            format!("\n{content}\n")
         } else {
-            format!(
-                "\n\x1b[1;34m╭───────────────────────────────────────────────╮\n\
-                     │                >> Volga v{version:<5}                │\n\
-                     │     Listening on: {url:<28}│\n\
-                     ╰───────────────────────────────────────────────╯\x1b[0m\n"
-            )
+            format!("\n\x1b[1;34m{content}\x1b[0m\n")
         };
 
         let routes = self.pipeline.endpoints().collect();
@@ -106,6 +136,56 @@ mod tests {
         let addr = "0.0.0.0:7878".parse().unwrap();
         let output = app.build_welcome(addr, true).unwrap();
         assert!(!output.contains('\x1b'));
+    }
+
+    /// The four lines of the box, borders included, from a colorless greeter
+    fn box_lines(output: &str) -> Vec<&str> {
+        output
+            .lines()
+            .filter(|line| line.starts_with(['\u{256d}', '\u{2502}', '\u{2570}']))
+            .collect()
+    }
+
+    #[test]
+    fn it_closes_the_box_on_the_same_column_on_every_line() {
+        let app = App::new().with_greeter();
+        let addr = "0.0.0.0:7878".parse().unwrap();
+        let output = app.build_welcome(addr, true).unwrap();
+
+        let lines = box_lines(&output);
+        let widths = lines
+            .iter()
+            .map(|line| line.chars().count())
+            .collect::<Vec<_>>();
+
+        assert_eq!(lines.len(), 4);
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "the box is ragged: {widths:?}"
+        );
+    }
+
+    #[test]
+    fn it_widens_the_box_for_an_address_the_default_width_cannot_hold() {
+        let addr = "[2001:db8:85a3:8d3:1319:8a2e:370:7348]:65535";
+        let app = App::new().with_greeter().bind(addr);
+        let output = app.build_welcome(addr.parse().unwrap(), true).unwrap();
+
+        let lines = box_lines(&output);
+        let widths = lines
+            .iter()
+            .map(|line| line.chars().count())
+            .collect::<Vec<_>>();
+
+        assert!(output.contains(addr), "the address was cut off: {output}");
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "the box is ragged: {widths:?}"
+        );
+        assert!(
+            widths[0] > 49,
+            "the box did not grow for the address: {widths:?}"
+        );
     }
 
     #[test]
