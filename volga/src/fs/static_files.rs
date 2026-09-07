@@ -32,7 +32,7 @@ use crate::{
     html, html_file,
     http::{
         IntoResponse, Method, StatusCode,
-        endpoints::route::{Layer, RoutePipeline, is_dynamic_segment, join_path},
+        endpoints::route::{Layer, RoutePipeline, is_dynamic_segment, join_path, split_path},
     },
     middleware::{HttpContext, Middleware, MiddlewareFn, NextFn},
     routing::RouteGroup,
@@ -180,7 +180,7 @@ impl StaticMount {
         // A mount is matched against the request target as it is written. A route parameter
         // is matched by the router, which knows nothing about this mount, and there is one
         // content root either way - so there is nothing for `/{tenant}` to answer under.
-        if self.prefix.split('/').any(is_dynamic_segment) {
+        if split_path(&self.prefix).any(is_dynamic_segment) {
             warn(&format!(
                 "Static files are not served under '{}': a mount answers a literal path \
                  prefix, and this one carries a route parameter. Mount them under a literal \

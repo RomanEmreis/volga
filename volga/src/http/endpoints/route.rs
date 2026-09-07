@@ -486,8 +486,10 @@ fn finish_path(mut path: String) -> String {
     path
 }
 
+/// Splits a path into the segments that name something, dropping the empty ones so that
+/// `/x`, `/x/` and `//x` are read as the one path they are.
 #[inline(always)]
-fn split_path(path: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn split_path(path: &str) -> impl Iterator<Item = &str> {
     memchr_split_nonempty(PATH_SEPARATOR, path.as_bytes())
         .map(|s| std::str::from_utf8(s).expect("Invalid UTF-8 sequence in path"))
 }

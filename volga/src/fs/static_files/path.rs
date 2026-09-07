@@ -1,6 +1,6 @@
 //! Resolving a request target to a path under the content root
 
-use crate::error::Error;
+use crate::{error::Error, http::endpoints::route::split_path};
 use std::{
     borrow::Cow,
     ffi::OsStr,
@@ -35,8 +35,10 @@ pub(crate) fn resolve(path: &str, prefix: &str) -> Result<Option<Target>, Error>
         return Ok(None);
     };
 
+    // Split the way the router splits a route pattern, so that a mount and a route read
+    // `//assets//app.css` as the same path.
     let mut relative = PathBuf::new();
-    for segment in rest.split('/').filter(|segment| !segment.is_empty()) {
+    for segment in split_path(rest) {
         let segment = percent_decode(segment)?;
         if !push_normal(&mut relative, segment.as_ref()) {
             return Ok(None);
