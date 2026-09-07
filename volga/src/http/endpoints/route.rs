@@ -27,7 +27,11 @@
 //! - **Dynamic routes are rare and handled separately:**  
 //!   Each node may have at most one dynamic child (e.g., `/user/{id}`), stored
 //!   as an `Option<RouteEntry>`. This avoids unnecessary branching and memory
-//!   overhead in the common case of static routing.
+//!   overhead in the common case of static routing. A parameter is matched by the
+//!   position it sits at rather than by what it is called, so the child is shared by
+//!   every route running through it - but each endpoint remembers the name its own
+//!   pattern was written with, so `GET /users/{id}` and `POST /users/{name}` are two
+//!   routes that bind two names at one position.
 //!
 //! ## Use of `SmallVec`
 //!
@@ -66,12 +70,25 @@ const TYPE_SEPARATOR: char = ':';
 const ALLOW_METHOD_SEPARATOR: char = ',';
 const DEFAULT_DEPTH: usize = 4;
 
+/// The route parameter names of one pattern, in the order the pattern writes them, while
+/// the pattern is being read
+pub(super) type ParamNames = SmallVec<[Arc<str>; DEFAULT_DEPTH]>;
+
 /// Represents a full route's "local" middleware pipeline
 /// with handler
 #[derive(Clone)]
 pub(super) struct RouteEndpoint {
     pub(super) method: Method,
     pub(super) pipeline: RoutePipeline,
+    /// The parameter names this endpoint's own pattern was written with, kept only when
+    /// they differ from the ones the tree binds on the way here - which happens when
+    /// another verb reached this position first and named it something else. `None` is
+    /// the common case and costs a request nothing.
+    ///
+    /// Boxed rather than inline: this list is read once per request and written once at
+    /// startup, while the endpoint holding it is scanned by every request that reaches
+    /// this node, so the two words a `Box` costs beat the ten a `SmallVec` would
+    pub(super) params: Option<Box<[Arc<str>]>>,
     /// The CORS policy bound to this route, `None` while nothing has bound one
     #[cfg(feature = "middleware")]
     pub(super) cors: Option<CorsOverride>,
@@ -126,13 +143,23 @@ impl RouteEntry {
 impl RouteEndpoint {
     /// Creates a new [`RouteEndpoint`]
     #[inline]
-    fn new(method: Method) -> Self {
+    fn new(method: Method, params: Option<Box<[Arc<str>]>>) -> Self {
         Self {
             method,
             pipeline: RoutePipeline::new(),
+            params,
             #[cfg(feature = "middleware")]
             cors: None,
         }
+    }
+
+    /// The parameter names this endpoint's pattern was written with
+    ///
+    /// `bound` is what the tree binds on the way here, which is what the endpoint was
+    /// written with unless it says otherwise.
+    #[inline]
+    fn params<'names>(&'names self, bound: &'names ParamNames) -> &'names [Arc<str>] {
+        self.params.as_deref().unwrap_or(bound)
     }
 
     /// Inserts a layer into the pipeline
@@ -170,20 +197,37 @@ impl RouteNode {
     }
 
     /// Inserts a handler to the route tree
+    ///
+    /// # Panics
+    /// if this route is a second name for one already mapped for `method`, or for the
+    /// `GET` that a `HEAD` answers. See [`ambiguous_route`].
     pub(super) fn insert(&mut self, path: &str, method: Method, handler: Layer) {
         let mut current = self;
-        let path_segments = split_path(path);
 
-        for segment in path_segments {
+        // What this pattern calls its parameters, and what the tree binds at the positions
+        // they sit at - the same names, unless another route reached a position first
+        let mut written = ParamNames::new();
+        let mut bound = ParamNames::new();
+
+        for segment in split_path(path) {
             if is_dynamic_segment(segment) {
                 let name = Self::dynamic_name(segment);
-                current = current.insert_dynamic_node(name);
+                let (next, name_bound) = current.insert_dynamic_node(name);
+
+                written.push(if name_bound.as_ref() == name {
+                    Arc::clone(&name_bound)
+                } else {
+                    Arc::from(name)
+                });
+
+                bound.push(name_bound);
+                current = next;
             } else {
                 current = current.insert_static_node(segment);
             }
         }
 
-        current.insert_handler(method, handler);
+        current.insert_handler(method, handler, &written, &bound, path);
     }
 
     /// Finds handlers by path
@@ -292,29 +336,28 @@ impl RouteNode {
     /// Returns a vector of tuples containing (HTTP method, route path)
     pub(super) fn collect(&self) -> super::meta::RoutesInfo {
         let mut routes = Vec::new();
-        self.traverse_routes(&mut routes, String::new());
+        let mut segments = Vec::new();
+        self.traverse_routes(&mut routes, &mut segments);
         super::meta::RoutesInfo(routes)
     }
 
-    fn traverse_routes(&self, routes: &mut Vec<super::meta::RouteInfo>, current_path: String) {
+    fn traverse_routes<'tree>(
+        &'tree self,
+        routes: &mut Vec<super::meta::RouteInfo>,
+        segments: &mut Vec<PathSegment<'tree>>,
+    ) {
         // Traverse static routes
         for route in self.static_routes.iter() {
-            let new_path = if current_path.is_empty() {
-                format!("/{}", route.path)
-            } else {
-                format!("{current_path}/{}", route.path)
-            };
-            route.node.traverse_routes(routes, new_path);
+            segments.push(PathSegment::Static(&route.path));
+            route.node.traverse_routes(routes, segments);
+            segments.pop();
         }
 
         // Traverse dynamic route (if any)
         if let Some(route) = &self.dynamic_route {
-            let new_path = if current_path.is_empty() {
-                format!("/{{{}}}", route.path)
-            } else {
-                format!("{current_path}/{{{}}}", route.path)
-            };
-            route.node.traverse_routes(routes, new_path);
+            segments.push(PathSegment::Dynamic(&route.path));
+            route.node.traverse_routes(routes, segments);
+            segments.pop();
         }
 
         // Record handlers for this node
@@ -323,11 +366,9 @@ impl RouteNode {
         };
 
         for handler in handlers.iter() {
-            let route_path = if current_path.is_empty() {
-                "/".to_string()
-            } else {
-                current_path.clone()
-            };
+            // A route is listed the way it was written, which is the name the tree binds
+            // unless another verb reached one of these positions first
+            let route_path = spell_route(segments, handler.params.as_deref());
             routes.push(super::meta::RouteInfo::new(
                 handler.method.clone(),
                 &route_path,
@@ -346,16 +387,40 @@ impl RouteNode {
         }
     }
 
+    /// Descends into the node the parameter named `name` leads to, creating it when this
+    /// is the first route to name one at this position, and hands back the name bound
+    /// there - `name` itself, unless another route got here first and called it something
+    /// else.
     #[inline(always)]
-    fn insert_dynamic_node(&mut self, segment: &str) -> &mut Self {
-        self.dynamic_route
-            .get_or_insert_with(|| RouteEntry::new(segment))
-            .node
-            .as_mut()
+    fn insert_dynamic_node(&mut self, name: &str) -> (&mut Self, Arc<str>) {
+        let entry = self
+            .dynamic_route
+            .get_or_insert_with(|| RouteEntry::new(name));
+        let bound = Arc::clone(&entry.path);
+
+        (entry.node.as_mut(), bound)
     }
 
     #[inline(always)]
-    fn insert_handler(&mut self, method: Method, handler: Layer) {
+    fn insert_handler(
+        &mut self,
+        method: Method,
+        handler: Layer,
+        written: &ParamNames,
+        bound: &ParamNames,
+        path: &str,
+    ) {
+        if let Some(handlers) = self.handlers.as_ref()
+            && let Some((other_method, other_written)) =
+                conflicting_endpoint(handlers, &method, written, bound)
+        {
+            ambiguous_route(path, &method, written, &other_method, &other_written);
+        }
+
+        // A pattern naming its parameters the way the tree already binds them - the route
+        // that reached each position first, and every route agreeing with it - says
+        // nothing, and a request to it is labelled straight from the tree
+        let params = (written != bound).then(|| Box::from(written.as_slice()));
         let handlers = self.handlers.get_or_insert_with(SmallVec::new);
 
         let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
@@ -366,13 +431,13 @@ impl RouteNode {
                 // while running the other's middleware is a pipeline nobody wrote.
                 // Layers added to a route do not replace it - only another handler does
                 if matches!(handler, Layer::Handler(_)) {
-                    handlers[i] = RouteEndpoint::new(method);
+                    handlers[i] = RouteEndpoint::new(method, params);
                 }
 
                 &mut handlers[i]
             }
             Err(i) => {
-                handlers.insert(i, RouteEndpoint::new(method));
+                handlers.insert(i, RouteEndpoint::new(method, params));
                 &mut handlers[i]
             }
         };
@@ -397,6 +462,148 @@ impl RouteNode {
             segment
         }
     }
+}
+
+/// Finds the endpoint at this node whose parameter names `method` has to agree with
+///
+/// A parameter is matched by the position it sits at rather than by what it is called, so
+/// every route running through a position shares it - but each endpoint labels its request
+/// with the names its own pattern was written with, so two verbs may call one position two
+/// things and both be right. Two cases cannot:
+///
+/// - the same verb at the same node: the second registration replaces the first, and a
+///   different name says that is not what was meant. `map_get("/users/{id}")` followed by
+///   `map_get("/users/{name}")` leaves one route mapped, not two
+/// - `GET` and `HEAD`: a `HEAD` request with no route of its own is answered by the `GET`
+///   route (RFC 9110 Section 9.3.2), so the two describe one resource and cannot disagree
+///   about what identifies it
+///
+/// `bound` is what the tree binds on the way to this node, which is what an endpoint was
+/// written with unless it says otherwise.
+#[inline]
+fn conflicting_endpoint(
+    handlers: &[RouteEndpoint],
+    method: &Method,
+    written: &ParamNames,
+    bound: &ParamNames,
+) -> Option<(Method, ParamNames)> {
+    handlers
+        .iter()
+        .find(|endpoint| {
+            (endpoint.method == *method || answers_for(&endpoint.method, method))
+                && endpoint.params(bound) != written.as_slice()
+        })
+        .map(|endpoint| {
+            (
+                endpoint.method.clone(),
+                endpoint.params(bound).iter().cloned().collect(),
+            )
+        })
+}
+
+/// Returns `true` when one of the two methods answers the requests of the other
+#[inline(always)]
+fn answers_for(left: &Method, right: &Method) -> bool {
+    (*left == Method::GET && *right == Method::HEAD)
+        || (*left == Method::HEAD && *right == Method::GET)
+}
+
+/// Reports a route written as a second name for one already mapped
+///
+/// Only one of the two names can label the request that arrives - the position they share
+/// carries the route, and the endpoint answering it carries the name - so the route mapped
+/// second used to take the first one's place while binding the first one's parameter name,
+/// which is a route nobody wrote. There is nothing to pick between them, so this is
+/// reported where it is written rather than resolved (#226).
+#[cold]
+#[inline(never)]
+fn ambiguous_route(
+    path: &str,
+    method: &Method,
+    written: &[Arc<str>],
+    other_method: &Method,
+    other_written: &[Arc<str>],
+) -> ! {
+    let this = spell_pattern(path, written);
+    let other = spell_pattern(path, other_written);
+    let name = other_written
+        .iter()
+        .zip(written)
+        .find(|(other, this)| other != this)
+        .map_or_else(String::new, |(other, _)| other.to_string());
+
+    let reason = if method == other_method {
+        format!(
+            "A route parameter is matched by the position it sits at rather than by what it \
+             is called, so this is that same route under a second name: mapping it replaces \
+             the one above rather than adding one, and whatever answers binds `{name}`."
+        )
+    } else {
+        format!(
+            "A `HEAD` request that has no route of its own is answered by the `GET` route, so \
+             the two describe one resource and name what identifies it once - `{name}`."
+        )
+    };
+
+    panic!(
+        "ambiguous route `{method} {this}`: `{other_method} {other}` is already mapped. \
+         {reason} Name the parameter `{name}` here too, or tell the two routes apart with a \
+         literal segment. Any other verb may name this position whatever it likes."
+    );
+}
+
+/// A segment of a route as the tree holds it, on the way to an endpoint
+enum PathSegment<'tree> {
+    /// A literal segment
+    Static(&'tree str),
+    /// A parameter, under the name the tree binds it as
+    Dynamic(&'tree str),
+}
+
+/// Spells the route reached through `segments`, with `names` at the positions its
+/// parameters sit at when the endpoint carries names of its own
+fn spell_route(segments: &[PathSegment<'_>], names: Option<&[Arc<str>]>) -> String {
+    let mut path = String::new();
+    let mut dynamic = 0;
+
+    for segment in segments {
+        path.push(PATH_SEPARATOR as char);
+        match segment {
+            PathSegment::Static(literal) => path.push_str(literal),
+            PathSegment::Dynamic(bound) => {
+                let name = names
+                    .and_then(|names| names.get(dynamic))
+                    .map_or(*bound, |name| name.as_ref());
+                dynamic += 1;
+
+                path.push(OPEN_BRACKET);
+                path.push_str(name);
+                path.push(CLOSE_BRACKET);
+            }
+        }
+    }
+
+    finish_path(path)
+}
+
+/// Spells `path` with `names` at the positions its parameters sit at
+fn spell_pattern(path: &str, names: &[Arc<str>]) -> String {
+    let mut pattern = String::with_capacity(path.len());
+    let mut params = names.iter();
+
+    for segment in split_path(path) {
+        pattern.push(PATH_SEPARATOR as char);
+        match is_dynamic_segment(segment).then(|| params.next()).flatten() {
+            Some(name) => {
+                pattern.push(OPEN_BRACKET);
+                pattern.push_str(name);
+                pattern.push(CLOSE_BRACKET);
+            }
+            None => pattern.push_str(segment),
+        }
+    }
+
+    finish_path(pattern)
 }
 
 /// Returns `true` when `segment` names a route parameter rather than a literal segment.
@@ -520,6 +727,7 @@ mod tests {
     use crate::ok;
     use hyper::Method;
     use smallvec::SmallVec;
+    use std::sync::Arc;
 
     #[cfg(debug_assertions)]
     use super::super::meta::RouteInfo;
@@ -870,8 +1078,8 @@ mod tests {
     #[test]
     fn it_makes_allowed_str() {
         let handlers: SmallVec<[RouteEndpoint; DEFAULT_DEPTH]> = smallvec::smallvec![
-            RouteEndpoint::new(Method::GET),
-            RouteEndpoint::new(Method::HEAD),
+            RouteEndpoint::new(Method::GET, None),
+            RouteEndpoint::new(Method::HEAD, None),
         ];
 
         let allowed = make_allowed_str(&handlers);
@@ -883,5 +1091,175 @@ mod tests {
         let handlers: SmallVec<[RouteEndpoint; DEFAULT_DEPTH]> = smallvec::smallvec![];
         let allowed = make_allowed_str(&handlers);
         assert_eq!(allowed.as_ref(), "");
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "ambiguous route `GET /users/{name}`: `GET /users/{id}` is already mapped"
+    )]
+    fn it_rejects_a_second_name_for_one_parameter() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/users/{name}", Method::GET, handler.into());
+    }
+
+    #[test]
+    #[should_panic(expected = "ambiguous route `GET /{name}`: `GET /{id}` is already mapped")]
+    fn it_names_the_root_position_of_a_conflict() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/{id}", Method::GET, handler.clone().into());
+        route.insert("/{name}", Method::GET, handler.into());
+    }
+
+    /// A `HEAD` request with no route of its own is answered by the `GET` route, so the two
+    /// describe one resource and cannot disagree about what identifies it
+    #[test]
+    #[should_panic(
+        expected = "ambiguous route `HEAD /users/{name}`: `GET /users/{id}` is already mapped"
+    )]
+    fn it_rejects_a_head_named_apart_from_the_get_it_answers_for() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/users/{name}", Method::HEAD, handler.into());
+    }
+
+    /// ... and it reads the same way round
+    #[test]
+    #[should_panic(
+        expected = "ambiguous route `GET /users/{name}`: `HEAD /users/{id}` is already mapped"
+    )]
+    fn it_rejects_a_get_named_apart_from_the_head_answering_for_it() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::HEAD, handler.clone().into());
+        route.insert("/users/{name}", Method::GET, handler.into());
+    }
+
+    /// Another verb is another route, and it names what it reads for itself: reading a user
+    /// by id and creating one by name meet at a position without describing one thing
+    #[test]
+    fn it_accepts_a_second_name_from_another_verb() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/users/{name}", Method::POST, handler.into());
+
+        let found = route.find("/users/42").unwrap();
+        let handlers = found.route.handlers.as_ref().unwrap();
+
+        // The tree binds the name the GET got there with, and only the POST carries one
+        assert_eq!(found.params.first().unwrap().name.as_ref(), "id");
+        assert!(handlers[0].params.is_none());
+        assert_eq!(
+            handlers[1].params.as_deref().unwrap(),
+            [Arc::<str>::from("name")]
+        );
+    }
+
+    /// Two routes on one verb parting at a position never meet at an endpoint, so each one
+    /// keeps the name it was written with
+    #[test]
+    fn it_accepts_two_names_where_the_routes_part() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}/posts", Method::GET, handler.clone().into());
+        route.insert("/users/{name}/comments", Method::GET, handler.into());
+
+        let posts = route.find("/users/42/posts").unwrap();
+        let comments = route.find("/users/42/comments").unwrap();
+
+        assert!(posts.route.handlers.as_ref().unwrap()[0].params.is_none());
+        assert_eq!(
+            comments.route.handlers.as_ref().unwrap()[0]
+                .params
+                .as_deref()
+                .unwrap(),
+            [Arc::<str>::from("name")]
+        );
+    }
+
+    /// The route listing is what the application was written as, so an endpoint naming a
+    /// position for itself is listed under its own name rather than the tree's
+    #[test]
+    #[cfg(debug_assertions)]
+    fn it_collects_each_route_under_the_name_it_was_written_with() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/users/{name}", Method::POST, handler.clone().into());
+        route.insert("/users/{name}/roles", Method::PUT, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 3);
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users/{id}")));
+        assert!(routes.contains(&RouteInfo::new(Method::POST, "/users/{name}")));
+        assert!(routes.contains(&RouteInfo::new(Method::PUT, "/users/{name}/roles")));
+    }
+
+    /// Mapping one route for several verbs is the whole point of the name matching, and a
+    /// layer added to a route arrives here the same way a handler does
+    #[test]
+    fn it_accepts_the_same_parameter_name_again() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/users/{id}", Method::HEAD, handler.clone().into());
+        route.insert("/users/{id}", Method::POST, handler.clone().into());
+        route.insert("/users/{id}/posts", Method::GET, handler.into());
+
+        let found = route.find("/users/42").unwrap();
+
+        assert_eq!(found.params.first().unwrap().name.as_ref(), "id");
+        assert_eq!(found.route.allowed_methods().as_ref(), "GET,POST,HEAD");
+        assert!(route.find("/users/42/posts").is_some());
+    }
+
+    /// The type a parameter is annotated with is not part of its name, so the two spell
+    /// one parameter
+    #[test]
+    fn it_accepts_a_typed_spelling_of_a_name_already_registered() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/users/{id:integer}", Method::POST, handler.into());
+
+        assert!(route.find("/users/42").is_some());
+    }
+
+    /// A literal segment is matched before the parameter covering it, which is how a route
+    /// is told apart from the parameter it sits under - and is the way out of a conflict
+    #[test]
+    fn it_accepts_a_literal_segment_beside_a_parameter() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/users/me", Method::GET, handler.into());
+
+        assert!(route.find("/users/me").unwrap().params.first().is_none());
+        assert_eq!(
+            route
+                .find("/users/42")
+                .unwrap()
+                .params
+                .first()
+                .unwrap()
+                .name
+                .as_ref(),
+            "id"
+        );
     }
 }

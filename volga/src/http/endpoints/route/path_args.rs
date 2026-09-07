@@ -58,6 +58,21 @@ impl PathArgs {
         self.args.first()
     }
 
+    /// Relabels the args with the names the matched endpoint's own pattern was written
+    /// with.
+    ///
+    /// The tree binds a parameter under the name of whichever route reached its position
+    /// first, and that route is not always the one answering: two verbs may name one
+    /// position two things. Extractors reading a parameter by name - `NamedPath<T>` and
+    /// anything else going through [`PathArgs::encoded`] - read the answering route's.
+    #[inline]
+    pub(crate) fn rename(&mut self, names: &[Arc<str>]) {
+        for (arg, name) in self.args.iter_mut().zip(names) {
+            arg.name = Arc::clone(name);
+        }
+        let _ = self.encoded.take();
+    }
+
     /// Append an item to the args vector.
     #[inline]
     pub(crate) fn push(&mut self, arg: PathArg) {

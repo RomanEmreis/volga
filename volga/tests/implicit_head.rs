@@ -197,23 +197,22 @@ async fn it_runs_group_middleware_once_for_a_head_mapped_by_hand() {
     server.shutdown().await;
 }
 
-/// A dynamic segment is one route whatever its placeholder is called, so a `HEAD` mapped
-/// under a different name for it is still the `GET` route's own `HEAD`.
+/// A dynamic route's `HEAD` is mapped under the parameter name that route already carries:
+/// a segment is matched by the position it sits at, so a second name for it is an ambiguous
+/// route reported at registration rather than another way of spelling this one (#226).
 #[tokio::test]
-async fn it_matches_an_explicit_head_by_route_shape() {
+async fn it_matches_an_explicit_head_on_a_dynamic_route() {
     let hits = Arc::new(Mutex::new(0usize));
     let group_hits = Arc::clone(&hits);
 
     let server = TestServer::spawn(move |app| {
         app.map_get("/users/{id}", |id: String| async move { id })
             .wrap(|_ctx, _next| async move { volga::status!(403) });
-        app.map_head("/users/{name}", || async {
-            volga::ok!([("x-who", "head")])
-        });
+        app.map_head("/users/{id}", || async { volga::ok!([("x-who", "head")]) });
 
         app.group("/api", |api| {
             api.map_get("/users/{id}", |id: String| async move { id });
-            api.map_head("/users/{name}", || async { volga::ok!() });
+            api.map_head("/users/{id}", || async { volga::ok!() });
 
             let counter = Arc::clone(&group_hits);
             api.wrap(move |ctx, next| {

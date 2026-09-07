@@ -118,7 +118,7 @@ impl Endpoints {
                     |handler| {
                         FindResult::Ok(Endpoint::new(
                             handler.pipeline.clone(),
-                            route_params.params,
+                            labelled(route_params.params, handler),
                             #[cfg(feature = "middleware")]
                             handler.cors.clone().unwrap_or_default(),
                         ))
@@ -133,7 +133,7 @@ impl Endpoints {
             |handler| {
                 FindResult::Ok(Endpoint::new(
                     handler.pipeline.clone(),
-                    route_params.params,
+                    labelled(route_params.params, handler),
                     #[cfg(feature = "middleware")]
                     handler.cors.clone().unwrap_or_default(),
                 ))
@@ -228,6 +228,19 @@ impl Endpoints {
 /// without content (RFC 9110 Section 9.3.2), so the request travels through everything
 /// that route travels through, and the body is dropped on the way out. A `HEAD` mapped by
 /// hand is found here first and keeps the `GET` route out of it.
+/// Labels the matched path arguments with the parameter names of the endpoint answering
+///
+/// The tree binds them under the names of whichever route reached each position first, and
+/// an endpoint carries names of its own only when it was written with different ones - so
+/// this is a branch and nothing else for every route that agrees with the tree.
+#[inline]
+fn labelled(mut params: PathArgs, endpoint: &RouteEndpoint) -> PathArgs {
+    if let Some(names) = endpoint.params.as_deref() {
+        params.rename(names);
+    }
+    params
+}
+
 #[inline]
 fn endpoint_for<'route>(
     handlers: &'route [RouteEndpoint],
@@ -341,6 +354,45 @@ mod tests {
         let has_route = endpoints.contains(&Method::GET, "path/to/handler");
 
         assert!(has_route);
+    }
+
+    /// The tree binds a path argument under the name of whichever route reached its
+    /// position first; the endpoint that answers decides what the request is labelled with
+    #[test]
+    fn it_labels_path_args_with_the_names_of_the_endpoint_that_answers() {
+        let mut endpoints = Endpoints::new();
+
+        let handler = Func::new(|| async { ok!() });
+
+        endpoints.map_route(Method::GET, "/users/{id}", handler.clone());
+        endpoints.map_route(Method::POST, "/users/{name}", handler);
+
+        for (method, expected) in [(Method::GET, "id"), (Method::POST, "name")] {
+            let request = Request::builder()
+                .method(method.clone())
+                .uri("https://example.com/users/42")
+                .body(())
+                .unwrap();
+
+            let found = endpoints.find(
+                request.method(),
+                request.uri(),
+                #[cfg(feature = "middleware")]
+                false,
+                #[cfg(feature = "middleware")]
+                &HeaderMap::new(),
+            );
+
+            match found {
+                FindResult::Ok(endpoint) => {
+                    let arg = endpoint.params.first().expect("the route has a parameter");
+
+                    assert_eq!(arg.name.as_ref(), expected, "{method}");
+                    assert_eq!(arg.value.as_ref(), "42", "{method}");
+                }
+                _ => panic!("{method} must have matched"),
+            }
+        }
     }
 
     #[test]
