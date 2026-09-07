@@ -70,7 +70,8 @@ const TYPE_SEPARATOR: char = ':';
 const ALLOW_METHOD_SEPARATOR: char = ',';
 const DEFAULT_DEPTH: usize = 4;
 
-/// The route parameter names of one pattern, in the order the pattern writes them
+/// The route parameter names of one pattern, in the order the pattern writes them, while
+/// the pattern is being read
 pub(super) type ParamNames = SmallVec<[Arc<str>; DEFAULT_DEPTH]>;
 
 /// Represents a full route's "local" middleware pipeline
@@ -82,8 +83,12 @@ pub(super) struct RouteEndpoint {
     /// The parameter names this endpoint's own pattern was written with, kept only when
     /// they differ from the ones the tree binds on the way here - which happens when
     /// another verb reached this position first and named it something else. `None` is
-    /// the common case and costs a request nothing
-    pub(super) params: Option<ParamNames>,
+    /// the common case and costs a request nothing.
+    ///
+    /// Boxed rather than inline: this list is read once per request and written once at
+    /// startup, while the endpoint holding it is scanned by every request that reaches
+    /// this node, so the two words a `Box` costs beat the ten a `SmallVec` would
+    pub(super) params: Option<Box<[Arc<str>]>>,
     /// The CORS policy bound to this route, `None` while nothing has bound one
     #[cfg(feature = "middleware")]
     pub(super) cors: Option<CorsOverride>,
@@ -138,7 +143,7 @@ impl RouteEntry {
 impl RouteEndpoint {
     /// Creates a new [`RouteEndpoint`]
     #[inline]
-    fn new(method: Method, params: Option<ParamNames>) -> Self {
+    fn new(method: Method, params: Option<Box<[Arc<str>]>>) -> Self {
         Self {
             method,
             pipeline: RoutePipeline::new(),
@@ -415,7 +420,7 @@ impl RouteNode {
         // A pattern naming its parameters the way the tree already binds them - the route
         // that reached each position first, and every route agreeing with it - says
         // nothing, and a request to it is labelled straight from the tree
-        let params = (written != bound).then(|| written.clone());
+        let params = (written != bound).then(|| Box::from(written.as_slice()));
         let handlers = self.handlers.get_or_insert_with(SmallVec::new);
 
         let endpoint = match handlers.binary_search_by(|r| r.cmp(&method)) {
