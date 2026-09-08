@@ -56,7 +56,7 @@
 
 use crate::{
     App, HttpResult,
-    app::{HostEnv, warn},
+    app::{HostEnv, RolePolicy, warn},
     error::Error,
     html, html_file,
     http::{
@@ -75,8 +75,8 @@ use std::{
 use tokio::fs::{File, canonicalize, metadata};
 
 use crate::headers::{
-    CACHE_CONTROL, CacheControl, ETAG, ETagSource, HeaderMap, HttpHeaders, LAST_MODIFIED,
-    ResponseCaching, helpers::validate_preconditions,
+    CACHE_CONTROL, ETAG, HeaderMap, HttpHeaders, LAST_MODIFIED, ResponseCaching,
+    helpers::validate_preconditions,
 };
 
 mod etag;
@@ -293,7 +293,7 @@ async fn probe_root(env: &HostEnv) -> Option<Serving> {
 
     let path = env.index_path();
     let metadata = metadata(path).await.ok().filter(|m| m.is_file())?;
-    let caching = caching_for(path, &metadata, env.shell_cache_control(), env.shell_etag())
+    let caching = caching_for(path, &metadata, env.shell_policy())
         .await
         .ok()?;
 
@@ -309,14 +309,10 @@ async fn probe_root(env: &HostEnv) -> Option<Serving> {
 async fn probe_asset(env: &HostEnv, relative: PathBuf) -> Option<Serving> {
     let path = env.content_root().join(relative);
 
-    // The index and the fallback file keep their own policy even when they are requested
-    // by name, since the name they are addressed by is stable either way - and the tag they
-    // are validated by is derived from the same role, for the same reason.
-    let (cache_control, etag_source) = if env.is_shell_path(&path) {
-        (env.shell_cache_control(), env.shell_etag())
-    } else {
-        (env.asset_cache_control(), env.asset_etag())
-    };
+    // The index and the fallback file keep their own policy even when they are requested by
+    // name, since the name they are addressed by is stable either way - and the tag they are
+    // validated by follows the same role, for the same reason.
+    let policy = env.policy_for(&path);
 
     // Asked first, and answered from a single `stat`: a request nothing is there for is
     // declined here, before the two `canonicalize` calls below.
@@ -345,9 +341,7 @@ async fn probe_asset(env: &HostEnv, relative: PathBuf) -> Option<Serving> {
         return Some(serving);
     }
 
-    let caching = caching_for(&path, &metadata, cache_control, etag_source)
-        .await
-        .ok()?;
+    let caching = caching_for(&path, &metadata, policy).await.ok()?;
 
     Some(Serving::File { path, caching })
 }
@@ -371,14 +365,10 @@ async fn respond(serving: &Serving, method: &Method, headers: &HeaderMap) -> Htt
 /// Answers a request no route was found for with the fallback file.
 #[inline]
 async fn fallback(method: Method, env: HostEnv, headers: HttpHeaders) -> HttpResult {
-    let cache_control = env.shell_cache_control();
-    let etag_source = env.shell_etag();
+    let policy = env.shell_policy();
     match env.fallback_path() {
         None => status!(404),
-        Some(path) => {
-            respond_with_shell_impl(path, &method, headers.as_map(), cache_control, etag_source)
-                .await
-        }
+        Some(path) => respond_with_shell_impl(path, &method, headers.as_map(), policy).await,
     }
 }
 
@@ -393,11 +383,10 @@ async fn respond_with_shell_impl(
     path: &Path,
     method: &Method,
     headers: &HeaderMap,
-    cache_control: CacheControl,
-    etag_source: ETagSource,
+    policy: RolePolicy,
 ) -> HttpResult {
     let metadata = metadata(path).await?;
-    let caching = caching_for(path, &metadata, cache_control, etag_source).await?;
+    let caching = caching_for(path, &metadata, policy).await?;
 
     respond_with_file_or_304_impl(path, &caching, method, headers).await
 }
@@ -408,11 +397,10 @@ async fn respond_with_shell_impl(
 async fn caching_for(
     path: &Path,
     meta: &Metadata,
-    cache_control: CacheControl,
-    etag_source: ETagSource,
+    policy: RolePolicy,
 ) -> Result<ResponseCaching, Error> {
-    let etag = etag::of(path, meta, etag_source).await?;
-    let caching = ResponseCaching::from_parts(etag, meta.modified()?, cache_control);
+    let etag = etag::of(path, meta, policy.etag()).await?;
+    let caching = ResponseCaching::from_parts(etag, meta.modified()?, policy.cache_control());
 
     Ok(caching)
 }
@@ -634,8 +622,8 @@ mod tests {
     };
     use crate::app::HostEnv;
     use crate::headers::{
-        CACHE_CONTROL, CacheControl, ETagSource, HeaderMap, HeaderValue, HttpHeaders,
-        IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
+        CACHE_CONTROL, CacheControl, HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE,
+        IF_NONE_MATCH, ResponseCaching,
     };
     use crate::http::{Method, StatusCode};
     use crate::{App, HttpResult};
@@ -675,13 +663,14 @@ mod tests {
         headers
     }
 
-    /// Derives what the server would serve `path` with, from the same `ETagSource` its
-    /// role is configured with - so a test that echoes this tag back sends the tag the
-    /// server is about to compare it against, rather than one derived some other way.
-    async fn caching_of(path: &str, etag_source: ETagSource) -> ResponseCaching {
+    /// Derives what the server would serve `path` with, through the same role selection the
+    /// server makes - so a test that echoes this tag back sends the tag the server is about
+    /// to compare it against, rather than one a test picked a source for itself.
+    async fn caching_of(env: &HostEnv, path: &str) -> ResponseCaching {
+        let path = Path::new(path);
         let metadata = metadata(path).await.unwrap();
 
-        caching_for(Path::new(path), &metadata, CacheControl::EMPTY, etag_source)
+        caching_for(path, &metadata, env.policy_for(path))
             .await
             .unwrap()
     }
@@ -741,7 +730,7 @@ mod tests {
     #[tokio::test]
     async fn it_returns_304_for_an_index_whose_etag_still_matches() {
         let env = HostEnv::new("tests/static");
-        let caching = caching_of(env.index_path().to_str().unwrap(), ETagSource::Content).await;
+        let caching = caching_of(&env, env.index_path().to_str().unwrap()).await;
 
         let response = serve(&env, "/", Method::GET, if_none_match(caching.etag()))
             .await
@@ -755,11 +744,7 @@ mod tests {
     #[tokio::test]
     async fn it_returns_304_for_a_fallback_whose_etag_still_matches() {
         let env = HostEnv::new("tests/static").with_fallback_file("index.html");
-        let caching = caching_of(
-            env.fallback_path().unwrap().to_str().unwrap(),
-            ETagSource::Content,
-        )
-        .await;
+        let caching = caching_of(&env, env.fallback_path().unwrap().to_str().unwrap()).await;
 
         let response = fallback(
             Method::GET,
@@ -776,7 +761,7 @@ mod tests {
     #[tokio::test]
     async fn it_returns_the_cache_control_on_a_304() {
         let env = HostEnv::new("tests/static");
-        let caching = caching_of("tests/static/assets/app.css", ETagSource::Metadata).await;
+        let caching = caching_of(&env, "tests/static/assets/app.css").await;
 
         let response = serve(
             &env,
@@ -798,7 +783,7 @@ mod tests {
     #[tokio::test]
     async fn it_ignores_the_date_when_the_etag_says_the_file_changed() {
         let env = HostEnv::new("tests/static");
-        let caching = caching_of("tests/static/assets/app.css", ETagSource::Metadata).await;
+        let caching = caching_of(&env, "tests/static/assets/app.css").await;
 
         // A client holding an asset from a build that has since been rolled back: its
         // `ETag` no longer matches what is on disk, but the date it remembers is newer
@@ -819,7 +804,7 @@ mod tests {
     #[tokio::test]
     async fn it_still_reads_the_date_when_no_etag_was_sent() {
         let env = HostEnv::new("tests/static");
-        let caching = caching_of("tests/static/assets/app.css", ETagSource::Metadata).await;
+        let caching = caching_of(&env, "tests/static/assets/app.css").await;
 
         let response = serve(
             &env,
@@ -952,8 +937,9 @@ mod tests {
 
     #[tokio::test]
     async fn it_responds_with_file() {
+        let env = HostEnv::new("tests/static");
         let path = PathBuf::from("tests/static/index.html");
-        let caching = caching_of("tests/static/index.html", ETagSource::Content).await;
+        let caching = caching_of(&env, "tests/static/index.html").await;
 
         let response = respond_with_file_impl(&path, &caching).await.unwrap();
 
@@ -1026,7 +1012,7 @@ mod tests {
     #[tokio::test]
     async fn it_responds_with_304_as_file_has_same_etag() {
         let env = HostEnv::new("tests/static");
-        let caching = caching_of("tests/static/index.html", ETagSource::Content).await;
+        let caching = caching_of(&env, "tests/static/index.html").await;
 
         let response = serve(
             &env,

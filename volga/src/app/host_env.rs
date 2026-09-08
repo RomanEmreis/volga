@@ -10,6 +10,52 @@ use std::path::{Path, PathBuf};
 const DEFAULT_INDEX_FILE: &str = "index.html";
 const DEFAULT_CONTENT_ROOT: &str = "/static";
 
+/// What a static file of one role is served with.
+///
+/// The static file server answers two kinds of file - an asset addressed by a
+/// content-hashed name, and the shell addressed by a stable one - and every header saying
+/// how a response may be cached is chosen by that kind rather than per file. Holding them
+/// together makes the role one decision where a file is served rather than one decision per
+/// header, and keeps a third such header from becoming a third pair of fields on [`HostEnv`].
+///
+/// This is the internal shape. The two roles are configured through the flat builders on
+/// [`HostEnv`] - [`with_asset_cache_control`], [`with_shell_etag`] and their siblings - each
+/// of which narrows a single directive without restating the rest.
+///
+/// [`with_asset_cache_control`]: HostEnv::with_asset_cache_control
+/// [`with_shell_etag`]: HostEnv::with_shell_etag
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct RolePolicy {
+    cache_control: CacheControl,
+    etag: ETagSource,
+}
+
+impl RolePolicy {
+    /// What a file addressed by a content-hashed name is served with, before configuration.
+    const ASSET: Self = Self {
+        cache_control: CacheControl::ASSET,
+        etag: ETagSource::Metadata,
+    };
+
+    /// What the index and the fallback file are served with, before configuration.
+    const SHELL: Self = Self {
+        cache_control: CacheControl::SHELL,
+        etag: ETagSource::Content,
+    };
+
+    /// Returns the `Cache-Control` policy of this role
+    #[inline]
+    pub(crate) fn cache_control(&self) -> CacheControl {
+        self.cache_control
+    }
+
+    /// Returns where the `ETag` of this role is derived from
+    #[inline]
+    pub(crate) fn etag(&self) -> ETagSource {
+        self.etag
+    }
+}
+
 /// Describes a Web Server's Hosting Environment
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct HostEnv {
@@ -33,27 +79,16 @@ pub struct HostEnv {
     /// Default: `false`
     show_directory: bool,
 
-    /// `Cache-Control` for the files addressed by a content-hashed name
+    /// What a file addressed by a content-hashed name is served with
     ///
-    /// Default: `max-age=86400, public, immutable`
-    asset_cache_control: CacheControl,
+    /// Default: `max-age=86400, public, immutable`, tagged from the file's metadata
+    asset: RolePolicy,
 
-    /// `Cache-Control` for the files addressed by a stable name - the index file
-    /// and the fallback file
+    /// What the files addressed by a stable name - the index file and the fallback file -
+    /// are served with
     ///
-    /// Default: `no-cache`
-    shell_cache_control: CacheControl,
-
-    /// Where the `ETag` of a file addressed by a content-hashed name comes from
-    ///
-    /// Default: [`ETagSource::Metadata`]
-    asset_etag: ETagSource,
-
-    /// Where the `ETag` of a file addressed by a stable name - the index file and the
-    /// fallback file - comes from
-    ///
-    /// Default: [`ETagSource::Content`]
-    shell_etag: ETagSource,
+    /// Default: `no-cache`, tagged from the file's contents
+    shell: RolePolicy,
 }
 
 impl Default for HostEnv {
@@ -74,10 +109,8 @@ impl HostEnv {
         Self {
             show_directory: false,
             fallback_path: None,
-            asset_cache_control: CacheControl::ASSET,
-            shell_cache_control: CacheControl::SHELL,
-            asset_etag: ETagSource::Metadata,
-            shell_etag: ETagSource::Content,
+            asset: RolePolicy::ASSET,
+            shell: RolePolicy::SHELL,
             content_root,
             index_path,
         }
@@ -165,7 +198,7 @@ impl HostEnv {
     where
         F: FnOnce(CacheControl) -> CacheControl,
     {
-        self.asset_cache_control = config(self.asset_cache_control);
+        self.asset.cache_control = config(self.asset.cache_control);
         self
     }
 
@@ -189,7 +222,7 @@ impl HostEnv {
     where
         F: FnOnce(CacheControl) -> CacheControl,
     {
-        self.shell_cache_control = config(self.shell_cache_control);
+        self.shell.cache_control = config(self.shell.cache_control);
         self
     }
 
@@ -216,7 +249,7 @@ impl HostEnv {
     ///
     /// [`with_asset_cache_control`]: Self::with_asset_cache_control
     pub fn with_asset_etag(mut self, source: ETagSource) -> Self {
-        self.asset_etag = source;
+        self.asset.etag = source;
         self
     }
 
@@ -238,7 +271,7 @@ impl HostEnv {
     ///     .with_shell_etag(ETagSource::Metadata);
     /// ```
     pub fn with_shell_etag(mut self, source: ETagSource) -> Self {
-        self.shell_etag = source;
+        self.shell.etag = source;
         self
     }
 
@@ -288,31 +321,48 @@ impl HostEnv {
     /// Returns the `Cache-Control` policy of the files addressed by a content-hashed name
     #[inline]
     pub fn asset_cache_control(&self) -> CacheControl {
-        self.asset_cache_control
+        self.asset.cache_control
     }
 
     /// Returns the `Cache-Control` policy of the index and the fallback files
     #[inline]
     pub fn shell_cache_control(&self) -> CacheControl {
-        self.shell_cache_control
+        self.shell.cache_control
     }
 
     /// Returns where the `ETag` of the files addressed by a content-hashed name comes from
     #[inline]
     pub fn asset_etag(&self) -> ETagSource {
-        self.asset_etag
+        self.asset.etag
     }
 
     /// Returns where the `ETag` of the index and the fallback files comes from
     #[inline]
     pub fn shell_etag(&self) -> ETagSource {
-        self.shell_etag
+        self.shell.etag
+    }
+
+    /// Returns what the index and the fallback file are served with.
+    #[inline]
+    pub(crate) fn shell_policy(&self) -> RolePolicy {
+        self.shell
+    }
+
+    /// Returns what the file at `path` is served with, by the role the name it is addressed
+    /// by gives it.
+    #[inline]
+    pub(crate) fn policy_for(&self, path: &Path) -> RolePolicy {
+        if self.is_shell_path(path) {
+            self.shell
+        } else {
+            self.asset
+        }
     }
 
     /// Returns `true` if `path` is addressed by a stable name - the index file
     /// or the fallback file - and so must not be served as immutable.
     #[inline]
-    pub(crate) fn is_shell_path(&self, path: &Path) -> bool {
+    fn is_shell_path(&self, path: &Path) -> bool {
         path == self.index_path || self.fallback_path.as_deref() == Some(path)
     }
 }

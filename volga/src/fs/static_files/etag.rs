@@ -14,19 +14,20 @@
 //!   a tag may carry, because a sub-second `mtime` differs between replicas of one build and
 //!   the tag has to agree across them - but an entry in this cache is never compared against
 //!   anything outside this process, so it is free to use every digit the filesystem reports.
-//! * the **file's identity**, where the platform gives one - the inode on Unix. A deploy
-//!   that writes a new file and renames it over the old, which is what `rsync`, `tar` and
-//!   every atomic deploy script do, moves this even when it restores both the length and the
-//!   modification time of what it replaced.
+//! * a **discriminator that moves when the file is replaced rather than written through**,
+//!   which is how a deploy that restores both of the above is still noticed. A deploy writes
+//!   a new file and renames it over the old - `rsync`, `tar` and every atomic deploy script
+//!   do - so what identifies the file itself is what tells the two apart. See
+//!   [`identity`] for what each platform can supply and how far it goes.
 //!
-//! What is left is a file rewritten *in place*, keeping its length, its inode and its
-//! modification time down to the nanosecond, inside the lifetime of one process. Nothing
-//! short of reading the file on every request sees that, and a deploy that restarts the
-//! server - a new container, a new binary, a `systemctl restart` - starts from an empty
-//! cache regardless.
+//! What is left is a file rewritten *in place*, keeping every one of those, inside the
+//! lifetime of one process. Nothing short of reading the file on every request sees that,
+//! and a deploy that restarts the server - a new container, a new binary, a
+//! `systemctl restart` - starts from an empty cache regardless.
 //!
-//! The cache is process-wide because its key is: one path, length, modification time and
-//! inode describe the same bytes whichever [`App`](crate::App) asked for them.
+//! The cache is process-wide because its key is: one path with the same length,
+//! modification time and identity describes the same bytes whichever
+//! [`App`](crate::App) asked for them.
 
 use crate::{
     error::Error,
@@ -68,7 +69,7 @@ const GENERATION_CAPACITY: usize = 1024;
 struct Version {
     len: u64,
     modified: SystemTime,
-    id: Option<u64>,
+    identity: Option<u64>,
 }
 
 /// A derived tag, and the version of the file it describes.
@@ -98,23 +99,41 @@ impl Version {
         Ok(Self {
             len: metadata.len(),
             modified: metadata.modified()?,
-            id: file_id(metadata),
+            identity: identity(metadata),
         })
     }
 }
 
-/// The identity the filesystem gives a file, where the platform exposes one.
+/// Something about the file itself, rather than about its contents, that a replacement is
+/// unlikely to carry over from what it replaced.
+///
+/// This can only ever make the check stricter: a value that moves when it need not costs one
+/// extra read, while a value that fails to move costs nothing that the length and the
+/// modification time were not already relied on for. That is why the weaker of the two
+/// answers below is still worth asking for.
+///
+/// * **Unix** - the inode, which a rename over an existing file always moves.
+/// * **Windows** - the creation time, because the inode equivalent (`file_index`) is behind
+///   the unstable `windows_by_handle` feature (rust-lang/rust#63010) and reading it directly
+///   would mean a dependency on the Windows API for one number. NTFS file system tunneling
+///   restores the creation time of a file replaced under the same name within about fifteen
+///   seconds, so this catches a replacement outside that window, on a volume where tunneling
+///   is off, and on ReFS - and falls back to the length and the modification time inside it.
 #[inline]
-fn file_id(metadata: &Metadata) -> Option<u64> {
+fn identity(metadata: &Metadata) -> Option<u64> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         Some(metadata.ino())
     }
 
-    // Windows reports one only through `windows_by_handle`, which is unstable, so there is
-    // nothing to read here yet. The length and the modification time still apply.
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        Some(metadata.creation_time())
+    }
+
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = metadata;
         None
@@ -382,11 +401,12 @@ mod tests {
                 ..current
             },
             Version {
-                id: current.id.map(|id| id + 1),
+                identity: current.identity.map(|identity| identity + 1),
                 ..current
             },
         ] {
-            // The inode is the one part a platform may not report, and `None` moves nowhere.
+            // The identity is the one part a platform may not report, and `None` moves
+            // nowhere.
             if moved == current {
                 continue;
             }
