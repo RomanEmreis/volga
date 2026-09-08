@@ -14,20 +14,17 @@
 //!   a tag may carry, because a sub-second `mtime` differs between replicas of one build and
 //!   the tag has to agree across them - but an entry in this cache is never compared against
 //!   anything outside this process, so it is free to use every digit the filesystem reports.
-//! * a **discriminator that moves when the file is replaced rather than written through**,
-//!   which is how a deploy that restores both of the above is still noticed. A deploy writes
-//!   a new file and renames it over the old - `rsync`, `tar` and every atomic deploy script
-//!   do - so what identifies the file itself is what tells the two apart. See
-//!   [`identity`] for what each platform can supply and how far it goes.
+//! * whatever the platform reports about the **file itself rather than its contents**, which
+//!   is what notices a deploy that restored both of the above. See [`discriminators`] for
+//!   what each platform can answer with and how far that goes - on Unix far enough that
+//!   nothing short of writing to the raw device gets past it, on Windows not quite.
 //!
-//! What is left is a file rewritten *in place*, keeping every one of those, inside the
-//! lifetime of one process. Nothing short of reading the file on every request sees that,
-//! and a deploy that restarts the server - a new container, a new binary, a
-//! `systemctl restart` - starts from an empty cache regardless.
+//! A deploy that restarts the server - a new container, a new binary, a `systemctl restart` -
+//! starts from an empty cache regardless of any of this.
 //!
-//! The cache is process-wide because its key is: one path with the same length,
-//! modification time and identity describes the same bytes whichever
-//! [`App`](crate::App) asked for them.
+//! The cache is process-wide because its key is: one path with the same length, modification
+//! time and discriminators describes the same bytes whichever [`App`](crate::App) asked for
+//! them.
 
 use crate::{
     error::Error,
@@ -69,8 +66,12 @@ const GENERATION_CAPACITY: usize = 1024;
 struct Version {
     len: u64,
     modified: SystemTime,
-    identity: Option<u64>,
+    extra: [u64; DISCRIMINATORS],
 }
+
+/// How many numbers [`discriminators`] reports. The platform that needs the most is Unix,
+/// with an inode and a two-part change time.
+const DISCRIMINATORS: usize = 3;
 
 /// A derived tag, and the version of the file it describes.
 struct Entry {
@@ -99,44 +100,56 @@ impl Version {
         Ok(Self {
             len: metadata.len(),
             modified: metadata.modified()?,
-            identity: identity(metadata),
+            extra: discriminators(metadata),
         })
     }
 }
 
-/// Something about the file itself, rather than about its contents, that a replacement is
-/// unlikely to carry over from what it replaced.
+/// Whatever the platform reports about the file itself rather than about its contents, as
+/// numbers to compare. Unused slots are zero, which simply compares equal every time.
 ///
-/// This can only ever make the check stricter: a value that moves when it need not costs one
-/// extra read, while a value that fails to move costs nothing that the length and the
-/// modification time were not already relied on for. That is why the weaker of the two
-/// answers below is still worth asking for.
+/// Adding a number here can only make the check stricter: one that moves when it need not
+/// costs a single extra read, while one that fails to move costs nothing that the length and
+/// the modification time were not already carrying. That is why the weaker answer below is
+/// still worth asking for.
 ///
-/// * **Unix** - the inode, which a rename over an existing file always moves.
-/// * **Windows** - the creation time, because the inode equivalent (`file_index`) is behind
-///   the unstable `windows_by_handle` feature (rust-lang/rust#63010) and reading it directly
-///   would mean a dependency on the Windows API for one number. NTFS file system tunneling
-///   restores the creation time of a file replaced under the same name within about fifteen
-///   seconds, so this catches a replacement outside that window, on a volume where tunneling
-///   is off, and on ReFS - and falls back to the length and the modification time inside it.
+/// * **Unix** - the inode, which a rename over an existing file always moves, and the inode
+///   change time, which is the strong one: no call sets it, it is stamped by the kernel on
+///   every write and on every metadata change, and restoring an `mtime` is itself a metadata
+///   change that stamps it. So a deploy that pins timestamps is seen whether it renames a new
+///   file into place or rewrites the old one through - short of writing to the raw device or
+///   moving the system clock backwards, there is no getting past it.
+/// * **Windows** - the creation time. The inode equivalent, `file_index`, is behind the
+///   unstable `windows_by_handle` feature (rust-lang/rust#63010), and the change time behind
+///   `windows_change_time`, so neither is available without taking a dependency on the
+///   Windows API for one number. NTFS file system tunneling caches the creation time of a
+///   name as it is removed and restores it to a file created under that name within about
+///   fifteen seconds, which is exactly the shape of a rename-into-place deploy - so on
+///   Windows this catches a replacement outside that window, on a volume where tunneling is
+///   switched off and on ReFS, and inside it the check falls back to the length and the
+///   modification time.
 #[inline]
-fn identity(metadata: &Metadata) -> Option<u64> {
+fn discriminators(metadata: &Metadata) -> [u64; DISCRIMINATORS] {
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        Some(metadata.ino())
+        [
+            metadata.ino(),
+            metadata.ctime() as u64,
+            metadata.ctime_nsec() as u64,
+        ]
     }
 
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
-        Some(metadata.creation_time())
+        [metadata.creation_time(), 0, 0]
     }
 
     #[cfg(not(any(unix, windows)))]
     {
         let _ = metadata;
-        None
+        [0; DISCRIMINATORS]
     }
 }
 
@@ -275,8 +288,9 @@ mod tests {
         Version::of(&std::fs::metadata(path).expect("metadata")).expect("version")
     }
 
-    /// Replaces a file the way a deploy does - a new file renamed over the old - restoring
-    /// the modification time of what it replaced, so that only the bytes and the inode move.
+    /// Replaces a file the way a deploy that pins timestamps does - a new file renamed over
+    /// the old, carrying the modification time of what it replaced - so that of everything a
+    /// `stat` reports, only what identifies the file itself moves.
     fn deploy(path: &Path, contents: &[u8], modified: SystemTime) -> Metadata {
         let staged = path.with_extension("staged");
         std::fs::write(&staged, contents).expect("write");
@@ -292,11 +306,34 @@ mod tests {
         std::fs::metadata(path).expect("metadata")
     }
 
-    /// The case reported in #233, with the timing pinned rather than raced: two shells of
-    /// the same byte length and the same modification time to the nanosecond.
+    /// The case reported in #233: two shells of the same byte length, where the tag derived
+    /// from the metadata would be the same for both.
     #[tokio::test]
-    async fn content_tags_differ_for_same_length_files_at_the_same_instant() {
+    async fn content_tags_differ_for_same_length_files() {
         let path = temp_path("collision.html");
+
+        let before_meta = write(&path, b"<script src=/a1b2c3.js>");
+        let before = of(&path, &before_meta, ETagSource::Content).await.unwrap();
+
+        let after_meta = write(&path, b"<script src=/d4e5f6.js>");
+        let after = of(&path, &after_meta, ETagSource::Content).await.unwrap();
+
+        assert_eq!(before_meta.len(), after_meta.len());
+        assert_ne!(before.as_ref(), after.as_ref());
+    }
+
+    /// The same case with the modification time pinned as well - a build that pins
+    /// timestamps, deployed by a copy that preserves them - so that of everything a `stat`
+    /// reports, only what identifies the file itself moves.
+    ///
+    /// Unix only, and the reason is the cache rather than the tag. Unix has the inode change
+    /// time, which the kernel stamps and no call sets, so it notices this deploy; Windows has
+    /// only the creation time, which NTFS file system tunneling restores to a file renamed
+    /// into place under the same name within about fifteen seconds. See [`discriminators`].
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn content_tags_differ_when_the_deploy_pins_the_modification_time() {
+        let path = temp_path("pinned.html");
 
         let before_meta = write(&path, b"<script src=/a1b2c3.js>");
         let before = of(&path, &before_meta, ETagSource::Content).await.unwrap();
@@ -308,7 +345,6 @@ mod tests {
         );
         let after = of(&path, &after_meta, ETagSource::Content).await.unwrap();
 
-        // Nothing a `stat` reports has moved except the inode.
         assert_eq!(before_meta.len(), after_meta.len());
         assert_eq!(
             before_meta.modified().unwrap(),
@@ -391,7 +427,7 @@ mod tests {
         let _ = of(&path, &metadata, ETagSource::Content).await.unwrap();
         let current = version_of(&path);
 
-        for moved in [
+        let mut moved_versions = vec![
             Version {
                 len: current.len + 1,
                 ..current
@@ -400,16 +436,17 @@ mod tests {
                 modified: current.modified + Duration::from_nanos(1),
                 ..current
             },
-            Version {
-                identity: current.identity.map(|identity| identity + 1),
-                ..current
-            },
-        ] {
-            // The identity is the one part a platform may not report, and `None` moves
-            // nowhere.
-            if moved == current {
-                continue;
-            }
+        ];
+
+        // One per slot, so a platform that reports fewer than the rest is still covered for
+        // the ones it does report.
+        for slot in 0..DISCRIMINATORS {
+            let mut extra = current.extra;
+            extra[slot] += 1;
+            moved_versions.push(Version { extra, ..current });
+        }
+
+        for moved in moved_versions {
             assert!(cached(&path, moved).is_none());
         }
     }
@@ -427,7 +464,7 @@ mod tests {
         // A single byte, in the tail a chunk boundary would be most likely to drop.
         let last = contents.len() - 1;
         contents[last] = b'b';
-        let second_meta = deploy(&path, &contents, first_meta.modified().unwrap());
+        let second_meta = write(&path, &contents);
         let second = of(&path, &second_meta, ETagSource::Content).await.unwrap();
 
         assert_eq!(first_meta.len(), second_meta.len());

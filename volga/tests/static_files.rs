@@ -784,11 +784,22 @@ async fn it_compresses_a_file_it_serves() {
     server.shutdown().await;
 }
 
-/// Replaces a file the way a deploy does - a new file renamed over the old - restoring the
-/// modification time of what it replaced, so that nothing a `stat` reports moves but the
-/// inode. A content-hashed build produces exactly this pair when it pins timestamps for
-/// reproducibility: the shell's `<script src="/assets/index-a1b2c3.js">` keeps its byte
-/// length across deploys, and `SOURCE_DATE_EPOCH` keeps its `mtime`.
+/// Rewrites a file with different bytes of the same length, which is what a content-hashed
+/// build does to the shell: `<script src="/assets/index-a1b2c3.js">` becomes
+/// `<script src="/assets/index-d4e5f6.js">`, and the hash has a fixed width - so the tag
+/// derived from the metadata is the same for both whenever the two writes land in one
+/// second, which is the case #233 reports.
+fn rewrite(path: &std::path::Path, contents: &str) {
+    let before = std::fs::metadata(path).unwrap().len() as usize;
+    std::fs::write(path, contents).unwrap();
+
+    assert_eq!(before, contents.len());
+}
+
+/// Rewrites it the way a deploy that pins timestamps does - a new file renamed over the old,
+/// carrying the modification time of what it replaced - so that of everything a `stat`
+/// reports, only what identifies the file itself moves. That is a reproducible build
+/// (`SOURCE_DATE_EPOCH`) shipped by a copy that preserves timestamps (`rsync -t`, `tar -p`).
 fn deploy(path: &std::path::Path, contents: &str) {
     let modified = std::fs::metadata(path).unwrap().modified().unwrap();
     let staged = path.with_extension("staged");
@@ -823,7 +834,7 @@ fn content_root(index: &str) -> (tempfile::TempDir, std::path::PathBuf) {
 /// The bug from #233, end to end: a client that holds the tag of the previous shell must be
 /// answered with the new one, not told its copy is current.
 #[tokio::test]
-async fn it_serves_the_new_shell_after_a_same_length_deploy_at_the_same_instant() {
+async fn it_serves_the_new_shell_after_a_same_length_rewrite() {
     let (_root, path) = content_root("<script src=/a1b2c3.js>");
     let index = path.join("index.html");
 
@@ -846,7 +857,7 @@ async fn it_serves_the_new_shell_after_a_same_length_deploy_at_the_same_instant(
             .unwrap();
         let etag = before.headers().get("etag").unwrap().clone();
 
-        deploy(&index, "<script src=/d4e5f6.js>");
+        rewrite(&index, "<script src=/d4e5f6.js>");
 
         let after = server
             .client()
@@ -863,7 +874,7 @@ async fn it_serves_the_new_shell_after_a_same_length_deploy_at_the_same_instant(
             "{target}"
         );
 
-        deploy(&index, "<script src=/a1b2c3.js>");
+        rewrite(&index, "<script src=/a1b2c3.js>");
     }
 
     server.shutdown().await;
@@ -872,7 +883,7 @@ async fn it_serves_the_new_shell_after_a_same_length_deploy_at_the_same_instant(
 /// The same deploy through the fallback handler, which reaches the shell by its own route
 /// rather than through the mount.
 #[tokio::test]
-async fn it_serves_the_new_fallback_after_a_same_length_deploy() {
+async fn it_serves_the_new_fallback_after_a_same_length_rewrite() {
     let (_root, path) = content_root("<script src=/a1b2c3.js>");
     let index = path.join("index.html");
 
@@ -897,11 +908,54 @@ async fn it_serves_the_new_fallback_after_a_same_length_deploy() {
         .unwrap();
     let etag = before.headers().get("etag").unwrap().clone();
 
-    deploy(&index, "<script src=/d4e5f6.js>");
+    rewrite(&index, "<script src=/d4e5f6.js>");
 
     let after = server
         .client()
         .get(server.url("/deep/unknown"))
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(after.status(), 200);
+    assert_eq!(after.text().await.unwrap(), "<script src=/d4e5f6.js>");
+
+    server.shutdown().await;
+}
+
+/// The same deploy with the modification time pinned as well, so that of everything a `stat`
+/// reports, only what identifies the file itself moves.
+///
+/// Unix only, and the reason is the cache rather than the tag. The tag is derived from the
+/// bytes on every platform; what differs is what lets the cache notice that the bytes moved
+/// without re-reading them. Unix has the inode change time, which the kernel stamps and no
+/// call sets. Windows has only the creation time, which NTFS file system tunneling restores
+/// to a file renamed into place under the same name within about fifteen seconds - which is
+/// the shape of this very deploy - so there it falls back to the length and the modification
+/// time, both of which this deploy holds still on purpose.
+#[cfg(unix)]
+#[tokio::test]
+async fn it_serves_the_new_shell_after_a_deploy_that_pins_the_modification_time() {
+    let (_root, path) = content_root("<script src=/a1b2c3.js>");
+    let index = path.join("index.html");
+
+    let server = TestServer::builder()
+        .configure(move |app| app.set_host_env(HostEnv::new(&path)))
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let before = server.client().get(server.url("/")).send().await.unwrap();
+    let etag = before.headers().get("etag").unwrap().clone();
+
+    deploy(&index, "<script src=/d4e5f6.js>");
+
+    let after = server
+        .client()
+        .get(server.url("/"))
         .header("if-none-match", etag)
         .send()
         .await
@@ -1020,7 +1074,7 @@ async fn it_derives_asset_tags_from_content_when_configured() {
         .unwrap();
     let etag = before.headers().get("etag").unwrap().clone();
 
-    deploy(&asset, "h1{color:tan}");
+    rewrite(&asset, "h1{color:tan}");
 
     let after = server
         .client()
