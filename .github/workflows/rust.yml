@@ -16,6 +16,27 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      # Windows cannot hold every name a POSIX filesystem can, and `git checkout` there
+      # refuses the whole tree over one of them - so a single bad name makes the repository
+      # unclonable on Windows, and says so only on Windows, as a bare "invalid path" buried
+      # in the checkout step. A fuzz corpus seed named `nul` did exactly that. Checked here
+      # because it costs seconds on Linux and answers in the words of the actual problem.
+      - name: Check that every path can be checked out on Windows
+        run: |
+          bad=$(
+            {
+              git ls-files | grep -Ei '(^|/)(con|prn|aux|nul|com[0-9]|lpt[0-9]|clock\$)(\.[^/]*)?$' || true
+              git ls-files | grep -E '[<>:"|?*]' || true
+              git ls-files | grep -E '[ .](/|$)' || true
+              git ls-files | tr 'A-Z' 'a-z' | sort | uniq -d || true
+            } | sort -u
+          )
+          if [ -n "$bad" ]; then
+            echo "::error::These paths cannot be checked out on Windows - a reserved device name, a character the filesystem forbids, a segment ending in a dot or a space, or two paths differing only in case:"
+            echo "$bad"
+            exit 1
+          fi
         
   clippy_check:
     runs-on: ubuntu-latest
