@@ -9,8 +9,8 @@ help: the trait `volga::http::endpoints::args::FromPayload` is not implemented f
   |
 3 | struct NotAnExtractor;
   | ^^^^^^^^^^^^^^^^^^^^^
-  = note: a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)
-  = note: `Option<T>`, `Result<T, E>`, `Vec<T>` and `Valid<E>` wrap any of them
+  = note: a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)
+  = note: `Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`
   = note: `FromPayload` is internal to volga: a type of your own travels inside an extractor rather than becoming one - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `Path<T>` takes a `FromPathArgs`, `Header<T>` a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
   = help: the following other types implement trait `volga::http::endpoints::args::FromPayload`:
             Authenticated<T>
