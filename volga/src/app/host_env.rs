@@ -1,6 +1,9 @@
 //! Application Host Environment configuration
 
-use crate::{App, headers::CacheControl};
+use crate::{
+    App,
+    headers::{CacheControl, ETagSource},
+};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
@@ -40,6 +43,17 @@ pub struct HostEnv {
     ///
     /// Default: `no-cache`
     shell_cache_control: CacheControl,
+
+    /// Where the `ETag` of a file addressed by a content-hashed name comes from
+    ///
+    /// Default: [`ETagSource::Metadata`]
+    asset_etag: ETagSource,
+
+    /// Where the `ETag` of a file addressed by a stable name - the index file and the
+    /// fallback file - comes from
+    ///
+    /// Default: [`ETagSource::Content`]
+    shell_etag: ETagSource,
 }
 
 impl Default for HostEnv {
@@ -62,6 +76,8 @@ impl HostEnv {
             fallback_path: None,
             asset_cache_control: CacheControl::ASSET,
             shell_cache_control: CacheControl::SHELL,
+            asset_etag: ETagSource::Metadata,
+            shell_etag: ETagSource::Content,
             content_root,
             index_path,
         }
@@ -177,6 +193,55 @@ impl HostEnv {
         self
     }
 
+    /// Configures where the `ETag` of the static files addressed by a content-hashed name
+    /// comes from, which is every file but the index and the fallback one.
+    ///
+    /// Default: [`ETagSource::Metadata`] - such a file is served `immutable`, so a client
+    /// never revalidates it and the tag is never consulted. Deriving it from the file's
+    /// bytes would read every asset once per deploy to answer a question nothing asks.
+    ///
+    /// Narrow [`CacheControl::ASSET`] with [`with_asset_cache_control`] and these files
+    /// start revalidating, at which point [`ETagSource::Content`] is what makes the answer
+    /// trustworthy - at the cost of one read per file per version.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use volga::{app::HostEnv, headers::ETagSource};
+    ///
+    /// // Assets that revalidate rather than being taken on trust, so the tag has to hold
+    /// let env = HostEnv::new("static")
+    ///     .with_asset_cache_control(|cc| cc.with_max_age(60))
+    ///     .with_asset_etag(ETagSource::Content);
+    /// ```
+    ///
+    /// [`with_asset_cache_control`]: Self::with_asset_cache_control
+    pub fn with_asset_etag(mut self, source: ETagSource) -> Self {
+        self.asset_etag = source;
+        self
+    }
+
+    /// Configures where the `ETag` of the static files addressed by a stable name - the
+    /// index file and the fallback file - comes from.
+    ///
+    /// Default: [`ETagSource::Content`] - the shell is served `no-cache`, so it is
+    /// revalidated on every navigation and its tag is what decides between a `304` and a
+    /// full body. It is also the file a content-hashed build rewrites without moving its
+    /// byte length, which is exactly where [`ETagSource::Metadata`] cannot tell two
+    /// versions apart. The shell is small, so the read this costs is one per deploy.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use volga::{app::HostEnv, headers::ETagSource};
+    ///
+    /// // Back to the cheaper tag, for a deployment that never rewrites the shell in place
+    /// let env = HostEnv::new("static")
+    ///     .with_shell_etag(ETagSource::Metadata);
+    /// ```
+    pub fn with_shell_etag(mut self, source: ETagSource) -> Self {
+        self.shell_etag = source;
+        self
+    }
+
     /// Enables showing a list of files when root "/static" is requested
     ///
     /// Default: `false`
@@ -230,6 +295,18 @@ impl HostEnv {
     #[inline]
     pub fn shell_cache_control(&self) -> CacheControl {
         self.shell_cache_control
+    }
+
+    /// Returns where the `ETag` of the files addressed by a content-hashed name comes from
+    #[inline]
+    pub fn asset_etag(&self) -> ETagSource {
+        self.asset_etag
+    }
+
+    /// Returns where the `ETag` of the index and the fallback files comes from
+    #[inline]
+    pub fn shell_etag(&self) -> ETagSource {
+        self.shell_etag
     }
 
     /// Returns `true` if `path` is addressed by a stable name - the index file
@@ -311,6 +388,27 @@ mod tests {
             "max-age=86400, public, immutable"
         );
         assert_eq!(env.shell_cache_control().to_string(), "no-cache");
+    }
+
+    /// The `ETag` follows the same split as the `Cache-Control`, and for the same reason: a
+    /// file nothing revalidates is not worth a read per version, and a file revalidated on
+    /// every navigation cannot be validated by two numbers a build holds still.
+    #[test]
+    fn it_defaults_to_metadata_tagged_assets_and_a_content_tagged_shell() {
+        let env = HostEnv::new("/root");
+
+        assert_eq!(env.asset_etag(), ETagSource::Metadata);
+        assert_eq!(env.shell_etag(), ETagSource::Content);
+    }
+
+    #[test]
+    fn it_configures_the_etag_source_of_each_role() {
+        let env = HostEnv::new("/root")
+            .with_asset_etag(ETagSource::Content)
+            .with_shell_etag(ETagSource::Metadata);
+
+        assert_eq!(env.asset_etag(), ETagSource::Content);
+        assert_eq!(env.shell_etag(), ETagSource::Metadata);
     }
 
     #[test]

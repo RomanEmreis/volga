@@ -423,6 +423,26 @@ impl TryFrom<&Metadata> for ResponseCaching {
 }
 
 impl ResponseCaching {
+    /// Assembles a policy from parts that were derived separately.
+    ///
+    /// [`TryFrom<&Metadata>`] derives all three from the one `stat`, which is every part of
+    /// this that the metadata can answer. An `ETag` taken from the file's bytes cannot be,
+    /// so the static file server derives that one itself and puts the policy together here
+    /// rather than building a metadata tag it would only throw away.
+    #[cfg(feature = "static-files")]
+    #[inline]
+    pub(crate) fn from_parts(
+        etag: ETag,
+        last_modified: SystemTime,
+        cache_control: CacheControl,
+    ) -> Self {
+        Self {
+            etag,
+            last_modified,
+            cache_control,
+        }
+    }
+
     /// Replaces the
     /// [`Cache-Control`](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control)
     /// policy, leaving the `ETag` and the `Last-Modified` as they are.

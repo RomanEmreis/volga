@@ -32,6 +32,9 @@ pub use self::{
     quality::Quality,
 };
 
+#[cfg(feature = "static-files")]
+pub use self::etag::ETagSource;
+
 #[cfg(feature = "macros")]
 pub use volga_macros::http_header;
 
