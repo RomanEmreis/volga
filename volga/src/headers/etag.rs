@@ -13,6 +13,49 @@ use std::fs::Metadata;
 #[cfg(feature = "static-files")]
 use std::time::UNIX_EPOCH;
 
+/// Where the `ETag` of a static file is derived from.
+///
+/// The two sources trade a read against the tag's precision, and the static file server
+/// chooses between them by the role the file plays rather than once for the whole tree:
+/// see [`HostEnv::with_asset_etag`] and [`HostEnv::with_shell_etag`].
+///
+/// Either way the tag stays **weak**. RFC 9110 Section 8.8.1 reserves strong validation for
+/// octet-equality of the representation that is actually sent, and a file served through
+/// this crate's compression middleware is sent in a content coding the static file server
+/// knew nothing about when it derived the tag.
+///
+/// [`HostEnv::with_asset_etag`]: crate::app::HostEnv::with_asset_etag
+/// [`HostEnv::with_shell_etag`]: crate::app::HostEnv::with_shell_etag
+#[cfg(feature = "static-files")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ETagSource {
+    /// The file's length and the whole-second part of its modification time.
+    ///
+    /// This costs no read at all - the `stat` the server has already made answers it - and
+    /// it is what nginx, Apache and ASP.NET Core derive their tag from as well.
+    ///
+    /// What it buys in cheapness it gives up in precision: two files carry the same tag
+    /// whenever they have the same byte length and their `mtime` falls in the same second.
+    /// That is not an exotic pair for a shell rewritten by a content-hashed build, whose
+    /// `<script src="/assets/index-a1b2c3.js">` keeps its byte length across deploys - so
+    /// this is the source for a file that is served `immutable` and never revalidated, and
+    /// [`Content`](Self::Content) is the source for a file that is.
+    Metadata,
+
+    /// The file's bytes.
+    ///
+    /// Identical wherever one build is deployed and different whenever a single byte is, so
+    /// it neither collides on two versions nor disagrees between replicas of one deployment
+    /// the way a tag carrying a sub-second `mtime` would.
+    ///
+    /// It costs one sequential read, which is then remembered against the file's length and
+    /// modification time - so a version is read once rather than once per request. Two
+    /// requests that race on a cold entry both read it; they derive the same tag either way,
+    /// so the race costs the read twice and nothing else.
+    Content,
+}
+
 /// Represents Entity Tag (ETag) value
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ETag {

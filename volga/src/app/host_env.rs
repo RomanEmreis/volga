@@ -1,11 +1,60 @@
 //! Application Host Environment configuration
 
-use crate::{App, headers::CacheControl};
+use crate::{
+    App,
+    headers::{CacheControl, ETagSource},
+};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 const DEFAULT_INDEX_FILE: &str = "index.html";
 const DEFAULT_CONTENT_ROOT: &str = "/static";
+
+/// What a static file of one role is served with.
+///
+/// The static file server answers two kinds of file - an asset addressed by a
+/// content-hashed name, and the shell addressed by a stable one - and every header saying
+/// how a response may be cached is chosen by that kind rather than per file. Holding them
+/// together makes the role one decision where a file is served rather than one decision per
+/// header, and keeps a third such header from becoming a third pair of fields on [`HostEnv`].
+///
+/// This is the internal shape. The two roles are configured through the flat builders on
+/// [`HostEnv`] - [`with_asset_cache_control`], [`with_shell_etag`] and their siblings - each
+/// of which narrows a single directive without restating the rest.
+///
+/// [`with_asset_cache_control`]: HostEnv::with_asset_cache_control
+/// [`with_shell_etag`]: HostEnv::with_shell_etag
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub(crate) struct RolePolicy {
+    cache_control: CacheControl,
+    etag: ETagSource,
+}
+
+impl RolePolicy {
+    /// What a file addressed by a content-hashed name is served with, before configuration.
+    const ASSET: Self = Self {
+        cache_control: CacheControl::ASSET,
+        etag: ETagSource::Metadata,
+    };
+
+    /// What the index and the fallback file are served with, before configuration.
+    const SHELL: Self = Self {
+        cache_control: CacheControl::SHELL,
+        etag: ETagSource::Content,
+    };
+
+    /// Returns the `Cache-Control` policy of this role
+    #[inline]
+    pub(crate) fn cache_control(&self) -> CacheControl {
+        self.cache_control
+    }
+
+    /// Returns where the `ETag` of this role is derived from
+    #[inline]
+    pub(crate) fn etag(&self) -> ETagSource {
+        self.etag
+    }
+}
 
 /// Describes a Web Server's Hosting Environment
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -30,16 +79,16 @@ pub struct HostEnv {
     /// Default: `false`
     show_directory: bool,
 
-    /// `Cache-Control` for the files addressed by a content-hashed name
+    /// What a file addressed by a content-hashed name is served with
     ///
-    /// Default: `max-age=86400, public, immutable`
-    asset_cache_control: CacheControl,
+    /// Default: `max-age=86400, public, immutable`, tagged from the file's metadata
+    asset: RolePolicy,
 
-    /// `Cache-Control` for the files addressed by a stable name - the index file
-    /// and the fallback file
+    /// What the files addressed by a stable name - the index file and the fallback file -
+    /// are served with
     ///
-    /// Default: `no-cache`
-    shell_cache_control: CacheControl,
+    /// Default: `no-cache`, tagged from the file's contents
+    shell: RolePolicy,
 }
 
 impl Default for HostEnv {
@@ -60,8 +109,8 @@ impl HostEnv {
         Self {
             show_directory: false,
             fallback_path: None,
-            asset_cache_control: CacheControl::ASSET,
-            shell_cache_control: CacheControl::SHELL,
+            asset: RolePolicy::ASSET,
+            shell: RolePolicy::SHELL,
             content_root,
             index_path,
         }
@@ -149,7 +198,7 @@ impl HostEnv {
     where
         F: FnOnce(CacheControl) -> CacheControl,
     {
-        self.asset_cache_control = config(self.asset_cache_control);
+        self.asset.cache_control = config(self.asset.cache_control);
         self
     }
 
@@ -173,7 +222,56 @@ impl HostEnv {
     where
         F: FnOnce(CacheControl) -> CacheControl,
     {
-        self.shell_cache_control = config(self.shell_cache_control);
+        self.shell.cache_control = config(self.shell.cache_control);
+        self
+    }
+
+    /// Configures where the `ETag` of the static files addressed by a content-hashed name
+    /// comes from, which is every file but the index and the fallback one.
+    ///
+    /// Default: [`ETagSource::Metadata`] - such a file is served `immutable`, so a client
+    /// never revalidates it and the tag is never consulted. Deriving it from the file's
+    /// bytes would read every asset once per deploy to answer a question nothing asks.
+    ///
+    /// Narrow [`CacheControl::ASSET`] with [`with_asset_cache_control`] and these files
+    /// start revalidating, at which point [`ETagSource::Content`] is what makes the answer
+    /// trustworthy - at the cost of one read per file per version.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use volga::{app::HostEnv, headers::ETagSource};
+    ///
+    /// // Assets that revalidate rather than being taken on trust, so the tag has to hold
+    /// let env = HostEnv::new("static")
+    ///     .with_asset_cache_control(|cc| cc.with_max_age(60))
+    ///     .with_asset_etag(ETagSource::Content);
+    /// ```
+    ///
+    /// [`with_asset_cache_control`]: Self::with_asset_cache_control
+    pub fn with_asset_etag(mut self, source: ETagSource) -> Self {
+        self.asset.etag = source;
+        self
+    }
+
+    /// Configures where the `ETag` of the static files addressed by a stable name - the
+    /// index file and the fallback file - comes from.
+    ///
+    /// Default: [`ETagSource::Content`] - the shell is served `no-cache`, so it is
+    /// revalidated on every navigation and its tag is what decides between a `304` and a
+    /// full body. It is also the file a content-hashed build rewrites without moving its
+    /// byte length, which is exactly where [`ETagSource::Metadata`] cannot tell two
+    /// versions apart. The shell is small, so the read this costs is one per deploy.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use volga::{app::HostEnv, headers::ETagSource};
+    ///
+    /// // Back to the cheaper tag, for a deployment that never rewrites the shell in place
+    /// let env = HostEnv::new("static")
+    ///     .with_shell_etag(ETagSource::Metadata);
+    /// ```
+    pub fn with_shell_etag(mut self, source: ETagSource) -> Self {
+        self.shell.etag = source;
         self
     }
 
@@ -223,19 +321,48 @@ impl HostEnv {
     /// Returns the `Cache-Control` policy of the files addressed by a content-hashed name
     #[inline]
     pub fn asset_cache_control(&self) -> CacheControl {
-        self.asset_cache_control
+        self.asset.cache_control
     }
 
     /// Returns the `Cache-Control` policy of the index and the fallback files
     #[inline]
     pub fn shell_cache_control(&self) -> CacheControl {
-        self.shell_cache_control
+        self.shell.cache_control
+    }
+
+    /// Returns where the `ETag` of the files addressed by a content-hashed name comes from
+    #[inline]
+    pub fn asset_etag(&self) -> ETagSource {
+        self.asset.etag
+    }
+
+    /// Returns where the `ETag` of the index and the fallback files comes from
+    #[inline]
+    pub fn shell_etag(&self) -> ETagSource {
+        self.shell.etag
+    }
+
+    /// Returns what the index and the fallback file are served with.
+    #[inline]
+    pub(crate) fn shell_policy(&self) -> RolePolicy {
+        self.shell
+    }
+
+    /// Returns what the file at `path` is served with, by the role the name it is addressed
+    /// by gives it.
+    #[inline]
+    pub(crate) fn policy_for(&self, path: &Path) -> RolePolicy {
+        if self.is_shell_path(path) {
+            self.shell
+        } else {
+            self.asset
+        }
     }
 
     /// Returns `true` if `path` is addressed by a stable name - the index file
     /// or the fallback file - and so must not be served as immutable.
     #[inline]
-    pub(crate) fn is_shell_path(&self, path: &Path) -> bool {
+    fn is_shell_path(&self, path: &Path) -> bool {
         path == self.index_path || self.fallback_path.as_deref() == Some(path)
     }
 }
@@ -311,6 +438,27 @@ mod tests {
             "max-age=86400, public, immutable"
         );
         assert_eq!(env.shell_cache_control().to_string(), "no-cache");
+    }
+
+    /// The `ETag` follows the same split as the `Cache-Control`, and for the same reason: a
+    /// file nothing revalidates is not worth a read per version, and a file revalidated on
+    /// every navigation cannot be validated by two numbers a build holds still.
+    #[test]
+    fn it_defaults_to_metadata_tagged_assets_and_a_content_tagged_shell() {
+        let env = HostEnv::new("/root");
+
+        assert_eq!(env.asset_etag(), ETagSource::Metadata);
+        assert_eq!(env.shell_etag(), ETagSource::Content);
+    }
+
+    #[test]
+    fn it_configures_the_etag_source_of_each_role() {
+        let env = HostEnv::new("/root")
+            .with_asset_etag(ETagSource::Content)
+            .with_shell_etag(ETagSource::Metadata);
+
+        assert_eq!(env.asset_etag(), ETagSource::Content);
+        assert_eq!(env.shell_etag(), ETagSource::Metadata);
     }
 
     #[test]

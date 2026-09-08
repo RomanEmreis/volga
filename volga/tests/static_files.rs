@@ -3,7 +3,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use volga::app::HostEnv;
-use volga::headers::{Header, HttpHeaders, headers};
+use volga::headers::{ETagSource, Header, HttpHeaders, headers};
 use volga::{HttpResponse, ok, test::TestServer};
 
 headers! {
@@ -780,6 +780,381 @@ async fn it_compresses_a_file_it_serves() {
         response.headers().get("cache-control").unwrap(),
         "max-age=86400, public, immutable"
     );
+
+    server.shutdown().await;
+}
+
+/// Rewrites a file with different bytes of the same length, which is what a content-hashed
+/// build does to the shell: `<script src="/assets/index-a1b2c3.js">` becomes
+/// `<script src="/assets/index-d4e5f6.js">`, and the hash has a fixed width - so the tag
+/// derived from the metadata is the same for both whenever the two writes land in one
+/// second, which is the case #233 reports.
+fn rewrite(path: &std::path::Path, contents: &str) {
+    let before = std::fs::metadata(path).unwrap().len() as usize;
+    std::fs::write(path, contents).unwrap();
+
+    assert_eq!(before, contents.len());
+}
+
+/// Rewrites it the way a deploy that pins timestamps does - a new file renamed over the old,
+/// carrying the modification time of what it replaced - so that of everything a `stat`
+/// reports, only what identifies the file itself moves. That is a reproducible build
+/// (`SOURCE_DATE_EPOCH`) shipped by a copy that preserves timestamps (`rsync -t`, `tar -p`).
+fn deploy(path: &std::path::Path, contents: &str) {
+    let modified = std::fs::metadata(path).unwrap().modified().unwrap();
+    let staged = path.with_extension("staged");
+
+    std::fs::write(&staged, contents).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&staged)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    std::fs::rename(&staged, path).unwrap();
+
+    let after = std::fs::metadata(path).unwrap();
+    assert_eq!(after.len() as usize, contents.len());
+    assert_eq!(after.modified().unwrap(), modified);
+}
+
+/// A content root of its own, so that a test may rewrite what it serves without reaching
+/// into the fixtures every other test reads.
+fn content_root(index: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().to_path_buf();
+
+    std::fs::create_dir(path.join("assets")).unwrap();
+    std::fs::write(path.join("index.html"), index).unwrap();
+    std::fs::write(path.join("assets/app.css"), "h1{color:red}").unwrap();
+
+    (dir, path)
+}
+
+/// The bug from #233, end to end: a client that holds the tag of the previous shell must be
+/// answered with the new one, not told its copy is current.
+#[tokio::test]
+async fn it_serves_the_new_shell_after_a_same_length_rewrite() {
+    let (_root, path) = content_root("<script src=/a1b2c3.js>");
+    let index = path.join("index.html");
+
+    let server = TestServer::builder()
+        .configure(move |app| app.set_host_env(HostEnv::new(&path)))
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    // Both the mount point and the index by name are addressed by a stable name, so both
+    // are validated by the shell's tag.
+    for target in ["/", "/index.html"] {
+        let before = server
+            .client()
+            .get(server.url(target))
+            .send()
+            .await
+            .unwrap();
+        let etag = before.headers().get("etag").unwrap().clone();
+
+        rewrite(&index, "<script src=/d4e5f6.js>");
+
+        let after = server
+            .client()
+            .get(server.url(target))
+            .header("if-none-match", etag)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(after.status(), 200, "{target}");
+        assert_eq!(
+            after.text().await.unwrap(),
+            "<script src=/d4e5f6.js>",
+            "{target}"
+        );
+
+        rewrite(&index, "<script src=/a1b2c3.js>");
+    }
+
+    server.shutdown().await;
+}
+
+/// The same deploy through the fallback handler, which reaches the shell by its own route
+/// rather than through the mount.
+#[tokio::test]
+async fn it_serves_the_new_fallback_after_a_same_length_rewrite() {
+    let (_root, path) = content_root("<script src=/a1b2c3.js>");
+    let index = path.join("index.html");
+
+    let server = TestServer::builder()
+        .configure(move |app| {
+            app.with_host_env(|env| {
+                env.with_content_root(&path)
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let before = server
+        .client()
+        .get(server.url("/deep/unknown"))
+        .send()
+        .await
+        .unwrap();
+    let etag = before.headers().get("etag").unwrap().clone();
+
+    rewrite(&index, "<script src=/d4e5f6.js>");
+
+    let after = server
+        .client()
+        .get(server.url("/deep/unknown"))
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(after.status(), 200);
+    assert_eq!(after.text().await.unwrap(), "<script src=/d4e5f6.js>");
+
+    server.shutdown().await;
+}
+
+/// The same deploy with the modification time pinned as well, so that of everything a `stat`
+/// reports, only what identifies the file itself moves.
+///
+/// Unix only, and the reason is the cache rather than the tag. The tag is derived from the
+/// bytes on every platform; what differs is what lets the cache notice that the bytes moved
+/// without re-reading them. Unix has the inode change time, which the kernel stamps and no
+/// call sets. Windows has only the creation time, which NTFS file system tunneling restores
+/// to a file renamed into place under the same name within about fifteen seconds - which is
+/// the shape of this very deploy - so there it falls back to the length and the modification
+/// time, both of which this deploy holds still on purpose.
+#[cfg(unix)]
+#[tokio::test]
+async fn it_serves_the_new_shell_after_a_deploy_that_pins_the_modification_time() {
+    let (_root, path) = content_root("<script src=/a1b2c3.js>");
+    let index = path.join("index.html");
+
+    let server = TestServer::builder()
+        .configure(move |app| app.set_host_env(HostEnv::new(&path)))
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let before = server.client().get(server.url("/")).send().await.unwrap();
+    let etag = before.headers().get("etag").unwrap().clone();
+
+    deploy(&index, "<script src=/d4e5f6.js>");
+
+    let after = server
+        .client()
+        .get(server.url("/"))
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(after.status(), 200);
+    assert_eq!(after.text().await.unwrap(), "<script src=/d4e5f6.js>");
+
+    server.shutdown().await;
+}
+
+/// Two replicas of one build carry the same shell tag, so revalidation keeps working behind
+/// a load balancer. This is what a tag carrying a sub-second `mtime` would give up.
+#[tokio::test]
+async fn it_agrees_on_the_shell_tag_across_replicas() {
+    let (_here, here) = content_root("<script src=/a1b2c3.js>");
+    // Written a moment later, the way a second replica receives the same build.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let (_there, there) = content_root("<script src=/a1b2c3.js>");
+
+    assert_ne!(
+        std::fs::metadata(here.join("index.html"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        std::fs::metadata(there.join("index.html"))
+            .unwrap()
+            .modified()
+            .unwrap()
+    );
+
+    let mut tags = Vec::new();
+    for root in [here, there] {
+        let server = TestServer::builder()
+            .configure(move |app| app.set_host_env(HostEnv::new(&root)))
+            .setup(|app| {
+                app.use_static_files();
+            })
+            .build()
+            .await;
+
+        let response = server.client().get(server.url("/")).send().await.unwrap();
+        tags.push(response.headers().get("etag").unwrap().clone());
+
+        server.shutdown().await;
+    }
+
+    assert_eq!(tags[0], tags[1]);
+}
+
+/// An asset stays on the cheap tag by default. It is served `immutable`, so a client never
+/// revalidates it and never asks - which is why it is not worth a read per version, and why
+/// the `304` here is the documented consequence of that trade rather than a hole.
+#[tokio::test]
+async fn it_keeps_assets_on_the_metadata_tag_by_default() {
+    let (_root, path) = content_root("<script src=/a1b2c3.js>");
+    let asset = path.join("assets/app.css");
+
+    let server = TestServer::builder()
+        .configure(move |app| app.set_host_env(HostEnv::new(&path)))
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let before = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+    let etag = before.headers().get("etag").unwrap().clone();
+
+    deploy(&asset, "h1{color:tan}");
+
+    let after = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(after.status(), 304);
+
+    server.shutdown().await;
+}
+
+/// ...and picks up the content tag once the assets are configured to revalidate, where the
+/// same deploy has to be noticed.
+#[tokio::test]
+async fn it_derives_asset_tags_from_content_when_configured() {
+    let (_root, path) = content_root("<script src=/a1b2c3.js>");
+    let asset = path.join("assets/app.css");
+
+    let server = TestServer::builder()
+        .configure(move |app| {
+            app.with_host_env(|env| {
+                env.with_content_root(&path)
+                    .with_asset_cache_control(|cc| cc.with_no_cache())
+                    .with_asset_etag(ETagSource::Content)
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let before = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .send()
+        .await
+        .unwrap();
+    let etag = before.headers().get("etag").unwrap().clone();
+
+    rewrite(&asset, "h1{color:tan}");
+
+    let after = server
+        .client()
+        .get(server.url("/assets/app.css"))
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(after.status(), 200);
+    assert_eq!(after.text().await.unwrap(), "h1{color:tan}");
+
+    server.shutdown().await;
+}
+
+/// The shell can be put back on the cheap tag, for a deployment that never rewrites it in
+/// place and would rather not pay the read.
+#[tokio::test]
+async fn it_keeps_the_shell_on_the_metadata_tag_when_configured() {
+    let (_root, path) = content_root("<script src=/a1b2c3.js>");
+    let index = path.join("index.html");
+
+    let server = TestServer::builder()
+        .configure(move |app| {
+            app.with_host_env(|env| {
+                env.with_content_root(&path)
+                    .with_shell_etag(ETagSource::Metadata)
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    let before = server.client().get(server.url("/")).send().await.unwrap();
+    let etag = before.headers().get("etag").unwrap().clone();
+
+    deploy(&index, "<script src=/d4e5f6.js>");
+
+    let after = server
+        .client()
+        .get(server.url("/"))
+        .header("if-none-match", etag)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(after.status(), 304);
+
+    server.shutdown().await;
+}
+
+/// Every tag the static file server emits stays weak, whichever source it came from - the
+/// compression middleware may re-encode the body after it is set, so nothing here can
+/// promise octet-equality of what is actually sent.
+#[tokio::test]
+async fn it_emits_weak_tags_from_either_source() {
+    let (_root, path) = content_root("<script src=/a1b2c3.js>");
+
+    let server = TestServer::builder()
+        .configure(move |app| app.set_host_env(HostEnv::new(&path)))
+        .setup(|app| {
+            app.use_static_files();
+        })
+        .build()
+        .await;
+
+    // The shell derives its tag from the content, the asset from the metadata.
+    for target in ["/", "/assets/app.css"] {
+        let response = server
+            .client()
+            .get(server.url(target))
+            .send()
+            .await
+            .unwrap();
+        let etag = response.headers().get("etag").unwrap().to_str().unwrap();
+
+        assert!(etag.starts_with("W/\""), "{target}: {etag}");
+    }
 
     server.shutdown().await;
 }

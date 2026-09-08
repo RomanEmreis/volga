@@ -16,6 +16,27 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check formatting
         run: cargo fmt --all -- --check
+
+      # Windows cannot hold every name a POSIX filesystem can, and `git checkout` there
+      # refuses the whole tree over one of them - so a single bad name makes the repository
+      # unclonable on Windows, and says so only on Windows, as a bare "invalid path" buried
+      # in the checkout step. A fuzz corpus seed named `nul` did exactly that. Checked here
+      # because it costs seconds on Linux and answers in the words of the actual problem.
+      - name: Check that every path can be checked out on Windows
+        run: |
+          bad=$(
+            {
+              git ls-files | grep -Ei '(^|/)(con|prn|aux|nul|com[0-9]|lpt[0-9]|clock\$)(\.[^/]*)?$' || true
+              git ls-files | grep -E '[<>:"|?*]' || true
+              git ls-files | grep -E '[ .](/|$)' || true
+              git ls-files | tr 'A-Z' 'a-z' | sort | uniq -d || true
+            } | sort -u
+          )
+          if [ -n "$bad" ]; then
+            echo "::error::These paths cannot be checked out on Windows - a reserved device name, a character the filesystem forbids, a segment ending in a dot or a space, or two paths differing only in case:"
+            echo "$bad"
+            exit 1
+          fi
         
   clippy_check:
     runs-on: ubuntu-latest
@@ -122,6 +143,45 @@ jobs:
       # its HTTP/2 path - so without this combination the HTTP/1 upgrade is never
       # exercised anywhere in the matrix.
       run: cargo test --locked --features "http1,ws,test"
+
+  cross_platform:
+    needs: build
+
+    strategy:
+      # A Windows failure and a macOS failure are different findings, and the first one to
+      # go red should not hide the other.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    # Every other job runs on Linux, so the platform-specific arms are otherwise never
+    # compiled - never mind linted or run: the shutdown signal set in `app.rs`
+    # (`ctrl_break` / `ctrl_close` / `ctrl_shutdown` against `SIGTERM`), the default bind
+    # address in `connection.rs`, the default certificate names in `volga-dev-cert`, and the
+    # discriminators the static file `ETag` cache validates an entry against. Some of those
+    # carry `#[cfg(target_os = "windows")]` tests that have never been run at all. Clippy
+    # runs here for the same reason the tests do: a lint inside an arm Linux does not compile
+    # is a lint nothing in CI has ever seen.
+    env:
+      # These cases assert the text this crate's own derive emits, which does not vary by
+      # platform, and each one drives a nested `cargo build`. There is nothing in them for
+      # another OS to find, and minutes to spend not finding it.
+      SKIP_UI_TESTS: 1
+
+      # `aws-lc-sys` assembles with NASM on Windows and the runner image is not guaranteed
+      # to carry one. Its prebuilt objects need no assembler, and so no extra action in this
+      # workflow; where NASM is present it is used instead and this changes nothing. Ignored
+      # on macOS.
+      AWS_LC_SYS_PREBUILT_NASM: 1
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - name: Run tests - Full
+        run: cargo test --locked --all-features
 
   coverage:
     runs-on: ubuntu-latest
