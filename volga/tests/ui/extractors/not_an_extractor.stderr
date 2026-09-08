@@ -11,7 +11,7 @@ help: the trait `volga::http::endpoints::args::FromPayload` is not implemented f
   | ^^^^^^^^^^^^^^^^^^^^^
   = note: a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)
   = note: `Option<T>`, `Result<T, E>`, `Vec<T>` and `Valid<E>` wrap any of them
-  = note: `FromPayload` is internal to volga - implement `FromRequest` to extract a type of your own
+  = note: `FromPayload` is internal to volga: a type of your own travels inside an extractor rather than becoming one - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `Path<T>` takes a `FromPathArgs`, `Header<T>` a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
   = help: the following other types implement trait `volga::http::endpoints::args::FromPayload`:
             Authenticated<T>
             Basic
