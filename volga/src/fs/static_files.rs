@@ -238,10 +238,20 @@ impl StaticMount {
 
 /// What a request that a mount answers is answered with.
 enum Serving {
-    /// A file, and the caching policy the name it is addressed by earns it.
+    /// A file, the `stat` it was found by, and what the name it is addressed by is served
+    /// with.
+    ///
+    /// The validators are derived from these rather than held ready, because deriving one
+    /// can read the file - [`ETagSource::Content`] - and this is decided before the mount's
+    /// pipeline runs. Reading it here would put that read ahead of the group's `filter` and
+    /// `authorize`, which is both work done for a request that is about to be refused and a
+    /// read an unauthorized caller can ask for. It also has nowhere to report a failure:
+    /// this stage answers `None` for "nothing is here", and a file that is here but cannot
+    /// be read is not that.
     File {
         path: PathBuf,
-        caching: ResponseCaching,
+        metadata: Metadata,
+        policy: RolePolicy,
     },
 
     /// A listing of a directory's contents.
@@ -293,13 +303,11 @@ async fn probe_root(env: &HostEnv) -> Option<Serving> {
 
     let path = env.index_path();
     let metadata = metadata(path).await.ok().filter(|m| m.is_file())?;
-    let caching = caching_for(path, &metadata, env.shell_policy())
-        .await
-        .ok()?;
 
     Some(Serving::File {
         path: path.to_path_buf(),
-        caching,
+        metadata,
+        policy: env.shell_policy(),
     })
 }
 
@@ -341,9 +349,11 @@ async fn probe_asset(env: &HostEnv, relative: PathBuf) -> Option<Serving> {
         return Some(serving);
     }
 
-    let caching = caching_for(&path, &metadata, policy).await.ok()?;
-
-    Some(Serving::File { path, caching })
+    Some(Serving::File {
+        path,
+        metadata,
+        policy,
+    })
 }
 
 /// Answers the request with what [`probe`] decided on.
@@ -356,8 +366,15 @@ async fn respond(serving: &Serving, method: &Method, headers: &HeaderMap) -> Htt
             content_root,
             is_root,
         } => respond_with_folder_impl(path, content_root, *is_root).await,
-        Serving::File { path, caching } => {
-            respond_with_file_or_304_impl(path, caching, method, headers).await
+        Serving::File {
+            path,
+            metadata,
+            policy,
+        } => {
+            // A failure here is a file that is there and cannot be read, which is an error
+            // to report rather than a reason to pretend nothing was found.
+            let caching = caching_for(path, metadata, *policy).await?;
+            respond_with_file_or_304_impl(path, &caching, method, headers).await
         }
     }
 }
@@ -622,8 +639,8 @@ mod tests {
     };
     use crate::app::HostEnv;
     use crate::headers::{
-        CACHE_CONTROL, CacheControl, HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE,
-        IF_NONE_MATCH, ResponseCaching,
+        CACHE_CONTROL, CacheControl, ETagSource, HeaderMap, HeaderValue, HttpHeaders,
+        IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
     };
     use crate::http::{Method, StatusCode};
     use crate::{App, HttpResult};
@@ -673,6 +690,64 @@ mod tests {
         caching_for(path, &metadata, env.policy_for(path))
             .await
             .unwrap()
+    }
+
+    /// A file the mount found and cannot read is an error it reports, not a reason to hand
+    /// the request to routing as though nothing were there - which would answer a
+    /// misconfigured permission with an unrelated route's response, or a `404`.
+    ///
+    /// Unix only: this needs a file whose `stat` succeeds while opening it fails, and
+    /// dropping the mode bits is how that is arranged.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn it_reports_a_file_it_cannot_read_rather_than_declining_it() {
+        let Some(root) = unreadable_index() else {
+            return;
+        };
+        let env = HostEnv::new(root.path());
+
+        // Through the mount point, which `probe_root` answers, and by name, which
+        // `probe_asset` answers - both derive the shell's tag from the file's contents.
+        for target in ["/", "/index.html"] {
+            let served = serve(&env, target, Method::GET, no_headers()).await;
+
+            assert!(
+                matches!(served, Some(Err(_))),
+                "{target}: expected the mount to answer with the error it hit"
+            );
+        }
+    }
+
+    /// The same file under the metadata tag, which reads nothing while it is derived: the
+    /// mount still claims it, and the failure surfaces when the body is opened instead.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn it_reports_an_unreadable_file_under_the_metadata_tag_too() {
+        let Some(root) = unreadable_index() else {
+            return;
+        };
+        let env = HostEnv::new(root.path()).with_shell_etag(ETagSource::Metadata);
+
+        let served = serve(&env, "/", Method::GET, no_headers()).await;
+
+        assert!(matches!(served, Some(Err(_))));
+    }
+
+    /// A content root holding an `index.html` that a `stat` reports and an `open` refuses.
+    ///
+    /// `None` when the caller can read it anyway, which is the answer under a test runner
+    /// running as root - there is nothing to assert in that case.
+    #[cfg(unix)]
+    fn unreadable_index() -> Option<tempfile::TempDir> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("index.html");
+
+        std::fs::write(&path, "<html></html>").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        std::fs::File::open(&path).err().map(|_| root)
     }
 
     #[test]

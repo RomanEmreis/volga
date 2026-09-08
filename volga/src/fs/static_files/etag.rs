@@ -10,10 +10,11 @@
 //! is the very thing [`ETagSource::Content`] exists to escape - so the check here is
 //! deliberately finer than the one a tag is derived from in [`ETagSource::Metadata`]:
 //!
-//! * the **length**, and the **modification time to the nanosecond**. Whole seconds are all
-//!   a tag may carry, because a sub-second `mtime` differs between replicas of one build and
-//!   the tag has to agree across them - but an entry in this cache is never compared against
-//!   anything outside this process, so it is free to use every digit the filesystem reports.
+//! * the **length**, and the **modification time at the full precision the platform keeps**,
+//!   which is nanoseconds on Unix and 100ns ticks on Windows. Whole seconds are all a *tag*
+//!   may carry, because a sub-second `mtime` differs between replicas of one build and the
+//!   tag has to agree across them - but an entry in this cache is never compared against
+//!   anything outside this process, so it is free to use every digit there is.
 //! * whatever the platform reports about the **file itself rather than its contents**, which
 //!   is what notices a deploy that restored both of the above. See [`discriminators`] for
 //!   what each platform can answer with and how far that goes - on Unix far enough that
@@ -433,7 +434,12 @@ mod tests {
                 ..current
             },
             Version {
-                modified: current.modified + Duration::from_nanos(1),
+                // One tick of the coarsest clock any supported platform keeps a
+                // modification time on: Windows stores one as a `FILETIME`, whose unit is
+                // 100ns, and `SystemTime + Duration` there divides the sub-second part by
+                // 100 - so a shift smaller than that lands back on the same instant and
+                // moves nothing.
+                modified: current.modified + Duration::from_micros(1),
                 ..current
             },
         ];
@@ -447,6 +453,9 @@ mod tests {
         }
 
         for moved in moved_versions {
+            // Asserted first, so that a shift the platform quietly rounds away is reported
+            // as the test bug it is rather than as the cache holding on to an entry.
+            assert!(moved != current, "the version under test did not move");
             assert!(cached(&path, moved).is_none());
         }
     }
