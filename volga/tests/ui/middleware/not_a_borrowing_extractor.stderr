@@ -1,0 +1,31 @@
+error[E0277]: `NotAnExtractor` cannot be extracted from a borrowed request
+ --> tests/ui/middleware/not_a_borrowing_extractor.rs:7:9
+  |
+7 |     app.with(async |_: NotAnExtractor, next| next.await);
+  |         ^^^^ not a borrowing extractor
+  |
+help: the trait `FromRequestRef` is not implemented for `NotAnExtractor`
+ --> tests/ui/middleware/not_a_borrowing_extractor.rs:3:1
+  |
+3 | struct NotAnExtractor;
+  | ^^^^^^^^^^^^^^^^^^^^^
+  = note: `with`, `filter` and `map_err` read the request without consuming it, so they take the extractors that borrow: `Query<T>`, `Path<T>`, `ClientIp`, `Dc<T>` (feature `di`) and the header types, but not `Json<T>` or any other body extractor
+  = help: the following other types implement trait `FromRequestRef`:
+            ()
+            (T1, T2)
+            (T1, T2, T3)
+            (T1, T2, T3, T4)
+            (T1, T2, T3, T4, T5)
+            (T1, T2, T3, T4, T5, T6)
+            (T1, T2, T3, T4, T5, T6, T7)
+            (T1, T2, T3, T4, T5, T6, T7, T8)
+          and $N others
+  = note: required for `(NotAnExtractor,)` to implement `FromRequestRef`
+note: required by a bound in `middleware::<impl App>::with`
+ --> src/middleware.rs
+  |
+  |     pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
+  |            ---- required by a bound in this associated function
+...
+  |         Args: FromRequestRef + Send + 'static,
+  |               ^^^^^^^^^^^^^^ required by this bound in `middleware::<impl App>::with`

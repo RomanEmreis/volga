@@ -1,0 +1,5 @@
+error: `Claims` can only be derived for structs
+ --> tests/ui/claims/a_union.rs:4:1
+  |
+4 | union AccessClaims {
+  | ^^^^^

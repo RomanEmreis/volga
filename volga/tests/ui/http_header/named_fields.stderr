@@ -1,0 +1,8 @@
+error: `#[http_header]` can only be applied to a unit-like struct
+ --> tests/ui/http_header/named_fields.rs:4:19
+  |
+4 |   pub struct ApiKey {
+  |  ___________________^
+5 | |     pub inner: String,
+6 | | }
+  | |_^
