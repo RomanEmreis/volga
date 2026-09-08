@@ -639,8 +639,8 @@ mod tests {
     };
     use crate::app::HostEnv;
     use crate::headers::{
-        CACHE_CONTROL, CacheControl, ETagSource, HeaderMap, HeaderValue, HttpHeaders,
-        IF_MODIFIED_SINCE, IF_NONE_MATCH, ResponseCaching,
+        CACHE_CONTROL, CacheControl, HeaderMap, HeaderValue, HttpHeaders, IF_MODIFIED_SINCE,
+        IF_NONE_MATCH, ResponseCaching,
     };
     use crate::http::{Method, StatusCode};
     use crate::{App, HttpResult};
@@ -723,6 +723,8 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn it_reports_an_unreadable_file_under_the_metadata_tag_too() {
+        use crate::headers::ETagSource;
+
         let Some(root) = unreadable_index() else {
             return;
         };
