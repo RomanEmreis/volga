@@ -28,6 +28,12 @@ mod validation;
 ///     exp: u64,
 /// }
 /// ```
+/// A struct carrying none of `role`, `roles` or `permissions` is accepted: every method of
+/// the trait has a default, so it simply reports no authorization data.
+///
+/// # Errors
+/// This macro will fail to compile if the input is not a struct - a JWT payload is a JSON
+/// object, and an enum or a union could never carry the recognised fields.
 #[cfg(feature = "jwt-auth-derive")]
 #[proc_macro_derive(Claims)]
 pub fn derive_claims(input: TokenStream) -> TokenStream {
@@ -61,7 +67,8 @@ pub fn derive_claims(input: TokenStream) -> TokenStream {
 /// This macro will fail to compile if:
 /// - The attribute is missing
 /// - The argument is not a string literal or identifier
-/// - The input is not a unit-like struct
+/// - The input is not a unit-like struct - the name is the whole of a typed header, and
+///   the value it carries lives in `volga::headers::Header<T>`
 #[proc_macro_attribute]
 pub fn http_header(attr: TokenStream, item: TokenStream) -> TokenStream {
     let header = parse_macro_input!(attr as http::attr::HeaderInput);

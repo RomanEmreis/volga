@@ -1,0 +1,7 @@
+error: unexpected end of input, expected a string literal or an identifier
+ --> tests/ui/http_header/missing_name.rs:3:1
+  |
+3 | #[http_header]
+  | ^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `http_header` (in Nightly builds, run with -Z macro-backtrace for more info)

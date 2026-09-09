@@ -53,6 +53,39 @@ jobs:
       - name: Run Clippy on the `full` feature set
         run: cargo clippy --all-targets --no-default-features --features full --locked -- -D warnings
 
+  transport_guard_check:
+    runs-on: ubuntu-latest
+    needs: format_check
+
+    # `volga` and `volga-oauth-client` each refuse to build without an HTTP transport, and
+    # say so through `compile_error!`. A `trybuild` case cannot reach either: it is built
+    # against the feature set the outer test run resolved, so there is no way to switch a
+    # feature off for one case. Checked here instead. A missing transport cascades into
+    # dozens of unresolved-import errors either way, so the build failing proves nothing on
+    # its own - what this asserts is that our own line is among them, and therefore the
+    # first thing the reader sees.
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that a missing HTTP transport is refused, and says why
+        run: |
+          check() {
+            # The cascade is only worth reading when the check itself is unhappy
+            if cargo check --locked -p "$1" --no-default-features > "$RUNNER_TEMP/$1.log" 2>&1; then
+              echo "::error::$1 built with no HTTP transport; the compile_error! guard is gone"
+              exit 1
+            fi
+            grep -qF "$2" "$RUNNER_TEMP/$1.log" || {
+              echo "::error::$1 failed without the transport guard's message: $2"
+              cat "$RUNNER_TEMP/$1.log"
+              exit 1
+            }
+            echo "$1: refused, as expected"
+          }
+          check volga \
+            "volga requires an HTTP transport: enable at least one of the \`http1\` or \`http2\` features"
+          check volga-oauth-client \
+            "volga-oauth-client requires at least one of the \`http1\` or \`http2\` features to be enabled"
+
   msrv_check:
     runs-on: ubuntu-latest
     needs: format_check

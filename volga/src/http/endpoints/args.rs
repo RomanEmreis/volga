@@ -57,6 +57,12 @@ pub(crate) enum Source {
 }
 
 /// Specifies extractors to read data from HTTP request
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be extracted from a request",
+    label = "not an extractor",
+    note = "a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)",
+    note = "`Option<T>` and `Result<T, volga::error::Error>` wrap any of them, `Valid<E>` wraps one whose payload implements `Validate`, and a tuple of up to 10 is an extractor too"
+)]
 pub trait FromRequest: Sized {
     /// Extracts data from HTTP request
     fn from_request(req: HttpRequest) -> impl Future<Output = Result<Self, Error>> + Send;
@@ -72,6 +78,11 @@ pub trait FromRequest: Sized {
 }
 
 /// Specifies extractors to read data from a borrowed HTTP request
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be extracted from a borrowed request",
+    label = "not a borrowing extractor",
+    note = "`with`, `filter` and `map_err` read the request without consuming it, so they take the extractors that borrow: `Query<T>`, `Path<T>`, `ClientIp`, `Dc<T>` (feature `di`) and the header types, but not `Json<T>` or any other body extractor"
+)]
 pub trait FromRequestRef: Sized {
     /// Extracts data from HTTP request reference
     fn from_request(req: &HttpRequest) -> Result<Self, Error>;
@@ -97,6 +108,13 @@ pub(crate) trait FromPathArg: Sized {
 
 /// Specifies extractor to read data from an HTTP request
 /// depending on payload's [`Source`]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not an extractor and cannot be a handler argument",
+    label = "not an extractor",
+    note = "a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)",
+    note = "`Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`",
+    note = "`FromPayload` is internal to volga: a type of your own travels inside an extractor rather than becoming one - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `Path<T>` takes a `FromPathArgs`, `Header<T>` a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds"
+)]
 pub(crate) trait FromPayload: Send + Sized {
     type Future: Future<Output = Result<Self, Error>> + Send;
 

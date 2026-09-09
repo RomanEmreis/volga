@@ -20,6 +20,12 @@ use crate::http::sse::Message;
 use std::{borrow::Cow, convert::Infallible, io::Error as IoError};
 
 /// Trait for types that can be returned from request handlers
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be returned from a request handler",
+    label = "not a response",
+    note = "a handler returns `HttpResult`, or anything that converts into one: `()`, `&'static str`, `String`, `Json<T>`, `Form<T>`, `ByteStream`, `HttpResponse`, or a `Result<T, E>` / `Option<T>` around them",
+    note = "the `ok!`, `created!`, `bad_request!` and `status!` macros build one for you"
+)]
 pub trait IntoResponse {
     /// Converts object into response
     fn into_response(self) -> HttpResult;

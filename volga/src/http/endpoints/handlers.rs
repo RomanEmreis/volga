@@ -62,6 +62,12 @@ where
 
 /// Describes a generic request handler that could take 0 or N parameters of types
 /// that are implement `FromPayload` trait
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a request handler",
+    label = "not a handler",
+    note = "a handler is an `async fn`, or a closure returning a future, taking up to 10 extractors as arguments",
+    note = "it must also be `Clone + Send + Sync + 'static`, which a closure capturing a non-`Send` value is not"
+)]
 pub trait GenericHandler<Args>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;

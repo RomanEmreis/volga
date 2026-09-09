@@ -1,5 +1,5 @@
 error: `Validate` can only be derived for structs with named fields
- --> tests/ui/unnamed_fields.rs:4:1
+ --> tests/ui/validate/unnamed_fields.rs:4:1
   |
 4 | struct Payload(String);
   | ^^^^^^

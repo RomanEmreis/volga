@@ -1,0 +1,19 @@
+error[E0277]: `&str` is not a request handler
+ --> tests/ui/extractors/not_a_handler.rs:5:22
+  |
+5 |     app.map_get("/", "not a function");
+  |         -------      ^^^^^^^^^^^^^^^^ not a handler
+  |         |
+  |         required by a bound introduced by this call
+  |
+  = help: the trait `GenericHandler<_>` is not implemented for `&str`
+  = note: a handler is an `async fn`, or a closure returning a future, taking up to 10 extractors as arguments
+  = note: it must also be `Clone + Send + Sync + 'static`, which a closure capturing a non-`Send` value is not
+note: required by a bound in `router::<impl App>::map_get`
+ --> src/app/router.rs
+  |
+  |     pub fn map_get<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+  |            ------- required by a bound in this associated function
+  |     where
+  |         F: GenericHandler<Args, Output = R>,
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `router::<impl App>::map_get`
