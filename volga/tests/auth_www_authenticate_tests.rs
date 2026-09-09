@@ -49,7 +49,7 @@ async fn it_includes_resource_metadata_in_challenge() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
     let www_auth = res.headers().get("www-authenticate").unwrap();
     let www_auth = www_auth.to_str().unwrap();
     assert!(
@@ -86,7 +86,7 @@ async fn it_derives_resource_metadata_from_mounted_metadata_route() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
     let www_auth = res.headers().get("www-authenticate").unwrap();
     let www_auth = www_auth.to_str().unwrap();
     assert!(
@@ -124,7 +124,7 @@ async fn it_prefers_explicit_resource_metadata_url_over_derived() {
         .await
         .unwrap();
 
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
     let www_auth = res.headers().get("www-authenticate").unwrap();
     let www_auth = www_auth.to_str().unwrap();
     assert!(

@@ -60,7 +60,7 @@ fn benchmark(c: &mut Criterion) {
     group.bench_function("no auth", |b| bearer(&app, b, "/open", &token, 200));
     group.bench_function("authorized", |b| bearer(&app, b, "/protected", &token, 200));
     group.bench_function("malformed token", |b| {
-        bearer(&app, b, "/protected", "invalid", 403)
+        bearer(&app, b, "/protected", "invalid", 401)
     });
     group.bench_function("missing token", |b| {
         let url = app.url("/protected");

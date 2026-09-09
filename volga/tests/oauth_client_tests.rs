@@ -264,7 +264,7 @@ async fn it_authorizes_with_issuer_published_keys() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
     let challenge = res.headers()["www-authenticate"].to_str().unwrap();
     assert!(challenge.contains("invalid_token"), "was: {challenge}");
 
@@ -320,7 +320,7 @@ async fn it_rejects_unknown_kids_as_invalid_tokens() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
     let challenge = res.headers()["www-authenticate"].to_str().unwrap();
     assert!(challenge.contains("invalid_token"), "was: {challenge}");
 
@@ -356,7 +356,7 @@ async fn it_respects_the_refresh_cooldown() {
             .send()
             .await
             .unwrap();
-        assert_eq!(res.status(), 403);
+        assert_eq!(res.status(), 401);
     }
     assert_eq!(issuer.jwks_hits.load(Ordering::SeqCst), 1);
 
@@ -405,7 +405,7 @@ async fn it_requires_the_iss_claim_by_default() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
     let challenge = res.headers()["www-authenticate"].to_str().unwrap();
     assert!(challenge.contains("invalid_token"), "was: {challenge}");
 
@@ -457,7 +457,7 @@ async fn it_requires_the_iss_claim_with_custom_issuers() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
     let challenge = res.headers()["www-authenticate"].to_str().unwrap();
     assert!(challenge.contains("invalid_token"), "was: {challenge}");
 
@@ -504,7 +504,7 @@ async fn it_rechecks_known_kids_once_keys_go_stale() {
         .send()
         .await
         .unwrap();
-    assert_eq!(res.status(), 403);
+    assert_eq!(res.status(), 401);
     let challenge = res.headers()["www-authenticate"].to_str().unwrap();
     assert!(challenge.contains("invalid_token"), "was: {challenge}");
     assert_eq!(issuer.jwks_hits.load(Ordering::SeqCst), 2);

@@ -424,6 +424,8 @@ where
 
                     next(ctx).await
                 }
+                // The token is valid, it just does not carry the authority this route
+                // asks for: RFC 6750 Section 3.1 `insufficient_scope`
                 Ok(_) => {
                     let metadata_url = bts.resource_metadata_url.as_deref();
 
@@ -437,15 +439,24 @@ where
                 Err(err) if err.status().is_server_error() => {
                     status!(503, "Token validation is temporarily unavailable")
                 }
+                // The token itself did not hold up. Answer with the status its own
+                // failure already carries - 401 for one that is malformed, expired or
+                // signed by the wrong key, 400 for a value that is not a token at all
+                // (see `map_jwt_error_to_status`). RFC 6750 Section 3.1 keeps 403 for a
+                // token that is valid but does not carry enough authority, which is the
+                // `Ok(_)` arm above. Answering 403 here would tell a client holding a
+                // stale token that refreshing it cannot help, and it would disagree with
+                // the `invalid_token` code the challenge below carries.
                 Err(err) => {
                     let metadata_url = bts.resource_metadata_url.as_deref();
+                    let status = err.status();
                     let www_authenticate = err
                         .into_inner()
                         .downcast_ref::<JwtError>()
                         .map(|e| build_www_authenticate(e.kind(), metadata_url))
                         .unwrap_or_else(|| authorizer::default_error_msg(metadata_url));
 
-                    status!(403; [
+                    status!(status.as_u16(); [
                         (WWW_AUTHENTICATE, www_authenticate)
                     ])
                 }
