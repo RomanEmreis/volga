@@ -140,8 +140,14 @@ impl ContainerBuilder {
     /// Build a DI container
     #[inline]
     pub fn build(self) -> Container {
+        let has_scoped = self
+            .services
+            .values()
+            .any(|entry| matches!(entry, ServiceEntry::Scoped(..)));
+
         Container {
             services: Arc::new(self.services),
+            has_scoped,
         }
     }
 
@@ -215,6 +221,14 @@ impl ContainerBuilder {
 pub struct Container {
     /// Read-only HashMap of dependencies
     services: Arc<ServiceMap>,
+
+    /// Whether any registration needs a cell of its own in each scope.
+    ///
+    /// Only a scoped service does. A singleton hands every scope the one instance it
+    /// already holds, and a transient keeps no state between resolutions, so where
+    /// nothing is registered scoped a scope is the registration map itself - see
+    /// [`Container::create_scope`].
+    has_scoped: bool,
 }
 
 impl Container {
@@ -231,8 +245,17 @@ impl Container {
     /// This method is typically used to create request-level or operation-level
     /// scopes when resolving services that should not live for the entire lifetime
     /// of the root container.
+    ///
+    /// A server calls this once per request, before it knows whether the request will
+    /// resolve anything at all, so what it costs is paid by every request. Where nothing
+    /// is registered scoped there is nothing for a scope to hold that the parent does not
+    /// already hold - copying the registrations would copy each entry to itself - and the
+    /// scope shares the parent's map instead.
     #[inline]
     pub fn create_scope(&self) -> Self {
+        if !self.has_scoped {
+            return self.clone();
+        }
         let services = self
             .services
             .iter()
@@ -240,6 +263,7 @@ impl Container {
             .collect::<HashMap<_, _, _>>();
         Self {
             services: Arc::new(services),
+            has_scoped: true,
         }
     }
 
@@ -350,6 +374,9 @@ mod tests {
                 .insert(key.to_string(), value.to_string());
         }
     }
+
+    #[derive(Clone, Default)]
+    struct InMemoryCache2(InMemoryCache);
 
     #[derive(Clone)]
     struct CacheWrapper {
@@ -532,5 +559,77 @@ mod tests {
         let cache = container.resolve::<CacheWrapper>();
 
         assert!(cache.is_err());
+    }
+
+    #[test]
+    fn it_keeps_lifetimes_in_a_scope_of_a_container_with_nothing_scoped() {
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(InMemoryCache::default());
+        container.register_transient_default::<InMemoryCache2>();
+
+        let container = container.build();
+        let scope = container.create_scope();
+
+        // The singleton is the parent's instance, as it is in any scope
+        scope
+            .resolve::<InMemoryCache>()
+            .unwrap()
+            .set("key", "value");
+        assert_eq!(
+            container
+                .resolve::<InMemoryCache>()
+                .unwrap()
+                .get("key")
+                .unwrap(),
+            "value"
+        );
+
+        // The transient is still built fresh on every resolution, even though this
+        // scope shares the parent's registrations rather than copying them
+        scope
+            .resolve::<InMemoryCache2>()
+            .unwrap()
+            .0
+            .set("key", "value");
+        assert!(
+            scope
+                .resolve::<InMemoryCache2>()
+                .unwrap()
+                .0
+                .get("key")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn it_isolates_a_scoped_service_registered_beside_ones_that_are_not() {
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(InMemoryCache::default());
+        container.register_scoped_default::<InMemoryCache2>();
+
+        let container = container.build();
+
+        let first = container.create_scope();
+        first.resolve::<InMemoryCache2>().unwrap().0.set("key", "1");
+        assert_eq!(
+            first
+                .resolve::<InMemoryCache2>()
+                .unwrap()
+                .0
+                .get("key")
+                .unwrap(),
+            "1"
+        );
+
+        // One scoped registration is enough to give every scope cells of its own
+        let second = container.create_scope();
+        assert!(
+            second
+                .resolve::<InMemoryCache2>()
+                .unwrap()
+                .0
+                .get("key")
+                .is_none()
+        );
     }
 }
