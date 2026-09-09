@@ -33,6 +33,13 @@
 //!   pattern was written with, so `GET /users/{id}` and `POST /users/{name}` are two
 //!   routes that bind two names at one position.
 //!
+//! - **Literals win, but only where they lead somewhere:**
+//!   A segment is read as a literal wherever one is mapped, so `/users/me` beats
+//!   `/users/{id}`. A literal that turns out to be a dead end is given back: the lookup
+//!   unwinds to the parameter it passed over and reads the segment again. Without that,
+//!   mapping `/users/me/settings` would silently stop `/users/{id}` from answering
+//!   `/users/me`.
+//!
 //! ## Use of `SmallVec`
 //!
 //! `SmallVec` is used for short collections such as `PathArgs`, which typically
@@ -115,6 +122,27 @@ pub(super) struct RouteNode {
 
     /// Cached allowed methods header value
     allowed_methods: Option<Arc<str>>,
+}
+
+/// A branch a lookup passed over on the way down: at this node the segment was read as
+/// a literal while a parameter sitting at the same position could have read it too.
+///
+/// Recorded only where a node holds both, which is rare, so an ordinary lookup builds
+/// none of these.
+///
+/// Unwinding cannot blow up: a node in this tree sits at one depth and is reached only
+/// after exactly that many segments have been read, so no node is visited twice within a
+/// lookup. The work is bounded by the nodes the path can reach, never by the number of
+/// ways it could be read.
+struct Fork<'route, 'path, I> {
+    /// The parameter child that was passed over
+    dynamic: &'route RouteEntry,
+    /// The segment it would bind
+    segment: &'path str,
+    /// The segments still unread when the literal was taken
+    rest: I,
+    /// How many parameters were bound before this point
+    bound: usize,
 }
 
 /// Parameters of a route
@@ -231,34 +259,71 @@ impl RouteNode {
     }
 
     /// Finds handlers by path
+    ///
+    /// A literal segment is read as a literal wherever one is mapped, and only falls back
+    /// to the parameter sharing its position when the literal branch turns out to lead
+    /// nowhere - either because the path parts ways deeper down, or because nothing is
+    /// mapped where the path ends. Without that fallback a route like `/a/{b}` would
+    /// stop answering `/a/b` the moment some unrelated route mapped `/a/b/c`.
     #[inline]
     pub(super) fn find(&self, path: &str) -> Option<RouteParams<'_>> {
         let mut current = self;
         let mut params = PathArgs::new();
-        let path_segments = split_path(path);
+        let mut segments = split_path(path);
+        let mut forks: SmallVec<[Fork<'_, '_, _>; DEFAULT_DEPTH]> = SmallVec::new();
 
-        for segment in path_segments {
-            if let Ok(i) = current.static_routes.binary_search_by(|r| r.cmp(segment)) {
-                current = current.static_routes[i].node.as_ref();
-                continue;
-            }
+        loop {
+            let matched = loop {
+                let Some(segment) = segments.next() else {
+                    break !current.handlers.as_ref().is_none_or(|h| h.is_empty());
+                };
 
-            if let Some(next) = &current.dynamic_route {
-                params.push(PathArg {
-                    name: Arc::clone(&next.path),
-                    value: Box::from(segment),
+                if let Ok(i) = current.static_routes.binary_search_by(|r| r.cmp(segment)) {
+                    // The literal goes first, but the parameter that could have read this
+                    // same segment is kept in case the literal branch dead-ends
+                    if let Some(dynamic) = &current.dynamic_route {
+                        forks.push(Fork {
+                            dynamic,
+                            segment,
+                            rest: segments.clone(),
+                            bound: params.len(),
+                        });
+                    }
+                    current = current.static_routes[i].node.as_ref();
+                    continue;
+                }
+
+                if let Some(next) = &current.dynamic_route {
+                    params.push(PathArg {
+                        name: Arc::clone(&next.path),
+                        value: Box::from(segment),
+                    });
+                    current = next.node.as_ref();
+                    continue;
+                }
+
+                break false;
+            };
+
+            if matched {
+                return Some(RouteParams {
+                    route: current,
+                    params,
                 });
-                current = next.node.as_ref();
-                continue;
             }
 
-            return None;
+            // Nothing down there. Unwind to the last parameter passed over - the deepest
+            // one, so the walk gives up as little of the path as it has to - and read its
+            // segment again, this time as the parameter.
+            let fork = forks.pop()?;
+            params.truncate(fork.bound);
+            params.push(PathArg {
+                name: Arc::clone(&fork.dynamic.path),
+                value: Box::from(fork.segment),
+            });
+            current = fork.dynamic.node.as_ref();
+            segments = fork.rest;
         }
-
-        (!current.handlers.as_ref().is_none_or(|h| h.is_empty())).then_some(RouteParams {
-            route: current,
-            params,
-        })
     }
 
     /// Finds handlers by path and returns a mutable reference to it
@@ -696,7 +761,7 @@ fn finish_path(mut path: String) -> String {
 /// Splits a path into the segments that name something, dropping the empty ones so that
 /// `/x`, `/x/` and `//x` are read as the one path they are.
 #[inline(always)]
-pub(crate) fn split_path(path: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn split_path(path: &str) -> impl Iterator<Item = &str> + Clone {
     memchr_split_nonempty(PATH_SEPARATOR, path.as_bytes())
         .map(|s| std::str::from_utf8(s).expect("Invalid UTF-8 sequence in path"))
 }
@@ -1261,5 +1326,107 @@ mod tests {
                 .as_ref(),
             "id"
         );
+    }
+
+    /// Collects the parameters a lookup bound, as `(name, value)` pairs.
+    fn bound(route: &RouteNode, path: &str) -> Option<Vec<(String, String)>> {
+        route.find(path).map(|found| {
+            found
+                .params
+                .iter()
+                .map(|p| (p.name.to_string(), p.value.to_string()))
+                .collect()
+        })
+    }
+
+    #[test]
+    fn it_falls_back_to_a_parameter_when_the_literal_branch_ends_short() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/a/b/c/d/e/i/k", Method::GET, handler.clone().into());
+        route.insert("/a/{b}", Method::GET, handler.into());
+
+        // `b` is a literal on the way to /a/b/c/d/e/i/k, but nothing is mapped at
+        // /a/b itself, so the walk has to come back and read it as the parameter
+        assert_eq!(
+            bound(&route, "/a/b"),
+            Some(vec![("b".to_string(), "b".to_string())])
+        );
+        assert_eq!(bound(&route, "/a/b/c/d/e/i/k"), Some(vec![]));
+        assert_eq!(
+            bound(&route, "/a/z"),
+            Some(vec![("b".to_string(), "z".to_string())])
+        );
+    }
+
+    #[test]
+    fn it_falls_back_to_a_parameter_when_the_literal_branch_parts_deeper() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/me/settings", Method::GET, handler.clone().into());
+        route.insert("/users/{id}/posts", Method::GET, handler.into());
+
+        // The literal `me` matches, and only the segment after it parts ways
+        assert_eq!(
+            bound(&route, "/users/me/posts"),
+            Some(vec![("id".to_string(), "me".to_string())])
+        );
+        assert_eq!(bound(&route, "/users/me/settings"), Some(vec![]));
+        assert_eq!(bound(&route, "/users/me/unmapped"), None);
+    }
+
+    #[test]
+    fn it_backtracks_to_the_nearest_parameter_first() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/a/b/c/d", Method::GET, handler.clone().into());
+        route.insert("/a/b/{y}/e", Method::GET, handler.clone().into());
+        route.insert("/a/{x}/z", Method::GET, handler.into());
+
+        // Two parameters were passed over on the way down; the deeper one is the
+        // one that gets to read its segment first
+        assert_eq!(
+            bound(&route, "/a/b/c/e"),
+            Some(vec![("y".to_string(), "c".to_string())])
+        );
+        // Nothing under `b` fits, so the walk unwinds all the way to `{x}`
+        assert_eq!(
+            bound(&route, "/a/b/z"),
+            Some(vec![("x".to_string(), "b".to_string())])
+        );
+        // And when no parameter fits either, the lookup still misses
+        assert_eq!(bound(&route, "/a/b/q/w"), None);
+    }
+
+    #[test]
+    fn it_reads_a_literal_before_a_parameter_that_also_fits() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/{id}", Method::GET, handler.clone().into());
+        route.insert("/users/me", Method::GET, handler.into());
+
+        assert_eq!(bound(&route, "/users/me"), Some(vec![]));
+        assert_eq!(
+            bound(&route, "/users/42"),
+            Some(vec![("id".to_string(), "42".to_string())])
+        );
+    }
+
+    #[test]
+    fn it_keeps_a_literal_mapped_for_another_verb_over_a_parameter() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/users/me", Method::POST, handler.clone().into());
+        route.insert("/users/{id}", Method::GET, handler.into());
+
+        // The literal node carries a handler, just not for every verb. Reading it
+        // as the parameter instead would answer a request that belongs to the
+        // literal route, and would turn its 405 into someone else's 200
+        assert_eq!(bound(&route, "/users/me"), Some(vec![]));
     }
 }

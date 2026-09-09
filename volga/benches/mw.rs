@@ -1,60 +1,30 @@
 #![allow(missing_docs)]
 
-use volga::App;
+mod common;
 
+use common::{BODY, Harness};
 use criterion::{Criterion, criterion_group, criterion_main};
-use futures_util::future::join_all;
-use reqwest::Client;
-use std::hint::black_box;
-use tokio::{runtime::Runtime, time::Instant};
-
-use std::time::Duration;
-
-async fn routing(iters: u64, url: &str) -> Duration {
-    #[cfg(all(feature = "http1", not(feature = "http2")))]
-    let client = Client::builder().http1_only().build().unwrap();
-    #[cfg(feature = "http2")]
-    let client = Client::builder().http2_prior_knowledge().build().unwrap();
-
-    let url = format!("http://localhost:7878{url}");
-
-    let start = Instant::now();
-
-    let requests = (0..iters).map(|_| client.get(&url).send());
-    let responses = join_all(requests).await;
-
-    let elapsed = start.elapsed();
-
-    let failed = responses.iter().filter(|r| r.is_err()).count();
-    if failed > 0 {
-        eprintln!("failed {failed} requests");
-    };
-    elapsed
-}
 
 fn benchmark(c: &mut Criterion) {
-    let rt = Runtime::new().unwrap();
-    rt.block_on(async {
-        tokio::spawn(async {
-            let mut app = App::new()
-                .with_no_delay()
-                .without_body_limit()
-                .without_greeter();
+    let app = Harness::new(|app| {
+        // Control: the same route with no middleware attached, so the numbers
+        // below can be read as the cost the pipeline stage adds.
+        app.map_get("/plain", || async { BODY });
 
-            app.map_get("/valid", || async {}).filter(|| async { true });
-            app.map_get("/invalid", || async {})
-                .filter(|| async { false });
-
-            _ = app.run().await;
-        });
+        app.map_get("/valid", || async { BODY })
+            .filter(|| async { true });
+        app.map_get("/invalid", || async { BODY })
+            .filter(|| async { false });
     });
 
-    c.bench_function("valid filter", |b| {
-        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/valid"))))
-    });
-    c.bench_function("invalid filter", |b| {
-        b.iter_custom(|iters| rt.block_on(routing(iters, black_box("/invalid"))))
-    });
+    let baseline = Harness::baseline();
+
+    let mut group = c.benchmark_group("middleware");
+    group.bench_function("bare hyper", |b| baseline.get_saturated(b, "/", 200));
+    group.bench_function("no middleware", |b| app.get_saturated(b, "/plain", 200));
+    group.bench_function("valid filter", |b| app.get_saturated(b, "/valid", 200));
+    group.bench_function("invalid filter", |b| app.get_saturated(b, "/invalid", 400));
+    group.finish();
 }
 
 criterion_group!(benches, benchmark);
