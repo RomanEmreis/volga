@@ -24,8 +24,9 @@ fn benchmark(c: &mut Criterion) {
     // them share - the request scope's handle on the registrations among others - only costs
     // anything once workers collide on it, which a single worker never does. The routes here
     // only read, so what they add is the framework's shared writes rather than the route's.
-    // Whether that shows depends on the machine: over macOS loopback the kernel's socket work
-    // takes about twice the CPU of everything in user space, and caps throughput first.
+    // Whether that shows depends on the load: this in-process reqwest client tops out near 165k
+    // requests a second, far below what the server serves, so the workers here rarely collide.
+    // An external load generator driving the server hard is what makes them.
     let multi = Harness::with_profile(Profile::MULTI, |app| app, routes);
     let multi_baseline = Harness::baseline_with(Profile::MULTI);
 
