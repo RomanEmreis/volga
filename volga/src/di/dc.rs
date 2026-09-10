@@ -1,6 +1,6 @@
 //! Extractors for Dependency Injection
 
-use super::{Container, FromContainer, Inject, error::Error as DiError};
+use super::{Container, Dependencies, FromContainer, Inject, error::Error as DiError};
 use crate::{
     HttpRequest,
     error::Error,
@@ -138,6 +138,11 @@ impl<T: Send + Sync + 'static> Inject for Dc<T> {
     #[inline]
     fn inject(container: &Container) -> Result<Self, DiError> {
         container.resolve_shared::<T>().map(Dc)
+    }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
     }
 }
 

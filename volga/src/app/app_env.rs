@@ -137,6 +137,14 @@ impl TryFrom<App> for AppEnv {
     type Error = Error;
 
     fn try_from(app: App) -> Result<Self, Self::Error> {
+        // A dependency graph that cannot be resolved - a cycle, or a service depending on
+        // one nobody registered - stops the app here, before a connection is accepted,
+        // rather than the first request that reaches it
+        #[cfg(feature = "di")]
+        app.container
+            .validate()
+            .map_err(|err| Error::other(err.to_string()))?;
+
         #[cfg(feature = "tls")]
         let hsts = app
             .tls_config

@@ -3,7 +3,7 @@
 use super::{App, error::Error};
 pub use {
     self::dc::Dc,
-    volga_di::{Container, ContainerBuilder, GenericFactory, Inject},
+    volga_di::{Container, ContainerBuilder, Dependencies, GenericFactory, Inject},
 };
 
 pub mod dc;

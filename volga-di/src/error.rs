@@ -35,9 +35,113 @@ impl Display for Error {
     }
 }
 
+/// Problems found in a container's dependency graph by
+/// [`ContainerBuilder::validate`](crate::ContainerBuilder::validate)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationError {
+    issues: Vec<Issue>,
+}
+
+/// One problem in a container's dependency graph
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Issue {
+    /// Services that depend on one another in a loop, from the first back to itself:
+    /// `[A, B, A]` for `A -> B -> A`
+    Cycle(Vec<&'static str>),
+
+    /// A service declares a dependency on a type nothing registered
+    Missing {
+        /// The service declaring the dependency
+        service: &'static str,
+        /// The type it depends on
+        dependency: &'static str,
+    },
+}
+
+impl ValidationError {
+    #[inline]
+    pub(crate) fn new(issues: Vec<Issue>) -> Self {
+        Self { issues }
+    }
+
+    /// Every problem found: cycles first, then missing dependencies, each in a stable order
+    #[inline]
+    pub fn issues(&self) -> &[Issue] {
+        &self.issues
+    }
+}
+
+impl Display for Issue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Issue::Cycle(path) => write!(f, "dependency cycle: {}", path.join(" -> ")),
+            Issue::Missing {
+                service,
+                dependency,
+            } => write!(
+                f,
+                "`{service}` depends on `{dependency}`, which is not registered"
+            ),
+        }
+    }
+}
+
+impl Display for ValidationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("dependency injection: ")?;
+
+        for (i, issue) in self.issues.iter().enumerate() {
+            if i > 0 {
+                f.write_str("; ")?;
+            }
+            write!(f, "{issue}")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn it_displays_a_cycle() {
+        assert_eq!(
+            Issue::Cycle(vec!["A", "B", "A"]).to_string(),
+            "dependency cycle: A -> B -> A"
+        );
+    }
+
+    #[test]
+    fn it_displays_a_missing_dependency() {
+        let issue = Issue::Missing {
+            service: "A",
+            dependency: "B",
+        };
+        assert_eq!(
+            issue.to_string(),
+            "`A` depends on `B`, which is not registered"
+        );
+    }
+
+    #[test]
+    fn it_displays_every_issue_on_one_line() {
+        let err = ValidationError::new(vec![
+            Issue::Cycle(vec!["A", "A"]),
+            Issue::Missing {
+                service: "B",
+                dependency: "C",
+            },
+        ]);
+        assert_eq!(
+            err.to_string(),
+            "dependency injection: dependency cycle: A -> A; `B` depends on `C`, which is not registered"
+        );
+    }
 
     #[test]
     fn it_displays_container_missing() {
