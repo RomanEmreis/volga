@@ -154,7 +154,9 @@ impl TryFrom<&Parts> for SignedCookies {
 
     #[inline]
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
-        Container::try_from(parts)?
+        // Borrowed: a clone of the request's container would write the registration map's
+        // count, which every request in flight shares
+        <&Container>::try_from(&parts.extensions)?
             .resolve::<SignedKey>()
             .map(|key| SignedCookies::from_headers(key, &parts.headers))
             .map_err(Into::into)
@@ -166,7 +168,7 @@ impl TryFrom<(&Extensions, &HeaderMap)> for SignedCookies {
 
     #[inline]
     fn try_from((extensions, headers): (&Extensions, &HeaderMap)) -> Result<Self, Self::Error> {
-        Container::try_from(extensions)?
+        <&Container>::try_from(extensions)?
             .resolve::<SignedKey>()
             .map(|key| SignedCookies::from_headers(key, headers))
             .map_err(Into::into)

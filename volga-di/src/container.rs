@@ -425,7 +425,7 @@ impl ContainerBuilder {
             TypeId::of::<T>(),
             ServiceEntry::transient(make_inject_resolver_fn::<T>()),
         );
-        
+
         self.declare::<T>(Dependencies::of::<T>());
     }
 }
@@ -478,11 +478,24 @@ impl Container {
     /// `T` must implement [`Clone`] otherwise use [`Container::resolve_shared`] method
     /// that returns a shared pointer.
     ///
+    /// A shared instance - a singleton, or a scoped service already built in this scope - is
+    /// cloned where it lies, without touching the [`Arc`] that holds it: every thread
+    /// resolving the service writes that count, and bumping it only to drop it again is
+    /// contention for nothing. A transient is built for this call alone, so it is handed
+    /// over as built rather than cloned.
+    ///
     /// # Panics
     /// if resolving `T` leads back to `T` - see [`Container::resolve_shared`].
     #[inline]
     pub fn resolve<T: Send + Sync + Clone + 'static>(&self) -> Result<T, Error> {
-        self.resolve_shared::<T>().map(|s| s.as_ref().clone())
+        match self.get_service_entry::<T>()? {
+            ServiceEntry::Transient(r) => self.construct::<T>(r).map(Arc::unwrap_or_clone),
+            ServiceEntry::Scoped(slot, r) => self
+                .scoped_instance::<T>(*slot, r)
+                .and_then(Self::downcast_ref::<T>)
+                .cloned(),
+            ServiceEntry::Singleton(instance) => Self::downcast_ref::<T>(instance).cloned(),
+        }
     }
 
     /// Resolves a service and returns a shared pointer
@@ -495,12 +508,11 @@ impl Container {
     #[inline]
     pub fn resolve_shared<T: Send + Sync + 'static>(&self) -> Result<Arc<T>, Error> {
         match self.get_service_entry::<T>()? {
-            ServiceEntry::Transient(r) => {
-                let _constructing = Constructing::enter::<T>();
-                r(self).and_then(|s| Self::resolve_internal(&s))
-            }
-            ServiceEntry::Scoped(slot, r) => self.resolve_scoped(*slot, r),
-            ServiceEntry::Singleton(instance) => Self::resolve_internal(instance),
+            ServiceEntry::Transient(r) => self.construct::<T>(r),
+            ServiceEntry::Scoped(slot, r) => self
+                .scoped_instance::<T>(*slot, r)
+                .and_then(Self::downcast_shared::<T>),
+            ServiceEntry::Singleton(instance) => Self::downcast_shared::<T>(instance),
         }
     }
 
@@ -513,13 +525,27 @@ impl Container {
             .ok_or_else(|| Error::NotRegistered(std::any::type_name::<T>()))
     }
 
-    /// Resolves scoped service from DI container
+    /// Builds a transient service for the caller alone
     #[inline]
-    fn resolve_scoped<T: Send + Sync + 'static>(
+    fn construct<T: Send + Sync + 'static>(
+        &self,
+        resolver_fn: &ResolverFn,
+    ) -> Result<Arc<T>, Error> {
+        let _constructing = Constructing::enter::<T>();
+        // Just built and held by nothing else, so it is downcast as it is, not through
+        // another handle on it
+        resolver_fn(self)?
+            .downcast::<T>()
+            .map_err(|_| Error::ResolveFailed(std::any::type_name::<T>()))
+    }
+
+    /// This scope's instance of a scoped service, built the first time it is asked for
+    #[inline]
+    fn scoped_instance<T: 'static>(
         &self,
         slot: usize,
         resolver_fn: &ResolverFn,
-    ) -> Result<Arc<T>, Error> {
+    ) -> Result<&ArcService, Error> {
         // Every scope is built from the map this entry came from, so it holds a cell at
         // every index that map hands out. A miss would be a bug in `build` rather than a
         // state a caller can reach - reported as a failed resolution, not a panic
@@ -540,15 +566,21 @@ impl Container {
             }
         };
 
-        result
-            .as_ref()
-            .map_err(|err| *err)
-            .and_then(Self::resolve_internal)
+        result.as_ref().map_err(|err| *err)
     }
 
-    /// Unwraps `T` from [`ArcService`]
+    /// Borrows `T` out of a shared instance
     #[inline]
-    fn resolve_internal<T: Send + Sync + 'static>(instance: &ArcService) -> Result<Arc<T>, Error> {
+    fn downcast_ref<T: 'static>(instance: &ArcService) -> Result<&T, Error> {
+        // `**` to ask the value, not the `Arc` handle - which is `Any` as well
+        (**instance)
+            .downcast_ref::<T>()
+            .ok_or_else(|| Error::ResolveFailed(std::any::type_name::<T>()))
+    }
+
+    /// Unwraps `T` from [`ArcService`] as another handle on the shared instance
+    #[inline]
+    fn downcast_shared<T: Send + Sync + 'static>(instance: &ArcService) -> Result<Arc<T>, Error> {
         instance
             .clone()
             .downcast::<T>()
@@ -593,7 +625,7 @@ mod tests {
     use std::collections::HashMap;
     use std::marker::PhantomData;
     use std::panic::{AssertUnwindSafe, catch_unwind};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex, mpsc};
     use std::time::Duration;
 
@@ -1333,5 +1365,58 @@ mod tests {
         });
 
         assert!(instances.windows(2).all(|w| Arc::ptr_eq(&w[0], &w[1])));
+    }
+    static TRANSIENT_CLONES: AtomicUsize = AtomicUsize::new(0);
+
+    #[derive(Default)]
+    struct CountedTransient;
+
+    impl Clone for CountedTransient {
+        fn clone(&self) -> Self {
+            TRANSIENT_CLONES.fetch_add(1, Ordering::SeqCst);
+            Self
+        }
+    }
+
+    static SINGLETON_CLONES: AtomicUsize = AtomicUsize::new(0);
+
+    struct CountedSingleton(u8);
+
+    impl Clone for CountedSingleton {
+        fn clone(&self) -> Self {
+            SINGLETON_CLONES.fetch_add(1, Ordering::SeqCst);
+            Self(self.0)
+        }
+    }
+
+    #[test]
+    fn it_hands_over_a_transient_without_cloning_it() {
+        let mut builder = ContainerBuilder::new();
+        builder.register_transient_default::<CountedTransient>();
+        let container = builder.build();
+
+        // Each is built for its caller alone, so there is nothing to clone it from
+        let _ = container.resolve::<CountedTransient>().unwrap();
+        let _ = container.resolve_shared::<CountedTransient>().unwrap();
+
+        assert_eq!(TRANSIENT_CLONES.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn it_clones_a_singleton_for_resolve_and_shares_it_for_resolve_shared() {
+        let mut builder = ContainerBuilder::new();
+        builder.register_singleton(CountedSingleton(7));
+        let container = builder.build();
+
+        assert_eq!(container.resolve::<CountedSingleton>().unwrap().0, 7);
+        assert_eq!(SINGLETON_CLONES.load(Ordering::SeqCst), 1);
+
+        let shared = container.resolve_shared::<CountedSingleton>().unwrap();
+        let from_scope = container
+            .create_scope()
+            .resolve_shared::<CountedSingleton>()
+            .unwrap();
+        assert!(Arc::ptr_eq(&shared, &from_scope));
+        assert_eq!(SINGLETON_CLONES.load(Ordering::SeqCst), 1);
     }
 }
