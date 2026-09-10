@@ -22,11 +22,13 @@
 //!   connection. That is a true end-to-end latency, but on loopback it is
 //!   dominated by the round trip (~36 us here), which buries the framework's
 //!   own cost below the noise floor.
-//! - [`Harness::get_saturated`] keeps [`CONCURRENCY`] requests in flight over
-//!   [`CONCURRENCY`] pooled connections. The server runs on a single worker
-//!   thread and the client on four, so the server is deliberately the
-//!   bottleneck: the round trip is overlapped away and `elapsed / iters` is the
-//!   server's mean per-request service time - the framework flow itself.
+//! - [`Harness::get_saturated`] keeps a fixed number of requests in flight over
+//!   as many pooled connections. With [`Profile::SINGLE`] the server runs on a
+//!   single worker thread and the client on four, so the server is deliberately
+//!   the bottleneck: the round trip is overlapped away and `elapsed / iters` is
+//!   the server's mean per-request service time - the framework flow itself.
+//!   [`Profile::MULTI`] gives the server several workers, which is what it takes
+//!   for per-request writes to state every worker shares to collide at all.
 //!
 //! [`Harness::baseline`] spawns a bare hyper server serving a fixed response,
 //! under the identical client and runtime setup. Subtracting it from a Volga
@@ -58,16 +60,37 @@ use hyper_util::rt::TokioIo;
 /// the branch predictors and allocator caches settle.
 const WARMUP_REQUESTS: usize = 512;
 
-/// Requests kept in flight by [`Harness::run_saturated`], and the size of the
-/// connection pool. High enough to keep the single-worker server busy, low
-/// enough that the connections are reused instead of churning through ephemeral
-/// ports.
-pub(crate) const CONCURRENCY: u64 = 32;
+/// How hard a harness drives its server.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Profile {
+    /// Worker threads the server runs on.
+    pub(crate) server_workers: usize,
+    /// Worker threads the client runs on. The client must not become the
+    /// bottleneck; hyper drives each pooled connection on its own task, so these
+    /// spread across the pool.
+    pub(crate) client_threads: usize,
+    /// Requests kept in flight by [`Harness::run_saturated`], and the size of the
+    /// connection pool: enough to keep the server busy, few enough that the
+    /// connections are reused instead of churning through ephemeral ports.
+    pub(crate) concurrency: u64,
+}
 
-/// Worker threads for the client runtime. The client must not become the
-/// bottleneck; hyper drives each pooled connection on its own task, so these
-/// spread across the pool.
-const CLIENT_THREADS: usize = 4;
+impl Profile {
+    /// One server worker kept saturated: per-request service time.
+    pub(crate) const SINGLE: Self = Self {
+        server_workers: 1,
+        client_threads: 4,
+        concurrency: 32,
+    };
+
+    /// Eight server workers taking requests at once: what per-request writes to
+    /// state shared by every worker add up to once they start to collide.
+    pub(crate) const MULTI: Self = Self {
+        server_workers: 8,
+        client_threads: 10,
+        concurrency: 128,
+    };
+}
 
 /// The body every route in the benchmarks returns, so route shapes stay
 /// comparable to each other and to the bare-hyper baseline.
@@ -78,6 +101,7 @@ pub(crate) struct Harness {
     rt: Runtime,
     client: Client,
     addr: SocketAddr,
+    profile: Profile,
 }
 
 impl Harness {
@@ -95,7 +119,16 @@ impl Harness {
         C: FnOnce(App) -> App + Send + 'static,
         S: FnOnce(&mut App) + Send + 'static,
     {
-        let addr = serve(move |listener| async move {
+        Self::with_profile(Profile::SINGLE, configure, setup)
+    }
+
+    /// Spawns a Volga app driven the way `profile` says.
+    pub(crate) fn with_profile<C, S>(profile: Profile, configure: C, setup: S) -> Self
+    where
+        C: FnOnce(App) -> App + Send + 'static,
+        S: FnOnce(&mut App) + Send + 'static,
+    {
+        let addr = serve(profile.server_workers, move |listener| async move {
             let mut app = configure(
                 App::new()
                     .with_no_delay()
@@ -105,7 +138,7 @@ impl Harness {
             setup(&mut app);
             _ = app.run_with_std_listener(listener).await;
         });
-        Self::attach(addr)
+        Self::attach(addr, profile)
     }
 
     /// Spawns a bare hyper server answering every request with [`BODY`].
@@ -113,7 +146,12 @@ impl Harness {
     /// This is the floor: client, loopback TCP and hyper, with no Volga in the
     /// path. Volga timings minus this one are the framework's own cost.
     pub(crate) fn baseline() -> Self {
-        let addr = serve(|listener| async move {
+        Self::baseline_with(Profile::SINGLE)
+    }
+
+    /// [`Harness::baseline`], driven the way `profile` says.
+    pub(crate) fn baseline_with(profile: Profile) -> Self {
+        let addr = serve(profile.server_workers, |listener| async move {
             listener
                 .set_nonblocking(true)
                 .expect("set_nonblocking failed");
@@ -148,19 +186,20 @@ impl Harness {
                 });
             }
         });
-        Self::attach(addr)
+        Self::attach(addr, profile)
     }
 
-    fn attach(addr: SocketAddr) -> Self {
+    fn attach(addr: SocketAddr, profile: Profile) -> Self {
         let rt = Builder::new_multi_thread()
-            .worker_threads(CLIENT_THREADS)
+            .worker_threads(profile.client_threads)
             .enable_all()
             .build()
             .expect("failed to build the client runtime");
         Self {
             rt,
-            client: client(),
+            client: client(profile),
             addr,
+            profile,
         }
     }
 
@@ -199,31 +238,49 @@ impl Harness {
         b.to_async(&self.rt).iter(|| send(make(), expect));
     }
 
-    /// Benchmarks `make` with [`CONCURRENCY`] requests in flight.
+    /// Benchmarks `make` with the profile's concurrency in flight.
     ///
     /// `iters` requests are spread evenly over that many workers, so the
     /// concurrency stays fixed no matter how large a sample criterion asks for.
+    /// Each worker is a task of its own, so the client spreads over all of its
+    /// threads: driven from a single task, the client tops out long before a
+    /// server with several workers does, and the run measures the client.
     pub(crate) fn run_saturated<F>(&self, b: &mut Bencher<'_>, expect: u16, make: F)
     where
         F: Fn() -> RequestBuilder,
     {
         self.warmup(&make, expect);
 
-        let make = &make;
+        let concurrency = self.profile.concurrency;
+        // One request per worker to clone from, since a spawned task cannot borrow `make`
+        let templates = (0..concurrency).map(|_| make()).collect::<Vec<_>>();
+        let templates = &templates;
         b.to_async(&self.rt).iter_custom(move |iters| async move {
-            let per_worker = iters / CONCURRENCY;
-            let remainder = iters % CONCURRENCY;
+            let per_worker = iters / concurrency;
+            let remainder = iters % concurrency;
 
             let start = Instant::now();
-            join_all((0..CONCURRENCY).map(|worker| {
-                let count = per_worker + u64::from(worker < remainder);
-                async move {
-                    for _ in 0..count {
-                        send(make(), expect).await;
-                    }
-                }
-            }))
-            .await;
+            let workers = templates
+                .iter()
+                .zip(0..concurrency)
+                .map(|(template, worker)| {
+                    let count = per_worker + u64::from(worker < remainder);
+                    let template = template
+                        .try_clone()
+                        .expect("a request without a streamed body");
+                    tokio::spawn(async move {
+                        for _ in 0..count {
+                            let request = template
+                                .try_clone()
+                                .expect("a request without a streamed body");
+                            send(request, expect).await;
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            for worker in workers {
+                worker.await.expect("a benchmark worker panicked");
+            }
             start.elapsed()
         });
     }
@@ -233,9 +290,10 @@ impl Harness {
     where
         F: Fn() -> RequestBuilder,
     {
+        let concurrency = self.profile.concurrency;
         self.rt.block_on(async {
-            for _ in 0..(WARMUP_REQUESTS as u64 / CONCURRENCY) {
-                join_all((0..CONCURRENCY).map(|_| send(make(), expect))).await;
+            for _ in 0..(WARMUP_REQUESTS as u64 / concurrency).max(1) {
+                join_all((0..concurrency).map(|_| send(make(), expect))).await;
             }
         });
     }
@@ -261,7 +319,7 @@ async fn send(req: RequestBuilder, expect: u16) -> usize {
 /// The listener is bound synchronously, so the address is valid and the backlog
 /// already accepts connections by the time this returns - no readiness polling
 /// and no race with the first request.
-fn serve<F, Fut>(f: F) -> SocketAddr
+fn serve<F, Fut>(workers: usize, f: F) -> SocketAddr
 where
     F: FnOnce(TcpListener) -> Fut + Send + 'static,
     Fut: Future<Output = ()>,
@@ -273,7 +331,7 @@ where
 
     thread::spawn(move || {
         Builder::new_multi_thread()
-            .worker_threads(1)
+            .worker_threads(workers)
             .enable_all()
             .build()
             .expect("failed to build the server runtime")
@@ -283,12 +341,12 @@ where
     addr
 }
 
-fn client() -> Client {
+fn client(profile: Profile) -> Client {
     let builder = Client::builder()
         .tcp_nodelay(true)
         // Keep the pooled connections alive for the whole run.
         .pool_idle_timeout(None)
-        .pool_max_idle_per_host(CONCURRENCY as usize);
+        .pool_max_idle_per_host(profile.concurrency as usize);
 
     #[cfg(all(feature = "http1", not(feature = "http2")))]
     let builder = builder.http1_only();
