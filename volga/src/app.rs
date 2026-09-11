@@ -657,37 +657,6 @@ impl App {
     ///
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(feature = "middleware")]
-    pub async fn run(mut self) -> io::Result<()> {
-        self.use_endpoints();
-
-        let tcp_listener = self.connection.bind().await?;
-        self.run_internal(tcp_listener).await
-    }
-
-    /// Runs the [`App`] using the current asynchronous runtime.
-    ///
-    /// This method must be called inside an existing asynchronous context,
-    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
-    ///
-    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
-    /// It gives you full control over runtime configuration, task execution, and integration
-    /// with other async components.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> std::io::Result<()> {
-    ///     let app = App::new().bind("127.0.0.1:7878");
-    ///     app.run().await
-    /// }
-    /// ```
-    ///
-    /// # Errors
-    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(not(feature = "middleware"))]
     pub async fn run(self) -> io::Result<()> {
         let tcp_listener = self.connection.bind().await?;
         self.run_internal(tcp_listener).await
@@ -719,43 +688,6 @@ impl App {
     ///
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(feature = "middleware")]
-    pub fn run_with_listener(
-        mut self,
-        tcp_listener: TcpListener,
-    ) -> impl Future<Output = io::Result<()>> {
-        self.use_endpoints();
-
-        self.run_internal(tcp_listener)
-    }
-
-    /// Runs the [`App`] using the custom [`tokio::net::TcpListener`] in the current asynchronous runtime.
-    ///
-    /// This method must be called inside an existing asynchronous context,
-    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
-    ///
-    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
-    /// It gives you full control over runtime configuration, task execution, and integration
-    /// with other async components.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    /// use tokio::net::TcpListener;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> std::io::Result<()> {
-    ///     let app = App::new();
-    ///
-    ///     let listener = TcpListener::bind("localhost:7878").await?;
-    ///     
-    ///     app.run_with_listener(listener).await
-    /// }
-    /// ```
-    ///
-    /// # Errors
-    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(not(feature = "middleware"))]
     pub fn run_with_listener(
         self,
         tcp_listener: TcpListener,
@@ -789,45 +721,6 @@ impl App {
     ///
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(feature = "middleware")]
-    pub async fn run_with_std_listener(
-        mut self,
-        tcp_listener: std::net::TcpListener,
-    ) -> io::Result<()> {
-        self.use_endpoints();
-
-        tcp_listener.set_nonblocking(true)?;
-        let tcp_listener = TcpListener::from_std(tcp_listener)?;
-        self.run_internal(tcp_listener).await
-    }
-
-    /// Runs the [`App`] using the custom [`std::net::TcpListener`] in the current asynchronous runtime.
-    ///
-    /// This method must be called inside an existing asynchronous context,
-    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
-    ///
-    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
-    /// It gives you full control over runtime configuration, task execution, and integration
-    /// with other async components.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    /// use std::net::TcpListener;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> std::io::Result<()> {
-    ///     let app = App::new();
-    ///
-    ///     let listener = TcpListener::bind("localhost:7878")?;
-    ///     
-    ///     app.run_with_std_listener(listener).await
-    /// }
-    /// ```
-    ///
-    /// # Errors
-    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(not(feature = "middleware"))]
     pub async fn run_with_std_listener(
         self,
         tcp_listener: std::net::TcpListener,

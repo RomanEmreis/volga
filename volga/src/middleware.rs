@@ -16,7 +16,6 @@
 use crate::{
     App, HttpResult,
     http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult},
-    not_found,
     routing::{Route, RouteGroup},
 };
 use futures_util::future::BoxFuture;
@@ -28,7 +27,6 @@ use crate::di::FromContainer;
 
 pub use handler::{Filter, MapOk, Middleware, Next, TapReq, With};
 pub use http_context::HttpContext;
-pub(crate) use make_fn::from_handler;
 
 #[cfg(any(
     feature = "compression-brotli",
@@ -64,15 +62,6 @@ pub(super) struct Middlewares {
     pub(super) pipeline: Vec<MiddlewareFn>,
 }
 
-impl From<MiddlewareFn> for Middlewares {
-    #[inline]
-    fn from(mw: MiddlewareFn) -> Self {
-        let mut middlewares = Self::new();
-        middlewares.add(mw);
-        middlewares
-    }
-}
-
 impl Middlewares {
     /// Initializes a new middleware pipeline
     pub(super) fn new() -> Self {
@@ -93,34 +82,25 @@ impl Middlewares {
         self.pipeline.push(middleware);
     }
 
-    /// Inserts middleware right after the route handler that heads a route pipeline,
-    /// keeping the order of both the inserted middleware and the middleware already there
+    /// Inserts middleware at the front of the pipeline, keeping the order of both the
+    /// inserted middleware and the middleware already there
     #[inline]
-    pub(super) fn insert_after_handler(&mut self, middlewares: &[MiddlewareFn]) {
-        let head = self.pipeline.len().min(1);
-        self.pipeline
-            .splice(head..head, middlewares.iter().cloned());
+    pub(super) fn prepend(&mut self, middlewares: &[MiddlewareFn]) {
+        self.pipeline.splice(0..0, middlewares.iter().cloned());
     }
 
-    /// Composes middlewares into a "Linked List" and returns head
-    pub(super) fn compose(&self) -> Option<NextFn> {
-        let mut iter = self.pipeline.iter().rev();
-        // Fetching the last middleware which is the request handler to be the initial `next`
-        let last = iter.next()?;
-        let mut next: NextFn = {
-            let handler = last.clone();
-            // Allocate the placeholder once at compose time, not per-request
-            let dummy: NextFn = Arc::new(|_| Box::pin(async { not_found!() }));
-            Arc::new(move |ctx| handler(ctx, dummy.clone()))
-        };
-
-        for mw in iter {
-            let current_mw = mw.clone();
-            let prev_next = next.clone();
-            next = Arc::new(move |ctx| current_mw(ctx, prev_next.clone()));
-        }
-
-        Some(next)
+    /// Composes middlewares into a "Linked List" ending in `terminal` and returns head
+    ///
+    /// `terminal` is what answers once every middleware has called `next`: a route's
+    /// handler, or for the global chain the stage that hands the request to whatever
+    /// routing decided. It is a [`NextFn`] of its own rather than one more middleware, so
+    /// reaching it is a call and nothing else - no future wrapped around it and no `next`
+    /// for it to ignore.
+    pub(super) fn compose(&self, terminal: NextFn) -> NextFn {
+        self.pipeline.iter().rev().fold(terminal, |next, mw| {
+            let mw = mw.clone();
+            Arc::new(move |ctx| mw(ctx, next.clone()))
+        })
     }
 }
 
@@ -448,13 +428,6 @@ impl App {
             .middlewares_mut()
             .add(make_with_fn(middleware));
         self
-    }
-
-    /// Registers default middleware
-    pub(super) fn use_endpoints(&mut self) {
-        if self.pipeline.has_middleware_pipeline() {
-            self.wrap(|ctx: HttpContext, _: NextFn| async move { ctx.execute().await });
-        }
     }
 }
 

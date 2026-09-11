@@ -61,7 +61,7 @@ use crate::{
     html, html_file,
     http::{
         IntoResponse, Method, StatusCode,
-        endpoints::route::{Layer, RoutePipeline, is_dynamic_segment, join_path, split_path},
+        endpoints::route::{RoutePipeline, is_dynamic_segment, join_path, split_path},
     },
     middleware::{HttpContext, Middleware, MiddlewareFn, NextFn},
     routing::RouteGroup,
@@ -156,13 +156,13 @@ fn mount_name(prefix: &str) -> &str {
     if prefix.is_empty() { "/" } else { prefix }
 }
 
-/// The layer that answers with the file, and the tail of every mount's pipeline.
+/// The stage that answers with the file, and the end of every mount's pipeline.
 ///
 /// It reads back what [`probe`] decided, so that the layers a group put in front of it - its
 /// `filter`, its `authorize`, its `map_ok` - run first, exactly as they do for a route.
 #[inline]
-fn serve_layer() -> MiddlewareFn {
-    Arc::new(|ctx: HttpContext, _| {
+fn serve_layer() -> NextFn {
+    Arc::new(|ctx: HttpContext| {
         Box::pin(async move {
             let request = ctx.request();
             match request.extensions().get::<Arc<Serving>>() {
@@ -188,7 +188,7 @@ impl StaticMount {
 
         Self {
             prefix: prefix.trim_end_matches('/').into(),
-            pipeline: RoutePipeline::from(Layer::from(serve_layer())),
+            pipeline: RoutePipeline::ending_in(serve_layer()),
         }
     }
 

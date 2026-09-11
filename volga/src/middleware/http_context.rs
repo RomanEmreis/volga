@@ -9,6 +9,7 @@ use crate::{
     status,
 };
 
+use futures_util::future::BoxFuture;
 use hyper::header::ALLOW;
 use std::sync::Arc;
 
@@ -257,6 +258,27 @@ impl HttpContext {
                 (ALLOW, allowed.as_ref())
             ]),
             Some(Terminal::RouteTaken) | None => status!(405),
+        }
+    }
+
+    /// Hands the current HTTP request to the terminal stage of the pipeline, as the end of
+    /// the global middleware chain
+    ///
+    /// A matched route answers through its own chain, and the future returned is that
+    /// chain's, so the step from the global chain into the route's allocates nothing. The
+    /// fallback and a `405` are answered by [`execute`](Self::execute), in a future of their
+    /// own.
+    #[inline]
+    pub(crate) fn hand_off(mut self) -> BoxFuture<'static, HttpResult> {
+        match self.terminal.take() {
+            Some(Terminal::Route(pipeline)) => {
+                self.terminal = Some(Terminal::RouteTaken);
+                pipeline.call(self)
+            }
+            terminal => {
+                self.terminal = terminal;
+                Box::pin(self.execute())
+            }
         }
     }
 }
