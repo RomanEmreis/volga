@@ -159,18 +159,25 @@ impl TestServerBuilder {
     /// This method spawns the server in the background and waits until it
     /// is ready to accept incoming connections.
     pub async fn build(self) -> TestServer {
-        let port = TestServer::get_free_port();
+        // The socket is bound here rather than inside the server task, because what a test
+        // needs back is a port that accepts connections. A signal the task can send before
+        // calling `run` does not say that - it says the task started, while the bind happens
+        // inside `run` - and on a loaded machine the first request beats it and is refused.
+        // Binding here also leaves no window between finding a free port and taking it.
+        let listener =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("failed to bind a test server");
+        let port = listener
+            .local_addr()
+            .expect("failed to read the test server address")
+            .port();
+
         let (tx, rx) = oneshot::channel();
-        let (ready_tx, ready_rx) = oneshot::channel();
 
         let app_config = self.app_config;
         let routes = self.routes;
 
         let server_handle = tokio::spawn(async move {
-            let mut app = App::new()
-                .bind(format!("127.0.0.1:{}", port))
-                .with_no_delay()
-                .without_greeter();
+            let mut app = App::new().with_no_delay().without_greeter();
 
             if let Some(config) = app_config {
                 app = config(app);
@@ -180,15 +187,11 @@ impl TestServerBuilder {
                 route(&mut app);
             }
 
-            let _ = ready_tx.send(());
-
             tokio::select! {
-                _ = app.run() => {},
+                _ = app.run_with_std_listener(listener) => {},
                 _ = rx => {}
             }
         });
-
-        let _ = ready_rx.await;
 
         TestServer {
             port,
