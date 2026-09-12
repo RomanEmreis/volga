@@ -133,6 +133,24 @@ async fn it_rejects_a_malformed_token_as_unauthorized() {
 }
 
 #[tokio::test]
+async fn it_rejects_a_token_that_does_not_decode_as_unauthorized() {
+    let server = server().await;
+
+    // The header carries a bearer credential, and what it carries is not a token: the first
+    // segment is not base64 at all. RFC 6750 Section 3.1 calls that a malformed access token
+    // - `invalid_token` and `401` - and keeps `invalid_request` for a request that is wrong
+    // about how it carries the token rather than about the token
+    let (status, challenge) = call(&server, Some("Bearer @@@.aGVsbG8.c2ln")).await;
+    assert_eq!(status, 401);
+    assert!(
+        challenge.contains(r#"error="invalid_token""#),
+        "challenge was: {challenge}"
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn it_rejects_a_token_signed_with_the_wrong_key_as_unauthorized() {
     let server = server().await;
     let wrong = encode(
