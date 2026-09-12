@@ -744,19 +744,14 @@ impl App {
 
         let no_delay = self.no_delay;
 
-        self.print_welcome(socket);
+        // Built here, where the app is still whole, and said further down. The greeter and
+        // the `listening on` line beside it are what an operator - and a readiness check
+        // tailing the log - read as "the server is up", which an app that is about to
+        // refuse to start has no business saying
+        let welcome = self.welcome(socket);
 
-        #[cfg(feature = "tracing")]
-        {
-            #[cfg(feature = "tls")]
-            if self.tls_config.is_some() {
-                tracing::info!("listening on: https://{socket}")
-            } else {
-                tracing::info!("listening on: http://{socket}")
-            };
-            #[cfg(not(feature = "tls"))]
-            tracing::info!("listening on: http://{socket}");
-        }
+        #[cfg(all(feature = "tls", feature = "tracing"))]
+        let serves_tls = self.tls_config.is_some();
 
         let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
         let shutdown_tx = Arc::new(shutdown_tx);
@@ -789,6 +784,23 @@ impl App {
         // it has. An app that does not start leaves no task of its own running and no second
         // port taken, so a caller that handles the error and tries again finds them free
         let app_instance: Arc<AppEnv> = Arc::new(self.try_into()?);
+
+        // Nothing is left that can refuse to start, so the server can be announced
+        if let Some(welcome) = welcome {
+            print!("{welcome}");
+        }
+
+        #[cfg(feature = "tracing")]
+        {
+            #[cfg(feature = "tls")]
+            if serves_tls {
+                tracing::info!("listening on: https://{socket}")
+            } else {
+                tracing::info!("listening on: http://{socket}")
+            };
+            #[cfg(not(feature = "tls"))]
+            tracing::info!("listening on: http://{socket}");
+        }
 
         // Spawn any async triggers registered via `App::shutdown_on`.
         // Each trigger cancels the handle's token when it resolves, and
