@@ -285,6 +285,21 @@ mod tests {
         std::fs::metadata(path).expect("metadata")
     }
 
+    /// Writes `contents` and pins the modification time, so that what a `stat` reports is
+    /// decided here rather than by how closely two writes follow each other.
+    fn write_at(path: &Path, contents: &[u8], modified: SystemTime) -> Metadata {
+        std::fs::write(path, contents).expect("write");
+
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("open")
+            .set_modified(modified)
+            .expect("set modified");
+
+        std::fs::metadata(path).expect("metadata")
+    }
+
     fn version_of(path: &Path) -> Version {
         Version::of(&std::fs::metadata(path).expect("metadata")).expect("version")
     }
@@ -309,17 +324,38 @@ mod tests {
 
     /// The case reported in #233: two shells of the same byte length, where the tag derived
     /// from the metadata would be the same for both.
+    ///
+    /// Both modification times are pinned inside one second rather than read off the clock.
+    /// A tag carries whole seconds, so that is what makes the two metadata tags collide -
+    /// and two writes in a row can land on one timestamp entirely, which decides the test
+    /// rather than the code: on Windows the only other thing a `stat` answers with is the
+    /// creation time, a file rewritten in place keeps it, and the cache is then left with
+    /// nothing to tell the two versions apart and answers with the first one's tag.
     #[tokio::test]
     async fn content_tags_differ_for_same_length_files() {
         let path = temp_path("collision.html");
+        let second = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
-        let before_meta = write(&path, b"<script src=/a1b2c3.js>");
+        let before_meta = write_at(
+            &path,
+            b"<script src=/a1b2c3.js>",
+            second + Duration::from_millis(100),
+        );
         let before = of(&path, &before_meta, ETagSource::Content).await.unwrap();
 
-        let after_meta = write(&path, b"<script src=/d4e5f6.js>");
+        let after_meta = write_at(
+            &path,
+            b"<script src=/d4e5f6.js>",
+            second + Duration::from_millis(900),
+        );
         let after = of(&path, &after_meta, ETagSource::Content).await.unwrap();
 
         assert_eq!(before_meta.len(), after_meta.len());
+        assert_eq!(
+            ETag::try_from(&before_meta).unwrap().as_ref(),
+            ETag::try_from(&after_meta).unwrap().as_ref(),
+            "the metadata tags have to collide here, or this is not the case #233 reports"
+        );
         assert_ne!(before.as_ref(), after.as_ref());
     }
 
