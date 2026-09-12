@@ -84,17 +84,26 @@ fn map_jwt_error_to_status(err: &ErrorKind) -> StatusCode {
         | MissingRequiredClaim(_)
         | ImmatureSignature
         | InvalidAlgorithmName
-        | InvalidAlgorithm => StatusCode::UNAUTHORIZED,
-        Base64(_) | Json(_) | Utf8(_) | InvalidKeyFormat => StatusCode::BAD_REQUEST,
+        | InvalidAlgorithm
+        // A credential that does not decode is a malformed access token, which RFC 6750
+        // Section 3.1 answers `401` with `invalid_token`. Its `400` and `invalid_request`
+        // are for a request that is wrong about how it carries a token rather than about
+        // the token - and a client told `400` reads its own request as the thing to fix,
+        // where what it is holding is a credential to replace
+        | Base64(_)
+        | Json(_)
+        | Utf8(_) => StatusCode::UNAUTHORIZED,
+        // The key this server verifies with is its own configuration. The caller has
+        // nothing to fix and nothing to learn from being told, so this is a validation that
+        // could not be completed rather than a credential that did not hold up
+        InvalidKeyFormat => StatusCode::INTERNAL_SERVER_ERROR,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 
 #[cfg(feature = "jwt-auth")]
 fn build_www_authenticate(err: &ErrorKind, resource_metadata_url: Option<&str>) -> String {
-    use crate::auth::oauth::OAuthErrorCode::{
-        InvalidRequest, InvalidToken as InvalidTokenCode, ServerError,
-    };
+    use crate::auth::oauth::OAuthErrorCode::{InvalidToken as InvalidTokenCode, ServerError};
     use ErrorKind::*;
 
     let (code, description) = match err {
@@ -107,10 +116,10 @@ fn build_www_authenticate(err: &ErrorKind, resource_metadata_url: Option<&str>) 
         InvalidAudience => (InvalidTokenCode, "Invalid audience (aud)"),
         InvalidSubject => (InvalidTokenCode, "Invalid subject (sub)"),
         InvalidAlgorithm | InvalidAlgorithmName => (InvalidTokenCode, "Invalid algorithm"),
-        Base64(_) => (InvalidRequest, "Token is not properly base64-encoded"),
-        Json(_) => (InvalidRequest, "Token payload is not valid JSON"),
-        Utf8(_) => (InvalidRequest, "Token contains invalid UTF-8 characters"),
-        InvalidKeyFormat => (InvalidRequest, "Invalid key format"),
+        Base64(_) => (InvalidTokenCode, "Token is not properly base64-encoded"),
+        Json(_) => (InvalidTokenCode, "Token payload is not valid JSON"),
+        Utf8(_) => (InvalidTokenCode, "Token contains invalid UTF-8 characters"),
+        InvalidKeyFormat => (ServerError, "Invalid key format"),
         _ => (ServerError, "Internal token processing error"),
     };
 
@@ -424,6 +433,8 @@ where
 
                     next(ctx).await
                 }
+                // The token is valid, it just does not carry the authority this route
+                // asks for: RFC 6750 Section 3.1 `insufficient_scope`
                 Ok(_) => {
                     let metadata_url = bts.resource_metadata_url.as_deref();
 
@@ -437,15 +448,25 @@ where
                 Err(err) if err.status().is_server_error() => {
                     status!(503, "Token validation is temporarily unavailable")
                 }
+                // The token itself did not hold up. Answer with the status its own
+                // failure already carries - 401 for one that is malformed, expired or
+                // signed by the wrong key (see `map_jwt_error_to_status`), and 400 where
+                // the credential is not a bearer value at all, which is a failure of the
+                // request rather than of a token. RFC 6750 Section 3.1 keeps 403 for a
+                // token that is valid but does not carry enough authority, which is the
+                // `Ok(_)` arm above. Answering 403 here would tell a client holding a
+                // stale token that refreshing it cannot help, and it would disagree with
+                // the `invalid_token` code the challenge below carries.
                 Err(err) => {
                     let metadata_url = bts.resource_metadata_url.as_deref();
+                    let status = err.status();
                     let www_authenticate = err
                         .into_inner()
                         .downcast_ref::<JwtError>()
                         .map(|e| build_www_authenticate(e.kind(), metadata_url))
                         .unwrap_or_else(|| authorizer::default_error_msg(metadata_url));
 
-                    status!(403; [
+                    status!(status.as_u16(); [
                         (WWW_AUTHENTICATE, www_authenticate)
                     ])
                 }
@@ -582,33 +603,33 @@ mod tests {
     }
 
     #[test]
-    fn it_maps_base64_error_to_bad_request() {
+    fn it_maps_base64_error_to_unauthorized() {
         let status = map_jwt_error_to_status(base64_jwt_error().kind());
-        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn it_maps_json_error_to_bad_request() {
+    fn it_maps_json_error_to_unauthorized() {
         // Create a JSON error by attempting to deserialize invalid JSON
         let json_result: Result<serde_json::Value, _> = serde_json::from_str("invalid json");
         let json_error = json_result.unwrap_err();
         let status = map_jwt_error_to_status(&ErrorKind::Json(Arc::from(json_error)));
-        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn it_maps_utf8_error_to_bad_request() {
+    fn it_maps_utf8_error_to_unauthorized() {
         // Create a FromUtf8Error by attempting to convert invalid UTF-8 bytes
         let invalid_utf8_bytes = vec![0, 159, 146, 150];
         let utf8_error = String::from_utf8(invalid_utf8_bytes).unwrap_err();
         let status = map_jwt_error_to_status(&ErrorKind::Utf8(utf8_error));
-        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[test]
-    fn it_maps_invalid_key_format_to_bad_request() {
+    fn it_maps_invalid_key_format_to_server_error() {
         let status = map_jwt_error_to_status(&ErrorKind::InvalidKeyFormat);
-        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]
@@ -707,7 +728,7 @@ mod tests {
         let www_auth = build_www_authenticate(base64_jwt_error().kind(), None);
         assert_eq!(
             www_auth,
-            r#"Bearer error="invalid_request", error_description="Token is not properly base64-encoded""#
+            r#"Bearer error="invalid_token", error_description="Token is not properly base64-encoded""#
         );
     }
 
@@ -718,7 +739,7 @@ mod tests {
         let www_auth = build_www_authenticate(&ErrorKind::Json(Arc::from(json_error)), None);
         assert_eq!(
             www_auth,
-            r#"Bearer error="invalid_request", error_description="Token payload is not valid JSON""#
+            r#"Bearer error="invalid_token", error_description="Token payload is not valid JSON""#
         );
     }
 
@@ -729,7 +750,7 @@ mod tests {
         let www_auth = build_www_authenticate(&ErrorKind::Utf8(utf8_error), None);
         assert_eq!(
             www_auth,
-            r#"Bearer error="invalid_request", error_description="Token contains invalid UTF-8 characters""#
+            r#"Bearer error="invalid_token", error_description="Token contains invalid UTF-8 characters""#
         );
     }
 
@@ -738,7 +759,7 @@ mod tests {
         let www_auth = build_www_authenticate(&ErrorKind::InvalidKeyFormat, None);
         assert_eq!(
             www_auth,
-            r#"Bearer error="invalid_request", error_description="Invalid key format""#
+            r#"Bearer error="server_error", error_description="Invalid key format""#
         );
     }
 
@@ -796,7 +817,7 @@ mod tests {
     fn it_converts_jwt_error_to_error_with_base64_error() {
         let error = Error::from_jwt_error(base64_jwt_error());
 
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.status, StatusCode::UNAUTHORIZED);
         assert!(error.instance.is_none());
     }
 
@@ -807,7 +828,7 @@ mod tests {
         let jwt_error = JwtError::from(ErrorKind::Json(Arc::from(json_error)));
         let error = Error::from_jwt_error(jwt_error);
 
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.status, StatusCode::UNAUTHORIZED);
         assert!(error.instance.is_none());
     }
 
@@ -816,7 +837,7 @@ mod tests {
         let jwt_error = JwtError::from(ErrorKind::InvalidKeyFormat);
         let error = Error::from_jwt_error(jwt_error);
 
-        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(error.instance.is_none());
     }
 }

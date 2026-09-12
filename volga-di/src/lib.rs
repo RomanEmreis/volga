@@ -27,7 +27,7 @@
 
 pub use crate::{
     container::{Container, ContainerBuilder, GenericFactory},
-    inject::Inject,
+    inject::{Dependencies, Inject},
 };
 
 pub mod container;

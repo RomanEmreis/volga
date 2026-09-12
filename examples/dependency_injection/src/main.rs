@@ -11,7 +11,7 @@ use std::{
 use uuid::Uuid;
 use volga::{
     App, HttpRequestMut, HttpResponse, HttpResult, Json,
-    di::{Container, Dc, Inject, error::Error as DiError},
+    di::{Container, Dc, Dependencies, Inject, error::Error as DiError},
     error::Error,
     headers::headers,
     status,
@@ -142,6 +142,14 @@ impl Inject for RequestLog {
             inner: Default::default(),
             cache,
         })
+    }
+
+    /// Declares what `inject` resolves, so the app checks at startup that both are
+    /// registered and that nothing loops back here - a mistake fails `App::run` rather
+    /// than the first request that needs a `RequestLog`
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<UuidGenerator>();
+        deps.add::<InMemoryCache>();
     }
 }
 

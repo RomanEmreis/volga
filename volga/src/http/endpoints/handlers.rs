@@ -1,14 +1,28 @@
+use crate::HttpResult;
 use crate::error::Error;
 use crate::http::{IntoResponse, endpoints::args::FromRequest};
-use crate::{HttpRequest, HttpResult};
 use futures_util::future::BoxFuture;
 use std::{future::Future, sync::Arc};
+
+#[cfg(not(feature = "middleware"))]
+use crate::HttpRequest;
+
+#[cfg(feature = "middleware")]
+use crate::middleware::{HttpContext, NextFn};
 
 /// Represents a specific registered request handler
 pub(crate) type RouteHandler = Arc<dyn Handler + Send + Sync>;
 
 pub(crate) trait Handler {
+    #[cfg(not(feature = "middleware"))]
     fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult>;
+
+    /// Turns the handler into the [`NextFn`] a route's middleware chain ends in
+    ///
+    /// The handler's own future is the whole of what reaching it costs: nothing is wrapped
+    /// around it, and there is no `next` after it to hand over.
+    #[cfg(feature = "middleware")]
+    fn into_next(self: Arc<Self>) -> NextFn;
 }
 
 /// Represents a function request handler that could take different arguments
@@ -48,14 +62,42 @@ where
 impl<F, R, Args> Handler for Func<F, R, Args>
 where
     F: GenericHandler<Args, Output = R>,
-    R: IntoResponse,
-    Args: FromRequest + Send,
+    R: IntoResponse + 'static,
+    Args: FromRequest + Send + 'static,
 {
     #[inline]
+    #[cfg(not(feature = "middleware"))]
     fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult> {
         Box::pin(async move {
             let args = Args::from_request(req).await?;
             self.func.call(args).await.into_response()
+        })
+    }
+
+    #[cfg(feature = "middleware")]
+    fn into_next(self: Arc<Self>) -> NextFn {
+        Arc::new(move |ctx: HttpContext| -> BoxFuture<'static, HttpResult> {
+            let (req, _, _) = ctx.into_parts();
+            let req = req.freeze();
+
+            // A handler with no state of its own - a function, or a closure capturing
+            // nothing - is copied into the future, which is free and touches no count. One
+            // that captures state is reached through its `Arc` instead: a write to a count
+            // every request to this route shares, where cloning what the closure captured
+            // could cost anything at all
+            if size_of::<F>() == 0 {
+                let func = self.func.clone();
+                Box::pin(async move {
+                    let args = Args::from_request(req).await?;
+                    func.call(args).await.into_response()
+                })
+            } else {
+                let this = Arc::clone(&self);
+                Box::pin(async move {
+                    let args = Args::from_request(req).await?;
+                    this.func.call(args).await.into_response()
+                })
+            }
         })
     }
 }
@@ -146,5 +188,69 @@ mod tests {
 
         let result = MapErr::map_err(&handler, err, (42,)).await;
         assert_eq!(result, (400, 42));
+    }
+}
+
+#[cfg(all(test, feature = "middleware"))]
+mod next_tests {
+    use super::{Func, RouteHandler};
+    use crate::http::cors::CorsOverride;
+    use crate::middleware::HttpContext;
+    use crate::{HttpBody, HttpRequest, ok};
+    use hyper::Request;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    fn ctx() -> HttpContext {
+        let (parts, body) = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+        HttpContext::new(
+            HttpRequest::from_parts(parts, body),
+            None,
+            CorsOverride::Inherit,
+        )
+    }
+
+    /// State a handler captures, counting how many times it is cloned
+    #[derive(Default)]
+    struct CountsClones(Arc<AtomicUsize>);
+
+    impl Clone for CountsClones {
+        fn clone(&self) -> Self {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Self(self.0.clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn it_reaches_a_handler_with_no_state() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+        let next = handler.into_next();
+
+        let response = next(ctx()).await.unwrap();
+
+        assert_eq!(response.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn it_does_not_clone_the_state_a_handler_captures() {
+        let state = CountsClones::default();
+        let clones = state.0.clone();
+        let handler: RouteHandler = Func::new(move || {
+            let _state = &state;
+            async { ok!() }
+        });
+        let next = handler.into_next();
+
+        for _ in 0..3 {
+            let response = next(ctx()).await.unwrap();
+            assert_eq!(response.status(), 200);
+        }
+
+        assert_eq!(clones.load(Ordering::SeqCst), 0);
     }
 }

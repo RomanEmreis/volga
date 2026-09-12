@@ -21,10 +21,11 @@ impl Middleware for Cors {
         ctx: HttpContext,
         next: NextFn,
     ) -> impl Future<Output = HttpResult> + Send + 'static {
-        let default_cors = self.default_cors.clone();
+        // Resolve effective policy (Route > Group > Default) before the future takes the
+        // context, so the policy that applies is the one cloned into it, and only once
+        let cors = ctx.resolve_cors(self.default_cors.as_ref());
         async move {
-            // Resolve effective policy (Route > Group > Default)
-            let Some(cors) = ctx.resolve_cors(default_cors.as_ref()) else {
+            let Some(cors) = cors else {
                 return next(ctx).await;
             };
 

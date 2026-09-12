@@ -91,8 +91,14 @@ impl PipelineBuilder {
 
     #[cfg(feature = "middleware")]
     pub(super) fn build(mut self) -> Pipeline {
-        let start = self.middlewares.compose();
+        // The global chain ends in the stage that hands the request to whatever routing
+        // decided, and is only built when there is middleware to put in front of it -
+        // without any, `Pipeline::execute` goes to that stage directly
+        let start = (!self.middlewares.is_empty())
+            .then(|| self.middlewares.compose(Arc::new(HttpContext::hand_off)));
+
         self.endpoints.compose();
+
         Pipeline {
             endpoints: self.endpoints,
             error_handler: self.error_handler,
@@ -108,11 +114,6 @@ impl PipelineBuilder {
             error_handler: self.error_handler,
             fallback_handler: self.fallback_handler,
         }
-    }
-
-    #[cfg(feature = "middleware")]
-    pub(crate) fn has_middleware_pipeline(&self) -> bool {
-        !self.middlewares.is_empty()
     }
 
     #[cfg(feature = "middleware")]
@@ -217,10 +218,7 @@ mod tests {
     #[cfg(feature = "middleware")]
     #[test]
     fn it_builds_without_middleware_pipeline() {
-        let builder = PipelineBuilder::new();
-        assert!(!builder.has_middleware_pipeline());
-
-        let pipeline = builder.build();
+        let pipeline = PipelineBuilder::new().build();
         assert!(pipeline.start.is_none());
     }
 }

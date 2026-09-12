@@ -41,12 +41,13 @@ fn draw_box(title: &str, subtitle: &str) -> String {
 }
 
 impl App {
-    /// Prints a greeter message
-    pub(super) fn print_welcome(&self, addr: SocketAddr) {
+    /// The greeter message to print, or `None` where the greeter is switched off
+    ///
+    /// Handed over rather than printed, so that the caller decides when it is said: this
+    /// message is what a reader takes for "the server is up"
+    pub(super) fn welcome(&self, addr: SocketAddr) -> Option<String> {
         let no_color = std::env::var_os("NO_COLOR").is_some();
-        if let Some(output) = self.build_welcome(addr, no_color) {
-            print!("{output}");
-        }
+        self.build_welcome(addr, no_color)
     }
 
     fn build_welcome(&self, addr: SocketAddr, no_color: bool) -> Option<String> {

@@ -4,22 +4,11 @@ use super::{
     HttpContext, MiddlewareFn, NextFn,
     handler::{Filter, MapOk, Middleware, Next, TapReq, With},
 };
-use crate::http::{
-    FromRequestRef, IntoResponse, MapErr, endpoints::handlers::RouteHandler, request::IntoTapResult,
-};
+use crate::http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult};
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
 use crate::di::FromContainer;
-
-/// Wraps a [`RouteHandler`] into [`MiddlewareFn`]
-pub(crate) fn from_handler(handler: RouteHandler) -> MiddlewareFn {
-    Arc::new(move |ctx: HttpContext, _| {
-        let handler = handler.clone();
-        let (req, _, _) = ctx.into_parts();
-        Box::pin(async move { handler.call(req.freeze()).await })
-    })
-}
 
 /// Wraps a closure into [`MiddlewareFn`]
 #[inline]
@@ -173,7 +162,6 @@ mod tests {
     use crate::error::Error;
     use crate::http::StatusCode;
     use crate::http::cors::CorsOverride;
-    use crate::http::endpoints::handlers::Func;
     use crate::{HttpBody, HttpRequest, HttpRequestMut, HttpResponse, bad_request, ok};
     use hyper::Request;
 
@@ -183,20 +171,6 @@ mod tests {
             .unwrap();
         let (parts, body) = req.into_parts();
         HttpRequest::from_parts(parts, body)
-    }
-
-    #[tokio::test]
-    async fn it_tests_from_handler() {
-        let handler = || async { ok!() };
-        let route_handler = Func::new(handler);
-        let middleware = from_handler(route_handler);
-
-        let req = create_request();
-        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
-        let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
-
-        let result = middleware(ctx, next).await;
-        assert!(result.is_ok());
     }
 
     #[tokio::test]

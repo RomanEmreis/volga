@@ -1,6 +1,6 @@
 //! Extractors for Dependency Injection
 
-use super::{Container, FromContainer, Inject, error::Error as DiError};
+use super::{Container, Dependencies, FromContainer, Inject, error::Error as DiError};
 use crate::{
     HttpRequest,
     error::Error,
@@ -91,8 +91,10 @@ impl<T: Send + Sync + 'static> TryFrom<&Extensions> for Dc<T> {
 
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
-        let container = Container::try_from(extensions)?;
-        Self::from_container(&container)
+        // Borrow the container rather than clone it. This runs once per `Dc<T>` argument
+        // of every handler, and the container is only read here.
+        let container: &Container = extensions.try_into()?;
+        Self::from_container(container)
     }
 }
 
@@ -136,6 +138,11 @@ impl<T: Send + Sync + 'static> Inject for Dc<T> {
     #[inline]
     fn inject(container: &Container) -> Result<Self, DiError> {
         container.resolve_shared::<T>().map(Dc)
+    }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
     }
 }
 

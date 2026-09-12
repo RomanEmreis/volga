@@ -155,7 +155,9 @@ impl TryFrom<&Parts> for PrivateCookies {
 
     #[inline]
     fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
-        Container::try_from(parts)?
+        // Borrowed: a clone of the request's container would write the registration map's
+        // count, which every request in flight shares
+        <&Container>::try_from(&parts.extensions)?
             .resolve::<PrivateKey>()
             .map(|key| PrivateCookies::from_headers(key, &parts.headers))
             .map_err(Into::into)
@@ -167,7 +169,7 @@ impl TryFrom<(&Extensions, &HeaderMap)> for PrivateCookies {
 
     #[inline]
     fn try_from((extensions, headers): (&Extensions, &HeaderMap)) -> Result<Self, Self::Error> {
-        Container::try_from(extensions)?
+        <&Container>::try_from(extensions)?
             .resolve::<PrivateKey>()
             .map(|key| PrivateCookies::from_headers(key, headers))
             .map_err(Into::into)

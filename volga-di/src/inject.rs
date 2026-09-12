@@ -2,6 +2,7 @@
 
 use crate::Container;
 use crate::error::Error;
+use std::any::TypeId;
 
 /// A trait that adds the ability to inject dependencies when resolving a type from the DI container
 ///
@@ -45,8 +46,86 @@ use crate::error::Error;
 pub trait Inject: Sized + Send + Sync {
     /// Constructs a type with dependencies
     fn inject(container: &Container) -> Result<Self, Error>;
+
+    /// Declares the services [`inject`](Self::inject) resolves from the container.
+    ///
+    /// [`ContainerBuilder::validate`](crate::ContainerBuilder::validate) reads these to
+    /// check the dependency graph before anything is resolved, so a cycle or a dependency
+    /// nobody registered is reported when the container is validated rather than when a
+    /// request first reaches it. The default declares nothing: that keeps the type out of
+    /// the check without making it wrong, and a cycle through it is still stopped when it
+    /// is resolved (see [`Container::resolve_shared`]).
+    ///
+    /// Declare exactly what `inject` resolves - a dependency declared here but never
+    /// resolved there is checked all the same.
+    ///
+    /// # Example
+    /// ```
+    /// use volga_di::{Container, ContainerBuilder, Dependencies, Inject, error::Error};
+    ///
+    /// #[derive(Default, Clone)]
+    /// struct Clock;
+    ///
+    /// struct Session {
+    ///     clock: Clock,
+    /// }
+    ///
+    /// impl Inject for Session {
+    ///     fn inject(container: &Container) -> Result<Self, Error> {
+    ///         Ok(Self { clock: container.resolve::<Clock>()? })
+    ///     }
+    ///
+    ///     fn dependencies(deps: &mut Dependencies) {
+    ///         deps.add::<Clock>();
+    ///     }
+    /// }
+    ///
+    /// let mut builder = ContainerBuilder::new();
+    /// builder.register_scoped::<Session>();
+    ///
+    /// // `Clock` is declared but not registered
+    /// assert!(builder.validate().is_err());
+    /// ```
+    #[inline]
+    fn dependencies(_deps: &mut Dependencies) {}
 }
 
+/// The services a type resolves when it is injected, as declared by
+/// [`Inject::dependencies`]
+#[derive(Debug)]
+pub struct Dependencies {
+    list: Vec<Dependency>,
+}
+
+/// One declared dependency: the service's type, and its name for reports
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Dependency {
+    pub(crate) id: TypeId,
+    pub(crate) name: &'static str,
+}
+
+impl Dependencies {
+    /// Declares that injecting this type resolves `T` from the container
+    #[inline]
+    pub fn add<T: Send + Sync + 'static>(&mut self) {
+        self.list.push(Dependency {
+            id: TypeId::of::<T>(),
+            name: std::any::type_name::<T>(),
+        });
+    }
+
+    /// Collects what `T` declares
+    #[inline]
+    pub(crate) fn of<T: Inject>() -> Vec<Dependency> {
+        let mut deps = Self { list: Vec::new() };
+        T::dependencies(&mut deps);
+        deps.list
+    }
+}
+
+// Handing out the container itself is the way around declaring anything: what is resolved
+// through it cannot be known here, so it declares nothing and is left to the check made
+// while resolving
 impl Inject for Container {
     #[inline]
     fn inject(container: &Container) -> Result<Self, Error> {
@@ -73,6 +152,11 @@ macro_rules! define_inject {
                     )*
                 );
                 Ok(tuple)
+            }
+
+            #[inline]
+            fn dependencies(deps: &mut Dependencies) {
+                $( $T::dependencies(deps); )*
             }
         }
     }

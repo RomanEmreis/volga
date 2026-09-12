@@ -270,8 +270,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //    redirect carrying the code
     let (_, headers, _) = http_get(&request.url, None).await?;
     let location = header(&headers, "location").expect("authorize must redirect");
-    let code = query_param(&location, "code").expect("redirect carries the code");
-    let state = query_param(&location, "state").expect("redirect carries the state");
+    let code = query_param(location, "code").expect("redirect carries the code");
+    let state = query_param(location, "state").expect("redirect carries the state");
     assert!(
         request.matches_state(&state),
         "state mismatch - possible CSRF"

@@ -23,11 +23,14 @@ fn has_ipv6_loopback() -> bool {
 
 /// A `reqwest::Client` with proxies disabled, so localhost probes are
 /// not redirected by HTTP(S)_PROXY env vars set in the test environment.
+///
+/// A server built without `http1` speaks only HTTP/2, which over cleartext
+/// takes prior knowledge - an HTTP/1.1 probe never gets an answer from it.
 fn local_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .no_proxy()
-        .build()
-        .expect("failed to build reqwest client")
+    let builder = reqwest::Client::builder().no_proxy();
+    #[cfg(not(feature = "http1"))]
+    let builder = builder.http2_prior_knowledge();
+    builder.build().expect("failed to build reqwest client")
 }
 
 async fn wait_until_listening(client: &reqwest::Client, url: &str) {

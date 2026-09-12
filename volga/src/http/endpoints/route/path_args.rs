@@ -51,6 +51,23 @@ impl PathArgs {
         self.args.iter()
     }
 
+    /// The number of args bound so far.
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.args.len()
+    }
+
+    /// Drops every arg past the first `len` of them.
+    ///
+    /// Used when a lookup unwinds a branch it had started to bind.
+    #[inline]
+    pub(crate) fn truncate(&mut self, len: usize) {
+        if len < self.args.len() {
+            self.args.truncate(len);
+            let _ = self.encoded.take();
+        }
+    }
+
     /// Returns the first arg, or `None` if it is empty.
     #[inline]
     #[allow(unused)]

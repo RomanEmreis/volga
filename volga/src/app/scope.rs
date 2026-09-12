@@ -1,6 +1,9 @@
 use futures_util::{TryFutureExt, future::BoxFuture};
 use std::net::SocketAddr;
-use std::sync::{Arc, Weak};
+use std::sync::Weak;
+
+#[cfg(feature = "ws")]
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use hyper::{
@@ -108,7 +111,7 @@ impl Scope {
         #[cfg(feature = "tls")]
         let host = request.headers().get(HOST).cloned();
 
-        let response = handle_impl(request, peer_addr, env.clone(), cancellation_token).await;
+        let response = handle_impl(request, peer_addr, &env, cancellation_token).await;
 
         finalize_response(
             method,
@@ -125,7 +128,7 @@ impl Scope {
 async fn handle_impl(
     request: Request<Incoming>,
     peer_addr: SocketAddr,
-    env: Arc<AppEnv>,
+    env: &AppEnv,
     cancellation_token: CancellationToken,
 ) -> HttpResult {
     {

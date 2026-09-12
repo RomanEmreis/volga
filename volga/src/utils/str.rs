@@ -37,6 +37,7 @@ pub(crate) struct MemchrSplitIter<'a> {
 
 /// An iterator over the substrings of a byte slice separated by a delimiter,
 /// excluding empty substrings.
+#[derive(Clone)]
 pub(crate) struct MemchrSplitNonEmpty<'a> {
     value: &'a [u8],
     iter: memchr::Memchr<'a>,

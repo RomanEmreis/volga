@@ -657,37 +657,6 @@ impl App {
     ///
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(feature = "middleware")]
-    pub async fn run(mut self) -> io::Result<()> {
-        self.use_endpoints();
-
-        let tcp_listener = self.connection.bind().await?;
-        self.run_internal(tcp_listener).await
-    }
-
-    /// Runs the [`App`] using the current asynchronous runtime.
-    ///
-    /// This method must be called inside an existing asynchronous context,
-    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
-    ///
-    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
-    /// It gives you full control over runtime configuration, task execution, and integration
-    /// with other async components.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> std::io::Result<()> {
-    ///     let app = App::new().bind("127.0.0.1:7878");
-    ///     app.run().await
-    /// }
-    /// ```
-    ///
-    /// # Errors
-    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(not(feature = "middleware"))]
     pub async fn run(self) -> io::Result<()> {
         let tcp_listener = self.connection.bind().await?;
         self.run_internal(tcp_listener).await
@@ -719,43 +688,6 @@ impl App {
     ///
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(feature = "middleware")]
-    pub fn run_with_listener(
-        mut self,
-        tcp_listener: TcpListener,
-    ) -> impl Future<Output = io::Result<()>> {
-        self.use_endpoints();
-
-        self.run_internal(tcp_listener)
-    }
-
-    /// Runs the [`App`] using the custom [`tokio::net::TcpListener`] in the current asynchronous runtime.
-    ///
-    /// This method must be called inside an existing asynchronous context,
-    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
-    ///
-    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
-    /// It gives you full control over runtime configuration, task execution, and integration
-    /// with other async components.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    /// use tokio::net::TcpListener;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> std::io::Result<()> {
-    ///     let app = App::new();
-    ///
-    ///     let listener = TcpListener::bind("localhost:7878").await?;
-    ///     
-    ///     app.run_with_listener(listener).await
-    /// }
-    /// ```
-    ///
-    /// # Errors
-    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(not(feature = "middleware"))]
     pub fn run_with_listener(
         self,
         tcp_listener: TcpListener,
@@ -789,45 +721,6 @@ impl App {
     ///
     /// # Errors
     /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(feature = "middleware")]
-    pub async fn run_with_std_listener(
-        mut self,
-        tcp_listener: std::net::TcpListener,
-    ) -> io::Result<()> {
-        self.use_endpoints();
-
-        tcp_listener.set_nonblocking(true)?;
-        let tcp_listener = TcpListener::from_std(tcp_listener)?;
-        self.run_internal(tcp_listener).await
-    }
-
-    /// Runs the [`App`] using the custom [`std::net::TcpListener`] in the current asynchronous runtime.
-    ///
-    /// This method must be called inside an existing asynchronous context,
-    /// typically from within a function annotated with `#[tokio::main]` or a manually started runtime.
-    ///
-    /// Unlike [`App::run_blocking`], this method does **not** create a runtime.
-    /// It gives you full control over runtime configuration, task execution, and integration
-    /// with other async components.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::App;
-    /// use std::net::TcpListener;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> std::io::Result<()> {
-    ///     let app = App::new();
-    ///
-    ///     let listener = TcpListener::bind("localhost:7878")?;
-    ///     
-    ///     app.run_with_std_listener(listener).await
-    /// }
-    /// ```
-    ///
-    /// # Errors
-    /// Returns an `io::Error` if the server fails to start or encounters a fatal error.
-    #[cfg(not(feature = "middleware"))]
     pub async fn run_with_std_listener(
         self,
         tcp_listener: std::net::TcpListener,
@@ -851,12 +744,56 @@ impl App {
 
         let no_delay = self.no_delay;
 
-        self.print_welcome(socket);
+        // Built here, where the app is still whole, and said further down. The greeter and
+        // the `listening on` line beside it are what an operator - and a readiness check
+        // tailing the log - read as "the server is up", which an app that is about to
+        // refuse to start has no business saying
+        let welcome = self.welcome(socket);
+
+        #[cfg(all(feature = "tls", feature = "tracing"))]
+        let serves_tls = self.tls_config.is_some();
+
+        let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
+        let shutdown_tx = Arc::new(shutdown_tx);
+
+        // What the background tasks below need, taken out of the app before it is converted
+        // into the instance they run alongside
+        let triggers = std::mem::take(&mut self.shutdown_triggers).0;
+        let shutdown_handle = if triggers.is_empty() {
+            self.shutdown_handle.clone()
+        } else {
+            // A trigger cancels the handle's token, so an app that was given one without a
+            // handle of its own gets a handle here
+            Some(
+                self.shutdown_handle
+                    .get_or_insert_with(ShutdownHandle::new)
+                    .clone(),
+            )
+        };
+
+        #[cfg(feature = "tls")]
+        let redirection_config = self
+            .tls_config
+            .as_ref()
+            .map(|config| config.https_redirection_config);
+
+        let active_connections = self.active_connections();
+
+        // Everything that can refuse to start is settled here - a dependency graph that does
+        // not resolve, a TLS key that does not load - and nothing is spawned or bound until
+        // it has. An app that does not start leaves no task of its own running and no second
+        // port taken, so a caller that handles the error and tries again finds them free
+        let app_instance: Arc<AppEnv> = Arc::new(self.try_into()?);
+
+        // Nothing is left that can refuse to start, so the server can be announced
+        if let Some(welcome) = welcome {
+            print!("{welcome}");
+        }
 
         #[cfg(feature = "tracing")]
         {
             #[cfg(feature = "tls")]
-            if self.tls_config.is_some() {
+            if serves_tls {
                 tracing::info!("listening on: https://{socket}")
             } else {
                 tracing::info!("listening on: http://{socket}")
@@ -865,17 +802,12 @@ impl App {
             tracing::info!("listening on: http://{socket}");
         }
 
-        let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
-        let shutdown_tx = Arc::new(shutdown_tx);
-
         // Spawn any async triggers registered via `App::shutdown_on`.
         // Each trigger cancels the handle's token when it resolves, and
         // exits early if another arm cancels the token first - otherwise
         // an unresolved watchdog future would leak its task after shutdown.
-        if !self.shutdown_triggers.0.is_empty() {
-            let handle = self.shutdown_handle.get_or_insert_with(ShutdownHandle::new);
-            let token = handle.token();
-            for trigger in self.shutdown_triggers.0.drain(..) {
+        if let Some(token) = shutdown_handle.as_ref().map(ShutdownHandle::token) {
+            for trigger in triggers {
                 let token = token.clone();
                 tokio::spawn(async move {
                     tokio::select! {
@@ -886,13 +818,7 @@ impl App {
             }
         }
 
-        Self::shutdown_signal(shutdown_rx, self.shutdown_handle.clone());
-
-        #[cfg(feature = "tls")]
-        let redirection_config = self
-            .tls_config
-            .as_ref()
-            .map(|config| config.https_redirection_config);
+        Self::shutdown_signal(shutdown_rx, shutdown_handle);
 
         #[cfg(feature = "tls")]
         if let Some(redirection_config) = redirection_config
@@ -904,9 +830,6 @@ impl App {
                 shutdown_tx.clone(),
             );
         }
-
-        let active_connections = self.active_connections();
-        let app_instance: Arc<AppEnv> = Arc::new(self.try_into()?);
 
         // Spawn hot-reload background task if requested.
         // The task selects on shutdown_tx.closed() so it terminates cleanly.
