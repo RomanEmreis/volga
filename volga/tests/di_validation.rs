@@ -51,6 +51,35 @@ async fn it_refuses_to_start_on_a_dependency_nobody_registered() {
     );
 }
 
+/// A graph that does not resolve stops the app before anything is started, not after. What
+/// this can observe is a `shutdown_on` trigger: a spawned one is polled, one that was never
+/// spawned is dropped without ever being. The same ordering is what keeps the HTTPS redirect
+/// listener of a TLS app from being left bound on a start that failed.
+#[tokio::test]
+async fn it_starts_no_background_task_when_the_graph_does_not_resolve() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let polled = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&polled);
+
+    let mut app = App::new().without_greeter().shutdown_on(async move {
+        flag.store(true, Ordering::SeqCst);
+        std::future::pending::<()>().await;
+    });
+    app.add_scoped_factory(|_: Dc<Unregistered>| Ok(A));
+
+    let _ = startup_error(app).await;
+    tokio::task::yield_now().await;
+
+    assert!(
+        !polled.load(Ordering::SeqCst),
+        "a shutdown trigger ran before the graph was known to resolve"
+    );
+}
+
 #[cfg(feature = "test")]
 #[tokio::test]
 async fn it_starts_with_a_graph_that_resolves() {

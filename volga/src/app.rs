@@ -761,14 +761,41 @@ impl App {
         let (shutdown_tx, shutdown_rx) = watch::channel::<()>(());
         let shutdown_tx = Arc::new(shutdown_tx);
 
+        // What the background tasks below need, taken out of the app before it is converted
+        // into the instance they run alongside
+        let triggers = std::mem::take(&mut self.shutdown_triggers).0;
+        let shutdown_handle = if triggers.is_empty() {
+            self.shutdown_handle.clone()
+        } else {
+            // A trigger cancels the handle's token, so an app that was given one without a
+            // handle of its own gets a handle here
+            Some(
+                self.shutdown_handle
+                    .get_or_insert_with(ShutdownHandle::new)
+                    .clone(),
+            )
+        };
+
+        #[cfg(feature = "tls")]
+        let redirection_config = self
+            .tls_config
+            .as_ref()
+            .map(|config| config.https_redirection_config);
+
+        let active_connections = self.active_connections();
+
+        // Everything that can refuse to start is settled here - a dependency graph that does
+        // not resolve, a TLS key that does not load - and nothing is spawned or bound until
+        // it has. An app that does not start leaves no task of its own running and no second
+        // port taken, so a caller that handles the error and tries again finds them free
+        let app_instance: Arc<AppEnv> = Arc::new(self.try_into()?);
+
         // Spawn any async triggers registered via `App::shutdown_on`.
         // Each trigger cancels the handle's token when it resolves, and
         // exits early if another arm cancels the token first - otherwise
         // an unresolved watchdog future would leak its task after shutdown.
-        if !self.shutdown_triggers.0.is_empty() {
-            let handle = self.shutdown_handle.get_or_insert_with(ShutdownHandle::new);
-            let token = handle.token();
-            for trigger in self.shutdown_triggers.0.drain(..) {
+        if let Some(token) = shutdown_handle.as_ref().map(ShutdownHandle::token) {
+            for trigger in triggers {
                 let token = token.clone();
                 tokio::spawn(async move {
                     tokio::select! {
@@ -779,13 +806,7 @@ impl App {
             }
         }
 
-        Self::shutdown_signal(shutdown_rx, self.shutdown_handle.clone());
-
-        #[cfg(feature = "tls")]
-        let redirection_config = self
-            .tls_config
-            .as_ref()
-            .map(|config| config.https_redirection_config);
+        Self::shutdown_signal(shutdown_rx, shutdown_handle);
 
         #[cfg(feature = "tls")]
         if let Some(redirection_config) = redirection_config
@@ -797,9 +818,6 @@ impl App {
                 shutdown_tx.clone(),
             );
         }
-
-        let active_connections = self.active_connections();
-        let app_instance: Arc<AppEnv> = Arc::new(self.try_into()?);
 
         // Spawn hot-reload background task if requested.
         // The task selects on shutdown_tx.closed() so it terminates cleanly.
