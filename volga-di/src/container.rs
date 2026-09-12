@@ -100,13 +100,22 @@ fn scoped_cells(len: usize) -> Arc<[ScopedCell]> {
 }
 
 thread_local! {
-    /// The services this thread is constructing right now, outermost first.
+    /// The services this thread is constructing right now, outermost first, each with the
+    /// registrations it is being built out of.
     ///
     /// Resolution is synchronous, so a construction that leads back to a service already
     /// on this stack is a dependency cycle - one that would otherwise re-enter a scoped
     /// cell in the middle of its initialization and deadlock, or recurse through
     /// transients until the stack overflows and takes the process with it.
-    static CONSTRUCTING: RefCell<Vec<(TypeId, &'static str)>> = const { RefCell::new(Vec::new()) };
+    ///
+    /// The registrations are half of the key because a service type says nothing on its
+    /// own: a factory may build its service out of a container of its own, and two
+    /// containers that share nothing but a type are not a loop. A container and every scope
+    /// created from it do share their registrations, so a cycle through a scope is still
+    /// one. No entry here can name registrations that are gone: each is being resolved
+    /// from further up this call stack, which is what holds them alive.
+    static CONSTRUCTING: RefCell<Vec<(usize, TypeId, &'static str)>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 /// Marks a service as under construction on this thread for as long as it lives, and
@@ -115,24 +124,31 @@ struct Constructing;
 
 impl Constructing {
     /// # Panics
-    /// if `T` is already under construction on this thread: a dependency cycle
+    /// if `T` is already under construction on this thread out of the same registrations:
+    /// a dependency cycle
     #[inline]
-    fn enter<T: 'static>() -> Self {
+    fn enter<T: 'static>(graph: usize) -> Self {
         let id = TypeId::of::<T>();
         let name = std::any::type_name::<T>();
 
         // Build the report inside the borrow and panic outside it, so nothing unwinding
         // from here finds the stack still borrowed
         let cycle = CONSTRUCTING.with_borrow_mut(|stack| {
-            if let Some(start) = stack.iter().position(|(entered, _)| *entered == id) {
+            let entered = stack
+                .iter()
+                .position(|(from, entered, _)| *from == graph && *entered == id);
+
+            if let Some(start) = entered {
                 let mut path = stack[start..]
                     .iter()
-                    .map(|(_, name)| *name)
+                    .map(|(_, _, name)| *name)
                     .collect::<Vec<_>>();
+
                 path.push(name);
+
                 return Some(path.join(" -> "));
             }
-            stack.push((id, name));
+            stack.push((graph, id, name));
             None
         });
 
@@ -516,6 +532,13 @@ impl Container {
         }
     }
 
+    /// Identifies the registrations this container resolves out of: the same for every scope
+    /// created from it, and not the same as those of a container built anywhere else
+    #[inline]
+    fn graph(&self) -> usize {
+        Arc::as_ptr(&self.services) as usize
+    }
+
     /// Fetches the service entry or return an error if not registered.
     #[inline]
     fn get_service_entry<T: Send + Sync + 'static>(&self) -> Result<&ServiceEntry, Error> {
@@ -531,7 +554,7 @@ impl Container {
         &self,
         resolver_fn: &ResolverFn,
     ) -> Result<Arc<T>, Error> {
-        let _constructing = Constructing::enter::<T>();
+        let _constructing = Constructing::enter::<T>(self.graph());
         // Just built and held by nothing else, so it is downcast as it is, not through
         // another handle on it
         resolver_fn(self)?
@@ -561,7 +584,7 @@ impl Container {
                 // Enter before `get_or_init`, not inside it: a cycle comes back to this very
                 // cell, and `OnceLock` deadlocks on reentrant initialization before the
                 // closure would get a chance to notice
-                let _constructing = Constructing::enter::<T>();
+                let _constructing = Constructing::enter::<T>(self.graph());
                 cell.get_or_init(|| resolver_fn(self))
             }
         };
@@ -1099,6 +1122,20 @@ mod tests {
         }
     }
 
+    /// Resolves itself out of a scope of the very container it is being built in
+    struct ThroughScope;
+
+    impl Inject for ThroughScope {
+        fn inject(container: &Container) -> Result<Self, Error> {
+            container.create_scope().resolve_shared::<ThroughScope>()?;
+            Ok(Self)
+        }
+    }
+
+    /// A service type that more than one container registers
+    #[derive(Clone)]
+    struct Tenant(&'static str);
+
     struct Ping;
     struct Pong;
 
@@ -1323,6 +1360,49 @@ mod tests {
             message.contains(&format!("{pong} -> {ping} -> {pong}")),
             "{message}"
         );
+    }
+
+    #[test]
+    fn it_reports_a_cycle_that_goes_through_a_scope_of_the_same_container() {
+        // A scope carries the registrations it was created from, so this is one graph
+        let message = outcome(|| {
+            let mut builder = ContainerBuilder::new();
+            builder.register_transient::<ThroughScope>();
+            let _ = builder.build().resolve_shared::<ThroughScope>();
+        })
+        .expect("the cycle was not reported");
+
+        let through_scope = type_name::<ThroughScope>();
+        assert!(
+            message.contains(&format!("{through_scope} -> {through_scope}")),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn it_does_not_report_a_cycle_across_independent_containers() {
+        let panicked = outcome(|| {
+            let mut inner = ContainerBuilder::new();
+            inner.register_transient_factory(|| Tenant("inner"));
+            let inner = inner.build();
+
+            // The outer container builds its own `Tenant` out of the one the inner container
+            // resolves - a second graph that happens to carry the same service type
+            let mut outer = ContainerBuilder::new();
+            outer.register_transient_factory(move || {
+                let Tenant(name) = inner.resolve::<Tenant>().expect("the inner container");
+                Tenant(name)
+            });
+
+            let tenant = outer
+                .build()
+                .resolve::<Tenant>()
+                .expect("the outer container");
+
+            assert_eq!(tenant.0, "inner");
+        });
+
+        assert_eq!(panicked, None, "two containers are not one graph");
     }
 
     #[test]
