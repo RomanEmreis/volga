@@ -3,7 +3,6 @@
 use super::App;
 use super::pipeline::Pipeline;
 use crate::{Limit, headers::HeaderValue, http::request::request_body_limit::RequestBodyLimit};
-use hyper_util::server::graceful::GracefulShutdown;
 use std::io::Error;
 
 #[cfg(any(
@@ -52,8 +51,6 @@ use crate::limits::Http2Limits;
 ))]
 use crate::middleware::decompress::ResolvedDecompressionLimits;
 
-pub(crate) const GRACEFUL_SHUTDOWN_TIMEOUT: u64 = 10;
-
 /// The application runtime environment, formed from [`App`].
 ///
 /// Stores immutable settings and shared Web Server resources
@@ -66,9 +63,6 @@ pub(crate) struct AppEnv {
 
     /// Maximum number of HTTP headers per request.
     pub(crate) max_header_count: Limit<usize>,
-
-    /// Graceful shutdown utilities
-    pub(crate) graceful_shutdown: GracefulShutdown,
 
     /// Request/Middleware pipeline
     pub(super) pipeline: Pipeline,
@@ -220,7 +214,6 @@ impl TryFrom<App> for AppEnv {
         let app_instance = Self {
             body_limit: app.body_limit,
             pipeline: app.pipeline.build(),
-            graceful_shutdown: GracefulShutdown::new(),
             max_header_count: app.max_header_count,
             max_header_size: app.max_header_size,
             cache_control: default_cache_control,
@@ -255,23 +248,6 @@ impl TryFrom<App> for AppEnv {
             config: app.config_store,
         };
         Ok(app_instance)
-    }
-}
-
-impl AppEnv {
-    /// Gracefully shutdown current instance
-    #[inline]
-    pub(super) async fn shutdown(self) {
-        tokio::select! {
-            _ = self.graceful_shutdown.shutdown() => {
-                #[cfg(feature = "tracing")]
-                tracing::info!("shutting down the server...");
-            },
-            _ = tokio::time::sleep(std::time::Duration::from_secs(GRACEFUL_SHUTDOWN_TIMEOUT)) => {
-                #[cfg(feature = "tracing")]
-                tracing::warn!("timed out wait for all connections to close");
-            }
-        }
     }
 }
 

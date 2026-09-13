@@ -1,8 +1,11 @@
 #![allow(missing_docs)]
 #![cfg(all(feature = "test", feature = "tls"))]
 
-use reqwest::{Certificate, Identity, redirect::Policy};
-use std::{sync::Once, time::Duration};
+use reqwest::{Certificate, Identity, Version, redirect::Policy};
+use std::{
+    sync::Once,
+    time::{Duration, Instant},
+};
 use volga::headers::{LOCATION, STRICT_TRANSPORT_SECURITY};
 use volga::http::StatusCode;
 use volga::test::TestServer;
@@ -323,8 +326,8 @@ async fn it_works_with_tls_with_https_redirection() {
     server.shutdown().await;
 }
 
-#[tokio::test]
-async fn it_returns_404_if_no_host() {
+/// A TLS server redirecting plain HTTP from a port of its own, and that port
+async fn redirecting_server() -> (TestServer, u16) {
     init_crypto();
 
     let http_port = TestServer::get_free_port();
@@ -335,12 +338,6 @@ async fn it_returns_404_if_no_host() {
                 "tests/tls/server.key",
             ))
             .with_tls(|tls| tls.with_https_redirection().with_http_port(http_port))
-            .with_hsts(|hsts| {
-                hsts.without_preload()
-                    .with_sub_domains()
-                    .with_max_age(Duration::from_secs(60))
-                    .with_exclude_hosts(["example.com", "example.net"])
-            })
         })
         .setup(|app| {
             app.map_get("/tls", || async { "Pass!" });
@@ -348,12 +345,67 @@ async fn it_returns_404_if_no_host() {
         .build()
         .await;
 
-    let ca_cert = include_bytes!("tls/ca.pem");
-    let ca_certificate = Certificate::from_pem(ca_cert).unwrap();
+    // The redirection listener binds in a task of its own, after the server's port is taken
+    drop(connect(http_port).await);
 
-    let response = server
-        .client_builder()
-        .add_root_certificate(ca_certificate)
+    (server, http_port)
+}
+
+/// Connects to a local port, waiting for something to listen on it
+async fn connect(port: u16) -> tokio::net::TcpStream {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+            Ok(stream) => return stream,
+            Err(_) if Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(20)).await
+            }
+            Err(err) => panic!("nothing started listening on port {port}: {err}"),
+        }
+    }
+}
+
+fn ca_certificate() -> Certificate {
+    Certificate::from_pem(include_bytes!("tls/ca.pem")).unwrap()
+}
+
+/// A browser arrives at a plain-HTTP port with HTTP/1.1, and has to be redirected whether or
+/// not HTTP/2 is enabled beside it
+#[tokio::test]
+#[cfg(feature = "http1")]
+async fn it_redirects_an_http1_request_to_https() {
+    let (server, http_port) = redirecting_server().await;
+
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .http1_only()
+        .redirect(Policy::none())
+        .build()
+        .unwrap()
+        .get(format!("http://localhost:{http_port}/tls?a=b"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.version(), Version::HTTP_11);
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        response.headers().get(&LOCATION).unwrap(),
+        format!("https://localhost:{}/tls?a=b", server.port).as_str()
+    );
+
+    server.shutdown().await;
+}
+
+/// HTTP/2 sends the host as `:authority`, never as a `Host` header
+#[tokio::test]
+#[cfg(feature = "http2")]
+async fn it_redirects_an_http2_request_to_https_by_its_authority() {
+    let (server, http_port) = redirecting_server().await;
+
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .http2_prior_knowledge()
         .redirect(Policy::none())
         .build()
         .unwrap()
@@ -362,5 +414,134 @@ async fn it_returns_404_if_no_host() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(response.version(), Version::HTTP_2);
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        response.headers().get(&LOCATION).unwrap(),
+        format!("https://localhost:{}/tls", server.port).as_str()
+    );
+
+    server.shutdown().await;
+}
+
+/// RFC 9112 Section 3.2: an HTTP/1.1 request without `Host` is answered `400`. Every client
+/// library adds the header, so the request is written by hand
+#[tokio::test]
+#[cfg(feature = "http1")]
+async fn it_answers_400_to_a_request_with_no_host() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (server, http_port) = redirecting_server().await;
+
+    let mut stream = connect(http_port).await;
+    stream
+        .write_all(b"GET /tls HTTP/1.1\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+
+    assert!(
+        response.starts_with("HTTP/1.1 400 "),
+        "unexpected response: {response}"
+    );
+
+    server.shutdown().await;
+}
+
+/// Excludes `localhost` from HSTS - by name, with no port - and asserts the header goes to
+/// every host but that one, whatever port it is reached on
+async fn assert_hsts_skips_the_excluded_host(client: reqwest::ClientBuilder, version: Version) {
+    init_crypto();
+
+    let server = TestServer::builder()
+        .with_https()
+        .configure(|app| {
+            app.set_tls(TlsConfig::from_pem_files(
+                "tests/tls/server.pem",
+                "tests/tls/server.key",
+            ))
+            .with_hsts(|hsts| hsts.with_exclude_hosts(["localhost"]))
+        })
+        .setup(|app| {
+            app.map_get("/tls", || async { "Pass!" });
+        })
+        .build()
+        .await;
+
+    let client = client
+        .no_proxy()
+        .add_root_certificate(ca_certificate())
+        .build()
+        .unwrap();
+
+    let excluded = client
+        .get(format!("https://localhost:{}/tls", server.port))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(excluded.version(), version);
+    assert!(excluded.status().is_success());
+    assert!(excluded.headers().get(STRICT_TRANSPORT_SECURITY).is_none());
+
+    let other = client
+        .get(format!("https://127.0.0.1:{}/tls", server.port))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(other.version(), version);
+    assert!(other.status().is_success());
+    assert!(other.headers().get(STRICT_TRANSPORT_SECURITY).is_some());
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[cfg(feature = "http1")]
+async fn it_does_not_send_hsts_to_an_excluded_host_over_http1() {
+    assert_hsts_skips_the_excluded_host(reqwest::Client::builder().http1_only(), Version::HTTP_11)
+        .await;
+}
+
+#[tokio::test]
+#[cfg(feature = "http2")]
+async fn it_does_not_send_hsts_to_an_excluded_host_over_http2() {
+    assert_hsts_skips_the_excluded_host(
+        reqwest::Client::builder().http2_prior_knowledge(),
+        Version::HTTP_2,
+    )
+    .await;
+}
+
+/// A client that opened a connection and stalls the TLS handshake has sent no request, so
+/// there is nothing to drain: shutting down must not wait on it
+#[tokio::test]
+async fn shutdown_does_not_wait_for_a_stalled_tls_handshake() {
+    use volga::App;
+
+    init_crypto();
+
+    let port = TestServer::get_free_port();
+    let (app, handle) = App::with_shutdown();
+    let app = app
+        .bind(format!("127.0.0.1:{port}"))
+        .without_greeter()
+        .set_tls(TlsConfig::from_pem_files(
+            "tests/tls/server.pem",
+            "tests/tls/server.key",
+        ));
+    let task = tokio::spawn(async move { app.run().await });
+
+    // Connected, and then silent - no ClientHello ever arrives
+    let _stalled = connect(port).await;
+    // Give the accept loop a moment to take the connection in
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    handle.shutdown();
+
+    tokio::time::timeout(Duration::from_secs(2), task)
+        .await
+        .expect("server waited on a connection that never finished its TLS handshake")
+        .expect("server task panicked")
+        .expect("server returned an error");
 }

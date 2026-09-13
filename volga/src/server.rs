@@ -2,6 +2,7 @@
 
 use crate::app::{AppEnv, scope::Scope};
 use hyper::rt::{Read, Write};
+use hyper_util::server::graceful::Watcher;
 use std::net::SocketAddr;
 use std::sync::Weak;
 
@@ -25,10 +26,10 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     }
 
     #[inline]
-    pub(super) async fn serve(self, env: Weak<AppEnv>) {
+    pub(super) async fn serve(self, env: Weak<AppEnv>, watcher: Watcher) {
         if let Some(instance) = env.upgrade() {
             let scope = Scope::new(env, self.peer_addr);
-            self.serve_core(scope, instance).await;
+            self.serve_core(scope, instance, watcher).await;
         } else {
             #[cfg(feature = "tracing")]
             tracing::warn!("app instance could not be upgraded; aborting...");

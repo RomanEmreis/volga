@@ -1,6 +1,12 @@
 //! HTTPS/TLS protocol implementations and middlewares
 
-use crate::{App, app::AppEnv, error::Error, headers::HeaderValue};
+use crate::{
+    App,
+    app::AppEnv,
+    error::Error,
+    headers::{HOST, HeaderMap, HeaderValue},
+};
+use hyper::Uri;
 use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 
 use std::{
@@ -28,17 +34,14 @@ use tokio_rustls::{
 
 use crate::tls::https_redirect::HttpsRedirectionMiddleware;
 
-#[cfg(any(
-    all(feature = "http1", feature = "http2"),
-    all(feature = "http2", not(feature = "http1"))
-))]
-use hyper::server::conn::http2;
-
-#[cfg(any(
-    all(feature = "http1", feature = "http2"),
-    all(feature = "http2", not(feature = "http1"))
-))]
+#[cfg(feature = "http2")]
 use hyper_util::rt::TokioExecutor;
+
+#[cfg(all(feature = "http1", feature = "http2"))]
+use hyper_util::server::conn::auto;
+
+#[cfg(all(feature = "http2", not(feature = "http1")))]
+use hyper::server::conn::http2;
 
 #[cfg(all(feature = "http1", not(feature = "http2")))]
 use hyper::server::conn::http1;
@@ -128,10 +131,10 @@ pub struct HstsConfig {
 #[derive(Debug, Clone)]
 pub struct HstsHeader {
     /// Inner [`HeaderValue`]
-    pub(super) inner: HeaderValue,
+    inner: HeaderValue,
 
-    /// A list of hosts names that will not add the HSTS header.
-    pub(super) exclude_hosts: Vec<String>,
+    /// Host names that are not sent the HSTS header, normalized and lowercased
+    exclude_hosts: Vec<String>,
 }
 
 /// Represents a type of Client Auth
@@ -290,16 +293,18 @@ impl HstsConfig {
 
     /// Configures a list of host names that will not add the HSTS header.
     ///
+    /// A host is matched by its name alone: a browser keeps an HSTS policy per host name and
+    /// applies it whatever port the host is reached on, so `example.com` also excludes
+    /// `example.com:8443`, and a port written here is ignored. Case, surrounding whitespace
+    /// and a trailing dot are ignored as well.
+    ///
     /// Default: empty list
     pub fn with_exclude_hosts<I, S>(mut self, hosts: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        self.exclude_hosts = hosts
-            .into_iter()
-            .map(|h| normalize_host(h.as_ref()).to_ascii_lowercase())
-            .collect();
+        self.exclude_hosts = hosts.into_iter().map(|h| h.as_ref().to_owned()).collect();
         self
     }
 }
@@ -328,8 +333,17 @@ impl HstsHeader {
 
         let header_value = HeaderValue::from_str(&value).expect("valid HSTS header");
 
+        // Normalized here rather than where the hosts are configured: a configuration read from
+        // a file never passes through `HstsConfig::with_exclude_hosts`, and this is the one
+        // point every configuration goes through on its way to a running server
+        let exclude_hosts = config
+            .exclude_hosts
+            .iter()
+            .map(|host| normalize_host(host).to_ascii_lowercase())
+            .collect();
+
         Self {
-            exclude_hosts: config.exclude_hosts,
+            exclude_hosts,
             inner: header_value,
         }
     }
@@ -338,6 +352,23 @@ impl HstsHeader {
     #[inline]
     pub(super) fn value(&self) -> HeaderValue {
         self.inner.clone()
+    }
+
+    /// Whether a request is to be answered with the header: every request is, except one
+    /// addressed to an excluded host
+    #[inline]
+    pub(crate) fn applies_to(&self, uri: &Uri, headers: &HeaderMap) -> bool {
+        if self.exclude_hosts.is_empty() {
+            return true;
+        }
+
+        request_authority(uri, headers).is_none_or(|authority| {
+            let host = normalize_host(authority);
+            !self
+                .exclude_hosts
+                .iter()
+                .any(|excluded| excluded.eq_ignore_ascii_case(host))
+        })
     }
 }
 
@@ -744,22 +775,24 @@ impl App {
         graceful_shutdown: &GracefulShutdown,
     ) {
         let io = TokioIo::new(stream);
+        let watcher = graceful_shutdown.watcher();
 
-        #[cfg(all(feature = "http1", not(feature = "http2")))]
-        let connection_builder = http1::Builder::new();
-
-        #[cfg(any(
-            all(feature = "http1", feature = "http2"),
-            all(feature = "http2", not(feature = "http1"))
-        ))]
-        let connection_builder = http2::Builder::new(TokioExecutor::new());
-
-        let connection =
-            connection_builder.serve_connection(io, HttpsRedirectionMiddleware::new(https_port));
-
-        let connection = graceful_shutdown.watch(connection);
         tokio::spawn(async move {
-            if let Err(_err) = connection.await {
+            #[cfg(all(feature = "http1", not(feature = "http2")))]
+            let connection_builder = http1::Builder::new();
+
+            // A plain-HTTP port is where a browser arrives with HTTP/1.1, so with HTTP/2 enabled
+            // as well the listener has to tell the two apart rather than expect HTTP/2 alone
+            #[cfg(all(feature = "http1", feature = "http2"))]
+            let connection_builder = auto::Builder::new(TokioExecutor::new());
+
+            #[cfg(all(feature = "http2", not(feature = "http1")))]
+            let connection_builder = http2::Builder::new(TokioExecutor::new());
+
+            let connection = connection_builder
+                .serve_connection(io, HttpsRedirectionMiddleware::new(https_port));
+
+            if let Err(_err) = watcher.watch(connection).await {
                 #[cfg(feature = "tracing")]
                 tracing::error!("error serving connection: {_err:#}");
             }
@@ -767,20 +800,46 @@ impl App {
     }
 }
 
-/// Normalizes a host name for comparison: trims whitespace, strips a default
-/// `:443`/`:80` port and trailing dots. Borrow-only - case is preserved, so
-/// compare results with [`str::eq_ignore_ascii_case`] (or lowercase once when
-/// storing, as [`HstsConfig::with_exclude_hosts`] does).
+/// Reduces a host, or the authority naming it, to the host name HSTS compares: surrounding
+/// whitespace, a userinfo, any port and a trailing dot are dropped, so
+/// `user@Example.com.:8443` becomes `Example.com`. Borrow-only - case is preserved, so
+/// compare results with [`str::eq_ignore_ascii_case`], or lowercase once when storing, as
+/// `HstsHeader::new` does.
 #[inline]
-pub(crate) fn normalize_host(host: &str) -> &str {
+fn normalize_host(host: &str) -> &str {
     let host = host.trim();
+    let host = host.rsplit_once('@').map_or(host, |(_, host)| host);
 
-    let host = match host.rsplit_once(':') {
-        Some((h, "443" | "80")) => h,
-        _ => host,
+    let host = match host.strip_prefix('[') {
+        // An IPv6 literal carries colons of its own, so its port can only follow the bracket
+        Some(literal) => literal.find(']').map_or(host, |end| &host[..end + 2]),
+        None => host.split_once(':').map_or(host, |(name, _)| name),
     };
 
     host.trim_end_matches('.')
+}
+
+/// The authority a request is addressed to: the one its target carries, if any, and its
+/// `Host` header otherwise.
+///
+/// Reading the header alone finds nothing over HTTP/2, which sends the host as the
+/// `:authority` pseudo-header - it lands in the request URI and never becomes a `Host` header
+/// (RFC 9113 Section 8.3.1). An HTTP/1.1 target in absolute form carries one as well, and
+/// RFC 9112 Section 3.2.2 has it take precedence over `Host`.
+///
+/// A `Host` header that appears more than once, or whose value is not visible ASCII, yields
+/// `None`: RFC 9112 Section 3.2 has such a request rejected rather than read.
+#[inline]
+fn request_authority<'a>(uri: &'a Uri, headers: &'a HeaderMap) -> Option<&'a str> {
+    if let Some(authority) = uri.authority() {
+        return Some(authority.as_str());
+    }
+
+    let mut hosts = headers.get_all(HOST).iter();
+    match (hosts.next(), hosts.next()) {
+        (Some(host), None) => host.to_str().ok(),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -789,6 +848,7 @@ mod tests {
         CERT_FILE_NAME, ClientAuth, DEFAULT_MAX_AGE, DEFAULT_PORT, HstsConfig, KEY_FILE_NAME,
         RedirectionConfig, TlsConfig, normalize_host,
     };
+    use super::{HOST, HeaderMap, HeaderValue, Uri, request_authority};
     use crate::{App, tls::HstsHeader};
     use std::path::PathBuf;
     use std::time::Duration;
@@ -1105,9 +1165,12 @@ mod tests {
         assert_eq!(normalize_host(" example.com. "), "example.com");
         assert_eq!(normalize_host("Example.COM:443"), "Example.COM");
         assert_eq!(normalize_host("example.com:80"), "example.com");
-        assert_eq!(normalize_host("example.com:8443"), "example.com:8443");
-        assert_eq!(normalize_host("[::1]:443"), "[::1]");
+        assert_eq!(normalize_host("example.com:8443"), "example.com");
+        assert_eq!(normalize_host("example.com.:8443"), "example.com");
+        assert_eq!(normalize_host("user@example.com:8443"), "example.com");
+        assert_eq!(normalize_host("[::1]:8443"), "[::1]");
         assert_eq!(normalize_host("[::1]"), "[::1]");
+        assert_eq!(normalize_host("127.0.0.1:8443"), "127.0.0.1");
     }
 
     #[test]
@@ -1116,12 +1179,73 @@ mod tests {
             "www.ExAmplE.com.",
             "www.ExAmplE.net:80",
             "www.ExAmplE.org:443",
+            "www.ExAmplE.io:8443",
         ]);
 
         assert_eq!(
-            hsts_config.exclude_hosts,
-            &["www.example.com", "www.example.net", "www.example.org"]
+            HstsHeader::new(hsts_config).exclude_hosts,
+            &[
+                "www.example.com",
+                "www.example.net",
+                "www.example.org",
+                "www.example.io"
+            ]
         );
+    }
+
+    #[test]
+    #[cfg(feature = "config")]
+    fn it_normalizes_excluded_hosts_read_from_a_config_file() {
+        let tls_config: TlsConfig = serde_json::from_value(serde_json::json!({
+            "hsts_config": { "exclude_hosts": ["Example.COM.:443"] }
+        }))
+        .unwrap();
+
+        let hsts_header = HstsHeader::new(tls_config.hsts_config);
+
+        assert_eq!(hsts_header.exclude_hosts, &["example.com"]);
+    }
+
+    fn hsts_excluding(hosts: &[&str]) -> HstsHeader {
+        HstsHeader::new(HstsConfig::default().with_exclude_hosts(hosts))
+    }
+
+    #[test]
+    fn it_does_not_apply_hsts_to_a_host_named_by_the_host_header() {
+        let (uri, headers) = uri_and_headers("/", &["Example.com:8443"]);
+
+        assert!(!hsts_excluding(&["example.com"]).applies_to(&uri, &headers));
+    }
+
+    #[test]
+    fn it_does_not_apply_hsts_to_a_host_named_by_the_request_target() {
+        // An HTTP/2 request carries its host only as `:authority`
+        let (uri, headers) = uri_and_headers("https://example.com:8443/", &[]);
+
+        assert!(!hsts_excluding(&["example.com:443"]).applies_to(&uri, &headers));
+    }
+
+    #[test]
+    fn it_applies_hsts_to_a_host_that_is_not_excluded() {
+        let (uri, headers) = uri_and_headers("https://example.org/", &[]);
+        assert!(hsts_excluding(&["example.com"]).applies_to(&uri, &headers));
+
+        let (uri, headers) = uri_and_headers("/", &["sub.example.com"]);
+        assert!(hsts_excluding(&["example.com"]).applies_to(&uri, &headers));
+    }
+
+    #[test]
+    fn it_applies_hsts_to_a_request_with_no_host() {
+        let (uri, headers) = uri_and_headers("/", &[]);
+
+        assert!(hsts_excluding(&["example.com"]).applies_to(&uri, &headers));
+    }
+
+    #[test]
+    fn it_applies_hsts_to_every_request_when_nothing_is_excluded() {
+        let (uri, headers) = uri_and_headers("https://example.com/", &[]);
+
+        assert!(hsts_excluding(&[]).applies_to(&uri, &headers));
     }
 
     #[test]
@@ -1138,5 +1262,60 @@ mod tests {
         let _ = HstsConfig::default()
             .with_max_age(Duration::from_secs(3600))
             .with_preload();
+    }
+
+    fn uri_and_headers(uri: &'static str, hosts: &[&'static str]) -> (Uri, HeaderMap) {
+        let mut headers = HeaderMap::new();
+        for host in hosts {
+            headers.append(HOST, HeaderValue::from_static(host));
+        }
+        (Uri::from_static(uri), headers)
+    }
+
+    #[test]
+    fn it_reads_the_authority_from_the_request_target() {
+        // What HTTP/2 hands over: `:authority` in the URI, no `Host` header
+        let (uri, headers) = uri_and_headers("http://example.com:8080/path", &[]);
+
+        assert_eq!(request_authority(&uri, &headers), Some("example.com:8080"));
+    }
+
+    #[test]
+    fn it_reads_the_authority_from_the_host_header() {
+        let (uri, headers) = uri_and_headers("/path", &["example.com"]);
+
+        assert_eq!(request_authority(&uri, &headers), Some("example.com"));
+    }
+
+    #[test]
+    fn it_prefers_the_request_target_to_the_host_header() {
+        let (uri, headers) = uri_and_headers("http://example.com/path", &["example.net"]);
+
+        assert_eq!(request_authority(&uri, &headers), Some("example.com"));
+    }
+
+    #[test]
+    fn it_finds_no_authority_without_a_host() {
+        let (uri, headers) = uri_and_headers("/path", &[]);
+
+        assert_eq!(request_authority(&uri, &headers), None);
+    }
+
+    #[test]
+    fn it_finds_no_authority_in_more_than_one_host_header() {
+        let (uri, headers) = uri_and_headers("/path", &["example.com", "example.net"]);
+
+        assert_eq!(request_authority(&uri, &headers), None);
+    }
+
+    #[test]
+    fn it_finds_no_authority_in_a_host_header_that_is_not_visible_ascii() {
+        let mut headers = HeaderMap::new();
+        headers.insert(HOST, HeaderValue::from_bytes(b"exampl\xe9.com").unwrap());
+
+        assert_eq!(
+            request_authority(&Uri::from_static("/path"), &headers),
+            None
+        );
     }
 }

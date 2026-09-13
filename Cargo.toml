@@ -40,7 +40,7 @@ hyper              = "1.11.1"
 hyper-util         = "0.1.20"
 jsonwebtoken       = "11.0.0"
 mime               = "0.3.17"
-reqwest            = "0.13.4"
+reqwest            = "0.13.5"
 serde              = "1.0.229"
 serde_json         = "1.0.151"
 serde_urlencoded   = "0.7.1"
@@ -50,7 +50,7 @@ tokio              = "1.53.1"
 # them asks for them itself
 tracing            = { version = "0.1.44", default-features = false }
 tracing-subscriber = "0.3.23"
-uuid               = "1.26.0"
+uuid               = "1.26.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

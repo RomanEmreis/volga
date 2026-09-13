@@ -6,7 +6,10 @@ use crate::{
     http::request::request_body_limit::RequestBodyLimit, server::Server,
 };
 use connection::Connection;
-use hyper_util::rt::TokioIo;
+use hyper_util::{
+    rt::TokioIo,
+    server::graceful::{GracefulShutdown, Watcher},
+};
 
 use std::{
     fmt,
@@ -67,9 +70,6 @@ pub(crate) use self::host_env::{RolePolicy, warn};
 #[cfg(feature = "http2")]
 pub use crate::limits::Http2Limits;
 
-#[cfg(feature = "tls")]
-pub(crate) use app_env::GRACEFUL_SHUTDOWN_TIMEOUT;
-
 use crate::app::shutdown::ShutdownHandle;
 pub(crate) use app_env::AppEnv;
 
@@ -82,6 +82,10 @@ pub(crate) mod pipeline;
 pub mod router;
 pub(crate) mod scope;
 pub(crate) mod shutdown;
+
+/// How long, in seconds, a server that stopped accepting connections waits for the open ones
+/// to finish before it returns anyway
+pub(crate) const GRACEFUL_SHUTDOWN_TIMEOUT: u64 = 10;
 
 /// The main entry point for building and running a Volga application.
 ///
@@ -838,6 +842,11 @@ impl App {
             crate::config::processing::spawn_reload(config, Arc::clone(&shutdown_tx));
         }
 
+        // The accept loop owns the graceful shutdown itself rather than the shared environment:
+        // taking it back must not depend on who holds a reference to the environment at that
+        // moment - a request in flight does, for as long as its handler runs
+        let graceful_shutdown = GracefulShutdown::new();
+
         loop {
             let (stream, _) = tokio::select! {
                 Ok(connection) = tcp_listener.accept() => connection,
@@ -865,18 +874,49 @@ impl App {
             }
 
             let instance = Arc::downgrade(&app_instance);
+            // Subscribed here rather than in the spawned task, so a connection accepted just
+            // before the loop breaks is still waited for, even if its task has not run yet
+            let watcher = graceful_shutdown.watcher();
+            #[cfg(feature = "tls")]
+            let shutdown_tx = Arc::clone(&shutdown_tx);
+
             tokio::spawn(async move {
                 let _permit = permit;
-                Self::handle_connection(stream, instance).await
+                Self::handle_connection(
+                    stream,
+                    instance,
+                    watcher,
+                    #[cfg(feature = "tls")]
+                    shutdown_tx,
+                )
+                .await
             });
         }
 
         drop(tcp_listener);
 
-        if let Some(app_instance) = Arc::into_inner(app_instance) {
-            app_instance.shutdown().await;
-        }
+        Self::wait_for_connections(graceful_shutdown).await;
+
+        // The environment - and the services it owns, singletons among them - is released
+        // here, unless a request outlived the wait above and still holds it
+        drop(app_instance);
         Ok(())
+    }
+
+    /// Signals every watched connection to finish what it is serving and close, then waits
+    /// until they have, but no longer than [`GRACEFUL_SHUTDOWN_TIMEOUT`]
+    #[inline]
+    async fn wait_for_connections(graceful_shutdown: GracefulShutdown) {
+        tokio::select! {
+            _ = graceful_shutdown.shutdown() => {
+                #[cfg(feature = "tracing")]
+                tracing::info!("shutting down the server...");
+            },
+            _ = tokio::time::sleep(std::time::Duration::from_secs(GRACEFUL_SHUTDOWN_TIMEOUT)) => {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("timed out wait for all connections to close");
+            }
+        }
     }
 
     #[inline]
@@ -955,7 +995,12 @@ impl App {
     }
 
     #[inline]
-    async fn handle_connection(stream: TcpStream, app_instance: Weak<AppEnv>) {
+    async fn handle_connection(
+        stream: TcpStream,
+        app_instance: Weak<AppEnv>,
+        watcher: Watcher,
+        #[cfg(feature = "tls")] shutdown_tx: Arc<watch::Sender<()>>,
+    ) {
         let peer_addr = match stream.peer_addr() {
             Ok(addr) => addr,
             Err(_err) => {
@@ -967,12 +1012,21 @@ impl App {
 
         #[cfg(not(feature = "tls"))]
         Server::new(TokioIo::new(stream), peer_addr)
-            .serve(app_instance)
+            .serve(app_instance, watcher)
             .await;
 
         #[cfg(feature = "tls")]
         if let Some(acceptor) = app_instance.upgrade().and_then(|app| app.acceptor()) {
-            let stream = match acceptor.accept(stream).await {
+            // The watcher is held from the moment the connection was accepted, and a handshake
+            // is not a connection hyper can be told to wind down. One still in progress when
+            // the accept loop breaks has sent no request yet, so it is dropped rather than
+            // waited for - otherwise a client that never finishes it holds up the shutdown
+            let result = tokio::select! {
+                result = acceptor.accept(stream) => result,
+                _ = shutdown_tx.closed() => return,
+            };
+
+            let stream = match result {
                 Ok(tls_stream) => tls_stream,
                 Err(_err) => {
                     #[cfg(feature = "tracing")]
@@ -981,10 +1035,14 @@ impl App {
                 }
             };
             let io = TokioIo::new(stream);
-            Server::new(io, peer_addr).serve(app_instance).await;
+            Server::new(io, peer_addr)
+                .serve(app_instance, watcher)
+                .await;
         } else {
             let io = TokioIo::new(stream);
-            Server::new(io, peer_addr).serve(app_instance).await;
+            Server::new(io, peer_addr)
+                .serve(app_instance, watcher)
+                .await;
         };
     }
 }
