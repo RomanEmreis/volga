@@ -29,10 +29,7 @@ use crate::{
 };
 
 #[cfg(feature = "tls")]
-use crate::{
-    headers::{HOST, STRICT_TRANSPORT_SECURITY},
-    tls::{HstsHeader, normalize_host},
-};
+use crate::{headers::STRICT_TRANSPORT_SECURITY, tls::HstsHeader};
 
 #[cfg(feature = "tracing")]
 use {
@@ -108,8 +105,12 @@ impl Scope {
         #[cfg(feature = "tracing")]
         let _guard = span.as_ref().map(|s| s.enter());
 
+        // Settled while the request is still at hand, so nothing of it has to be kept for later
         #[cfg(feature = "tls")]
-        let host = request.headers().get(HOST).cloned();
+        let hsts = env
+            .hsts
+            .as_ref()
+            .filter(|hsts| hsts.applies_to(request.uri(), request.headers()));
 
         let response = handle_impl(request, peer_addr, &env, cancellation_token).await;
 
@@ -120,7 +121,7 @@ impl Scope {
             #[cfg(feature = "tracing")]
             span.as_ref().and_then(|s| s.id()),
             #[cfg(feature = "tls")]
-            host,
+            hsts,
         )
     }
 }
@@ -276,7 +277,7 @@ fn finalize_response(
     response: HttpResult,
     shared: &AppEnv,
     #[cfg(feature = "tracing")] span_id: Option<Id>,
-    #[cfg(feature = "tls")] host: Option<HeaderValue>,
+    #[cfg(feature = "tls")] hsts: Option<&HstsHeader>,
 ) -> HttpResult {
     response.map(|mut resp| {
         if method == Method::HEAD {
@@ -294,8 +295,9 @@ fn finalize_response(
         }
 
         #[cfg(feature = "tls")]
-        if let Some(hsts) = &shared.hsts {
-            apply_hsts_headers(&mut resp, hsts, host);
+        if let Some(hsts) = hsts {
+            resp.headers_mut()
+                .insert(STRICT_TRANSPORT_SECURITY, hsts.value());
         }
 
         resp
@@ -326,34 +328,6 @@ fn apply_tracing_headers(
         tracing.span_header_name.clone(),
         value.parse().expect("valid span id"),
     );
-}
-
-#[cfg(feature = "tls")]
-fn apply_hsts_headers(
-    resp: &mut crate::HttpResponse,
-    hsts: &HstsHeader,
-    host: Option<HeaderValue>,
-) {
-    if is_excluded(host, &hsts.exclude_hosts) {
-        return;
-    }
-
-    resp.headers_mut()
-        .insert(STRICT_TRANSPORT_SECURITY, hsts.value());
-}
-
-#[inline]
-#[cfg(feature = "tls")]
-fn is_excluded(host: Option<HeaderValue>, exclude_hosts: &[String]) -> bool {
-    host.as_ref()
-        .and_then(|h| h.to_str().ok())
-        .map(|h| {
-            let h = normalize_host(h);
-            // Stored exclude hosts are normalized and lowercased once at
-            // configuration time; the incoming Host header is only borrowed
-            exclude_hosts.iter().any(|e| e.eq_ignore_ascii_case(h))
-        })
-        .unwrap_or(false)
 }
 
 fn keep_content_length(size_hint: SizeHint, headers: &mut HeaderMap) {
