@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.11.0
+
+## Added
+* Synchronous request handlers. A handler with nothing to await - formatting, arithmetic, a lookup, a check of a header - can be a plain `fn` or a closure returning its response directly, instead of opening an `async` block to hand back a ready future: `app.map_get("/sum/{x}/{y}", |x: i32, y: i32| x + y)`. The shape is read off the signature, and extraction, OpenAPI description and the response are the same as for the asynchronous form. Extractors still run before the handler, so `Json<T>`, `Form<T>`, `Query<T>` and `Dc<T>` arrive with the body already read. Accepted by `map_get` ... `map_query`, `map`, their `RouteGroup` counterparts, `map_fallback`, `map_err` and `map_conn`.
+* Synchronous middleware: `filter`, `map_ok`, `map_err` and `tap_req` accept a closure returning its verdict, response or request directly - `app.filter(|headers: HttpHeaders| headers.get_raw("x-api-key").is_some())` - on `App`, `Route` and `RouteGroup`. `wrap`, `with` and `attach` stay asynchronous, since what they exist for is awaiting `next`.
+* `volga::blocking(f)` runs a synchronous handler on Tokio's blocking pool instead of the runtime worker that polls the request, for bodies that actually block: `std::fs`, a synchronous database driver, a long computation. The extractors still run on the worker. A panic in the handler is resumed on the task awaiting it, as it would have been inline; the offloaded call is not cancelled with the request, and a body that should stop early can check a `CancellationToken`. The handler is shared, not cloned per request, so what it captures does not need to be `Clone`.
+* `volga::marker::{Async, Immediate}`, the markers that tell the two shapes apart, and `volga::http::BlockingFn`, the type `blocking` returns.
+
+## Changed
+* **Breaking:** the handler and middleware traits gained a marker parameter, defaulted to the asynchronous shape - `GenericHandler<Args, M = marker::Async>`, and likewise `MapErr`, `Filter`, `MapOk` and `TapReq` - and every method registering one takes it as its last generic parameter. The marker is inferred, so handler code is unaffected, and a bound written without it, such as `F: GenericHandler<Args>`, keeps its meaning. What breaks is a call site that spells the generics out: `app.map_get::<_, _, (i32,)>(..)` becomes `app.map_get::<_, _, (i32,), _>(..)`. `App::map` and `RouteGroup::map` renamed their method parameter from `M` to `V` to make room for it. `ErrorFunc` and `FallbackFunc` gained the marker as a defaulted last parameter, so naming them is unaffected.
+* The compile error for something that is not a handler names both shapes: "an `async fn` or a closure returning a future, or a plain `fn` or closure returning a response directly".
+
+## Notes
+* A return type that is both a `Future` and `IntoResponse` - which nothing in volga is, and a user type would have to implement `IntoResponse` for a future to become - is ambiguous between the two shapes and fails to compile.
+* A synchronous closure returning something that is not a response reports "is not a request handler" rather than the `IntoResponse` message an `async` one gets: with neither shape matching, rustc cannot tell which of the two was meant.
+* A synchronous handler runs on the worker that polls the request, exactly as an `async` one with no `.await` inside does, and blocks that worker exactly as long as its body does - which is what `blocking` is for. It costs what the asynchronous form costs: measured in-process through a route's handler stage, both shapes make the one allocation the stage already made and take 91-94 ns a call, with or without captured state.
+
 # 0.10.1
 
 ## Changed

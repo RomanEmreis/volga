@@ -5,7 +5,7 @@
 //! ```
 
 use tokio::time::{Duration, interval};
-use volga::{App, CancellationToken};
+use volga::{App, CancellationToken, blocking};
 
 async fn long_running_task() {
     let mut interval = interval(Duration::from_millis(1000));
@@ -62,6 +62,22 @@ async fn main() -> std::io::Result<()> {
 
             "done"
         },
+    );
+
+    // Example of a synchronous task that blocks, moved off the runtime worker with `blocking`
+    app.map_get(
+        "/blocking-task",
+        blocking(|cancellation_token: CancellationToken| {
+            for _ in 0..5 {
+                if cancellation_token.is_cancelled() {
+                    println!("Task was cancelled");
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                println!("doing something");
+            }
+            "done"
+        }),
     );
 
     app.run().await

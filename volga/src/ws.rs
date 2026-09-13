@@ -91,11 +91,12 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_conn<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_conn<F, R, Args, M>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         // Using GET for WebSocket protocol and HTTP/1
         #[cfg(all(feature = "http1", not(feature = "http2")))]

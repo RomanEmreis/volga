@@ -150,11 +150,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_get<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_get<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::GET, pattern, handler)
     }
@@ -181,11 +182,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_post<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_post<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::POST, pattern, handler)
     }
@@ -211,11 +213,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_put<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_put<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::PUT, pattern, handler)
     }
@@ -241,11 +244,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_patch<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_patch<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::PATCH, pattern, handler)
     }
@@ -271,11 +275,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_delete<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_delete<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::DELETE, pattern, handler)
     }
@@ -301,11 +306,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_head<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_head<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::HEAD, pattern, handler)
     }
@@ -331,11 +337,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_options<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_options<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::OPTIONS, pattern, handler)
     }
@@ -361,11 +368,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_trace<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_trace<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::TRACE, pattern, handler)
     }
@@ -391,11 +399,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_connect<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_connect<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route(Method::CONNECT, pattern, handler)
     }
@@ -432,11 +441,12 @@ impl App {
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
     /// `GET` that a `HEAD` answers. See
     /// [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map_query<'a, F, R, Args>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+    pub fn map_query<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         let method = Method::from_bytes(QUERY).expect("invalid QUERY verb");
         self.map_route(method, pattern, handler)
@@ -475,60 +485,69 @@ impl App {
     /// if `method` cannot be converted into a valid [`Method`], or if `pattern` is a second
     /// name for a route already mapped for `method`, or for the `GET` that a `HEAD`
     /// answers. See [Ambiguous routes](crate::app::router#ambiguous-routes).
-    pub fn map<'a, M, P, F, R, Args>(&'a mut self, method: M, pattern: P, handler: F) -> Route<'a>
+    pub fn map<'a, V, P, F, R, Args, M>(
+        &'a mut self,
+        method: V,
+        pattern: P,
+        handler: F,
+    ) -> Route<'a>
     where
-        M: TryInto<Method>,
-        M::Error: std::fmt::Debug,
+        V: TryInto<Method>,
+        V::Error: std::fmt::Debug,
         P: Into<Cow<'a, str>>,
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         let method = method.try_into().expect("invalid HTTP method");
         self.map_route_impl(method, pattern.into(), handler)
     }
 
     #[inline]
-    fn map_route<'a, F, R, Args>(
+    fn map_route<'a, F, R, Args, M>(
         &'a mut self,
         method: Method,
         pattern: &'a str,
         handler: F,
     ) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route_impl(method, Cow::Borrowed(pattern), handler)
     }
 
     #[inline]
-    fn map_route_owned<F, R, Args>(
+    fn map_route_owned<F, R, Args, M>(
         &mut self,
         method: Method,
         pattern: String,
         handler: F,
     ) -> Route<'_>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         self.map_route_impl(method, Cow::Owned(pattern), handler)
     }
 
     #[inline]
-    fn map_route_impl<'a, F, R, Args>(
+    fn map_route_impl<'a, F, R, Args, M>(
         &'a mut self,
         method: Method,
         pattern: Cow<'a, str>,
         handler: F,
     ) -> Route<'a>
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         let handler = Func::new(handler);
 
@@ -858,14 +877,15 @@ impl<'a> RouteGroup<'a> {
     /// Maps a request handler that matches the given HTTP `method` for the specified pattern.
     ///
     /// See [`App::map`] for more details.
-    pub fn map<M, P, F, R, Args>(&mut self, method: M, pattern: P, handler: F) -> Route<'_>
+    pub fn map<V, P, F, R, Args, M>(&mut self, method: V, pattern: P, handler: F) -> Route<'_>
     where
-        M: TryInto<Method>,
-        M::Error: std::fmt::Debug,
+        V: TryInto<Method>,
+        V::Error: std::fmt::Debug,
         P: AsRef<str>,
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         let method = method.try_into().expect("invalid HTTP method");
         let pattern = join_path(&self.prefix, pattern.as_ref());
@@ -897,11 +917,12 @@ macro_rules! define_route_group_methods {
 
             $(
             #[doc = concat!("See [`App::", stringify!($fn_name), "`] for more details.")]
-            pub fn $fn_name<F, R, Args>(&mut self, pattern: &str, handler: F) -> Route<'_>
+            pub fn $fn_name<F, R, Args, M>(&mut self, pattern: &str, handler: F) -> Route<'_>
             where
-                F: GenericHandler<Args, Output = R>,
+                F: GenericHandler<Args, M, Output = R>,
                 R: IntoResponse + 'static,
                 Args: FromRequest + Send + 'static,
+                M: 'static,
             {
                 let method = $http_method;
                 let pattern = join_path(&self.prefix, pattern);

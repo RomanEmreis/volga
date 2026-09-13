@@ -272,11 +272,12 @@ impl App {
     /// # app.run().await
     /// # }
     /// ```
-    pub fn map_err<F, R, Args>(&mut self, handler: F) -> &mut Self
+    pub fn map_err<F, R, Args, M>(&mut self, handler: F) -> &mut Self
     where
-        F: MapErr<Args, Output = R>,
+        F: MapErr<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestParts + Send + 'static,
+        M: 'static,
     {
         self.pipeline
             .set_error_handler(ErrorFunc::new(handler).into());
@@ -326,11 +327,12 @@ impl App {
     /// # app.run().await
     /// # }
     /// ```
-    pub fn map_fallback<F, Args, R>(&mut self, handler: F) -> &mut Self
+    pub fn map_fallback<F, Args, R, M>(&mut self, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         Args: FromRequestParts + Send + 'static,
         R: IntoResponse,
+        M: 'static,
     {
         self.pipeline
             .set_fallback_handler(FallbackFunc::new(handler).into());

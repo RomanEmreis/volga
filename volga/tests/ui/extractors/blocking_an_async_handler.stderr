@@ -1,12 +1,12 @@
-error[E0277]: `&str` is not a request handler
- --> tests/ui/extractors/not_a_handler.rs:5:22
+error[E0277]: `BlockingFn<{async closure@$DIR/tests/ui/extractors/blocking_an_async_handler.rs:5:31: 5:39}>` is not a request handler
+ --> tests/ui/extractors/blocking_an_async_handler.rs:5:22
   |
-5 |     app.map_get("/", "not a function");
-  |         -------      ^^^^^^^^^^^^^^^^ not a handler
+5 |     app.map_get("/", blocking(async || ok!()));
+  |         -------      ^^^^^^^^^^^^^^^^^^^^^^^^ not a handler
   |         |
   |         required by a bound introduced by this call
   |
-  = help: the trait `GenericHandler<_, _>` is not implemented for `&str`
+  = help: the trait `GenericHandler<_, _>` is not implemented for `BlockingFn<{async closure@$DIR/tests/ui/extractors/blocking_an_async_handler.rs:5:31: 5:39}>`
   = note: a handler is an `async fn` or a closure returning a future, or a plain `fn` or closure returning a response directly, taking up to 10 extractors as arguments
   = note: it must also be `Clone + Send + Sync + 'static`, which a closure capturing a non-`Send` value is not
 note: required by a bound in `router::<impl App>::map_get`

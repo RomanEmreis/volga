@@ -3,7 +3,7 @@
 use super::Error;
 use crate::{
     HttpResult,
-    http::{FromRequestParts, IntoResponse, MapErr},
+    http::{FromRequestParts, IntoResponse, MapErr, marker},
     status,
 };
 use futures_util::future::BoxFuture;
@@ -102,19 +102,19 @@ impl ErrorHandler for DefaultErrorHandler {
 
 /// Owns a closure that handles an error
 #[derive(Debug)]
-pub struct ErrorFunc<F, R, Args>
+pub struct ErrorFunc<F, R, Args, M = marker::Async>
 where
-    F: MapErr<Args, Output = R>,
+    F: MapErr<Args, M, Output = R>,
     R: IntoResponse,
     Args: FromRequestParts + Send,
 {
     func: F,
-    _marker: std::marker::PhantomData<fn(Args) -> R>,
+    _marker: std::marker::PhantomData<fn(Args, M) -> R>,
 }
 
-impl<F, R, Args> ErrorFunc<F, R, Args>
+impl<F, R, Args, M> ErrorFunc<F, R, Args, M>
 where
-    F: MapErr<Args, Output = R>,
+    F: MapErr<Args, M, Output = R>,
     R: IntoResponse,
     Args: FromRequestParts + Send,
 {
@@ -129,17 +129,19 @@ where
 /// Stores a pre-extracted handler invocation: the function, its arguments,
 /// and the request URI (for `err.instance`). Allocated once per request
 /// instead of cloning the full `Parts`.
-struct BoundErrorArgs<F, Args> {
+struct BoundErrorArgs<F, Args, M> {
     func: F,
     args: Args,
     uri: Uri,
+    _marker: std::marker::PhantomData<fn(M)>,
 }
 
-impl<F, Args> ErasedErrorArgs for BoundErrorArgs<F, Args>
+impl<F, Args, M> ErasedErrorArgs for BoundErrorArgs<F, Args, M>
 where
-    F: MapErr<Args> + Send + 'static,
+    F: MapErr<Args, M> + Send + 'static,
     F::Output: IntoResponse + 'static,
     Args: Send + 'static,
+    M: 'static,
 {
     fn call(self: Box<Self>, mut err: Error) -> BoxFuture<'static, HttpResult> {
         Box::pin(async move {
@@ -170,11 +172,12 @@ impl ErasedErrorArgs for DefaultErrorArgs {
     }
 }
 
-impl<F, R, Args> ErrorHandler for ErrorFunc<F, R, Args>
+impl<F, R, Args, M> ErrorHandler for ErrorFunc<F, R, Args, M>
 where
-    F: MapErr<Args, Output = R> + Clone + 'static,
+    F: MapErr<Args, M, Output = R> + Clone + 'static,
     R: IntoResponse + 'static,
     Args: FromRequestParts + Send + 'static,
+    M: 'static,
 {
     #[inline]
     fn extract(&self, parts: &Parts) -> Box<dyn ErasedErrorArgs + Send> {
@@ -184,20 +187,22 @@ where
                 func: self.func.clone(),
                 args,
                 uri,
+                _marker: std::marker::PhantomData,
             }),
             Err(_) => Box::new(DefaultErrorArgs { uri }),
         }
     }
 }
 
-impl<F, R, Args> From<ErrorFunc<F, R, Args>> for PipelineErrorHandler
+impl<F, R, Args, M> From<ErrorFunc<F, R, Args, M>> for PipelineErrorHandler
 where
-    F: MapErr<Args, Output = R>,
+    F: MapErr<Args, M, Output = R>,
     R: IntoResponse + 'static,
     Args: FromRequestParts + Send + 'static,
+    M: 'static,
 {
     #[inline]
-    fn from(func: ErrorFunc<F, R, Args>) -> Self {
+    fn from(func: ErrorFunc<F, R, Args, M>) -> Self {
         Arc::new(func)
     }
 }

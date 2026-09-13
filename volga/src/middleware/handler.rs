@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 
 use super::{HttpContext, NextFn};
 use crate::error::Error;
+use crate::http::{IntoResponse, marker, request::IntoTapResult};
 use crate::{HttpRequestMut, HttpResponse, HttpResult, http::FilterResult};
 
 /// Internal state machine for [`Next`]
@@ -106,7 +107,10 @@ pub trait With<Args>: Clone + Send + Sync + 'static {
 }
 
 /// Describes a filter middleware handler that could take 0 or N parameters and return [`FilterResult`]
-pub trait Filter<Args>: Clone + Send + Sync + 'static {
+///
+/// `M` is the filter's shape - [`marker::Async`] or [`marker::Immediate`] - inferred where the
+/// filter is registered: a filter may return a future or its verdict directly.
+pub trait Filter<Args, M = marker::Async>: Clone + Send + Sync + 'static {
     /// Return type
     type Output: Into<FilterResult>;
 
@@ -115,7 +119,10 @@ pub trait Filter<Args>: Clone + Send + Sync + 'static {
 }
 
 /// Describes a generic `tap_req` middleware handler that could take 0 or N parameters and [`HttpRequestMut`]
-pub trait TapReq<Args = ()>: Clone + Send + Sync + 'static {
+///
+/// `M` is the handler's shape - [`marker::Async`] or [`marker::Immediate`] - inferred where it
+/// is registered: it may return a future or the request directly.
+pub trait TapReq<Args = (), M = marker::Async>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
 
@@ -125,7 +132,10 @@ pub trait TapReq<Args = ()>: Clone + Send + Sync + 'static {
 }
 
 /// Describes a generic `map_ok` middleware handler that could take 0 or N parameters and [`HttpResponse`]
-pub trait MapOk<Args>: Clone + Send + Sync + 'static {
+///
+/// `M` is the handler's shape - [`marker::Async`] or [`marker::Immediate`] - inferred where it
+/// is registered: it may return a future or the response directly.
+pub trait MapOk<Args, M = marker::Async>: Clone + Send + Sync + 'static {
     /// Return type
     type Output;
 
@@ -149,7 +159,7 @@ where
 }
 
 #[cfg(not(feature = "di"))]
-impl<Func, Fut: Send> TapReq for Func
+impl<Func, Fut: Send> TapReq<(), marker::Async> for Func
 where
     Func: Fn(HttpRequestMut) -> Fut + Send + Sync + Clone + 'static,
     Fut: Future,
@@ -159,6 +169,20 @@ where
     #[inline]
     fn tap_req(&self, req: HttpRequestMut, _args: ()) -> impl Future<Output = Self::Output> + Send {
         self(req)
+    }
+}
+
+#[cfg(not(feature = "di"))]
+impl<Func, R> TapReq<(), marker::Immediate> for Func
+where
+    Func: Fn(HttpRequestMut) -> R + Send + Sync + Clone + 'static,
+    R: IntoTapResult + Send,
+{
+    type Output = R;
+
+    #[inline]
+    fn tap_req(&self, req: HttpRequestMut, _args: ()) -> impl Future<Output = Self::Output> + Send {
+        std::future::ready(self(req))
     }
 }
 
@@ -176,7 +200,7 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
             (self)($($param,)* next)
         }
     }
-    impl<Func, Fut: Send, $($param,)*> Filter<($($param,)*)> for Func
+    impl<Func, Fut: Send, $($param,)*> Filter<($($param,)*), marker::Async> for Func
     where
         Func: Fn($($param,)*) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
@@ -190,8 +214,22 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
             (self)($($param,)*)
         }
     }
+    // `Into<FilterResult>` is what keeps a future out of this impl; see `GenericHandler`
+    impl<Func, R, $($param,)*> Filter<($($param,)*), marker::Immediate> for Func
+    where
+        Func: Fn($($param,)*) -> R + Send + Sync + Clone + 'static,
+        R: Into<FilterResult> + Send,
+    {
+        type Output = R;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn filter(&self, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
+            std::future::ready((self)($($param,)*))
+        }
+    }
     #[cfg(feature = "di")]
-    impl<Func, Fut: Send, $($param,)*> TapReq<($($param,)*)> for Func
+    impl<Func, Fut: Send, $($param,)*> TapReq<($($param,)*), marker::Async> for Func
     where
         Func: Fn(HttpRequestMut,$($param,)*) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
@@ -204,7 +242,22 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
             (self)(req, $($param,)*)
         }
     }
-    impl<Func, Fut: Send, $($param,)*> MapOk<($($param,)*)> for Func
+    // `IntoTapResult` is what keeps a future out of this impl; see `GenericHandler`
+    #[cfg(feature = "di")]
+    impl<Func, R, $($param,)*> TapReq<($($param,)*), marker::Immediate> for Func
+    where
+        Func: Fn(HttpRequestMut,$($param,)*) -> R + Send + Sync + Clone + 'static,
+        R: IntoTapResult + Send,
+    {
+        type Output = R;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn tap_req(&self, req: HttpRequestMut, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
+            std::future::ready((self)(req, $($param,)*))
+        }
+    }
+    impl<Func, Fut: Send, $($param,)*> MapOk<($($param,)*), marker::Async> for Func
     where
         Func: Fn(HttpResponse,$($param,)*) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future,
@@ -215,6 +268,20 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
         #[allow(non_snake_case)]
         fn map_ok(&self, resp: HttpResponse, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
             (self)(resp, $($param,)*)
+        }
+    }
+    // `IntoResponse` is what keeps a future out of this impl; see `GenericHandler`
+    impl<Func, R, $($param,)*> MapOk<($($param,)*), marker::Immediate> for Func
+    where
+        Func: Fn(HttpResponse,$($param,)*) -> R + Send + Sync + Clone + 'static,
+        R: IntoResponse + Send,
+    {
+        type Output = R;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn map_ok(&self, resp: HttpResponse, ($($param,)*): ($($param,)*)) -> impl Future<Output = Self::Output> {
+            std::future::ready((self)(resp, $($param,)*))
         }
     }
 });
@@ -233,8 +300,9 @@ define_generic_mw_handler! { T1 T2 T3 T4 T5 T6 T7 T8 T9 T10 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MapOk, Next, NextState, With};
+    use super::{Filter, MapOk, Next, NextState, With};
     use crate::error::Error;
+    use crate::http::marker;
     use crate::{HttpBody, HttpResponse, status};
     use futures_util::task::noop_waker_ref;
     use std::pin::Pin;
@@ -293,5 +361,32 @@ mod tests {
 
         let result = MapOk::map_ok(&handler, response, ("ok",)).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn immediate_map_ok_handler_returns_its_value() {
+        let handler = |resp: HttpResponse, extra: u16| {
+            assert_eq!(extra, 7);
+            resp
+        };
+
+        let response = HttpResponse::builder()
+            .status(201)
+            .body(HttpBody::from("ok"))
+            .unwrap();
+
+        let response = MapOk::<_, marker::Immediate>::map_ok(&handler, response, (7,)).await;
+        assert_eq!(response.status(), 201);
+    }
+
+    #[tokio::test]
+    async fn immediate_filter_returns_its_verdict() {
+        let handler = |value: i32| value > 0;
+
+        let accepted = Filter::<_, marker::Immediate>::filter(&handler, (1,)).await;
+        let rejected = Filter::<_, marker::Immediate>::filter(&handler, (-1,)).await;
+
+        assert!(accepted);
+        assert!(!rejected);
     }
 }

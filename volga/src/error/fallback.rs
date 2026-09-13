@@ -5,7 +5,7 @@ use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
     HttpRequest, HttpResult,
-    http::{FromRequestParts, GenericHandler, IntoResponse},
+    http::{FromRequestParts, GenericHandler, IntoResponse, marker},
     status,
 };
 
@@ -17,11 +17,11 @@ pub trait FallbackHandler {
 
 /// Owns a closure that handles a 404
 #[derive(Debug)]
-pub struct FallbackFunc<F, Args>(pub(crate) F, PhantomData<fn(Args)>);
+pub struct FallbackFunc<F, Args, M = marker::Async>(pub(crate) F, PhantomData<fn(Args, M)>);
 
-impl<F, Args, R> FallbackFunc<F, Args>
+impl<F, Args, R, M> FallbackFunc<F, Args, M>
 where
-    F: GenericHandler<Args, Output = R>,
+    F: GenericHandler<Args, M, Output = R>,
     Args: FromRequestParts + Send + 'static,
     R: IntoResponse,
 {
@@ -30,9 +30,9 @@ where
     }
 }
 
-impl<F, Args, R> FallbackHandler for FallbackFunc<F, Args>
+impl<F, Args, R, M> FallbackHandler for FallbackFunc<F, Args, M>
 where
-    F: GenericHandler<Args, Output = R>,
+    F: GenericHandler<Args, M, Output = R>,
     Args: FromRequestParts + Send + 'static,
     R: IntoResponse,
 {
@@ -50,14 +50,15 @@ where
     }
 }
 
-impl<F, Args, R> From<FallbackFunc<F, Args>> for PipelineFallbackHandler
+impl<F, Args, R, M> From<FallbackFunc<F, Args, M>> for PipelineFallbackHandler
 where
-    F: GenericHandler<Args, Output = R>,
+    F: GenericHandler<Args, M, Output = R>,
     Args: FromRequestParts + Send + 'static,
     R: IntoResponse,
+    M: 'static,
 {
     #[inline]
-    fn from(func: FallbackFunc<F, Args>) -> Self {
+    fn from(func: FallbackFunc<F, Args, M>) -> Self {
         Arc::new(func)
     }
 }
