@@ -3,6 +3,7 @@ use crate::app::{AppEnv, scope::Scope};
 use crate::limits::{Http2Limits, Limit};
 use hyper::rt::{Read, Write};
 use hyper_util::rt::TokioExecutor;
+use hyper_util::server::graceful::Watcher;
 use std::sync::Arc;
 
 // When HTTP/1 is also enabled the connection may be either protocol
@@ -17,7 +18,7 @@ use hyper::server::conn::http2::Builder;
 /// HTTP/2 impl
 impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     #[inline]
-    pub(super) async fn serve_core(self, scope: Scope, env: Arc<AppEnv>) {
+    pub(super) async fn serve_core(self, scope: Scope, env: Arc<AppEnv>, watcher: Watcher) {
         let scoped_cancellation_token = scope.cancellation_token.clone();
 
         #[cfg(any(feature = "ws", feature = "http1"))]
@@ -43,7 +44,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
             #[cfg(not(feature = "ws"))]
             let connection = connection_builder.serve_connection(self.io, scope);
-            let connection = env.graceful_shutdown.watch(connection);
+            let connection = watcher.watch(connection);
 
             drop(env);
 
@@ -63,7 +64,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             configure_http2(&mut connection_builder, env.http2_limits);
 
             let connection = connection_builder.serve_connection(self.io, scope);
-            let connection = env.graceful_shutdown.watch(connection);
+            let connection = watcher.watch(connection);
 
             drop(env);
 

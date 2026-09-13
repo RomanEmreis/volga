@@ -312,3 +312,62 @@ async fn shutdown_drains_in_flight_requests() {
         .expect("server task panicked")
         .expect("server returned an error");
 }
+
+/// A request still running when the accept loop breaks holds the app environment for as long
+/// as its handler runs. `run` must wait for its connection all the same: returning earlier
+/// lets whoever owns the runtime drop it under a response that is still being written
+#[tokio::test]
+async fn run_does_not_return_before_a_request_in_flight_is_answered() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let port = pick_free_port();
+    let (app, handle) = App::with_shutdown();
+    let answered = Arc::new(AtomicBool::new(false));
+    let answered_for_handler = Arc::clone(&answered);
+
+    let mut app = app.bind(format!("127.0.0.1:{port}")).without_greeter();
+    app.map_get("/ping", || async { ok!("pong") });
+    app.map_get("/slow", move || {
+        let handle = handle.clone();
+        let answered = Arc::clone(&answered_for_handler);
+        async move {
+            // Shutting down from inside the handler makes the accept loop break while this
+            // request is certainly still in flight - no timing involved
+            handle.shutdown();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            answered.store(true, Ordering::SeqCst);
+            ok!("done")
+        }
+    });
+    let task = tokio::spawn(async move { app.run().await });
+
+    let client = local_client();
+    wait_until_listening(&client, port).await;
+
+    let request = tokio::spawn(async move {
+        client
+            .get(format!("http://127.0.0.1:{port}/slow"))
+            .send()
+            .await
+            .unwrap()
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("server did not exit after drain")
+        .expect("server task panicked")
+        .expect("server returned an error");
+
+    assert!(
+        answered.load(Ordering::SeqCst),
+        "run returned while a request was still in flight"
+    );
+
+    let response = tokio::time::timeout(Duration::from_secs(5), request)
+        .await
+        .expect("in-flight request did not finish")
+        .expect("request task panicked");
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "done");
+}

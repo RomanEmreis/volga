@@ -2,6 +2,7 @@ use super::Server;
 use crate::Limit;
 use crate::app::{AppEnv, scope::Scope};
 use hyper::rt::{Read, Write};
+use hyper_util::server::graceful::Watcher;
 use std::sync::Arc;
 
 #[cfg(feature = "ws")]
@@ -13,7 +14,7 @@ use hyper::server::conn::http1::Builder;
 /// HTTP/1 impl
 impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     #[inline]
-    pub(super) async fn serve_core(self, scope: Scope, env: Arc<AppEnv>) {
+    pub(super) async fn serve_core(self, scope: Scope, env: Arc<AppEnv>, watcher: Watcher) {
         let scoped_cancellation_token = scope.cancellation_token.clone();
 
         #[cfg(feature = "ws")]
@@ -24,7 +25,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             }
 
             let connection = connection_builder.serve_connection_with_upgrades(self.io, scope);
-            let connection = env.graceful_shutdown.watch(connection);
+            let connection = watcher.watch(connection);
 
             drop(env);
 
@@ -42,7 +43,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             }
 
             let connection = connection_builder.serve_connection(self.io, scope);
-            let connection = env.graceful_shutdown.watch(connection);
+            let connection = watcher.watch(connection);
 
             drop(env);
 
