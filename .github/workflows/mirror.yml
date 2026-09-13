@@ -6,9 +6,8 @@ on:
       - main
     tags:
       - "*"
-
-# Re-syncs Codeberg by hand when a push to main or a tag was not delivered
-workflow_dispatch:
+  # Re-syncs Codeberg by hand when a push to main or a tag was not delivered
+  workflow_dispatch:
 
 jobs:
   mirror:
