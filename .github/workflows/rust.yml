@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# A push to main that GitHub fails to deliver leaves main untested; this re-runs it by hand
+workflow_dispatch:
+
 env:
   CARGO_TERM_COLOR: always
 
