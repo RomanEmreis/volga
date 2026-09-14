@@ -470,4 +470,39 @@ mod ws {
 
         server.shutdown().await;
     }
+
+    #[tokio::test]
+    async fn it_maps_a_synchronous_message_handler() {
+        let server = TestServer::spawn(|app| {
+            app.map_msg("/ws", |msg: String| format!("echo: {msg}"));
+        })
+        .await;
+
+        let mut ws = server.ws("/ws").await;
+
+        for msg in ["first", "second"] {
+            ws.send_text(msg).await;
+            assert_eq!(ws.recv_text().await, format!("echo: {msg}"));
+        }
+
+        server.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn it_maps_a_synchronous_json_message_handler_with_an_extractor() {
+        let server = TestServer::spawn(|app| {
+            app.map_msg("/ws", |Json(user): Json<User>, uri: Uri| {
+                format!("{} is {} at {}", user.name, user.age, uri.path())
+            });
+        })
+        .await;
+
+        let mut ws = server.ws("/ws").await;
+
+        ws.send_text(r#"{"name":"volga","age":1}"#).await;
+
+        assert_eq!(ws.recv_text().await, "volga is 1 at /ws");
+
+        server.shutdown().await;
+    }
 }
