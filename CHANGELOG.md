@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Fixed
 * A `Json<T>` sent over a WebSocket - the reply of a `map_msg` handler, or `WebSocket::send` / `WsSink::send` - went out as a binary frame, so a browser client reading `event.data` got a `Blob` instead of the JSON text, and a `JSON.parse` on it failed. It is sent as a text frame now, as JSON is UTF-8 text (RFC 8259 Section 8.1). A client that read those replies as binary has to read text instead. Receiving is unchanged: `Json<T>` is still parsed from a text or a binary frame.
 
+## Security
+* `rustls` 0.23.40 -> 0.23.45 (with `rustls-webpki` 0.103.13 -> 0.103.15) in `Cargo.lock`, resolving RUSTSEC-2026-0285: TLS 1.3 handshake messages were accepted across encryption level boundaries. volga reaches `rustls` through `tokio-rustls` (feature `tls`), `hyper-rustls` in `volga-oauth-client` (feature `oauth-client`) and `reqwest` (feature `test`). The published crates already allow the fixed release, so an application picks it up with `cargo update -p rustls`.
+
 ## Notes
 * A return type that is both a `Future` and `IntoResponse` - which nothing in volga is, and a user type would have to implement `IntoResponse` for a future to become - is ambiguous between the two shapes and fails to compile.
 * A synchronous closure returning something that is not a response reports "is not a request handler" rather than the `IntoResponse` message an `async` one gets: with neither shape matching, rustc cannot tell which of the two was meant.
