@@ -492,7 +492,10 @@ mod ws {
     async fn it_maps_a_synchronous_json_message_handler_with_an_extractor() {
         let server = TestServer::spawn(|app| {
             app.map_msg("/ws", |Json(user): Json<User>, uri: Uri| {
-                format!("{} is {} at {}", user.name, user.age, uri.path())
+                Json(User {
+                    name: format!("{} at {}", user.name, uri.path()),
+                    age: user.age + 1,
+                })
             });
         })
         .await;
@@ -501,7 +504,16 @@ mod ws {
 
         ws.send_text(r#"{"name":"volga","age":1}"#).await;
 
-        assert_eq!(ws.recv_text().await, "volga is 1 at /ws");
+        // `recv_text` fails the test on anything but a text frame
+        let reply: User = serde_json::from_str(&ws.recv_text().await).unwrap();
+
+        assert_eq!(
+            reply,
+            User {
+                name: "volga at /ws".into(),
+                age: 2
+            }
+        );
 
         server.shutdown().await;
     }
