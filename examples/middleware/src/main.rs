@@ -38,6 +38,9 @@ async fn main() -> std::io::Result<()> {
         },
     );
 
+    // Example of a synchronous filter: it only reads a header, so it returns its verdict directly
+    app.filter(|user_agent: Header<Accept>| !user_agent.as_ref().is_empty());
+
     // Request handler
     app.map_get("/hello", || async { ok!("Hello World!") });
 

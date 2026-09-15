@@ -135,9 +135,11 @@ impl<T: DeserializeOwned + Send> FromPayload for Json<T> {
 impl<T: Serialize> TryFrom<Json<T>> for Message {
     type Error = Error;
 
+    /// Serializes into a text frame: JSON is UTF-8 text (RFC 8259 Section 8.1), and a binary
+    /// frame is what a client reading `event.data` as a string does not get
     #[inline]
     fn try_from(json: Json<T>) -> Result<Self, Self::Error> {
-        serde_json::to_vec(&json.0)?.try_into()
+        serde_json::to_string(&json.0)?.try_into()
     }
 }
 
@@ -291,6 +293,7 @@ mod tests {
 
         let msg = Message::try_from(json).unwrap();
 
+        assert!(msg.is_text());
         assert_eq!(msg.to_string(), "{\"age\":33,\"name\":\"John\"}");
     }
 
@@ -300,6 +303,18 @@ mod tests {
         use crate::ws::Message;
 
         let msg = Message::try_from("{\"age\":33,\"name\":\"John\"}").unwrap();
+        let json: Json<User> = msg.try_into().unwrap();
+
+        assert_eq!(json.age, 33);
+        assert_eq!(json.name, "John");
+    }
+
+    #[test]
+    #[cfg(feature = "ws")]
+    fn it_converts_from_binary_ws_msg() {
+        use crate::ws::Message;
+
+        let msg = Message::try_from(b"{\"age\":33,\"name\":\"John\"}".as_slice()).unwrap();
         let json: Json<User> = msg.try_into().unwrap();
 
         assert_eq!(json.age, 33);

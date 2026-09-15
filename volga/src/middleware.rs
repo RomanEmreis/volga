@@ -250,10 +250,26 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn filter<F, Args>(&mut self, filter: F) -> &mut Self
+    ///
+    /// A filter with nothing to await can return its verdict directly:
+    /// ```no_run
+    /// use volga::{App, headers::HttpHeaders};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.filter(|headers: HttpHeaders| headers.get_raw("x-api-key").is_some());
+    ///
+    /// app.map_get("/sum", |x: i32, y: i32| x + y);
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn filter<F, Args, M>(&mut self, filter: F) -> &mut Self
     where
-        F: Filter<Args>,
+        F: Filter<Args, M>,
         Args: FromRequestRef + Send + 'static,
+        M: 'static,
     {
         self.pipeline.middlewares_mut().add(make_filter_fn(filter));
         self
@@ -283,11 +299,12 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_ok<F, R, Args>(&mut self, map: F) -> &mut Self
+    pub fn map_ok<F, R, Args, M>(&mut self, map: F) -> &mut Self
     where
-        F: MapOk<Args, Output = R>,
+        F: MapOk<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
+        M: 'static,
     {
         self.pipeline.middlewares_mut().add(make_map_ok_fn(map));
         self
@@ -335,11 +352,12 @@ impl App {
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
     #[cfg(feature = "di")]
-    pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
+    pub fn tap_req<F, Args, R, M>(&mut self, map: F) -> &mut Self
     where
-        F: TapReq<Args, Output = R>,
+        F: TapReq<Args, M, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
+        M: 'static,
     {
         self.pipeline.middlewares_mut().add(make_tap_req_fn(map));
         self
@@ -387,10 +405,11 @@ impl App {
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
     #[cfg(not(feature = "di"))]
-    pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
+    pub fn tap_req<F, R, M>(&mut self, map: F) -> &mut Self
     where
-        F: TapReq<Output = R>,
+        F: TapReq<(), M, Output = R>,
         R: IntoTapResult,
+        M: 'static,
     {
         self.pipeline.middlewares_mut().add(make_tap_req_fn(map));
         self
@@ -546,10 +565,11 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn filter<F, Args>(self, filter: F) -> Self
+    pub fn filter<F, Args, M>(self, filter: F) -> Self
     where
-        F: Filter<Args>,
+        F: Filter<Args, M>,
         Args: FromRequestRef + Send + 'static,
+        M: 'static,
     {
         let filter_fn = make_filter_fn(filter);
         self.map_middleware(filter_fn)
@@ -579,11 +599,12 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_ok<F, R, Args>(self, map: F) -> Self
+    pub fn map_ok<F, R, Args, M>(self, map: F) -> Self
     where
-        F: MapOk<Args, Output = R>,
+        F: MapOk<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
+        M: 'static,
     {
         let map_ok_fn = make_map_ok_fn(map);
         self.map_middleware(map_ok_fn)
@@ -609,11 +630,12 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_err<F, R, Args>(self, map: F) -> Self
+    pub fn map_err<F, R, Args, M>(self, map: F) -> Self
     where
-        F: MapErr<Args, Output = R>,
+        F: MapErr<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
+        M: 'static,
     {
         let map_err_fn = make_map_err_fn(map);
         self.map_middleware(map_err_fn)
@@ -661,11 +683,12 @@ impl<'a> Route<'a> {
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
     #[cfg(feature = "di")]
-    pub fn tap_req<F, Args, R>(self, map: F) -> Self
+    pub fn tap_req<F, Args, R, M>(self, map: F) -> Self
     where
-        F: TapReq<Args, Output = R>,
+        F: TapReq<Args, M, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
+        M: 'static,
     {
         let map_err_fn = make_tap_req_fn(map);
         self.map_middleware(map_err_fn)
@@ -713,10 +736,11 @@ impl<'a> Route<'a> {
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
     #[cfg(not(feature = "di"))]
-    pub fn tap_req<F, R>(self, map: F) -> Self
+    pub fn tap_req<F, R, M>(self, map: F) -> Self
     where
-        F: TapReq<Output = R>,
+        F: TapReq<(), M, Output = R>,
         R: IntoTapResult,
+        M: 'static,
     {
         let map_err_fn = make_tap_req_fn(map);
         self.map_middleware(map_err_fn)
@@ -891,10 +915,11 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn filter<F, Args>(&mut self, filter: F) -> &mut Self
+    pub fn filter<F, Args, M>(&mut self, filter: F) -> &mut Self
     where
-        F: Filter<Args>,
+        F: Filter<Args, M>,
         Args: FromRequestRef + Send + 'static,
+        M: 'static,
     {
         let filter_fn = make_filter_fn(filter);
         self.middleware.push(filter_fn);
@@ -927,11 +952,12 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_ok<F, R, Args>(&mut self, map: F) -> &mut Self
+    pub fn map_ok<F, R, Args, M>(&mut self, map: F) -> &mut Self
     where
-        F: MapOk<Args, Output = R>,
+        F: MapOk<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
+        M: 'static,
     {
         let map_ok_fn = make_map_ok_fn(map);
         self.middleware.push(map_ok_fn);
@@ -960,11 +986,12 @@ impl<'a> RouteGroup<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_err<F, R, Args>(&mut self, map: F) -> &mut Self
+    pub fn map_err<F, R, Args, M>(&mut self, map: F) -> &mut Self
     where
-        F: MapErr<Args, Output = R>,
+        F: MapErr<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
+        M: 'static,
     {
         let map_err_fn = make_map_err_fn(map);
         self.middleware.push(map_err_fn);
@@ -1015,11 +1042,12 @@ impl<'a> RouteGroup<'a> {
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
     #[cfg(feature = "di")]
-    pub fn tap_req<F, Args, R>(&mut self, map: F) -> &mut Self
+    pub fn tap_req<F, Args, R, M>(&mut self, map: F) -> &mut Self
     where
-        F: TapReq<Args, Output = R>,
+        F: TapReq<Args, M, Output = R>,
         R: IntoTapResult,
         Args: FromContainer + Send + 'static,
+        M: 'static,
     {
         let tap_req_fn = make_tap_req_fn(map);
         self.middleware.push(tap_req_fn);
@@ -1070,10 +1098,11 @@ impl<'a> RouteGroup<'a> {
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
     #[cfg(not(feature = "di"))]
-    pub fn tap_req<F, R>(&mut self, map: F) -> &mut Self
+    pub fn tap_req<F, R, M>(&mut self, map: F) -> &mut Self
     where
-        F: TapReq<Output = R>,
+        F: TapReq<(), M, Output = R>,
         R: IntoTapResult,
+        M: 'static,
     {
         let tap_req_fn = make_tap_req_fn(map);
         self.middleware.push(tap_req_fn);

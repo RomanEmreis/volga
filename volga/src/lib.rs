@@ -74,7 +74,7 @@ pub mod ws;
 pub use crate::app::App;
 pub use crate::app::shutdown::ShutdownHandle;
 pub use crate::http::{
-    BoxBody, HttpBody, HttpRequest, HttpResponse, HttpResult, UnsyncBoxBody,
+    BoxBody, HttpBody, HttpRequest, HttpResponse, HttpResult, UnsyncBoxBody, blocking,
     endpoints::args::{
         byte_stream::ByteStream,
         cancellation_token::CancellationToken,
@@ -85,6 +85,7 @@ pub use crate::http::{
         path::{NamedPath, Path},
         query::Query,
     },
+    marker,
 };
 
 #[cfg(feature = "config")]

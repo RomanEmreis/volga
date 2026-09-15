@@ -91,11 +91,12 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_conn<F, R, Args>(&mut self, pattern: &str, handler: F) -> &mut Self
+    pub fn map_conn<F, R, Args, M>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: GenericHandler<Args, Output = R>,
+        F: GenericHandler<Args, M, Output = R>,
         R: IntoResponse + 'static,
         Args: FromRequest + Send + 'static,
+        M: 'static,
     {
         // Using GET for WebSocket protocol and HTTP/1
         #[cfg(all(feature = "http1", not(feature = "http2")))]
@@ -162,12 +163,26 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn map_msg<F, M, Args, R>(&mut self, pattern: &str, handler: F) -> &mut Self
+    ///
+    /// A handler with nothing to await can return its reply directly:
+    /// ```no_run
+    /// use volga::App;
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.map_msg("/ws", |msg: String| format!("received msg: {msg}"));
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_msg<F, Msg, Args, R, M>(&mut self, pattern: &str, handler: F) -> &mut Self
     where
-        F: MessageHandler<M, Args, Output = R> + 'static,
+        F: MessageHandler<Msg, Args, M, Output = R> + 'static,
         Args: FromRequest + Clone + Send + 'static,
-        M: TryFrom<Message, Error = Error> + Send,
+        Msg: TryFrom<Message, Error = Error> + Send,
         R: TryInto<Message, Error = Error> + Send,
+        M: 'static,
     {
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
@@ -176,7 +191,7 @@ impl App {
                 let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await?;
                 let args = Args::from_request(HttpRequest::from_parts(parts, body)).await?;
                 conn.on(|mut ws| async move {
-                    ws.on_msg(move |msg: M| handler.call(msg, args.clone()))
+                    ws.on_msg(move |msg: Msg| handler.call(msg, args.clone()))
                         .await;
                 })
             }

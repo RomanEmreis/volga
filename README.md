@@ -5,7 +5,7 @@ Fast, simple, and high-performance web framework for Rust, built on top of
 Volga is designed to make building HTTP services straightforward and explicit,
 while keeping performance predictable and overhead minimal.
 
-[![latest](https://img.shields.io/badge/latest-0.10.1-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.11.0-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://releases.rs/docs/1.90.0/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
@@ -34,7 +34,8 @@ Volga is a good fit if you:
 ## Features
 - HTTP/1 and HTTP/2 support
 - Explicit and robust routing
-- Composable async middlewares
+- Async and synchronous handlers and middleware
+- Composable middlewares
 - Dependency Injection without derive macros
 - Typed request extraction
 - WebSockets and WebSocket-over-HTTP/2
@@ -47,7 +48,7 @@ Volga is a good fit if you:
 ### Dependencies
 ```toml
 [dependencies]
-volga = "0.10.1"
+volga = "0.11.0"
 tokio = { version = "1", features = ["full"] }
 ```
 ### Simple request handler
@@ -70,6 +71,25 @@ This example demonstrates:
 * typed path parameter extraction
 * async request handlers
 * minimal setup with zero boilerplate
+
+### Synchronous handlers
+A handler with nothing to await can return its response directly, and one that blocks can be moved off the runtime with `blocking`:
+```rust
+use volga::{App, blocking};
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let mut app = App::new();
+
+    app.map_get("/sum/{x}/{y}", |x: i32, y: i32| x + y);
+
+    app.map_get("/reports/{id}", blocking(|id: u32| {
+        std::fs::read_to_string(format!("reports/{id}.txt"))
+    }));
+
+    app.run().await
+}
+```
 
 More advanced examples (middleware, DI, auth, rate limiting) can be found in the
 [documentation](https://romanemreis.github.io/volga-docs/) and [here](https://github.com/RomanEmreis/volga/tree/main/examples).

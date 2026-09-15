@@ -60,6 +60,9 @@ async fn main() -> std::io::Result<()> {
         format!("received: {}; msg #{value}", msg.text)
     });
 
+    // Synchronous message handler: nothing to await, so the reply is returned directly
+    app.map_msg("/ws3", |msg: Json<Msg>| format!("received: {}", msg.text));
+
     // Handle errors globally
     app.map_err(|err| async move {
         tracing::error!("{:?}", err);

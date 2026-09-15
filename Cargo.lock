@@ -2318,9 +2318,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.40"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -2381,9 +2381,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -3252,7 +3252,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "volga"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "arc-swap",
  "async-compression",
@@ -3303,7 +3303,7 @@ dependencies = [
 
 [[package]]
 name = "volga-dev-cert"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "rcgen",
  "serial_test",
@@ -3311,14 +3311,14 @@ dependencies = [
 
 [[package]]
 name = "volga-di"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "http",
 ]
 
 [[package]]
 name = "volga-macros"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3327,7 +3327,7 @@ dependencies = [
 
 [[package]]
 name = "volga-oauth-client"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -3348,7 +3348,7 @@ dependencies = [
 
 [[package]]
 name = "volga-oauth-core"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "http",
  "serde",
@@ -3357,7 +3357,7 @@ dependencies = [
 
 [[package]]
 name = "volga-open-api"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "http",
  "mime",
@@ -3368,7 +3368,7 @@ dependencies = [
 
 [[package]]
 name = "volga-rate-limiter"
-version = "0.10.1"
+version = "0.11.0"
 dependencies = [
  "dashmap",
 ]

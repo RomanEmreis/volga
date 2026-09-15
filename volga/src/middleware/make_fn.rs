@@ -21,10 +21,11 @@ where
 
 /// Wraps a closure for the route filter into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_filter_fn<F, Args>(filter: F) -> MiddlewareFn
+pub(super) fn make_filter_fn<F, Args, M>(filter: F) -> MiddlewareFn
 where
-    F: Filter<Args>,
+    F: Filter<Args, M>,
     Args: FromRequestRef + Send + 'static,
+    M: 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let filter = filter.clone();
@@ -43,11 +44,12 @@ where
 
 /// Wraps a closure for the response mapping into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_map_ok_fn<F, R, Args>(map: F) -> MiddlewareFn
+pub(super) fn make_map_ok_fn<F, R, Args, M>(map: F) -> MiddlewareFn
 where
-    F: MapOk<Args, Output = R>,
+    F: MapOk<Args, M, Output = R>,
     R: IntoResponse + 'static,
     Args: FromRequestRef + Send + 'static,
+    M: 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
@@ -66,11 +68,12 @@ where
 
 /// Wraps a closure for the error mapping into [`MiddlewareFn`]
 #[inline]
-pub(super) fn make_map_err_fn<F, R, Args>(map: F) -> MiddlewareFn
+pub(super) fn make_map_err_fn<F, R, Args, M>(map: F) -> MiddlewareFn
 where
-    F: MapErr<Args, Output = R>,
+    F: MapErr<Args, M, Output = R>,
     R: IntoResponse + 'static,
     Args: FromRequestRef + Send + 'static,
+    M: 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
@@ -90,11 +93,12 @@ where
 /// Wraps a closure for the request mapping into [`MiddlewareFn`]
 #[inline]
 #[cfg(feature = "di")]
-pub(super) fn make_tap_req_fn<F, Args, R>(map: F) -> MiddlewareFn
+pub(super) fn make_tap_req_fn<F, Args, R, M>(map: F) -> MiddlewareFn
 where
-    F: TapReq<Args, Output = R>,
+    F: TapReq<Args, M, Output = R>,
     R: IntoTapResult,
     Args: FromContainer + Send + 'static,
+    M: 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
@@ -116,10 +120,11 @@ where
 /// Wraps a closure for the request mapping into [`MiddlewareFn`]
 #[inline]
 #[cfg(not(feature = "di"))]
-pub(super) fn make_tap_req_fn<F, R>(map: F) -> MiddlewareFn
+pub(super) fn make_tap_req_fn<F, R, M>(map: F) -> MiddlewareFn
 where
-    F: TapReq<Output = R>,
+    F: TapReq<(), M, Output = R>,
     R: IntoTapResult,
+    M: 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
@@ -201,6 +206,74 @@ mod tests {
 
         let result = middleware(ctx, next).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn it_short_circuits_on_an_immediate_filter() {
+        let middleware = make_filter_fn(|| false);
+
+        let req = create_request();
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
+        let next: NextFn = Arc::new(|_| Box::pin(async { unreachable!("filtered out") }));
+
+        let err = middleware(ctx, next).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn it_maps_the_response_with_an_immediate_map_ok() {
+        let middleware = make_map_ok_fn(|mut resp: HttpResponse| {
+            resp.headers_mut()
+                .insert("X-Test", "value".parse().unwrap());
+            resp
+        });
+
+        let req = create_request();
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
+        let next: NextFn = Arc::new(|_| Box::pin(async { ok!() }));
+
+        let response = middleware(ctx, next).await.unwrap();
+        assert_eq!(response.headers().get("X-Test").unwrap(), "value");
+    }
+
+    #[tokio::test]
+    async fn it_maps_the_error_with_an_immediate_map_err() {
+        let middleware = make_map_err_fn(|_err: Error| bad_request!());
+
+        let req = create_request();
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
+        let next: NextFn = Arc::new(|_| Box::pin(async { Err(Error::server_error("boom")) }));
+
+        let response = middleware(ctx, next).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn it_taps_the_request_with_an_immediate_tap_req() {
+        let middleware = make_tap_req_fn(|mut req: HttpRequestMut| {
+            req.headers_mut().insert("X-Test", "value".parse().unwrap());
+            req
+        });
+
+        let req = create_request();
+
+        #[cfg(feature = "di")]
+        let req = {
+            let mut req = req;
+            req.extensions_mut()
+                .insert(crate::di::ContainerBuilder::new().build());
+            req
+        };
+
+        let ctx = HttpContext::new(req, None, CorsOverride::Inherit);
+        let next: NextFn = Arc::new(|ctx: HttpContext| {
+            Box::pin(async move {
+                assert_eq!(ctx.request().headers().get("X-Test").unwrap(), "value");
+                ok!()
+            })
+        });
+
+        assert!(middleware(ctx, next).await.is_ok());
     }
 
     #[tokio::test]

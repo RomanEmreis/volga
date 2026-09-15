@@ -1,6 +1,7 @@
 //! Type extractors and converters for WebSockets
 
 use crate::error::Error;
+use crate::http::marker;
 use crate::ws::WebSocket;
 use bytes::Bytes;
 use std::{
@@ -222,14 +223,21 @@ pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
 
 /// Describes a generic WebSocket/WebSocket-over-HTTP/2 message handler that could take a message
 /// in a format that implements the `FromMessage` and 0 or N parameters of types
-pub trait MessageHandler<M: TryFrom<Message>, Args>: Clone + Send + Sync + 'static {
-    /// The type of valure returned from a WebSocket message handler
+///
+/// `M` is the handler's shape - [`marker::Async`] or [`marker::Immediate`] - inferred where the
+/// handler is registered: it may return a future or the reply directly. As with
+/// [`GenericHandler`](crate::http::GenericHandler), the `Immediate` impl's own
+/// `TryInto<Message, Error = Error>` bound is what keeps a future out of it.
+pub trait MessageHandler<Msg: TryFrom<Message>, Args, M = marker::Async>:
+    Clone + Send + Sync + 'static
+{
+    /// The type of value returned from a WebSocket message handler
     type Output;
     /// Output future of a WebSocket message handler
     type Future: Future<Output = Self::Output> + Send;
 
     /// Calls a WebSocket message handler
-    fn call(&self, msg: M, args: Args) -> Self::Future;
+    fn call(&self, msg: Msg, args: Args) -> Self::Future;
 }
 
 macro_rules! define_generic_ws_handler ({ $($param:ident)* } => {
@@ -250,10 +258,10 @@ macro_rules! define_generic_ws_handler ({ $($param:ident)* } => {
 });
 
 macro_rules! define_generic_message_handler ({ $($param:ident)* } => {
-    impl<M, Func, Fut: Send, $($param,)*> MessageHandler<M, ($($param,)*)> for Func
+    impl<Msg, Func, Fut: Send, $($param,)*> MessageHandler<Msg, ($($param,)*), marker::Async> for Func
     where
-        Func: Fn(M, $($param),*) -> Fut + Send + Sync + Clone + 'static,
-        M: TryFrom<Message> + Send,
+        Func: Fn(Msg, $($param),*) -> Fut + Send + Sync + Clone + 'static,
+        Msg: TryFrom<Message> + Send,
         Fut: Future + 'static,
     {
         type Output = Fut::Output;
@@ -261,8 +269,23 @@ macro_rules! define_generic_message_handler ({ $($param:ident)* } => {
 
         #[inline]
         #[allow(non_snake_case)]
-        fn call(&self, msg: M, ($($param,)*): ($($param,)*)) -> Self::Future {
+        fn call(&self, msg: Msg, ($($param,)*): ($($param,)*)) -> Self::Future {
             (self)(msg, $($param,)*)
+        }
+    }
+    impl<Msg, Func, R, $($param,)*> MessageHandler<Msg, ($($param,)*), marker::Immediate> for Func
+    where
+        Func: Fn(Msg, $($param),*) -> R + Send + Sync + Clone + 'static,
+        Msg: TryFrom<Message> + Send,
+        R: TryInto<Message, Error = Error> + Send,
+    {
+        type Output = R;
+        type Future = std::future::Ready<R>;
+
+        #[inline]
+        #[allow(non_snake_case)]
+        fn call(&self, msg: Msg, ($($param,)*): ($($param,)*)) -> Self::Future {
+            std::future::ready((self)(msg, $($param,)*))
         }
     }
 });
@@ -284,6 +307,7 @@ define_generic_message_handler! { T1 T2 T3 T4 T5 }
 #[cfg(test)]
 mod tests {
     use super::{Message, MessageHandler};
+    use crate::http::marker;
     use bytes::Bytes;
     use std::borrow::Cow;
     use tokio_tungstenite::tungstenite;
@@ -392,6 +416,20 @@ mod tests {
         let message: Message = "ping".try_into().unwrap();
         let output =
             MessageHandler::call(&handler, String::try_from(message).unwrap(), ("ws",)).await;
+
+        assert_eq!(output, "ws:ping");
+    }
+
+    #[tokio::test]
+    async fn immediate_message_handler_returns_its_reply() {
+        let handler = |msg: String, tag: &'static str| format!("{tag}:{msg}");
+        let message: Message = "ping".try_into().unwrap();
+        let output = MessageHandler::<_, _, marker::Immediate>::call(
+            &handler,
+            String::try_from(message).unwrap(),
+            ("ws",),
+        )
+        .await;
 
         assert_eq!(output, "ws:ping");
     }
