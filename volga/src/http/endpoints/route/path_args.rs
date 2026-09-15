@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 
 const QUERY_SEPARATOR: char = '&';
 const QUERY_KEY_VALUE_SEPARATOR: char = '=';
+const ESCAPED_QUERY_SEPARATOR: &str = "%26";
 
 /// Route path arguments
 ///
@@ -49,23 +50,6 @@ impl PathArgs {
     #[inline]
     pub(crate) fn iter(&self) -> std::slice::Iter<'_, PathArg> {
         self.args.iter()
-    }
-
-    /// The number of args bound so far.
-    #[inline]
-    pub(crate) fn len(&self) -> usize {
-        self.args.len()
-    }
-
-    /// Drops every arg past the first `len` of them.
-    ///
-    /// Used when a lookup unwinds a branch it had started to bind.
-    #[inline]
-    pub(crate) fn truncate(&mut self, len: usize) {
-        if len < self.args.len() {
-            self.args.truncate(len);
-            let _ = self.encoded.take();
-        }
     }
 
     /// Returns the first arg, or `None` if it is empty.
@@ -195,16 +179,34 @@ fn encode(args: &SmallVec<[PathArg; DEFAULT_DEPTH]>) -> String {
     if let Some(first) = iter.next() {
         result.push_str(first.name.as_ref());
         result.push(QUERY_KEY_VALUE_SEPARATOR);
-        result.push_str(first.value.as_ref());
+        push_value(&mut result, first.value.as_ref());
         for s in iter {
             result.push(QUERY_SEPARATOR);
             result.push_str(s.name.as_ref());
             result.push(QUERY_KEY_VALUE_SEPARATOR);
-            result.push_str(s.value.as_ref());
+            push_value(&mut result, s.value.as_ref());
         }
     }
 
     result
+}
+
+/// Appends a value to the encoded args, escaping the separator between two of them.
+///
+/// A path segment may carry a literal `&`, and a catch-all value carries whatever the rest
+/// of the path does, so written as it is one would end its own pair early and start a pair
+/// the route never bound: `/files/a&admin=true` would read as `path=a` and `admin=true`.
+/// Everything else is left for the decoder to read as it always has.
+#[inline]
+fn push_value(result: &mut String, value: &str) {
+    let mut parts = value.split(QUERY_SEPARATOR);
+    if let Some(first) = parts.next() {
+        result.push_str(first);
+    }
+    for part in parts {
+        result.push_str(ESCAPED_QUERY_SEPARATOR);
+        result.push_str(part);
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +260,32 @@ mod tests {
 
         let query_str = args.encoded().unwrap();
         assert_eq!(query_str, "=123&name=");
+    }
+
+    #[test]
+    fn it_escapes_the_pair_separator_inside_a_value() {
+        let args: PathArgs =
+            smallvec::smallvec![arg("path", "a&admin=true/b&"), arg("id", "7")].into();
+
+        let query_str = args.encoded().unwrap();
+        assert_eq!(query_str, "path=a%26admin=true/b%26&id=7");
+
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Params {
+            path: String,
+            id: u32,
+            admin: Option<bool>,
+        }
+
+        let params: Params = serde_urlencoded::from_str(query_str).unwrap();
+        assert_eq!(
+            params,
+            Params {
+                path: "a&admin=true/b&".into(),
+                id: 7,
+                admin: None
+            }
+        );
     }
 
     #[test]

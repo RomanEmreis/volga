@@ -1,5 +1,55 @@
 //! Route mapping helpers
 //!
+//! # Catch-all parameters
+//!
+//! A route's last segment can be a catch-all parameter, `{*name}`, which binds the rest of
+//! the path as one value:
+//!
+//! ```
+//!# use volga::App;
+//! let mut app = App::new();
+//!
+//! // GET /files/docs/2026/report.pdf binds `path` as "docs/2026/report.pdf"
+//! app.map_get("/files/{*path}", |path: String| async move { path });
+//! ```
+//!
+//! - **It reads at least one segment.** `/files/{*path}` does not answer `/files` or
+//!   `/files/`, so that position can carry a route of its own.
+//! - **The value is the path as the request wrote it**, from the first segment the
+//!   catch-all reads to the end: separators inside it and a trailing one are kept, and
+//!   nothing is percent-decoded - the same as a single-segment parameter. `GET /files/a/b/`
+//!   binds `"a/b/"`.
+//! - **It comes last in precedence.** At every position a literal segment is read first, a
+//!   parameter second and a catch-all last, and the first position two routes differ at
+//!   decides between them - whatever order they were mapped in, and however deep the path
+//!   goes:
+//!
+//! ```
+//!# use volga::App;
+//! let mut app = App::new();
+//!
+//! app.map_get("/api/users/{id}", |id: u32| async move { id.to_string() });
+//! app.map_get("/assets/{*path}", |path: String| async move { path });
+//! app.map_get("/{lang}/{page}", |lang: String, page: String| async move { page });
+//! app.map_get("/{*path}", |path: String| async move { path });
+//!
+//! // GET /api/users/7        -> /api/users/{id}
+//! // GET /assets/app.js      -> /assets/{*path}, not /{lang}/{page}
+//! // GET /en/home            -> /{lang}/{page}
+//! // GET /api/users/7/extra  -> /{*path}, since nothing else reads all of it
+//! ```
+//!
+//! - **It is the last segment.** A route continuing past one - including a route mapped
+//!   inside a group whose prefix ends in one - panics where it is mapped.
+//! - **It is named like any other parameter**, and [ambiguous routes](#ambiguous-routes)
+//!   apply to it the same way: another verb may name the rest of the path something else,
+//!   while one verb naming it twice panics.
+//!
+//! A catch-all is described in an OpenAPI document as the path parameter `{name}`, since
+//! OpenAPI templates a path one segment at a time and has no spelling for a value spanning
+//! several. A client generated from that document may percent-encode the `/` in the value
+//! it sends, and a catch-all binds that value undecoded, as `%2F`.
+//!
 //! # Ambiguous routes
 //!
 //! A route parameter is matched by the position it sits at rather than by what it is

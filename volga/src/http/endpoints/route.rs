@@ -40,6 +40,29 @@
 //!   mapping `/users/me/settings` would silently stop `/users/{id}` from answering
 //!   `/users/me`.
 //!
+//! - **A catch-all is the last word at its position:**
+//!   A catch-all parameter (`/files/{*path}`) reads the rest of the path, at least one
+//!   segment of it, and is terminal by construction - it is not a child node, so nothing can
+//!   be mapped below it. At every position a literal is tried first, a parameter second and
+//!   the catch-all last, and the first difference from the left decides between two routes:
+//!   `/assets/{*path}` answers `/assets/app.js` ahead of `/{lang}/{page}`, at any depth and
+//!   in any registration order.
+//!
+//! ## Two passes
+//!
+//! The first pass is greedy: a literal where one is mapped, the parameter otherwise, and
+//! no memory of what it passed over. When it ends on a mapped node, what it found is the
+//! route the precedence above picks - an alternative it skipped is either a parameter where
+//! it read a literal, or a catch-all, and both come later in that order. So a request that
+//! takes this path pays nothing for backtracking or for catch-alls, whether or not any are
+//! mapped.
+//!
+//! Only when the greedy walk dead-ends does the second pass run: a depth-first search in
+//! the same order - literal, parameter, catch-all - that unwinds to the deepest alternative
+//! first. That pass is what a request answered by a catch-all, a request answered by a
+//! parameter behind a dead-end literal, and a request answered by nothing all pay for, on
+//! top of the greedy walk that came before it.
+//!
 //! ## Use of `SmallVec`
 //!
 //! `SmallVec` is used for short collections such as `PathArgs`, which typically
@@ -70,6 +93,7 @@ pub(crate) mod path_args;
 
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
+const CATCH_ALL_MARKER: char = '*';
 const PATH_SEPARATOR: u8 = b'/';
 const DOUBLE_PATH_SEPARATOR: &str = "//";
 const ROOT_PATH: &str = "/";
@@ -108,11 +132,33 @@ pub(super) struct RouteEntry {
     node: Box<RouteNode>,
 }
 
+/// The endpoints answering one route, one per HTTP method
+#[derive(Clone)]
+pub(super) struct Resource {
+    /// A list of associated endpoints for each HTTP method
+    pub(super) handlers: Option<SmallVec<[RouteEndpoint; DEFAULT_DEPTH]>>,
+
+    /// Cached allowed methods header value
+    allowed_methods: Option<Arc<str>>,
+}
+
+/// A catch-all parameter: the route that reads the rest of a path from the position it
+/// sits at
+///
+/// It holds a [`Resource`] rather than a [`RouteNode`], so a route continuing past a
+/// catch-all has nowhere to be stored.
+#[derive(Clone)]
+struct CatchAll {
+    /// The name the tree binds the rest of the path as
+    name: Arc<str>,
+    resource: Resource,
+}
+
 /// A node in the route tree
 #[derive(Clone)]
 pub(super) struct RouteNode {
-    /// A list of associated endpoints for each HTTP method
-    pub(super) handlers: Option<SmallVec<[RouteEndpoint; DEFAULT_DEPTH]>>,
+    /// What answers a path that ends at this node
+    resource: Resource,
 
     /// List of static routes
     static_routes: SmallVec<[RouteEntry; DEFAULT_DEPTH]>,
@@ -120,34 +166,20 @@ pub(super) struct RouteNode {
     /// Dynamic route
     dynamic_route: Option<RouteEntry>,
 
-    /// Cached allowed methods header value
-    allowed_methods: Option<Arc<str>>,
+    /// The catch-all mapped at this position, if any.
+    ///
+    /// Boxed: most nodes carry none, and the greedy lookup never reads it, so it costs a
+    /// node one word rather than the size of a [`Resource`]
+    catch_all: Option<Box<CatchAll>>,
 }
 
-/// A branch a lookup passed over on the way down: at this node the segment was read as
-/// a literal while a parameter sitting at the same position could have read it too.
-///
-/// Recorded only where a node holds both, which is rare, so an ordinary lookup builds
-/// none of these.
-///
-/// Unwinding cannot blow up: a node in this tree sits at one depth and is reached only
-/// after exactly that many segments have been read, so no node is visited twice within a
-/// lookup. The work is bounded by the nodes the path can reach, never by the number of
-/// ways it could be read.
-struct Fork<'route, 'path, I> {
-    /// The parameter child that was passed over
-    dynamic: &'route RouteEntry,
-    /// The segment it would bind
-    segment: &'path str,
-    /// The segments still unread when the literal was taken
-    rest: I,
-    /// How many parameters were bound before this point
-    bound: usize,
-}
+/// The parameters a backtracking search has bound so far, each as the name the tree binds
+/// and the part of the path it reads - both borrowed, so giving a branch up costs nothing
+type Bindings<'route, 'path> = SmallVec<[(&'route Arc<str>, &'path str); DEFAULT_DEPTH]>;
 
 /// Parameters of a route
 pub(super) struct RouteParams<'route> {
-    pub(super) route: &'route RouteNode,
+    pub(super) route: &'route Resource,
     pub(super) params: PathArgs,
 }
 
@@ -212,15 +244,26 @@ impl RouteEndpoint {
     }
 }
 
+impl CatchAll {
+    /// Creates a [`CatchAll`] binding the rest of a path as `name`
+    #[inline]
+    fn new(name: &str) -> Self {
+        Self {
+            name: Arc::from(name),
+            resource: Resource::new(),
+        }
+    }
+}
+
 impl RouteNode {
     /// Create a new [`RouteNode`]
     #[inline]
     pub(super) fn new() -> Self {
         Self {
+            resource: Resource::new(),
             static_routes: SmallVec::new(),
-            handlers: None,
             dynamic_route: None,
-            allowed_methods: None,
+            catch_all: None,
         }
     }
 
@@ -228,34 +271,45 @@ impl RouteNode {
     ///
     /// # Panics
     /// if this route is a second name for one already mapped for `method`, or for the
-    /// `GET` that a `HEAD` answers. See [`ambiguous_route`].
+    /// `GET` that a `HEAD` answers - see [`ambiguous_route`] - or if a catch-all parameter
+    /// is followed by another segment - see [`misplaced_catch_all`].
     pub(super) fn insert(&mut self, path: &str, method: Method, handler: Layer) {
         let mut current = self;
+        let mut segments = split_path(path);
 
         // What this pattern calls its parameters, and what the tree binds at the positions
         // they sit at - the same names, unless another route reached a position first
         let mut written = ParamNames::new();
         let mut bound = ParamNames::new();
 
-        for segment in split_path(path) {
-            if is_dynamic_segment(segment) {
-                let name = Self::dynamic_name(segment);
-                let (next, name_bound) = current.insert_dynamic_node(name);
+        let resource = loop {
+            let Some(segment) = segments.next() else {
+                break &mut current.resource;
+            };
 
-                written.push(if name_bound.as_ref() == name {
-                    Arc::clone(&name_bound)
-                } else {
-                    Arc::from(name)
-                });
-
-                bound.push(name_bound);
-                current = next;
-            } else {
+            if !is_dynamic_segment(segment) {
                 current = current.insert_static_node(segment);
+                continue;
             }
-        }
 
-        current.insert_handler(method, handler, &written, &bound, path);
+            let name = param_name(segment);
+
+            if is_catch_all_segment(segment) {
+                if segments.next().is_some() {
+                    misplaced_catch_all(path);
+                }
+
+                let (resource, name_bound) = current.insert_catch_all(name);
+                bind_param(&mut written, &mut bound, name, name_bound);
+                break resource;
+            }
+
+            let (next, name_bound) = current.insert_dynamic_node(name);
+            bind_param(&mut written, &mut bound, name, name_bound);
+            current = next;
+        };
+
+        resource.insert_handler(method, handler, &written, &bound, path);
     }
 
     /// Finds handlers by path
@@ -264,76 +318,138 @@ impl RouteNode {
     /// to the parameter sharing its position when the literal branch turns out to lead
     /// nowhere - either because the path parts ways deeper down, or because nothing is
     /// mapped where the path ends. Without that fallback a route like `/a/{b}` would
-    /// stop answering `/a/b` the moment some unrelated route mapped `/a/b/c`.
+    /// stop answering `/a/b` the moment some unrelated route mapped `/a/b/c`. A catch-all
+    /// is read after both, where neither leads anywhere.
+    ///
+    /// See [the module documentation](self) for why this takes two passes. The first one
+    /// is written out here rather than chained to the second, which keeps the result it
+    /// finds from being moved through an `Option` on the way out.
     #[inline]
     pub(super) fn find(&self, path: &str) -> Option<RouteParams<'_>> {
+        // The first pass: the literal where one is mapped, the parameter otherwise, with no
+        // record of what it passed over and no look at a catch-all
         let mut current = self;
         let mut params = PathArgs::new();
-        let mut segments = split_path(path);
-        let mut forks: SmallVec<[Fork<'_, '_, _>; DEFAULT_DEPTH]> = SmallVec::new();
 
-        loop {
-            let matched = loop {
-                let Some(segment) = segments.next() else {
-                    break !current.handlers.as_ref().is_none_or(|h| h.is_empty());
-                };
-
-                if let Ok(i) = current.static_routes.binary_search_by(|r| r.cmp(segment)) {
-                    // The literal goes first, but the parameter that could have read this
-                    // same segment is kept in case the literal branch dead-ends
-                    if let Some(dynamic) = &current.dynamic_route {
-                        forks.push(Fork {
-                            dynamic,
-                            segment,
-                            rest: segments.clone(),
-                            bound: params.len(),
-                        });
-                    }
-                    current = current.static_routes[i].node.as_ref();
-                    continue;
-                }
-
-                if let Some(next) = &current.dynamic_route {
-                    params.push(PathArg {
-                        name: Arc::clone(&next.path),
-                        value: Box::from(segment),
-                    });
-                    current = next.node.as_ref();
-                    continue;
-                }
-
-                break false;
-            };
-
-            if matched {
-                return Some(RouteParams {
-                    route: current,
-                    params,
-                });
+        for segment in split_path(path) {
+            if let Ok(i) = current.static_routes.binary_search_by(|r| r.cmp(segment)) {
+                current = current.static_routes[i].node.as_ref();
+                continue;
             }
 
-            // Nothing down there. Unwind to the last parameter passed over - the deepest
-            // one, so the walk gives up as little of the path as it has to - and read its
-            // segment again, this time as the parameter.
-            let fork = forks.pop()?;
-            params.truncate(fork.bound);
+            let Some(next) = &current.dynamic_route else {
+                return self.find_backtracking(path);
+            };
+
             params.push(PathArg {
-                name: Arc::clone(&fork.dynamic.path),
-                value: Box::from(fork.segment),
+                name: Arc::clone(&next.path),
+                value: Box::from(segment),
             });
-            current = fork.dynamic.node.as_ref();
-            segments = fork.rest;
+            current = next.node.as_ref();
         }
+
+        if !current.resource.is_mapped() {
+            return self.find_backtracking(path);
+        }
+
+        Some(RouteParams {
+            route: &current.resource,
+            params,
+        })
     }
 
-    /// Finds handlers by path and returns a mutable reference to it
+    /// The second pass, for a path the greedy walk could not place: every reading of it in
+    /// precedence order, until one of them reaches a mapped route.
+    ///
+    /// The search binds borrowed names and segments, and they are copied out only once a
+    /// route is found - so a branch it gives up, and a path nothing answers, allocate
+    /// nothing.
+    #[inline(never)]
+    fn find_backtracking(&self, path: &str) -> Option<RouteParams<'_>> {
+        let mut bindings = Bindings::new();
+        let route = self.search(path, split_path(path), &mut bindings)?;
+
+        let params = bindings
+            .into_iter()
+            .map(|(name, value)| PathArg {
+                name: Arc::clone(name),
+                value: Box::from(value),
+            })
+            .collect();
+
+        Some(RouteParams { route, params })
+    }
+
+    /// Searches this subtree for the route answering `segments`, the unread rest of `path`:
+    /// the literal child first, the parameter child next and the catch-all last, so the walk
+    /// unwinds to the deepest alternative it passed and gives up as little of the path as it
+    /// has to. `bindings` is left as it was found unless a route is found.
+    ///
+    /// The recursion cannot blow up. It only descends into a child that exists, so it goes
+    /// no deeper than the longest route mapped; and a node in this tree sits at one depth,
+    /// reached only after exactly that many segments have been read, so no node is visited
+    /// twice within a lookup. The work is bounded by the nodes the path can reach, never by
+    /// the number of ways it could be read.
+    fn search<'route, 'path, I>(
+        &'route self,
+        path: &'path str,
+        mut segments: I,
+        bindings: &mut Bindings<'route, 'path>,
+    ) -> Option<&'route Resource>
+    where
+        I: Iterator<Item = &'path str> + Clone,
+    {
+        let Some(segment) = segments.next() else {
+            return self.resource.is_mapped().then_some(&self.resource);
+        };
+
+        if let Ok(i) = self.static_routes.binary_search_by(|r| r.cmp(segment))
+            && let Some(found) = self.static_routes[i]
+                .node
+                .search(path, segments.clone(), bindings)
+        {
+            return Some(found);
+        }
+
+        if let Some(dynamic) = &self.dynamic_route {
+            let bound = bindings.len();
+            bindings.push((&dynamic.path, segment));
+
+            if let Some(found) = dynamic.node.search(path, segments, bindings) {
+                return Some(found);
+            }
+            bindings.truncate(bound);
+        }
+
+        let catch_all = self
+            .catch_all
+            .as_deref()
+            .filter(|catch_all| catch_all.resource.is_mapped())?;
+
+        bindings.push((&catch_all.name, tail(path, segment)));
+
+        Some(&catch_all.resource)
+    }
+
+    /// Finds the endpoints a route pattern names, reading the pattern the way it was written
     #[inline]
     #[cfg(feature = "middleware")]
-    pub(super) fn find_mut(&mut self, path: &str) -> Option<&'_ mut RouteNode> {
+    pub(super) fn find_mut(&mut self, pattern: &str) -> Option<&'_ mut Resource> {
         let mut current = self;
-        let path_segments = split_path(path);
+        let mut segments = split_path(pattern);
 
-        for segment in path_segments {
+        let resource = loop {
+            let Some(segment) = segments.next() else {
+                break &mut current.resource;
+            };
+
+            if is_catch_all_segment(segment) {
+                if segments.next().is_some() {
+                    return None;
+                }
+                break &mut current.catch_all.as_mut()?.resource;
+            }
+
             if let Ok(i) = current.static_routes.binary_search_by(|r| r.cmp(segment)) {
                 current = current.static_routes[i].node.as_mut();
                 continue;
@@ -345,31 +461,9 @@ impl RouteNode {
             }
 
             return None;
-        }
+        };
 
-        (!current.handlers.as_ref().is_none_or(|h| h.is_empty())).then_some(current)
-    }
-
-    /// Returns a reference to the handler for the given method
-    #[inline]
-    #[allow(unused)]
-    pub(super) fn handler(&self, method: &Method) -> Option<&RouteEndpoint> {
-        let handlers = self.handlers.as_ref()?;
-        let i = handlers.binary_search_by(|h| h.cmp(method)).ok()?;
-        Some(&handlers[i])
-    }
-
-    /// Returns a mutable reference to the handler for the given method
-    #[inline]
-    #[cfg(feature = "middleware")]
-    pub(super) fn handler_mut(&mut self, method: &Method) -> Option<&mut RouteEndpoint> {
-        let i = self
-            .handlers
-            .as_ref()?
-            .binary_search_by(|h| h.cmp(method))
-            .ok()?;
-
-        Some(&mut self.handlers.as_mut()?[i])
+        resource.is_mapped().then_some(resource)
     }
 
     #[cfg(feature = "middleware")]
@@ -382,19 +476,12 @@ impl RouteNode {
             route.node.compose();
         }
 
-        // Compose oute endpoint pipeline if present
-        if let Some(handlers) = self.handlers.as_mut() {
-            handlers.iter_mut().for_each(|r| r.pipeline.compose());
+        // Compose a catch-all route if present
+        if let Some(catch_all) = self.catch_all.as_mut() {
+            catch_all.resource.compose();
         }
-    }
 
-    /// Returns allowed HTTP methods for this route
-    #[inline]
-    pub(super) fn allowed_methods(&self) -> Arc<str> {
-        self.allowed_methods
-            .as_ref()
-            .map(Arc::clone)
-            .unwrap_or_else(|| Arc::from(""))
+        self.resource.compose();
     }
 
     /// Traverses the route tree and collects all available routes
@@ -425,20 +512,15 @@ impl RouteNode {
             segments.pop();
         }
 
-        // Record handlers for this node
-        let Some(ref handlers) = self.handlers else {
-            return;
-        };
-
-        for handler in handlers.iter() {
-            // A route is listed the way it was written, which is the name the tree binds
-            // unless another verb reached one of these positions first
-            let route_path = spell_route(segments, handler.params.as_deref());
-            routes.push(super::meta::RouteInfo::new(
-                handler.method.clone(),
-                &route_path,
-            ));
+        // Record the catch-all route (if any), which has nothing below it
+        if let Some(catch_all) = &self.catch_all {
+            segments.push(PathSegment::CatchAll(&catch_all.name));
+            catch_all.resource.record_routes(routes, segments);
+            segments.pop();
         }
+
+        // Record handlers for this node
+        self.resource.record_routes(routes, segments);
     }
 
     #[inline(always)]
@@ -464,6 +546,95 @@ impl RouteNode {
         let bound = Arc::clone(&entry.path);
 
         (entry.node.as_mut(), bound)
+    }
+
+    /// Reaches the catch-all named `name` at this position, creating it when this is the
+    /// first route to map one here, and hands back the name bound there - `name` itself,
+    /// unless another route got here first and called it something else.
+    #[inline(always)]
+    fn insert_catch_all(&mut self, name: &str) -> (&mut Resource, Arc<str>) {
+        let catch_all = self
+            .catch_all
+            .get_or_insert_with(|| Box::new(CatchAll::new(name)));
+        let bound = Arc::clone(&catch_all.name);
+
+        (&mut catch_all.resource, bound)
+    }
+}
+
+impl Resource {
+    /// Creates a [`Resource`] with nothing mapped
+    #[inline]
+    fn new() -> Self {
+        Self {
+            handlers: None,
+            allowed_methods: None,
+        }
+    }
+
+    /// Returns `true` when an endpoint is mapped here, for any method
+    #[inline(always)]
+    fn is_mapped(&self) -> bool {
+        !self.handlers.as_ref().is_none_or(|h| h.is_empty())
+    }
+
+    /// Returns a reference to the handler for the given method
+    #[inline]
+    #[allow(unused)]
+    pub(super) fn handler(&self, method: &Method) -> Option<&RouteEndpoint> {
+        let handlers = self.handlers.as_ref()?;
+        let i = handlers.binary_search_by(|h| h.cmp(method)).ok()?;
+        Some(&handlers[i])
+    }
+
+    /// Returns a mutable reference to the handler for the given method
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(super) fn handler_mut(&mut self, method: &Method) -> Option<&mut RouteEndpoint> {
+        let i = self
+            .handlers
+            .as_ref()?
+            .binary_search_by(|h| h.cmp(method))
+            .ok()?;
+
+        Some(&mut self.handlers.as_mut()?[i])
+    }
+
+    #[cfg(feature = "middleware")]
+    fn compose(&mut self) {
+        if let Some(handlers) = self.handlers.as_mut() {
+            handlers.iter_mut().for_each(|r| r.pipeline.compose());
+        }
+    }
+
+    /// Returns allowed HTTP methods for this route
+    #[inline]
+    pub(super) fn allowed_methods(&self) -> Arc<str> {
+        self.allowed_methods
+            .as_ref()
+            .map(Arc::clone)
+            .unwrap_or_else(|| Arc::from(""))
+    }
+
+    /// Lists the routes answered here, reached through `segments`
+    fn record_routes(
+        &self,
+        routes: &mut Vec<super::meta::RouteInfo>,
+        segments: &[PathSegment<'_>],
+    ) {
+        let Some(ref handlers) = self.handlers else {
+            return;
+        };
+
+        for handler in handlers.iter() {
+            // A route is listed the way it was written, which is the name the tree binds
+            // unless another verb reached one of these positions first
+            let route_path = spell_route(segments, handler.params.as_deref());
+            routes.push(super::meta::RouteInfo::new(
+                handler.method.clone(),
+                &route_path,
+            ));
+        }
     }
 
     #[inline(always)]
@@ -509,24 +680,42 @@ impl RouteNode {
         endpoint.insert(handler);
         self.allowed_methods = Some(make_allowed_str(handlers));
     }
+}
 
-    #[inline(always)]
-    fn dynamic_name(segment: &str) -> &str {
-        // expects "{name}" but safely handles unexpected input
-        // only touch placeholders: "{id:integer}"
-        if let Some(inner) = segment
-            .strip_prefix(OPEN_BRACKET)
-            .and_then(|s| s.strip_suffix(CLOSE_BRACKET))
-        {
-            // strip ":type" part from inside, keep braces in routing logic if you need,
-            // but for *param name* return only name.
-            let (name, _) = inner.split_once(TYPE_SEPARATOR).unwrap_or((inner, ""));
-            // IMPORTANT: return name only (caller decides how to store)
-            name
-        } else {
-            segment
-        }
-    }
+/// Records a parameter a pattern calls `name`, where the tree binds `name_bound`
+#[inline(always)]
+fn bind_param(written: &mut ParamNames, bound: &mut ParamNames, name: &str, name_bound: Arc<str>) {
+    written.push(if name_bound.as_ref() == name {
+        Arc::clone(&name_bound)
+    } else {
+        Arc::from(name)
+    });
+    bound.push(name_bound);
+}
+
+/// The name a `{name}`, `{name:type}` or `{*name}` segment binds its value as
+#[inline(always)]
+fn param_name(segment: &str) -> &str {
+    // expects a placeholder but safely handles unexpected input
+    let Some(inner) = segment
+        .strip_prefix(OPEN_BRACKET)
+        .and_then(|s| s.strip_suffix(CLOSE_BRACKET))
+    else {
+        return segment;
+    };
+
+    let inner = inner.strip_prefix(CATCH_ALL_MARKER).unwrap_or(inner);
+    let (name, _) = inner.split_once(TYPE_SEPARATOR).unwrap_or((inner, ""));
+    name
+}
+
+/// The rest of `path` from `segment` on, where `segment` is one [`split_path`] read out of
+/// `path` - which is what a catch-all binds: every segment from the position it sits at to
+/// the end, with the separators between them, and a trailing one, as the request wrote them
+#[inline]
+fn tail<'path>(path: &'path str, segment: &'path str) -> &'path str {
+    let start = segment.as_ptr() as usize - path.as_ptr() as usize;
+    &path[start..]
 }
 
 /// Finds the endpoint at this node whose parameter names `method` has to agree with
@@ -617,35 +806,55 @@ fn ambiguous_route(
     );
 }
 
+/// Reports a catch-all parameter written anywhere but at the end of a route
+///
+/// A catch-all reads the rest of the path, so a segment after it could never be read -
+/// the tree has nowhere to store one, and quietly dropping it would map a route nobody
+/// wrote.
+#[cold]
+#[inline(never)]
+fn misplaced_catch_all(path: &str) -> ! {
+    panic!(
+        "invalid route `{path}`: a catch-all parameter reads the rest of the path, so it can \
+         only be the last segment of a route. Move it to the end, or map what follows it as \
+         a route of its own."
+    );
+}
+
 /// A segment of a route as the tree holds it, on the way to an endpoint
 enum PathSegment<'tree> {
     /// A literal segment
     Static(&'tree str),
     /// A parameter, under the name the tree binds it as
     Dynamic(&'tree str),
+    /// A catch-all parameter, under the name the tree binds it as
+    CatchAll(&'tree str),
 }
 
 /// Spells the route reached through `segments`, with `names` at the positions its
 /// parameters sit at when the endpoint carries names of its own
 fn spell_route(segments: &[PathSegment<'_>], names: Option<&[Arc<str>]>) -> String {
     let mut path = String::new();
-    let mut dynamic = 0;
+    let mut params = 0;
 
     for segment in segments {
         path.push(PATH_SEPARATOR as char);
-        match segment {
-            PathSegment::Static(literal) => path.push_str(literal),
-            PathSegment::Dynamic(bound) => {
-                let name = names
-                    .and_then(|names| names.get(dynamic))
-                    .map_or(*bound, |name| name.as_ref());
-                dynamic += 1;
 
-                path.push(OPEN_BRACKET);
-                path.push_str(name);
-                path.push(CLOSE_BRACKET);
+        let (bound, catch_all) = match segment {
+            PathSegment::Static(literal) => {
+                path.push_str(literal);
+                continue;
             }
-        }
+            PathSegment::Dynamic(bound) => (*bound, false),
+            PathSegment::CatchAll(bound) => (*bound, true),
+        };
+
+        let name = names
+            .and_then(|names| names.get(params))
+            .map_or(bound, |name| name.as_ref());
+        params += 1;
+
+        spell_param(&mut path, name, catch_all);
     }
 
     finish_path(path)
@@ -659,11 +868,7 @@ fn spell_pattern(path: &str, names: &[Arc<str>]) -> String {
     for segment in split_path(path) {
         pattern.push(PATH_SEPARATOR as char);
         match is_dynamic_segment(segment).then(|| params.next()).flatten() {
-            Some(name) => {
-                pattern.push(OPEN_BRACKET);
-                pattern.push_str(name);
-                pattern.push(CLOSE_BRACKET);
-            }
+            Some(name) => spell_param(&mut pattern, name, is_catch_all_segment(segment)),
             None => pattern.push_str(segment),
         }
     }
@@ -671,10 +876,32 @@ fn spell_pattern(path: &str, names: &[Arc<str>]) -> String {
     finish_path(pattern)
 }
 
+/// Spells a parameter placeholder, `{name}` or `{*name}`
+#[inline]
+fn spell_param(path: &mut String, name: &str, catch_all: bool) {
+    path.push(OPEN_BRACKET);
+    if catch_all {
+        path.push(CATCH_ALL_MARKER);
+    }
+    path.push_str(name);
+    path.push(CLOSE_BRACKET);
+}
+
 /// Returns `true` when `segment` names a route parameter rather than a literal segment.
+///
+/// A catch-all parameter is a route parameter too.
 #[inline(always)]
 pub(crate) fn is_dynamic_segment(segment: &str) -> bool {
     segment.starts_with(OPEN_BRACKET) && segment.ends_with(CLOSE_BRACKET)
+}
+
+/// Returns `true` when `segment` names a catch-all parameter, `{*name}`.
+#[inline(always)]
+fn is_catch_all_segment(segment: &str) -> bool {
+    segment
+        .strip_prefix(OPEN_BRACKET)
+        .is_some_and(|inner| inner.starts_with(CATCH_ALL_MARKER))
+        && segment.ends_with(CLOSE_BRACKET)
 }
 
 #[inline(always)]
@@ -762,8 +989,7 @@ fn finish_path(mut path: String) -> String {
 /// `/x`, `/x/` and `//x` are read as the one path they are.
 #[inline(always)]
 pub(crate) fn split_path(path: &str) -> impl Iterator<Item = &str> + Clone {
-    memchr_split_nonempty(PATH_SEPARATOR, path.as_bytes())
-        .map(|s| std::str::from_utf8(s).expect("Invalid UTF-8 sequence in path"))
+    memchr_split_nonempty(PATH_SEPARATOR, path)
 }
 
 #[inline(always)]
@@ -1428,5 +1654,239 @@ mod tests {
         // as the parameter instead would answer a request that belongs to the
         // literal route, and would turn its 405 into someone else's 200
         assert_eq!(bound(&route, "/users/me"), Some(vec![]));
+    }
+
+    /// Builds a tree mapping every pattern in `patterns` for `GET`, in that order.
+    fn tree(patterns: &[&str]) -> RouteNode {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        for pattern in patterns {
+            route.insert(pattern, Method::GET, handler.clone().into());
+        }
+        route
+    }
+
+    /// `(name, value)` pairs, spelled briefly.
+    fn args(pairs: &[(&str, &str)]) -> Option<Vec<(String, String)>> {
+        Some(
+            pairs
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn it_binds_the_rest_of_the_path_to_a_catch_all() {
+        let route = tree(&["/files/{*path}"]);
+
+        assert_eq!(bound(&route, "/files/a"), args(&[("path", "a")]));
+        assert_eq!(
+            bound(&route, "/files/a/b/c.txt"),
+            args(&[("path", "a/b/c.txt")])
+        );
+    }
+
+    /// A catch-all reads at least one segment, so the position it sits at can carry a
+    /// route of its own
+    #[test]
+    fn it_does_not_bind_an_empty_tail() {
+        let route = tree(&["/files/{*path}", "/{*all}"]);
+
+        assert_eq!(bound(&route, "/files"), args(&[("all", "files")]));
+        assert_eq!(bound(&route, "/files/"), args(&[("all", "files/")]));
+        assert_eq!(bound(&route, "/"), None);
+        assert_eq!(bound(&route, ""), None);
+    }
+
+    #[test]
+    fn it_answers_the_position_of_a_catch_all_with_a_route_mapped_there() {
+        let route = tree(&["/files/{*path}", "/files"]);
+
+        assert_eq!(bound(&route, "/files"), Some(vec![]));
+        assert_eq!(bound(&route, "/files/a"), args(&[("path", "a")]));
+    }
+
+    /// The tail is the path as the request wrote it, from the first segment the catch-all
+    /// reads - the separators inside it and after it included, so a proxy can forward it
+    #[test]
+    fn it_binds_the_tail_as_the_request_wrote_it() {
+        let route = tree(&["/files/{*path}"]);
+
+        assert_eq!(bound(&route, "/files/a/b/"), args(&[("path", "a/b/")]));
+        assert_eq!(bound(&route, "/files/a//b"), args(&[("path", "a//b")]));
+        assert_eq!(bound(&route, "/files//a"), args(&[("path", "a")]));
+        assert_eq!(bound(&route, "//files/a"), args(&[("path", "a")]));
+        assert_eq!(
+            bound(&route, "/files/a%2Fb/c"),
+            args(&[("path", "a%2Fb/c")])
+        );
+    }
+
+    #[test]
+    fn it_binds_the_parameters_before_a_catch_all() {
+        let route = tree(&["/users/{id}/files/{*path}"]);
+
+        assert_eq!(
+            bound(&route, "/users/7/files/a/b"),
+            args(&[("id", "7"), ("path", "a/b")])
+        );
+        assert_eq!(bound(&route, "/users/7/files"), None);
+    }
+
+    #[test]
+    fn it_reads_a_literal_before_a_catch_all() {
+        let route = tree(&["/{*path}", "/api/users"]);
+
+        assert_eq!(bound(&route, "/api/users"), Some(vec![]));
+        // The literal branch dead-ends, and the catch-all it passed over reads it all
+        assert_eq!(
+            bound(&route, "/api/unknown"),
+            args(&[("path", "api/unknown")])
+        );
+        assert_eq!(bound(&route, "/api"), args(&[("path", "api")]));
+    }
+
+    #[test]
+    fn it_reads_a_parameter_before_a_catch_all() {
+        let route = tree(&["/users/{*rest}", "/users/{id}"]);
+
+        assert_eq!(bound(&route, "/users/1"), args(&[("id", "1")]));
+        assert_eq!(bound(&route, "/users/1/2"), args(&[("rest", "1/2")]));
+    }
+
+    /// The parameter bound on the way into a branch that dead-ends is not left behind for
+    /// the catch-all that answers instead
+    #[test]
+    fn it_unbinds_a_parameter_whose_branch_dead_ends_before_a_catch_all() {
+        let route = tree(&["/files/{id}/meta", "/files/{*path}"]);
+
+        assert_eq!(bound(&route, "/files/5/meta"), args(&[("id", "5")]));
+        assert_eq!(
+            bound(&route, "/files/5/other"),
+            args(&[("path", "5/other")])
+        );
+        assert_eq!(bound(&route, "/files/5"), args(&[("path", "5")]));
+    }
+
+    /// The first position two routes differ at decides between them, whatever order they
+    /// were mapped in and however deep the path goes: a literal there beats a parameter
+    #[test]
+    fn it_decides_between_routes_at_the_first_position_they_differ() {
+        for patterns in [
+            ["/assets/{*path}", "/{lang}/{page}"],
+            ["/{lang}/{page}", "/assets/{*path}"],
+        ] {
+            let route = tree(&patterns);
+
+            assert_eq!(
+                bound(&route, "/assets/app.js"),
+                args(&[("path", "app.js")]),
+                "{patterns:?}"
+            );
+            assert_eq!(
+                bound(&route, "/assets/css/app.css"),
+                args(&[("path", "css/app.css")]),
+                "{patterns:?}"
+            );
+            assert_eq!(
+                bound(&route, "/en/home"),
+                args(&[("lang", "en"), ("page", "home")]),
+                "{patterns:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn it_prefers_a_catch_all_under_a_literal_to_a_deeper_one_under_a_parameter() {
+        let route = tree(&["/{id}/x/{*rest}", "/files/{*path}"]);
+
+        assert_eq!(bound(&route, "/files/x/y"), args(&[("path", "x/y")]));
+        assert_eq!(
+            bound(&route, "/other/x/y"),
+            args(&[("id", "other"), ("rest", "y")])
+        );
+    }
+
+    #[test]
+    fn it_prefers_the_deeper_of_two_catch_alls_on_one_branch() {
+        let route = tree(&["/{*path}", "/api/{*rest}"]);
+
+        assert_eq!(bound(&route, "/api/x/y"), args(&[("rest", "x/y")]));
+        assert_eq!(bound(&route, "/api"), args(&[("path", "api")]));
+        assert_eq!(bound(&route, "/other/x"), args(&[("path", "other/x")]));
+    }
+
+    #[test]
+    fn it_reads_a_typed_catch_all_by_its_name() {
+        let route = tree(&["/files/{*path:string}"]);
+
+        assert_eq!(bound(&route, "/files/a/b"), args(&[("path", "a/b")]));
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "invalid route `/{*path}/edit`: a catch-all parameter reads the rest of the path"
+    )]
+    fn it_rejects_a_segment_after_a_catch_all() {
+        tree(&["/{*path}/edit"]);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "ambiguous route `GET /files/{*rest}`: `GET /files/{*path}` is already mapped"
+    )]
+    fn it_rejects_a_second_name_for_one_catch_all() {
+        tree(&["/files/{*path}", "/files/{*rest}"]);
+    }
+
+    #[test]
+    fn it_accepts_a_second_name_for_a_catch_all_from_another_verb() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/files/{*path}", Method::GET, handler.clone().into());
+        route.insert("/files/{*rest}", Method::POST, handler.into());
+
+        let found = route.find("/files/a/b").unwrap();
+        let handlers = found.route.handlers.as_ref().unwrap();
+
+        assert_eq!(found.params.first().unwrap().name.as_ref(), "path");
+        assert!(handlers[0].params.is_none());
+        assert_eq!(
+            handlers[1].params.as_deref().unwrap(),
+            [Arc::<str>::from("rest")]
+        );
+        assert_eq!(found.route.allowed_methods().as_ref(), "GET,POST,HEAD");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    fn it_collects_catch_all_routes() {
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut route = RouteNode::new();
+        route.insert("/files/{*path}", Method::GET, handler.clone().into());
+        route.insert("/files/{*rest}", Method::PUT, handler.clone().into());
+        route.insert("/users/{id}/files/{*path}", Method::GET, handler.into());
+
+        let routes = route.collect();
+
+        assert_eq!(routes.len(), 3);
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/files/{*path}")));
+        assert!(routes.contains(&RouteInfo::new(Method::PUT, "/files/{*rest}")));
+        assert!(routes.contains(&RouteInfo::new(Method::GET, "/users/{id}/files/{*path}")));
+    }
+
+    #[test]
+    #[cfg(feature = "middleware")]
+    fn it_finds_a_catch_all_route_by_its_pattern() {
+        let mut route = tree(&["/files/{*path}", "/files/{id}"]);
+
+        assert!(route.find_mut("/files/{*path}").is_some());
+        assert!(route.find_mut("/files/{id}").is_some());
+        assert!(route.find_mut("/users/{*path}").is_none());
+        assert!(route.find_mut("/files/{*path}/edit").is_none());
     }
 }

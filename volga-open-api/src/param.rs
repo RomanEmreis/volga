@@ -14,6 +14,10 @@ pub(super) struct OpenApiParameter {
 }
 
 /// Normalize Open API route path
+///
+/// A catch-all parameter, `{*name}`, is described as the path parameter `{name}`: OpenAPI
+/// templates a path one segment at a time, so a value spanning several segments has no
+/// faithful spelling there, and this is the closest one.
 pub(super) fn normalize_openapi_path(path: &str) -> (String, Vec<OpenApiParameter>) {
     let mut params = Vec::new();
     let mut out = String::with_capacity(path.len());
@@ -52,6 +56,7 @@ pub(super) fn normalize_openapi_path(path: &str) -> (String, Vec<OpenApiParamete
 
 fn parse_typed_param_segment(seg: &str) -> Option<(String, Option<OpenApiSchema>)> {
     let inner = seg.strip_prefix('{')?.strip_suffix('}')?.trim();
+    let inner = inner.strip_prefix('*').unwrap_or(inner);
     if inner.is_empty() {
         return None;
     }
@@ -114,6 +119,23 @@ mod tests {
         assert_eq!(params[0].schema.schema_type.as_deref(), Some("integer"));
         assert_eq!(params[1].name, "published");
         assert_eq!(params[1].schema.schema_type.as_deref(), Some("boolean"));
+    }
+
+    #[test]
+    fn normalize_openapi_path_describes_a_catch_all_as_a_path_parameter() {
+        let (path, params) = normalize_openapi_path("/users/{id}/files/{*path}");
+
+        assert_eq!(path, "/users/{id}/files/{path}");
+        assert_eq!(params.len(), 2);
+        assert_eq!(params[1].name, "path");
+        assert!(params[1].required);
+        assert_eq!(params[1].schema.schema_type.as_deref(), Some("string"));
+    }
+
+    #[test]
+    fn normalize_openapi_path_skips_an_unnamed_catch_all() {
+        let (_, params) = normalize_openapi_path("/files/{*}");
+        assert!(params.is_empty());
     }
 
     #[test]

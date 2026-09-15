@@ -24,6 +24,12 @@ fn build_router() -> Endpoints {
         "/files/{name}",
         Func::new(|| async { ok!() }),
     );
+    endpoints.map_route(Method::GET, "/files/{*path}", Func::new(|| async { ok!() }));
+    endpoints.map_route(
+        Method::GET,
+        "/a/{id}/b/{*rest}",
+        Func::new(|| async { ok!() }),
+    );
     endpoints
 }
 

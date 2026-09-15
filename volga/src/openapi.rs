@@ -339,4 +339,34 @@ mod tests {
         let after_json = serde_json::to_value(after).expect("serialize");
         assert!(after_json["paths"].get("/users").is_some());
     }
+
+    /// OpenAPI templates a path one segment at a time, so a catch-all is described as the
+    /// path parameter closest to it
+    #[test]
+    fn it_describes_a_catch_all_route_as_a_path_parameter() {
+        let config = OpenApiConfig::new().with_specs([OpenApiSpec::new("v1")]);
+        let registry = OpenApiRegistry::new(config.clone());
+
+        let mut state = OpenApiState {
+            registry: Some(registry.clone()),
+            config: Some(config),
+            ..Default::default()
+        };
+
+        state.on_route_mapped(
+            RouteKey {
+                method: Method::GET,
+                pattern: "/files/{*path}".into(),
+            },
+            super::OpenApiRouteConfig::default().produces_text(200u16),
+        );
+
+        let doc = registry.document_by_name("v1").expect("document");
+        let json = serde_json::to_value(doc).expect("serialize openapi doc");
+        let parameters = &json["paths"]["/files/{path}"]["get"]["parameters"];
+
+        assert_eq!(parameters[0]["name"], Value::String("path".to_string()));
+        assert_eq!(parameters[0]["in"], Value::String("path".to_string()));
+        assert!(json["paths"].get("/files/{*path}").is_none());
+    }
 }
