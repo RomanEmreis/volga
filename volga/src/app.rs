@@ -745,8 +745,8 @@ impl App {
         }
 
         #[cfg(all(debug_assertions, feature = "openapi"))]
-        for (catch_all, by) in self.openapi.undescribed_catch_alls() {
-            let message = crate::openapi::undescribed_catch_all_warning(catch_all, by);
+        for (catch_all, by, docs) in self.openapi.undescribed_catch_alls() {
+            let message = crate::openapi::undescribed_catch_all_warning(catch_all, by, &docs);
             #[cfg(feature = "tracing")]
             tracing::warn!("{message}");
             #[cfg(not(feature = "tracing"))]

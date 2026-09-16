@@ -59,8 +59,10 @@
 //! several. A client generated from that document may percent-encode the `/` in the value
 //! it sends, and a positional extractor reads that value undecoded, as `%2F`. The same
 //! templating leaves no room for a catch-all beside a parameter route mapped for the same
-//! verb at the same position - `/files/{name}` and `/files/{*path}` - so the parameter route
-//! is described and the catch-all is left out, with a warning at startup in debug builds.
+//! verb at the same position - `/files/{name}` and `/files/{*path}` - in one document, so
+//! where both are bound to a document the parameter route is described there and the
+//! catch-all is left out, with a warning at startup in debug builds. A document only the
+//! catch-all is bound to still describes it.
 //!
 //! # Ambiguous routes
 //!

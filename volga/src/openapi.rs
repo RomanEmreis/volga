@@ -8,7 +8,10 @@ use crate::{
         endpoints::route::{is_catch_all_segment, is_dynamic_segment, split_path},
     },
 };
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use volga_open_api::ui_html;
 
 pub use volga_open_api::{
@@ -19,14 +22,30 @@ pub use volga_open_api::{
 pub(super) const OPEN_API_NOT_EXPOSED_WARN: &str =
     "OpenAPI configured but endpoints not exposed; call app.use_open_api() to serve spec/UI.";
 
-/// Reports a catch-all route left out of the OpenAPI document, and the route describing its
-/// position instead
+/// Reports a catch-all route left out of OpenAPI documents, and the route describing its
+/// position there instead
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
-pub(super) fn undescribed_catch_all_warning(catch_all: &RouteKey, by: &RouteKey) -> String {
+pub(super) fn undescribed_catch_all_warning(
+    catch_all: &RouteKey,
+    by: &RouteKey,
+    docs: &[&str],
+) -> String {
+    let names = docs
+        .iter()
+        .map(|doc| format!("`{doc}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    
+    let there = if docs.len() == 1 {
+        "that document"
+    } else {
+        "those documents"
+    };
+
     format!(
-        "OpenAPI: `{} {}` is left out of the document. OpenAPI describes a catch-all as a \
-         one-segment path parameter, which `{} {}` already is, and one templated path cannot \
-         carry two operations for one method.",
+        "OpenAPI: `{} {}` is left out of {names}. OpenAPI describes a catch-all as a \
+         one-segment path parameter, which `{} {}` already is in {there}, and one templated \
+         path cannot carry two operations for one method.",
         catch_all.method, catch_all.pattern, by.method, by.pattern
     )
 }
@@ -36,6 +55,9 @@ pub(super) struct OpenApiState {
     pub(super) registry: Option<OpenApiRegistry>,
     pub(super) config: Option<OpenApiConfig>,
     pub(super) route_configs: HashMap<RouteKey, OpenApiRouteConfig>,
+    /// Whether a catch-all route has been mapped. Until one is, no route shares an operation
+    /// with a catch-all, and a route is written to the registry without looking for one.
+    has_catch_alls: bool,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -53,20 +75,17 @@ impl RouteKey {
             .is_some_and(is_catch_all_segment)
     }
 
-    /// Returns `true` when this route is a catch-all that `other` - a route for the same
-    /// method with a parameter at the catch-all's position - takes the OpenAPI operation
-    /// from.
+    /// Returns `true` when `other` is mapped for this route's method at this route's position
+    /// in an OpenAPI path template - so an OpenAPI document describes the two as one
+    /// operation.
     ///
     /// OpenAPI templates a path one segment at a time, so a catch-all is described as the
-    /// parameter it would be in one segment, and the two routes are one templated path
-    /// there: an operation of one would be merged into the other's, or overwritten by it.
-    /// The parameter route is the one a spec can describe faithfully, so it is the one kept.
+    /// parameter it would be in one segment: `/files/{*path}` and `/files/{id}` are one
+    /// templated path there, and an operation written for one would be merged into the
+    /// other's, or overwrite it.
     #[inline]
-    fn is_shadowed_by(&self, other: &RouteKey) -> bool {
-        self.method == other.method
-            && self.is_catch_all()
-            && !other.is_catch_all()
-            && is_same_template(&self.pattern, &other.pattern)
+    fn shares_operation_with(&self, other: &RouteKey) -> bool {
+        self.method == other.method && is_same_template(&self.pattern, &other.pattern)
     }
 }
 
@@ -104,34 +123,66 @@ impl OpenApiState {
         self.config.as_ref().is_some_and(|cfg| !cfg.exposed)
     }
 
-    /// Returns the route that keeps `key` out of the OpenAPI document, if any.
-    /// See [`RouteKey::is_shadowed_by`].
+    /// The routes sharing an OpenAPI operation with `key`, `key` included once it is mapped.
+    /// See [`RouteKey::shares_operation_with`].
     #[inline]
-    fn shadowing(&self, key: &RouteKey) -> Option<&RouteKey> {
-        if !key.is_catch_all() {
+    fn operation_group(&self, key: &RouteKey) -> Vec<(&RouteKey, &OpenApiRouteConfig)> {
+        self.route_configs
+            .iter()
+            .filter(|(other, _)| key.shares_operation_with(other))
+            .collect()
+    }
+
+    /// The routes sharing an OpenAPI operation with `key`, when a catch-all is among them.
+    #[inline]
+    fn catch_all_group(&self, key: &RouteKey) -> Option<Vec<(&RouteKey, &OpenApiRouteConfig)>> {
+        if !self.has_catch_alls {
             return None;
         }
 
-        self.route_configs
-            .keys()
-            .find(|other| key.is_shadowed_by(other))
+        let group = self.operation_group(key);
+        group
+            .iter()
+            .any(|(other, _)| other.is_catch_all())
+            .then_some(group)
     }
 
-    /// The catch-all routes left out of the OpenAPI document, each with the route whose
-    /// operation takes its place - empty unless OpenAPI is configured.
+    /// The catch-all routes left out of OpenAPI documents, each with the route whose
+    /// operation takes its place and the documents it is left out of - empty unless OpenAPI
+    /// is configured.
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
-    pub(super) fn undescribed_catch_alls(&self) -> Vec<(&RouteKey, &RouteKey)> {
-        if self.registry.is_none() {
+    pub(super) fn undescribed_catch_alls(&self) -> Vec<(&RouteKey, &RouteKey, Vec<&str>)> {
+        let Some(registry) = self.registry.as_ref() else {
             return Vec::new();
+        };
+
+        let existing: HashSet<&str> = registry.specs().iter().map(|s| s.name.as_str()).collect();
+        let mut undescribed = Vec::new();
+
+        for (key, cfg) in &self.route_configs {
+            if !key.is_catch_all() {
+                continue;
+            }
+
+            let mut routes = self.operation_group(key);
+            routes.retain(|(other, _)| !other.is_catch_all());
+            routes.sort_by(|(left, _), (right, _)| left.pattern.cmp(&right.pattern));
+
+            let docs = registry.docs_for(cfg);
+            if let Some((by, left_out)) = routes.iter().find_map(|(other, other_cfg)| {
+                let theirs = registry.docs_for(other_cfg);
+                let left_out: Vec<&str> = docs
+                    .iter()
+                    .copied()
+                    .filter(|doc| existing.contains(doc) && theirs.contains(doc))
+                    .collect();
+                (!left_out.is_empty()).then_some((*other, left_out))
+            }) {
+                undescribed.push((key, by, left_out));
+            }
         }
 
-        let mut undescribed: Vec<_> = self
-            .route_configs
-            .keys()
-            .filter_map(|key| self.shadowing(key).map(|by| (key, by)))
-            .collect();
-
-        undescribed.sort_by(|(left, _), (right, _)| {
+        undescribed.sort_by(|(left, _, _), (right, _, _)| {
             (left.pattern.as_ref(), left.method.as_str())
                 .cmp(&(right.pattern.as_ref(), right.method.as_str()))
         });
@@ -144,7 +195,6 @@ impl OpenApiState {
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
-        let described = self.shadowing(key).is_none();
         let entry = self
             .route_configs
             .get_mut(key)
@@ -154,41 +204,41 @@ impl OpenApiState {
         let updated = config(current);
         *entry = updated;
 
-        if described && let Some(registry) = self.registry.as_ref() {
-            registry.rebind_route(&key.method, &key.pattern, entry);
-        }
+        self.write_route(key, true);
     }
 
     /// Applies new route registration
     #[inline]
     pub(super) fn on_route_mapped(&mut self, key: RouteKey, auto: OpenApiRouteConfig) {
-        // A route taking a described catch-all's position takes its operation as well, so
-        // the catch-all's operation goes first - otherwise this route's would be merged into
-        // it rather than written on its own
-        if let Some(registry) = self.registry.as_ref() {
-            self.route_configs
-                .keys()
-                .filter(|other| other.is_shadowed_by(&key) && self.shadowing(other).is_none())
-                .for_each(|catch_all| registry.remove_route(&catch_all.method, &catch_all.pattern));
-        }
+        self.has_catch_alls |= key.is_catch_all();
 
-        let described = self.shadowing(&key).is_none();
+        let remapped = self.route_configs.insert(key.clone(), auto).is_some();
+        self.write_route(&key, remapped);
+    }
 
-        if let Some(entry) = self.route_configs.get_mut(&key) {
-            *entry = auto;
+    /// Writes a mapped route's configuration to the registry, if one is configured.
+    ///
+    /// A route sharing its operation with a catch-all rewrites that whole operation group,
+    /// since which document describes which of them depends on all of their configurations
+    /// at once. Every other route is written on its own, as it always was.
+    #[inline]
+    fn write_route(&self, key: &RouteKey, remapped: bool) {
+        let Some(registry) = self.registry.as_ref() else {
+            return;
+        };
 
-            if described && let Some(registry) = self.registry.as_ref() {
-                registry.rebind_route(&key.method, &key.pattern, entry);
-            }
+        if let Some(group) = self.catch_all_group(key) {
+            describe_group(registry, &group);
             return;
         }
 
-        if described && let Some(reg) = self.registry.as_ref() {
-            reg.register_route(&key.method, &key.pattern, &auto);
-            reg.apply_route_config(&key.method, &key.pattern, &auto);
+        let cfg = &self.route_configs[key];
+        if remapped {
+            registry.rebind_route(&key.method, &key.pattern, cfg);
+        } else {
+            registry.register_route(&key.method, &key.pattern, cfg);
+            registry.apply_route_config(&key.method, &key.pattern, cfg);
         }
-
-        self.route_configs.insert(key, auto);
     }
 
     /// Rebuilds the current registry from stored route configs.
@@ -199,10 +249,54 @@ impl OpenApiState {
         };
 
         for (key, cfg) in &self.route_configs {
-            if self.shadowing(key).is_some() {
+            if let Some(group) = self.catch_all_group(key) {
+                // A group is written once, by the member that sorts first
+                let first = group
+                    .iter()
+                    .map(|(other, _)| (other.pattern.as_ref(), other.method.as_str()))
+                    .min();
+
+                if first == Some((key.pattern.as_ref(), key.method.as_str())) {
+                    describe_group(registry, &group);
+                }
                 continue;
             }
 
+            registry.register_route(&key.method, &key.pattern, cfg);
+            registry.apply_route_config(&key.method, &key.pattern, cfg);
+        }
+    }
+}
+
+/// Writes the operations of routes that share one, with a catch-all among them, from their
+/// configurations alone.
+///
+/// Each route is described in the documents it is bound to, except that a catch-all is left
+/// out of every document a parameter route of the group is described in: the parameter
+/// route is the one such a document can describe faithfully. So a catch-all bound to `v1`
+/// beside a parameter route bound to `admin` is described in `v1`, and moving the parameter
+/// route out of a document gives the catch-all its place there back.
+fn describe_group(registry: &OpenApiRegistry, group: &[(&RouteKey, &OpenApiRouteConfig)]) {
+    for (key, _) in group {
+        registry.remove_route(&key.method, &key.pattern);
+    }
+
+    let taken: HashSet<&str> = group
+        .iter()
+        .filter(|(key, _)| !key.is_catch_all())
+        .flat_map(|(_, cfg)| registry.docs_for(cfg))
+        .collect();
+
+    for (key, cfg) in group {
+        if key.is_catch_all() {
+            let docs: Vec<&str> = registry
+                .docs_for(cfg)
+                .into_iter()
+                .filter(|doc| !taken.contains(doc))
+                .collect();
+
+            registry.describe_route_in(&key.method, &key.pattern, cfg, &docs);
+        } else {
             registry.register_route(&key.method, &key.pattern, cfg);
             registry.apply_route_config(&key.method, &key.pattern, cfg);
         }
@@ -488,8 +582,102 @@ mod tests {
     }
 
     fn paths(registry: &OpenApiRegistry) -> Value {
-        let doc = registry.document_by_name("v1").expect("document");
+        paths_in(registry, "v1")
+    }
+
+    fn paths_in(registry: &OpenApiRegistry, doc: &str) -> Value {
+        let doc = registry.document_by_name(doc).expect("document");
         serde_json::to_value(doc).expect("serialize openapi doc")["paths"].clone()
+    }
+
+    /// An `OpenApiState` with a registry for two specs, `v1` (the default) and `admin`.
+    fn two_docs_state() -> (OpenApiState, OpenApiRegistry) {
+        let config =
+            OpenApiConfig::new().with_specs([OpenApiSpec::new("v1"), OpenApiSpec::new("admin")]);
+        let registry = OpenApiRegistry::new(config.clone());
+
+        let state = OpenApiState {
+            registry: Some(registry.clone()),
+            config: Some(config),
+            ..Default::default()
+        };
+
+        (state, registry)
+    }
+
+    fn summary(paths: &Value, path: &str, method: &str) -> Value {
+        paths[path][method]["summary"].clone()
+    }
+
+    /// A catch-all is left out only of the documents a parameter route at its position is
+    /// described in
+    #[test]
+    fn it_leaves_out_a_catch_all_only_where_a_parameter_route_is_described() {
+        let (mut state, registry) = two_docs_state();
+
+        map(&mut state, Method::GET, "/files/{*path}", "the rest");
+        state.update_route_config(&key(Method::GET, "/files/{*path}"), |cfg| {
+            cfg.with_doc("v1")
+        });
+        map(&mut state, Method::GET, "/files/{id}", "one segment");
+        state.update_route_config(&key(Method::GET, "/files/{id}"), |cfg| {
+            cfg.with_doc("admin")
+        });
+
+        let v1 = paths_in(&registry, "v1");
+        let admin = paths_in(&registry, "admin");
+
+        assert_eq!(summary(&v1, "/files/{path}", "get"), "the rest");
+        assert!(v1.get("/files/{id}").is_none());
+        assert_eq!(summary(&admin, "/files/{id}", "get"), "one segment");
+        assert!(admin.get("/files/{path}").is_none());
+    }
+
+    /// Moving the parameter route to another document gives the catch-all its place back
+    #[test]
+    fn it_describes_a_catch_all_again_once_the_parameter_route_moves_away() {
+        let (mut state, registry) = two_docs_state();
+
+        map(&mut state, Method::GET, "/files/{*path}", "the rest");
+        map(&mut state, Method::GET, "/files/{path}", "one segment");
+        assert_eq!(
+            summary(&paths_in(&registry, "v1"), "/files/{path}", "get"),
+            "one segment"
+        );
+
+        state.update_route_config(&key(Method::GET, "/files/{path}"), |cfg| {
+            cfg.with_doc("admin")
+        });
+
+        assert_eq!(
+            summary(&paths_in(&registry, "v1"), "/files/{path}", "get"),
+            "the rest"
+        );
+        assert_eq!(
+            summary(&paths_in(&registry, "admin"), "/files/{path}", "get"),
+            "one segment"
+        );
+    }
+
+    #[test]
+    fn it_leaves_out_a_catch_all_from_the_documents_it_shares_with_a_parameter_route() {
+        let (mut state, registry) = two_docs_state();
+
+        map(&mut state, Method::GET, "/files/{*path}", "the rest");
+        state.update_route_config(&key(Method::GET, "/files/{*path}"), |cfg| {
+            cfg.with_docs(["v1", "admin"])
+        });
+        map(&mut state, Method::GET, "/files/{id}", "one segment");
+        state.update_route_config(&key(Method::GET, "/files/{id}"), |cfg| {
+            cfg.with_doc("admin")
+        });
+
+        let v1 = paths_in(&registry, "v1");
+        let admin = paths_in(&registry, "admin");
+
+        assert_eq!(summary(&v1, "/files/{path}", "get"), "the rest");
+        assert_eq!(summary(&admin, "/files/{id}", "get"), "one segment");
+        assert!(admin.get("/files/{path}").is_none());
     }
 
     /// A catch-all and a parameter route at one position are one templated path in the
@@ -571,6 +759,59 @@ mod tests {
         assert!(paths["/files/meta"].get("get").is_some());
     }
 
+    /// Routes bound to documents before OpenAPI is configured are replayed per document too
+    #[test]
+    fn it_replays_a_catch_all_into_the_documents_no_parameter_route_takes() {
+        let mut state = OpenApiState::default();
+
+        map(&mut state, Method::GET, "/files/{*path}", "the rest");
+        state.update_route_config(&key(Method::GET, "/files/{*path}"), |cfg| {
+            cfg.with_docs(["v1", "admin"])
+        });
+        map(&mut state, Method::GET, "/files/{path}", "one segment");
+        state.update_route_config(&key(Method::GET, "/files/{path}"), |cfg| {
+            cfg.with_doc("admin")
+        });
+
+        let config =
+            OpenApiConfig::new().with_specs([OpenApiSpec::new("v1"), OpenApiSpec::new("admin")]);
+        let registry = OpenApiRegistry::new(config.clone());
+        state.registry = Some(registry.clone());
+        state.config = Some(config);
+        state.replay_all_routes_to_registry();
+
+        assert_eq!(
+            summary(&paths_in(&registry, "v1"), "/files/{path}", "get"),
+            "the rest"
+        );
+        assert_eq!(
+            summary(&paths_in(&registry, "admin"), "/files/{path}", "get"),
+            "one segment"
+        );
+    }
+
+    #[test]
+    fn it_names_only_the_documents_a_catch_all_is_left_out_of() {
+        let (mut state, _) = two_docs_state();
+
+        map(&mut state, Method::GET, "/files/{*path}", "the rest");
+        state.update_route_config(&key(Method::GET, "/files/{*path}"), |cfg| {
+            cfg.with_docs(["v1", "admin"])
+        });
+        map(&mut state, Method::GET, "/files/{id}", "one segment");
+        state.update_route_config(&key(Method::GET, "/files/{id}"), |cfg| {
+            cfg.with_docs(["admin", "missing"])
+        });
+
+        let undescribed = state.undescribed_catch_alls();
+        assert_eq!(undescribed.len(), 1);
+
+        let (catch_all, by, docs) = &undescribed[0];
+        assert_eq!(catch_all.pattern.as_ref(), "/files/{*path}");
+        assert_eq!(by.pattern.as_ref(), "/files/{id}");
+        assert_eq!(docs, &["admin"]);
+    }
+
     /// Routes mapped before OpenAPI is configured are replayed into the registry the same way
     #[test]
     fn it_leaves_out_a_catch_all_when_replaying_routes() {
@@ -604,12 +845,12 @@ mod tests {
         let undescribed = state.undescribed_catch_alls();
         assert_eq!(undescribed.len(), 1);
 
-        let (catch_all, by) = undescribed[0];
+        let (catch_all, by, docs) = &undescribed[0];
         assert_eq!(
-            super::undescribed_catch_all_warning(catch_all, by),
-            "OpenAPI: `GET /files/{*path}` is left out of the document. OpenAPI describes a \
-             catch-all as a one-segment path parameter, which `GET /files/{path}` already is, \
-             and one templated path cannot carry two operations for one method."
+            super::undescribed_catch_all_warning(catch_all, by, docs),
+            "OpenAPI: `GET /files/{*path}` is left out of `v1`. OpenAPI describes a catch-all \
+             as a one-segment path parameter, which `GET /files/{path}` already is in that \
+             document, and one templated path cannot carry two operations for one method."
         );
 
         // Nothing is left out of a document that does not exist
