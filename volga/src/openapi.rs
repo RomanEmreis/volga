@@ -35,7 +35,7 @@ pub(super) fn undescribed_catch_all_warning(
         .map(|doc| format!("`{doc}`"))
         .collect::<Vec<_>>()
         .join(", ");
-    
+
     let there = if docs.len() == 1 {
         "that document"
     } else {
