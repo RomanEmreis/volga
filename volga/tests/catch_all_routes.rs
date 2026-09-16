@@ -85,9 +85,9 @@ async fn it_binds_the_parameters_before_a_catch_all() {
 }
 
 /// A tail is read by name as a whole, separators and all: an `&` in it does not end it and
-/// start a field the route never bound
+/// start a field the route never bound, and a `+` is not a space
 #[tokio::test]
-async fn it_reads_a_tail_carrying_a_pair_separator_by_name() {
+async fn it_reads_a_tail_carrying_form_characters_by_name() {
     #[derive(Deserialize)]
     struct Params {
         path: String,
@@ -107,6 +107,11 @@ async fn it_reads_a_tail_carrying_a_pair_separator_by_name() {
     assert_eq!(
         get(&server, "/files/a&admin=true/b").await,
         (200, "a&admin=true/b:None".into())
+    );
+    // Percent-escapes are decoded by name, as for any parameter
+    assert_eq!(
+        get(&server, "/files/C++/a%2Fb").await,
+        (200, "C++/a/b:None".into())
     );
 
     server.shutdown().await;

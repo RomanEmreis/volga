@@ -16,9 +16,18 @@
 //! - **It reads at least one segment.** `/files/{*path}` does not answer `/files` or
 //!   `/files/`, so that position can carry a route of its own.
 //! - **The value is the path as the request wrote it**, from the first segment the
-//!   catch-all reads to the end: separators inside it and a trailing one are kept, and
-//!   nothing is percent-decoded - the same as a single-segment parameter. `GET /files/a/b/`
-//!   binds `"a/b/"`.
+//!   catch-all reads to the end: separators inside it and a trailing one are kept.
+//!   `GET /files/a/b/` binds `"a/b/"`. It is decoded the way any parameter is: a positional
+//!   extractor (`String`, `Path<T>`) reads it undecoded, while `NamedPath<T>` decodes its
+//!   percent-escapes - so `GET /files/a%2Fb/c` reads as `"a%2Fb/c"` through the first and
+//!   `"a/b/c"` through the second.
+//! - **It is not a safe file system path.** Nothing in it is normalized, so a `..` segment
+//!   reaches the handler as the request wrote it: `GET /files/../../etc/passwd` binds
+//!   `"../../etc/passwd"`, and so does `GET /files/..%2F..%2Fetc/passwd` read through
+//!   `NamedPath<T>`. A handler that joins the value onto a directory has to reject
+//!   `..`, a root and a drive prefix itself, or resolve the joined path and check that it is
+//!   still under that directory. The static file server (`use_static_files`) does this for
+//!   the files it serves; a catch-all route does not.
 //! - **It comes last in precedence.** At every position a literal segment is read first, a
 //!   parameter second and a catch-all last, and the first position two routes differ at
 //!   decides between them - whatever order they were mapped in, and however deep the path
@@ -48,7 +57,10 @@
 //! A catch-all is described in an OpenAPI document as the path parameter `{name}`, since
 //! OpenAPI templates a path one segment at a time and has no spelling for a value spanning
 //! several. A client generated from that document may percent-encode the `/` in the value
-//! it sends, and a catch-all binds that value undecoded, as `%2F`.
+//! it sends, and a positional extractor reads that value undecoded, as `%2F`. The same
+//! templating leaves no room for a catch-all beside a parameter route mapped for the same
+//! verb at the same position - `/files/{name}` and `/files/{*path}` - so the parameter route
+//! is described and the catch-all is left out, with a warning at startup in debug builds.
 //!
 //! # Ambiguous routes
 //!

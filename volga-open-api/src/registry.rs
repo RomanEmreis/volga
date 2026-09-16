@@ -121,12 +121,7 @@ impl OpenApiRegistry {
         }
 
         for doc in docs.values_mut() {
-            if let Some(methods) = doc.paths.get_mut(&spec_path)
-                && methods.remove(&method_lc).is_some()
-                && methods.is_empty()
-            {
-                doc.paths.remove(&spec_path);
-            }
+            remove_operation(doc, &spec_path, &method_lc);
         }
 
         // Built from `cfg` alone rather than from the operation that was there: `cfg`
@@ -152,6 +147,25 @@ impl OpenApiRegistry {
         }
 
         for doc in docs.values_mut() {
+            doc.prune_unreferenced_components();
+        }
+    }
+
+    /// Removes a route's operation from every spec.
+    ///
+    /// A route that is not in a spec is left out of it, so removing one that was never
+    /// registered does nothing.
+    pub fn remove_route(&self, method: &Method, path: &str) {
+        if self.is_excluded_path(path) {
+            return;
+        }
+
+        let (spec_path, _) = normalize_openapi_path(path);
+        let method_lc = method.as_str().to_ascii_lowercase();
+
+        let mut docs = self.lock();
+        for doc in docs.values_mut() {
+            remove_operation(doc, &spec_path, &method_lc);
             doc.prune_unreferenced_components();
         }
     }
@@ -229,6 +243,18 @@ impl OpenApiRegistry {
     }
 }
 
+/// Removes the operation `method` has at `spec_path`, and the path with it once no method is
+/// left there
+#[inline]
+fn remove_operation(doc: &mut OpenApiDocument, spec_path: &str, method: &str) {
+    if let Some(methods) = doc.paths.get_mut(spec_path)
+        && methods.remove(method).is_some()
+        && methods.is_empty()
+    {
+        doc.paths.remove(spec_path);
+    }
+}
+
 fn validate_specs(specs: &[OpenApiSpec]) {
     let mut names = HashSet::with_capacity(specs.len());
     let mut paths = HashSet::with_capacity(specs.len());
@@ -295,6 +321,36 @@ mod tests {
         assert!(v1_doc.paths.contains_key("/users"));
         assert!(!v1_doc.paths.contains_key("/openapi"));
         assert!(!v1_doc.paths.contains_key("/sv1/openapi.json"));
+    }
+
+    #[test]
+    fn remove_route_drops_the_operation_and_keeps_the_others() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        registry.register_route(
+            &Method::GET,
+            "/files/{*path}",
+            &OpenApiRouteConfig::default(),
+        );
+        registry.register_route(
+            &Method::PUT,
+            "/files/{*path}",
+            &OpenApiRouteConfig::default(),
+        );
+        registry.register_route(&Method::GET, "/users", &OpenApiRouteConfig::default());
+
+        registry.remove_route(&Method::GET, "/files/{*path}");
+
+        let doc = registry.document_by_name("v1").expect("v1 document");
+        assert!(!doc.paths["/files/{path}"].contains_key("get"));
+        assert!(doc.paths["/files/{path}"].contains_key("put"));
+
+        registry.remove_route(&Method::PUT, "/files/{*path}");
+        registry.remove_route(&Method::DELETE, "/never/registered");
+
+        let doc = registry.document_by_name("v1").expect("v1 document");
+        assert!(!doc.paths.contains_key("/files/{path}"));
+        assert!(doc.paths.contains_key("/users"));
     }
 
     #[test]

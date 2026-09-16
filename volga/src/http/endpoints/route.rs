@@ -897,7 +897,7 @@ pub(crate) fn is_dynamic_segment(segment: &str) -> bool {
 
 /// Returns `true` when `segment` names a catch-all parameter, `{*name}`.
 #[inline(always)]
-fn is_catch_all_segment(segment: &str) -> bool {
+pub(crate) fn is_catch_all_segment(segment: &str) -> bool {
     segment
         .strip_prefix(OPEN_BRACKET)
         .is_some_and(|inner| inner.starts_with(CATCH_ALL_MARKER))
@@ -1721,6 +1721,11 @@ mod tests {
         assert_eq!(
             bound(&route, "/files/a%2Fb/c"),
             args(&[("path", "a%2Fb/c")])
+        );
+        // Not a file system path: nothing in it is resolved on the way
+        assert_eq!(
+            bound(&route, "/files/../../etc/passwd"),
+            args(&[("path", "../../etc/passwd")])
         );
     }
 
