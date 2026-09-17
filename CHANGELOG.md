@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Fixed
 * `NamedPath<T>` read a path parameter through form decoding, so a literal `&` split it into two fields - `/users/a&admin=true` deserialized `id = "a"` and `admin = true` into a struct with both - and a `+` became a space, `/files/C++` reading as `C  `. Both are kept as written now, as they are in a path (RFC 3986 Section 3.3). Percent-escapes are still decoded, as before, while positional extractors such as `String` and `Path<T>` still read the value undecoded. (#227)
+* A route mapped again under another spelling of its pattern - `/users/{id:integer}`, then `/users/{id}` - replaces the first in the router, but its OpenAPI operation kept the replaced registration's configuration merged into the new one: a description or response the new handler never declared stayed in the document. The replaced configuration is dropped now. (#251)
 * A `Json<T>` sent over a WebSocket - the reply of a `map_msg` handler, or `WebSocket::send` / `WsSink::send` - went out as a binary frame, so a browser client reading `event.data` got a `Blob` instead of the JSON text, and a `JSON.parse` on it failed. It is sent as a text frame now, as JSON is UTF-8 text (RFC 8259 Section 8.1). A client that read those replies as binary has to read text instead. Receiving is unchanged: `Json<T>` is still parsed from a text or a binary frame.
 
 ## Security

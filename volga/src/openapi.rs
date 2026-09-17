@@ -5,10 +5,11 @@ use crate::{
     headers::{CacheControl, ETag, Header, HttpHeaders},
     http::{
         Method,
-        endpoints::route::{is_catch_all_segment, is_dynamic_segment, split_path},
+        endpoints::route::{is_catch_all_segment, is_dynamic_segment, split_path, untyped_path},
     },
 };
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     sync::Arc,
 };
@@ -58,6 +59,10 @@ pub(super) struct OpenApiState {
     /// Whether a catch-all route has been mapped. Until one is, no route shares an operation
     /// with a catch-all, and a route is written to the registry without looking for one.
     has_catch_alls: bool,
+    /// The spelling each mapped route was last mapped under, keyed by the route it names -
+    /// see [`RouteKey::untyped`] - so that mapping a route again under another spelling finds
+    /// the configuration it replaces.
+    spellings: HashMap<RouteKey, RouteKey>,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -67,6 +72,19 @@ pub(super) struct RouteKey {
 }
 
 impl RouteKey {
+    /// This route as the router reads it, without the type annotations of its parameters:
+    /// `GET /users/{id:integer}` and `GET /users/{id}` are one route
+    #[inline]
+    fn untyped(&self) -> RouteKey {
+        match untyped_path(&self.pattern) {
+            Cow::Borrowed(_) => self.clone(),
+            Cow::Owned(pattern) => RouteKey {
+                method: self.method.clone(),
+                pattern: pattern.into(),
+            },
+        }
+    }
+
     /// Returns `true` when this route ends in a catch-all parameter
     #[inline]
     fn is_catch_all(&self) -> bool {
@@ -156,7 +174,6 @@ impl OpenApiState {
             return Vec::new();
         };
 
-        let existing: HashSet<&str> = registry.specs().iter().map(|s| s.name.as_str()).collect();
         let mut undescribed = Vec::new();
 
         for (key, cfg) in &self.route_configs {
@@ -168,14 +185,15 @@ impl OpenApiState {
             routes.retain(|(other, _)| !other.is_catch_all());
             routes.sort_by(|(left, _), (right, _)| left.pattern.cmp(&right.pattern));
 
-            let docs = registry.docs_for(cfg);
+            let docs = placement(registry, cfg);
             if let Some((by, left_out)) = routes.iter().find_map(|(other, other_cfg)| {
-                let theirs = registry.docs_for(other_cfg);
+                let theirs = placement(registry, other_cfg);
                 let left_out: Vec<&str> = docs
                     .iter()
                     .copied()
-                    .filter(|doc| existing.contains(doc) && theirs.contains(doc))
+                    .filter(|doc| theirs.contains(doc))
                     .collect();
+
                 (!left_out.is_empty()).then_some((*other, left_out))
             }) {
                 undescribed.push((key, by, left_out));
@@ -195,10 +213,11 @@ impl OpenApiState {
     where
         T: FnOnce(OpenApiRouteConfig) -> OpenApiRouteConfig,
     {
-        let entry = self
-            .route_configs
-            .get_mut(key)
-            .expect("route config missing");
+        // A route mapped again under another spelling was replaced, configuration and all -
+        // a group closing over both spellings reaches the one that is gone as well
+        let Some(entry) = self.route_configs.get_mut(key) else {
+            return;
+        };
 
         let current = std::mem::take(entry);
         let updated = config(current);
@@ -212,7 +231,21 @@ impl OpenApiState {
     pub(super) fn on_route_mapped(&mut self, key: RouteKey, auto: OpenApiRouteConfig) {
         self.has_catch_alls |= key.is_catch_all();
 
-        let remapped = self.route_configs.insert(key.clone(), auto).is_some();
+        // Mapping a handler where one is mapped replaces the route, and a type annotation is
+        // not part of what the router reads - so a route mapped again under another spelling
+        // replaces the configuration of the one it was mapped as, rather than leaving it to be
+        // merged into this one's operation
+        let replaced = self
+            .spellings
+            .insert(key.untyped(), key.clone())
+            .filter(|previous| *previous != key)
+            .and_then(|previous| self.route_configs.remove_entry(&previous));
+
+        if let (Some((previous, _)), Some(registry)) = (&replaced, self.registry.as_ref()) {
+            registry.remove_route(&previous.method, &previous.pattern);
+        }
+
+        let remapped = self.route_configs.insert(key.clone(), auto).is_some() || replaced.is_some();
         self.write_route(&key, remapped);
     }
 
@@ -271,11 +304,11 @@ impl OpenApiState {
 /// Writes the operations of routes that share one, with a catch-all among them, from their
 /// configurations alone.
 ///
-/// Each route is described in the documents it is bound to, except that a catch-all is left
-/// out of every document a parameter route of the group is described in: the parameter
-/// route is the one such a document can describe faithfully. So a catch-all bound to `v1`
-/// beside a parameter route bound to `admin` is described in `v1`, and moving the parameter
-/// route out of a document gives the catch-all its place there back.
+/// Each route is described in the documents it is placed in - see [`placement`] - except that
+/// a catch-all is left out of every document a parameter route of the group is described in:
+/// the parameter route is the one such a document can describe faithfully. So a catch-all
+/// bound to `v1` beside a parameter route bound to `admin` is described in `v1`, and moving
+/// the parameter route out of a document gives the catch-all its place there back.
 fn describe_group(registry: &OpenApiRegistry, group: &[(&RouteKey, &OpenApiRouteConfig)]) {
     for (key, _) in group {
         registry.remove_route(&key.method, &key.pattern);
@@ -284,23 +317,41 @@ fn describe_group(registry: &OpenApiRegistry, group: &[(&RouteKey, &OpenApiRoute
     let taken: HashSet<&str> = group
         .iter()
         .filter(|(key, _)| !key.is_catch_all())
-        .flat_map(|(_, cfg)| registry.docs_for(cfg))
+        .flat_map(|(_, cfg)| placement(registry, cfg))
         .collect();
 
     for (key, cfg) in group {
+        let mut docs = placement(registry, cfg);
         if key.is_catch_all() {
-            let docs: Vec<&str> = registry
-                .docs_for(cfg)
-                .into_iter()
-                .filter(|doc| !taken.contains(doc))
-                .collect();
-
-            registry.describe_route_in(&key.method, &key.pattern, cfg, &docs);
-        } else {
-            registry.register_route(&key.method, &key.pattern, cfg);
-            registry.apply_route_config(&key.method, &key.pattern, cfg);
+            docs.retain(|doc| !taken.contains(doc));
         }
+
+        registry.describe_route_in(&key.method, &key.pattern, cfg, &docs);
     }
+}
+
+/// The documents a route of an operation group is described in: the ones it is bound to that
+/// exist, or the first spec when it is bound to none that does.
+///
+/// A route is bound to documents only after it is mapped, and only ever gains them, so one
+/// whose documents all fail to exist has been described in the first spec all along - which
+/// is also where `OpenApiRegistry::rebind_route` leaves a route rebound to such documents.
+fn placement<'a>(registry: &'a OpenApiRegistry, cfg: &'a OpenApiRouteConfig) -> Vec<&'a str> {
+    let specs = registry.specs();
+    let docs: Vec<&str> = registry
+        .docs_for(cfg)
+        .into_iter()
+        .filter(|doc| specs.iter().any(|spec| spec.name == *doc))
+        .collect();
+
+    if !docs.is_empty() {
+        return docs;
+    }
+
+    specs
+        .first()
+        .map(|spec| vec![spec.name.as_str()])
+        .unwrap_or_default()
 }
 
 impl App {
@@ -757,6 +808,98 @@ mod tests {
             Value::String("upload".into())
         );
         assert!(paths["/files/meta"].get("get").is_some());
+    }
+
+    /// The router replaces a route mapped again under another spelling, and so does the
+    /// document - in a group with a catch-all as well, where both configurations used to be
+    /// written back in whatever order the map yielded them
+    #[test]
+    fn it_replaces_a_catch_all_mapped_again_under_another_spelling() {
+        for _ in 0..32 {
+            let (mut state, registry) = configured_state();
+
+            map(
+                &mut state,
+                Method::GET,
+                "/files/{*path:string}",
+                "old handler",
+            );
+            map(&mut state, Method::GET, "/files/{id}/meta", "unrelated");
+            map(&mut state, Method::GET, "/files/{*path}", "new handler");
+
+            assert_eq!(
+                summary(&paths(&registry), "/files/{path}", "get"),
+                "new handler"
+            );
+            assert_eq!(state.route_configs.len(), 2);
+        }
+    }
+
+    #[test]
+    fn it_replaces_a_parameter_route_mapped_again_under_another_spelling() {
+        let (mut state, registry) = configured_state();
+
+        let typed = key(Method::GET, "/users/{id:integer}");
+        state.on_route_mapped(typed.clone(), super::OpenApiRouteConfig::default());
+        state.update_route_config(&typed, |cfg| {
+            cfg.with_summary("old handler")
+                .with_description("old description")
+        });
+        map(&mut state, Method::GET, "/users/{id}", "new handler");
+
+        let operation = &paths(&registry)["/users/{id}"]["get"];
+        assert_eq!(operation["summary"], "new handler");
+        assert!(operation.get("description").is_none());
+        assert_eq!(operation["parameters"][0]["schema"]["type"], "string");
+        assert_eq!(state.route_configs.len(), 1);
+
+        // A group closing over the spelling that was replaced reaches nothing
+        state.update_route_config(&typed, |cfg| cfg.with_summary("group"));
+        assert_eq!(
+            paths(&registry)["/users/{id}"]["get"]["summary"],
+            "new handler"
+        );
+    }
+
+    /// A group applies its configuration to every route it mapped when it closes, the
+    /// spelling that was replaced included
+    #[test]
+    fn it_closes_a_group_that_mapped_a_route_under_two_spellings() {
+        let mut app = crate::App::new().with_open_api(|cfg| cfg);
+
+        app.group("/files", |files| {
+            files.open_api(|cfg| cfg.with_summary("files"));
+            files.map_get("/{*path:string}", |path: String| async move { path });
+            files.map_get("/{*path}", |path: String| async move { path });
+        });
+
+        let registry = app.openapi.registry.clone().expect("registry");
+        assert_eq!(summary(&paths(&registry), "/files/{path}", "get"), "files");
+        assert_eq!(app.openapi.route_configs.len(), 1);
+    }
+
+    /// A route bound only to documents that do not exist stays where an unbound route is
+    /// described, as `rebind_route` leaves one - the catch-all beside it does not take its
+    /// place there
+    #[test]
+    fn it_keeps_a_route_bound_only_to_missing_documents_in_the_first_spec() {
+        let (mut state, registry) = two_docs_state();
+
+        map(&mut state, Method::GET, "/files/{*path}", "the rest");
+        map(&mut state, Method::GET, "/files/{path}", "one segment");
+        state.update_route_config(&key(Method::GET, "/files/{path}"), |cfg| {
+            cfg.with_doc("missing")
+        });
+
+        assert_eq!(
+            summary(&paths_in(&registry, "v1"), "/files/{path}", "get"),
+            "one segment"
+        );
+        assert!(paths_in(&registry, "admin").get("/files/{path}").is_none());
+
+        let undescribed = state.undescribed_catch_alls();
+        assert_eq!(undescribed.len(), 1);
+        assert_eq!(undescribed[0].2, ["v1"]);
     }
 
     /// Routes bound to documents before OpenAPI is configured are replayed per document too

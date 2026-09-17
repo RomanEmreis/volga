@@ -956,6 +956,37 @@ pub(crate) fn canonical_path(path: &str) -> String {
     finish_path(canonical)
 }
 
+/// Spells a route pattern without the type annotations its parameters carry, which is how
+/// the router reads it: `/users/{id:integer}` and `/users/{id}` name one route
+#[inline]
+#[cfg(feature = "openapi")]
+pub(crate) fn untyped_path(pattern: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+
+    let typed = split_path(pattern)
+        .any(|segment| is_dynamic_segment(segment) && segment.contains(TYPE_SEPARATOR));
+
+    if !typed {
+        return Cow::Borrowed(pattern);
+    }
+
+    let mut path = String::with_capacity(pattern.len());
+    for segment in split_path(pattern) {
+        path.push(PATH_SEPARATOR as char);
+        if is_dynamic_segment(segment) {
+            spell_param(
+                &mut path,
+                param_name(segment),
+                is_catch_all_segment(segment),
+            );
+        } else {
+            path.push_str(segment);
+        }
+    }
+
+    Cow::Owned(finish_path(path))
+}
+
 /// Joins a route group's prefix and a route's pattern into the name of the route they
 /// address together
 #[inline]
@@ -1297,6 +1328,27 @@ mod tests {
         let path = "a/b/c/d";
         let split = split_path(path);
         assert_eq!(split.collect::<Vec<_>>(), vec!["a", "b", "c", "d"])
+    }
+
+    #[test]
+    #[cfg(feature = "openapi")]
+    fn it_spells_a_pattern_without_parameter_types() {
+        use super::untyped_path;
+        use std::borrow::Cow;
+
+        assert_eq!(
+            untyped_path("/users/{id:integer}/files/{*path:string}"),
+            "/users/{id}/files/{*path}"
+        );
+        assert!(matches!(
+            untyped_path("/users/{id}"),
+            Cow::Borrowed("/users/{id}")
+        ));
+        // A literal carrying the separator is a literal, not a type annotation
+        assert!(matches!(
+            untyped_path("/at/12:00"),
+            Cow::Borrowed("/at/12:00")
+        ));
     }
 
     #[test]
