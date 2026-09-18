@@ -744,6 +744,15 @@ impl App {
             eprintln!("{}", crate::openapi::OPEN_API_NOT_EXPOSED_WARN);
         }
 
+        #[cfg(all(debug_assertions, feature = "openapi"))]
+        for (catch_all, by, docs) in self.openapi.undescribed_catch_alls() {
+            let message = crate::openapi::undescribed_catch_all_warning(catch_all, by, &docs);
+            #[cfg(feature = "tracing")]
+            tracing::warn!("{message}");
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("{message}");
+        }
+
         let socket = tcp_listener.local_addr()?;
 
         let no_delay = self.no_delay;

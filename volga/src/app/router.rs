@@ -1,5 +1,69 @@
 //! Route mapping helpers
 //!
+//! # Catch-all parameters
+//!
+//! A route's last segment can be a catch-all parameter, `{*name}`, which binds the rest of
+//! the path as one value:
+//!
+//! ```
+//!# use volga::App;
+//! let mut app = App::new();
+//!
+//! // GET /files/docs/2026/report.pdf binds `path` as "docs/2026/report.pdf"
+//! app.map_get("/files/{*path}", |path: String| async move { path });
+//! ```
+//!
+//! - **It reads at least one segment.** `/files/{*path}` does not answer `/files` or
+//!   `/files/`, so that position can carry a route of its own.
+//! - **The value is the path as the request wrote it**, from the first segment the
+//!   catch-all reads to the end: separators inside it and a trailing one are kept.
+//!   `GET /files/a/b/` binds `"a/b/"`. It is decoded the way any parameter is: a positional
+//!   extractor (`String`, `Path<T>`) reads it undecoded, while `NamedPath<T>` decodes its
+//!   percent-escapes - so `GET /files/a%2Fb/c` reads as `"a%2Fb/c"` through the first and
+//!   `"a/b/c"` through the second.
+//! - **It is not a safe file system path.** Nothing in it is normalized, so a `..` segment
+//!   reaches the handler as the request wrote it: `GET /files/../../etc/passwd` binds
+//!   `"../../etc/passwd"`, and so does `GET /files/..%2F..%2Fetc/passwd` read through
+//!   `NamedPath<T>`. A handler that joins the value onto a directory has to reject
+//!   `..`, a root and a drive prefix itself, or resolve the joined path and check that it is
+//!   still under that directory. The static file server (`use_static_files`) does this for
+//!   the files it serves; a catch-all route does not.
+//! - **It comes last in precedence.** At every position a literal segment is read first, a
+//!   parameter second and a catch-all last, and the first position two routes differ at
+//!   decides between them - whatever order they were mapped in, and however deep the path
+//!   goes:
+//!
+//! ```
+//!# use volga::App;
+//! let mut app = App::new();
+//!
+//! app.map_get("/api/users/{id}", |id: u32| async move { id.to_string() });
+//! app.map_get("/assets/{*path}", |path: String| async move { path });
+//! app.map_get("/{lang}/{page}", |lang: String, page: String| async move { page });
+//! app.map_get("/{*path}", |path: String| async move { path });
+//!
+//! // GET /api/users/7        -> /api/users/{id}
+//! // GET /assets/app.js      -> /assets/{*path}, not /{lang}/{page}
+//! // GET /en/home            -> /{lang}/{page}
+//! // GET /api/users/7/extra  -> /{*path}, since nothing else reads all of it
+//! ```
+//!
+//! - **It is the last segment.** A route continuing past one - including a route mapped
+//!   inside a group whose prefix ends in one - panics where it is mapped.
+//! - **It is named like any other parameter**, and [ambiguous routes](#ambiguous-routes)
+//!   apply to it the same way: another verb may name the rest of the path something else,
+//!   while one verb naming it twice panics.
+//!
+//! A catch-all is described in an OpenAPI document as the path parameter `{name}`, since
+//! OpenAPI templates a path one segment at a time and has no spelling for a value spanning
+//! several. A client generated from that document may percent-encode the `/` in the value
+//! it sends, and a positional extractor reads that value undecoded, as `%2F`. The same
+//! templating leaves no room for a catch-all beside a parameter route mapped for the same
+//! verb at the same position - `/files/{name}` and `/files/{*path}` - in one document, so
+//! where both are bound to a document the parameter route is described there and the
+//! catch-all is left out, with a warning at startup in debug builds. A document only the
+//! catch-all is bound to still describes it.
+//!
 //! # Ambiguous routes
 //!
 //! A route parameter is matched by the position it sits at rather than by what it is

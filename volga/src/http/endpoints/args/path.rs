@@ -48,6 +48,9 @@ pub struct Path<T>(pub T);
 /// Unlike [`Path<T>`], this extractor deserializes parameters into a named
 /// struct, preserving parameter names.
 ///
+/// Unlike [`Path<T>`] as well, it decodes the percent-escapes in a value: `%20` is read as
+/// a space and `%2F` as a `/`. A `+` or an `&` is read as it is written.
+///
 /// This extractor operates on a snapshot of the matched path arguments.
 /// The original path state remains available to other extractors.
 ///

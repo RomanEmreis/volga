@@ -8,6 +8,11 @@ use std::sync::OnceLock;
 
 const QUERY_SEPARATOR: char = '&';
 const QUERY_KEY_VALUE_SEPARATOR: char = '=';
+const FORM_SPACE: char = '+';
+
+/// The characters a form decoder reads as something other than themselves, and that a
+/// path carries as they are
+const FORM_ONLY: [char; 2] = [QUERY_SEPARATOR, FORM_SPACE];
 
 /// Route path arguments
 ///
@@ -49,23 +54,6 @@ impl PathArgs {
     #[inline]
     pub(crate) fn iter(&self) -> std::slice::Iter<'_, PathArg> {
         self.args.iter()
-    }
-
-    /// The number of args bound so far.
-    #[inline]
-    pub(crate) fn len(&self) -> usize {
-        self.args.len()
-    }
-
-    /// Drops every arg past the first `len` of them.
-    ///
-    /// Used when a lookup unwinds a branch it had started to bind.
-    #[inline]
-    pub(crate) fn truncate(&mut self, len: usize) {
-        if len < self.args.len() {
-            self.args.truncate(len);
-            let _ = self.encoded.take();
-        }
     }
 
     /// Returns the first arg, or `None` if it is empty.
@@ -195,16 +183,43 @@ fn encode(args: &SmallVec<[PathArg; DEFAULT_DEPTH]>) -> String {
     if let Some(first) = iter.next() {
         result.push_str(first.name.as_ref());
         result.push(QUERY_KEY_VALUE_SEPARATOR);
-        result.push_str(first.value.as_ref());
+        push_value(&mut result, first.value.as_ref());
         for s in iter {
             result.push(QUERY_SEPARATOR);
             result.push_str(s.name.as_ref());
             result.push(QUERY_KEY_VALUE_SEPARATOR);
-            result.push_str(s.value.as_ref());
+            push_value(&mut result, s.value.as_ref());
         }
     }
 
     result
+}
+
+/// Appends a value to the encoded args, escaping what form decoding reads differently from
+/// a path.
+///
+/// The encoded args are read back as a form, and two characters mean something there that
+/// they do not mean in a path (RFC 3986 Section 3.3), where both are literal:
+///
+/// - `&` separates two pairs, so a value carrying one would end its own pair early and
+///   start a pair the route never bound: `/files/a&admin=true` would read as `path=a` and
+///   `admin=true`.
+/// - `+` is a space, so `/files/C++` would read as `C  `.
+///
+/// A path segment may carry either, and a catch-all value carries whatever the rest of the
+/// path does. Percent-escapes are left for the decoder, which decodes them as it always has.
+#[inline]
+fn push_value(result: &mut String, value: &str) {
+    let mut rest = value;
+    while let Some(at) = rest.find(FORM_ONLY) {
+        result.push_str(&rest[..at]);
+        result.push_str(match rest.as_bytes()[at] {
+            b'&' => "%26",
+            _ => "%2B",
+        });
+        rest = &rest[at + 1..];
+    }
+    result.push_str(rest);
 }
 
 #[cfg(test)]
@@ -258,6 +273,46 @@ mod tests {
 
         let query_str = args.encoded().unwrap();
         assert_eq!(query_str, "=123&name=");
+    }
+
+    #[test]
+    fn it_escapes_what_a_form_reads_differently_from_a_path() {
+        let args: PathArgs =
+            smallvec::smallvec![arg("path", "a&admin=true/C++/b&"), arg("id", "7")].into();
+
+        let query_str = args.encoded().unwrap();
+        assert_eq!(query_str, "path=a%26admin=true/C%2B%2B/b%26&id=7");
+
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        struct Params {
+            path: String,
+            id: u32,
+            admin: Option<bool>,
+        }
+
+        let params: Params = serde_urlencoded::from_str(query_str).unwrap();
+        assert_eq!(
+            params,
+            Params {
+                path: "a&admin=true/C++/b&".into(),
+                id: 7,
+                admin: None
+            }
+        );
+    }
+
+    /// Percent-escapes are left for the decoder, which is what `NamedPath<T>` has always
+    /// read them through
+    #[test]
+    fn it_leaves_percent_escapes_to_the_decoder() {
+        let args: PathArgs = smallvec::smallvec![arg("name", "John%20Doe%2B")].into();
+
+        let query_str = args.encoded().unwrap();
+        assert_eq!(query_str, "name=John%20Doe%2B");
+
+        let decoded: std::collections::HashMap<String, String> =
+            serde_urlencoded::from_str(query_str).unwrap();
+        assert_eq!(decoded["name"], "John Doe+");
     }
 
     #[test]

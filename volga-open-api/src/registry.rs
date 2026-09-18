@@ -66,6 +66,38 @@ impl OpenApiRegistry {
 
     /// Registers a route in the OpenAPI registry.
     pub fn register_route(&self, method: &Method, path: &str, cfg: &OpenApiRouteConfig) {
+        self.register_in(method, path, &self.docs_for(cfg));
+    }
+
+    /// Registers a route in `docs` alone and applies its configuration there.
+    ///
+    /// `docs` is meant to be some of the documents `cfg` names - see [`Self::docs_for`] - for a
+    /// route that has to be left out of the rest. A name no document carries is skipped.
+    pub fn describe_route_in(
+        &self,
+        method: &Method,
+        path: &str,
+        cfg: &OpenApiRouteConfig,
+        docs: &[&str],
+    ) {
+        self.register_in(method, path, docs);
+        self.apply_in(method, path, cfg, docs);
+    }
+
+    /// Returns the names of the documents a route configured with `cfg` is described in: the
+    /// ones it is bound to, or the first spec when it is bound to none.
+    pub fn docs_for<'a>(&'a self, cfg: &'a OpenApiRouteConfig) -> Vec<&'a str> {
+        if let Some(docs) = cfg.docs() {
+            docs.iter().map(|s| s.as_str()).collect()
+        } else {
+            self.specs
+                .first()
+                .map(|s| vec![s.name.as_str()])
+                .unwrap_or_default()
+        }
+    }
+
+    fn register_in(&self, method: &Method, path: &str, targets: &[&str]) {
         if self.is_excluded_path(path) {
             return;
         }
@@ -74,10 +106,9 @@ impl OpenApiRegistry {
 
         let mut docs = self.lock();
         let method = method.as_str().to_ascii_lowercase();
-        let targets = self.target_doc_names(cfg);
 
         for doc_name in targets {
-            if let Some(doc) = docs.get_mut(doc_name) {
+            if let Some(doc) = docs.get_mut(*doc_name) {
                 let entry = doc.paths.entry(spec_path.clone()).or_default();
 
                 let op = entry
@@ -100,7 +131,7 @@ impl OpenApiRegistry {
         let (spec_path, path_params) = normalize_openapi_path(path);
 
         let method_lc = method.as_str().to_ascii_lowercase();
-        let targets = self.target_doc_names(cfg);
+        let targets = self.docs_for(cfg);
 
         let mut docs = self.lock();
 
@@ -121,12 +152,7 @@ impl OpenApiRegistry {
         }
 
         for doc in docs.values_mut() {
-            if let Some(methods) = doc.paths.get_mut(&spec_path)
-                && methods.remove(&method_lc).is_some()
-                && methods.is_empty()
-            {
-                doc.paths.remove(&spec_path);
-            }
+            remove_operation(doc, &spec_path, &method_lc);
         }
 
         // Built from `cfg` alone rather than from the operation that was there: `cfg`
@@ -156,8 +182,31 @@ impl OpenApiRegistry {
         }
     }
 
+    /// Removes a route's operation from every spec.
+    ///
+    /// A route that is not in a spec is left out of it, so removing one that was never
+    /// registered does nothing.
+    pub fn remove_route(&self, method: &Method, path: &str) {
+        if self.is_excluded_path(path) {
+            return;
+        }
+
+        let (spec_path, _) = normalize_openapi_path(path);
+        let method_lc = method.as_str().to_ascii_lowercase();
+
+        let mut docs = self.lock();
+        for doc in docs.values_mut() {
+            remove_operation(doc, &spec_path, &method_lc);
+            doc.prune_unreferenced_components();
+        }
+    }
+
     /// Applies route configuration
     pub fn apply_route_config(&self, method: &Method, path: &str, cfg: &OpenApiRouteConfig) {
+        self.apply_in(method, path, cfg, &self.docs_for(cfg));
+    }
+
+    fn apply_in(&self, method: &Method, path: &str, cfg: &OpenApiRouteConfig, targets: &[&str]) {
         if self.is_excluded_path(path) {
             return;
         }
@@ -166,10 +215,9 @@ impl OpenApiRegistry {
 
         let mut docs = self.lock();
         let method_lc = method.as_str().to_ascii_lowercase();
-        let targets = self.target_doc_names(cfg);
 
         for doc_name in targets {
-            let Some(doc) = docs.get_mut(doc_name) else {
+            let Some(doc) = docs.get_mut(*doc_name) else {
                 continue;
             };
 
@@ -216,16 +264,17 @@ impl OpenApiRegistry {
     fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, OpenApiDocument>> {
         self.inner.lock().expect("openapi registry lock poisoned")
     }
+}
 
-    fn target_doc_names<'a>(&'a self, cfg: &'a OpenApiRouteConfig) -> Vec<&'a str> {
-        if let Some(docs) = cfg.docs() {
-            docs.iter().map(|s| s.as_str()).collect()
-        } else {
-            self.specs
-                .first()
-                .map(|s| vec![s.name.as_str()])
-                .unwrap_or_default()
-        }
+/// Removes the operation `method` has at `spec_path`, and the path with it once no method is
+/// left there
+#[inline]
+fn remove_operation(doc: &mut OpenApiDocument, spec_path: &str, method: &str) {
+    if let Some(methods) = doc.paths.get_mut(spec_path)
+        && methods.remove(method).is_some()
+        && methods.is_empty()
+    {
+        doc.paths.remove(spec_path);
     }
 }
 
@@ -295,6 +344,62 @@ mod tests {
         assert!(v1_doc.paths.contains_key("/users"));
         assert!(!v1_doc.paths.contains_key("/openapi"));
         assert!(!v1_doc.paths.contains_key("/sv1/openapi.json"));
+    }
+
+    #[test]
+    fn remove_route_drops_the_operation_and_keeps_the_others() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        registry.register_route(
+            &Method::GET,
+            "/files/{*path}",
+            &OpenApiRouteConfig::default(),
+        );
+        registry.register_route(
+            &Method::PUT,
+            "/files/{*path}",
+            &OpenApiRouteConfig::default(),
+        );
+        registry.register_route(&Method::GET, "/users", &OpenApiRouteConfig::default());
+
+        registry.remove_route(&Method::GET, "/files/{*path}");
+
+        let doc = registry.document_by_name("v1").expect("v1 document");
+        assert!(!doc.paths["/files/{path}"].contains_key("get"));
+        assert!(doc.paths["/files/{path}"].contains_key("put"));
+
+        registry.remove_route(&Method::PUT, "/files/{*path}");
+        registry.remove_route(&Method::DELETE, "/never/registered");
+
+        let doc = registry.document_by_name("v1").expect("v1 document");
+        assert!(!doc.paths.contains_key("/files/{path}"));
+        assert!(doc.paths.contains_key("/users"));
+    }
+
+    #[test]
+    fn docs_for_reads_the_bound_docs_or_the_first_spec() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        assert_eq!(registry.docs_for(&OpenApiRouteConfig::default()), ["v1"]);
+        assert_eq!(
+            registry.docs_for(&OpenApiRouteConfig::default().with_docs(["admin", "v1"])),
+            ["admin", "v1"]
+        );
+    }
+
+    #[test]
+    fn describe_route_in_writes_to_the_given_docs_only() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+        let cfg = OpenApiRouteConfig::default()
+            .with_docs(["v1", "admin"])
+            .with_summary("the rest");
+
+        registry.describe_route_in(&Method::GET, "/files/{*path}", &cfg, &["admin", "missing"]);
+
+        let v1 = registry.document_by_name("v1").expect("v1 document");
+        let admin = registry.document_by_name("admin").expect("admin document");
+        assert!(!v1.paths.contains_key("/files/{path}"));
+        assert!(admin.paths["/files/{path}"].contains_key("get"));
     }
 
     #[test]
