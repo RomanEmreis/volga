@@ -20,6 +20,7 @@ use std::{
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::watch,
+    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -734,12 +735,17 @@ impl App {
         self
     }
 
+    /// Serves the HTTPS redirection on `http_port` until the server shuts down.
+    ///
+    /// The returned task ends once the listener's own connections have drained or been closed,
+    /// so the caller awaits it to return with none of them still running.
+    #[must_use = "the redirection listener has to be awaited for its connections to be drained"]
     pub(super) fn run_https_redirection_middleware(
         socket: SocketAddr,
         http_port: u16,
         shutdown_tx: Arc<watch::Sender<()>>,
         shutdown_timeout: Duration,
-    ) {
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let https_port = socket.port();
             let socket = SocketAddr::new(socket.ip(), http_port);
@@ -771,7 +777,7 @@ impl App {
                 #[cfg(feature = "tracing")]
                 tracing::error!("unable to start HTTPS redirection listener");
             }
-        });
+        })
     }
 
     #[inline]

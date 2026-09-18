@@ -864,16 +864,16 @@ impl App {
         Self::shutdown_signal(shutdown_rx, shutdown_handle);
 
         #[cfg(feature = "tls")]
-        if let Some(redirection_config) = redirection_config
-            && redirection_config.enabled
-        {
-            Self::run_https_redirection_middleware(
-                socket,
-                redirection_config.http_port,
-                shutdown_tx.clone(),
-                shutdown_timeout,
-            );
-        }
+        let redirection = redirection_config
+            .filter(|config| config.enabled)
+            .map(|config| {
+                Self::run_https_redirection_middleware(
+                    socket,
+                    config.http_port,
+                    shutdown_tx.clone(),
+                    shutdown_timeout,
+                )
+            });
 
         // Spawn hot-reload background task if requested.
         // The task selects on shutdown_tx.closed() so it terminates cleanly.
@@ -947,6 +947,17 @@ impl App {
         drop(tcp_listener);
 
         Self::wait_for_connections(graceful_shutdown, shutdown_timeout, &force_close).await;
+
+        // The redirection listener stops on the same signal and drains its connections in
+        // parallel with the ones above, under the same timeout, so this adds no wait of its own
+        // unless one of its connections outlasted all of the server's
+        #[cfg(feature = "tls")]
+        if let Some(redirection) = redirection
+            && let Err(_err) = redirection.await
+        {
+            #[cfg(feature = "tracing")]
+            tracing::error!("HTTPS redirection listener failed: {_err:#}");
+        }
 
         // The environment - and the services it owns, singletons among them - is released
         // here, unless something a handler spawned outlived its connection and still holds it
