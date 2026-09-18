@@ -70,6 +70,7 @@ impl App {
             body_limit_bytes: Option<usize>,
             max_header_count: Option<usize>,
             max_connections: Option<usize>,
+            shutdown_timeout_secs: Option<u64>,
         }
 
         let Some(s) = parse_section::<ServerSection>(value, "server")? else {
@@ -96,6 +97,9 @@ impl App {
             } else {
                 crate::Limit::Limited(n)
             });
+        }
+        if let Some(secs) = s.shutdown_timeout_secs {
+            self = self.with_shutdown_timeout(std::time::Duration::from_secs(secs));
         }
 
         Ok(self)
@@ -441,6 +445,26 @@ mod tests {
     fn reload_on_change_without_file_panics() {
         // ConfigBuilder with reload but no file path must fail at process_config time.
         App::new().with_config(|cfg| cfg.reload_on_change());
+    }
+
+    #[test]
+    fn server_section_sets_shutdown_timeout() {
+        let file = write_toml("[server]\nshutdown_timeout_secs = 3\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        assert_eq!(app.shutdown_timeout(), std::time::Duration::from_secs(3));
+    }
+
+    #[test]
+    fn server_section_keeps_default_shutdown_timeout() {
+        let file = write_toml("[server]\nport = 8181\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        assert_eq!(app.shutdown_timeout(), std::time::Duration::from_secs(10));
     }
 
     #[test]

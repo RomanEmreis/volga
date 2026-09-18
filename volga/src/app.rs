@@ -16,7 +16,9 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{Arc, Weak},
+    time::Duration,
 };
+use tokio_util::sync::CancellationToken;
 
 use tokio::{
     io,
@@ -70,7 +72,7 @@ pub(crate) use self::host_env::{RolePolicy, warn};
 #[cfg(feature = "http2")]
 pub use crate::limits::Http2Limits;
 
-use crate::app::shutdown::ShutdownHandle;
+use crate::app::shutdown::{DEFAULT_SHUTDOWN_TIMEOUT, ShutdownHandle, drain_connections};
 pub(crate) use app_env::AppEnv;
 
 mod app_env;
@@ -82,10 +84,6 @@ pub(crate) mod pipeline;
 pub mod router;
 pub(crate) mod scope;
 pub(crate) mod shutdown;
-
-/// How long, in seconds, a server that stopped accepting connections waits for the open ones
-/// to finish before it returns anyway
-pub(crate) const GRACEFUL_SHUTDOWN_TIMEOUT: u64 = 10;
 
 /// The main entry point for building and running a Volga application.
 ///
@@ -237,6 +235,11 @@ pub struct App {
     /// Async triggers registered via [`App::shutdown_on`]. Drained and
     /// spawned by [`App::run_internal`] once a Tokio runtime is active.
     shutdown_triggers: ShutdownTriggers,
+
+    /// How long a shutdown waits for open connections before closing them.
+    ///
+    /// Default: 10 seconds
+    shutdown_timeout: Duration,
 }
 
 /// Async triggers queued via [`App::shutdown_on`]. Wraps a vector of
@@ -324,6 +327,7 @@ impl App {
             config_store: None,
             shutdown_handle: None,
             shutdown_triggers: ShutdownTriggers::default(),
+            shutdown_timeout: DEFAULT_SHUTDOWN_TIMEOUT,
         }
     }
 
@@ -417,10 +421,42 @@ impl App {
         self
     }
 
+    /// Sets how long a shutdown waits for open connections to finish before it closes them.
+    ///
+    /// Once the shutdown starts, the server stops accepting connections and tells the open
+    /// ones to close after the response they are serving. A connection still open when
+    /// `timeout` runs out is closed: the request's [`crate::CancellationToken`] is cancelled
+    /// and the response is dropped where it stands, so [`App::run`] returns with nothing of
+    /// the connection still running.
+    ///
+    /// A response that never ends on its own, such as an SSE feed, keeps its connection open
+    /// for the whole `timeout`. It can end itself as soon as the shutdown starts by extracting
+    /// the [`ShutdownHandle`] and waiting on [`ShutdownHandle::cancelled`].
+    ///
+    /// Default: 10 seconds. `Duration::ZERO` closes open connections right away.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::App;
+    ///
+    /// let app = App::new().with_shutdown_timeout(Duration::from_secs(2));
+    /// ```
+    pub fn with_shutdown_timeout(mut self, timeout: Duration) -> Self {
+        self.shutdown_timeout = timeout;
+        self
+    }
+
     /// Returns the address the `App` was asked to listen on.
     #[cfg(all(test, feature = "config"))]
     pub(crate) fn connection(&self) -> &Connection {
         &self.connection
+    }
+
+    /// Returns how long a shutdown waits for open connections before closing them.
+    #[cfg(all(test, feature = "config"))]
+    pub(crate) fn shutdown_timeout(&self) -> Duration {
+        self.shutdown_timeout
     }
 
     /// Replaces the host and/or the port of the current address, keeping whichever half
@@ -772,17 +808,13 @@ impl App {
         // What the background tasks below need, taken out of the app before it is converted
         // into the instance they run alongside
         let triggers = std::mem::take(&mut self.shutdown_triggers).0;
-        let shutdown_handle = if triggers.is_empty() {
-            self.shutdown_handle.clone()
-        } else {
-            // A trigger cancels the handle's token, so an app that was given one without a
-            // handle of its own gets a handle here
-            Some(
-                self.shutdown_handle
-                    .get_or_insert_with(ShutdownHandle::new)
-                    .clone(),
-            )
-        };
+        // Every source of a shutdown cancels this handle's token, and requests extract it,
+        // so an app that was not given one gets one here
+        let shutdown_handle = self
+            .shutdown_handle
+            .get_or_insert_with(ShutdownHandle::new)
+            .clone();
+        let shutdown_timeout = self.shutdown_timeout;
 
         #[cfg(feature = "tls")]
         let redirection_config = self
@@ -819,16 +851,14 @@ impl App {
         // Each trigger cancels the handle's token when it resolves, and
         // exits early if another arm cancels the token first - otherwise
         // an unresolved watchdog future would leak its task after shutdown.
-        if let Some(token) = shutdown_handle.as_ref().map(ShutdownHandle::token) {
-            for trigger in triggers {
-                let token = token.clone();
-                tokio::spawn(async move {
-                    tokio::select! {
-                        _ = trigger => token.cancel(),
-                        _ = token.cancelled() => {}
-                    }
-                });
-            }
+        for trigger in triggers {
+            let token = shutdown_handle.token();
+            tokio::spawn(async move {
+                tokio::select! {
+                    _ = trigger => token.cancel(),
+                    _ = token.cancelled() => {}
+                }
+            });
         }
 
         Self::shutdown_signal(shutdown_rx, shutdown_handle);
@@ -841,6 +871,7 @@ impl App {
                 socket,
                 redirection_config.http_port,
                 shutdown_tx.clone(),
+                shutdown_timeout,
             );
         }
 
@@ -855,6 +886,9 @@ impl App {
         // taking it back must not depend on who holds a reference to the environment at that
         // moment - a request in flight does, for as long as its handler runs
         let graceful_shutdown = GracefulShutdown::new();
+        // Cancelled when the shutdown runs out of time. Every connection's token is a child of
+        // it, and so is every request's `CancellationToken`, which is the connection's
+        let force_close = CancellationToken::new();
 
         loop {
             let (stream, _) = tokio::select! {
@@ -888,43 +922,55 @@ impl App {
             let watcher = graceful_shutdown.watcher();
             #[cfg(feature = "tls")]
             let shutdown_tx = Arc::clone(&shutdown_tx);
+            let cancellation_token = force_close.child_token();
 
             tokio::spawn(async move {
                 let _permit = permit;
-                Self::handle_connection(
-                    stream,
-                    instance,
-                    watcher,
-                    #[cfg(feature = "tls")]
-                    shutdown_tx,
-                )
-                .await
+                // Selecting on the connection's own token rather than on `force_close` keeps
+                // the waiter off the token every connection shares. It is also cancelled when
+                // the connection fails, which happens only once it has stopped serving
+                let closed = cancellation_token.clone();
+                tokio::select! {
+                    _ = Self::handle_connection(
+                        stream,
+                        instance,
+                        watcher,
+                        cancellation_token,
+                        #[cfg(feature = "tls")]
+                        shutdown_tx,
+                    ) => {},
+                    _ = closed.cancelled() => {},
+                }
             });
         }
 
         drop(tcp_listener);
 
-        Self::wait_for_connections(graceful_shutdown).await;
+        Self::wait_for_connections(graceful_shutdown, shutdown_timeout, &force_close).await;
 
         // The environment - and the services it owns, singletons among them - is released
-        // here, unless a request outlived the wait above and still holds it
+        // here, unless something a handler spawned outlived its connection and still holds it
         drop(app_instance);
         Ok(())
     }
 
     /// Signals every watched connection to finish what it is serving and close, then waits
-    /// until they have, but no longer than [`GRACEFUL_SHUTDOWN_TIMEOUT`]
+    /// until they have, closing the ones still open once `timeout` runs out
     #[inline]
-    async fn wait_for_connections(graceful_shutdown: GracefulShutdown) {
-        tokio::select! {
-            _ = graceful_shutdown.shutdown() => {
-                #[cfg(feature = "tracing")]
-                tracing::info!("shutting down the server...");
-            },
-            _ = tokio::time::sleep(std::time::Duration::from_secs(GRACEFUL_SHUTDOWN_TIMEOUT)) => {
-                #[cfg(feature = "tracing")]
-                tracing::warn!("timed out wait for all connections to close");
-            }
+    async fn wait_for_connections(
+        graceful_shutdown: GracefulShutdown,
+        timeout: Duration,
+        force_close: &CancellationToken,
+    ) {
+        let _drained = drain_connections(graceful_shutdown, timeout, force_close).await;
+
+        #[cfg(feature = "tracing")]
+        if _drained {
+            tracing::info!("shutting down the server...");
+        } else {
+            tracing::warn!(
+                "connections still open after {timeout:?} of the shutdown have been closed"
+            );
         }
     }
 
@@ -937,8 +983,8 @@ impl App {
     }
 
     #[inline]
-    fn shutdown_signal(shutdown_rx: watch::Receiver<()>, handle: Option<ShutdownHandle>) {
-        let token = handle.map(|h| h.token()).unwrap_or_default();
+    fn shutdown_signal(shutdown_rx: watch::Receiver<()>, handle: ShutdownHandle) {
+        let token = handle.token();
 
         // OS signal listener - spawned as its own task so it lives
         // independently of the manual-shutdown path. Tokio's process-wide
@@ -1008,6 +1054,7 @@ impl App {
         stream: TcpStream,
         app_instance: Weak<AppEnv>,
         watcher: Watcher,
+        cancellation_token: CancellationToken,
         #[cfg(feature = "tls")] shutdown_tx: Arc<watch::Sender<()>>,
     ) {
         let peer_addr = match stream.peer_addr() {
@@ -1021,7 +1068,7 @@ impl App {
 
         #[cfg(not(feature = "tls"))]
         Server::new(TokioIo::new(stream), peer_addr)
-            .serve(app_instance, watcher)
+            .serve(app_instance, watcher, cancellation_token)
             .await;
 
         #[cfg(feature = "tls")]
@@ -1045,12 +1092,12 @@ impl App {
             };
             let io = TokioIo::new(stream);
             Server::new(io, peer_addr)
-                .serve(app_instance, watcher)
+                .serve(app_instance, watcher, cancellation_token)
                 .await;
         } else {
             let io = TokioIo::new(stream);
             Server::new(io, peer_addr)
-                .serve(app_instance, watcher)
+                .serve(app_instance, watcher, cancellation_token)
                 .await;
         };
     }
@@ -1094,6 +1141,20 @@ mod tests {
         assert_eq!(app.connection.to_string(), "127.0.0.1:7878");
         #[cfg(not(target_os = "windows"))]
         assert_eq!(app.connection.to_string(), "0.0.0.0:7878");
+    }
+
+    #[test]
+    fn it_sets_default_shutdown_timeout() {
+        let app = App::new();
+
+        assert_eq!(app.shutdown_timeout, std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn it_sets_shutdown_timeout() {
+        let app = App::new().with_shutdown_timeout(std::time::Duration::from_millis(250));
+
+        assert_eq!(app.shutdown_timeout, std::time::Duration::from_millis(250));
     }
 
     #[test]

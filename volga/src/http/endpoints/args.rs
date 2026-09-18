@@ -30,6 +30,7 @@ pub mod path;
 pub mod query;
 pub mod request;
 pub mod result;
+pub mod shutdown_handle;
 pub mod sse;
 pub mod vec;
 

@@ -6,7 +6,7 @@
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    ClientIp,
+    ClientIp, ShutdownHandle,
     http::{endpoints::route::PathArgs, request::request_body_limit::RequestBodyLimit},
 };
 
@@ -52,6 +52,9 @@ pub(crate) struct HttpRequestScope {
 
     /// Cooperative cancellation token for this request.
     pub(crate) cancellation_token: CancellationToken,
+
+    /// The running server's shutdown handle, fired as soon as its shutdown starts.
+    pub(crate) shutdown: ShutdownHandle,
 
     /// Request body size limit.
     pub(crate) body_limit: RequestBodyLimit,
@@ -112,6 +115,7 @@ impl Default for HttpRequestScope {
         Self {
             client_ip: ClientIp(SocketAddr::from(([0, 0, 0, 0], 0))),
             cancellation_token: CancellationToken::new(),
+            shutdown: ShutdownHandle::new(),
             body_limit: RequestBodyLimit::Disabled,
             params: PathArgs::default(),
             #[cfg(feature = "ws")]
@@ -146,13 +150,13 @@ mod tests {
     use super::*;
     use std::net::SocketAddr;
 
-    /// A scope carrying values a test can recognise in the four fields every build has,
+    /// A scope carrying values a test can recognise in the five fields every build has,
     /// and the defaults in the ones a build may not have.
     ///
     /// Whether the `..default()` tail fills anything depends on the enabled features: with
-    /// all of them it fills the seven that are gated, and with none of them the four listed
+    /// all of them it fills the seven that are gated, and with none of them the five listed
     /// here are the whole struct and the tail is a no-op - which is what the lint reports,
-    /// truthfully, for that one build. Spelling those four out is the point of the helper,
+    /// truthfully, for that one build. Spelling those five out is the point of the helper,
     /// and the alternatives - listing every gated field behind its own `cfg`, or assigning
     /// onto a default - trade this lint for a copy of the `Default` impl or for
     /// `field_reassign_with_default`.
@@ -161,6 +165,7 @@ mod tests {
         HttpRequestScope {
             client_ip: ClientIp(SocketAddr::from(([127, 0, 0, 1], 4321))),
             cancellation_token: CancellationToken::new(),
+            shutdown: ShutdownHandle::new(),
             body_limit: RequestBodyLimit::Enabled(1024),
             params: PathArgs::default(),
             ..HttpRequestScope::default()
