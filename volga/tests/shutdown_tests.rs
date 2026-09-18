@@ -689,3 +689,48 @@ async fn shutdown_timeout_cancels_the_request_token() {
         .unwrap();
     assert!(result.is_err());
 }
+
+/// A handler may cancel its own `CancellationToken` - it derefs to the tokio token. That
+/// notifies the token's clones and nothing else: the connection is closed only by the server,
+/// so the response still goes out and the connection keeps serving
+#[tokio::test]
+async fn a_handler_cancelling_its_token_does_not_close_the_connection() {
+    use volga::CancellationToken;
+
+    let port = pick_free_port();
+    let (app, handle) = App::with_shutdown();
+    let mut app = app.bind(format!("127.0.0.1:{port}")).without_greeter();
+    app.map_get("/ping", || async { ok!("pong") });
+    app.map_get("/cancel", |token: CancellationToken| async move {
+        token.cancel();
+        // Long enough for the connection task to be woken by the cancellation
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        ok!("answered")
+    });
+    let task = tokio::spawn(async move { app.run().await });
+
+    // One connection for all requests, so the second one would fail on a closed connection
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .pool_max_idle_per_host(1);
+    #[cfg(not(feature = "http1"))]
+    let client = client.http2_prior_knowledge();
+    let client = client.build().unwrap();
+    wait_until_listening(&client, port).await;
+
+    for _ in 0..2 {
+        let response = client
+            .get(format!("http://127.0.0.1:{port}/cancel"))
+            .send()
+            .await
+            .expect("the connection was closed under the response");
+        assert_eq!(response.text().await.unwrap(), "answered");
+    }
+
+    handle.shutdown();
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("server did not exit")
+        .expect("server task panicked")
+        .expect("server returned an error");
+}

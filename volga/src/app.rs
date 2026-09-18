@@ -922,14 +922,17 @@ impl App {
             let watcher = graceful_shutdown.watcher();
             #[cfg(feature = "tls")]
             let shutdown_tx = Arc::clone(&shutdown_tx);
-            let cancellation_token = force_close.child_token();
+            // Two tokens, because cancellation only flows from parent to child. `closed` is the
+            // server's alone and tells this task to drop the connection; the requests get a child
+            // of it, so a forced close reaches them, while a handler cancelling its own token -
+            // which it can - notifies the clones of that token and closes nothing. Selecting on
+            // a token of the connection's own, rather than on `force_close`, also keeps the
+            // waiter off the token every connection shares
+            let closed = force_close.child_token();
+            let cancellation_token = closed.child_token();
 
             tokio::spawn(async move {
                 let _permit = permit;
-                // Selecting on the connection's own token rather than on `force_close` keeps
-                // the waiter off the token every connection shares. It is also cancelled when
-                // the connection fails, which happens only once it has stopped serving
-                let closed = cancellation_token.clone();
                 tokio::select! {
                     _ = Self::handle_connection(
                         stream,
