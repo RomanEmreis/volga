@@ -29,8 +29,8 @@ pub struct HttpContext {
     request: HttpRequestMut,
 
     /// What answers this request once the middleware chain has run: the matched
-    /// route's pipeline, the application fallback, or a `405`. `None` once the
-    /// terminal has been taken, so a second execution has nothing left to run.
+    /// route's pipeline, a fallback, or a `405`. `None` once the terminal has been
+    /// taken, so a second execution has nothing left to run.
     terminal: Option<Terminal>,
 
     /// CORS headers for this route
@@ -83,12 +83,16 @@ impl HttpContext {
     /// Returns `true` when routing matched an endpoint for this request.
     ///
     /// The pipeline runs for every request, so a middleware also sees the ones
-    /// that matched no route or matched a path but not a method - the fallback
+    /// that matched no route or matched a path but not a method - a fallback
     /// or a `405` answers those. Middleware that should only do its work for a
     /// real endpoint, or that answers on an endpoint's behalf, reads this to
     /// tell the two apart. It answers the same at every layer: a route's or a
     /// group's own middleware runs after the route pipeline has been taken and
     /// still sees `true`.
+    ///
+    /// A route group's fallback - [`RouteGroup::map_fallback`](crate::routing::RouteGroup::map_fallback) -
+    /// is not a route either, so a request it answers reads `false` here, in the
+    /// group's middleware as well as in the application's.
     ///
     /// # Example
     /// ```no_run
@@ -253,6 +257,15 @@ impl HttpContext {
                     })
                     .await
             }
+            Some(Terminal::GroupFallback(pipeline)) => {
+                pipeline
+                    .call(Self {
+                        request,
+                        cors,
+                        terminal: None,
+                    })
+                    .await
+            }
             Some(Terminal::Fallback(fallback)) => fallback.call(request.freeze()).await,
             Some(Terminal::MethodNotAllowed(allowed)) => status!(405; [
                 (ALLOW, allowed.as_ref())
@@ -265,9 +278,9 @@ impl HttpContext {
     /// the global middleware chain
     ///
     /// A matched route answers through its own chain, and the future returned is that
-    /// chain's, so the step from the global chain into the route's allocates nothing. The
-    /// fallback and a `405` are answered by [`execute`](Self::execute), in a future of their
-    /// own.
+    /// chain's, so the step from the global chain into the route's allocates nothing - and
+    /// so does a route group's fallback. The application fallback and a `405` are answered
+    /// by [`execute`](Self::execute), in a future of their own.
     #[inline]
     pub(crate) fn hand_off(mut self) -> BoxFuture<'static, HttpResult> {
         match self.terminal.take() {
@@ -275,6 +288,8 @@ impl HttpContext {
                 self.terminal = Some(Terminal::RouteTaken);
                 pipeline.call(self)
             }
+            // Taken without a trace: a group's fallback is not a route
+            Some(Terminal::GroupFallback(pipeline)) => pipeline.call(self),
             terminal => {
                 self.terminal = terminal;
                 Box::pin(self.execute())

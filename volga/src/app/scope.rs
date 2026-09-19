@@ -189,13 +189,17 @@ async fn handle_impl(
     );
 
     // Routing decides *what* answers the request, not *whether* the pipeline
-    // runs: all three outcomes are carried through the same chain, so global
+    // runs: every outcome is carried through the same chain, so global
     // middleware and the request scope reach an unmatched path as well.
     #[cfg(feature = "middleware")]
     let (terminal, params, cors) = match found {
         FindResult::Ok(endpoint) => {
             let (route_pipeline, params, cors) = endpoint.into_parts();
             (Terminal::Route(route_pipeline), params, cors)
+        }
+        FindResult::Fallback(endpoint) => {
+            let (fallback_pipeline, params, cors) = endpoint.into_parts();
+            (Terminal::GroupFallback(fallback_pipeline), params, cors)
         }
         FindResult::RouteNotFound => (
             Terminal::Fallback(pipeline.fallback_handler().clone()),
@@ -214,6 +218,10 @@ async fn handle_impl(
         FindResult::Ok(endpoint) => {
             let (route_pipeline, params) = endpoint.into_parts();
             (Terminal::Route(route_pipeline), params)
+        }
+        FindResult::Fallback(endpoint) => {
+            let (fallback_pipeline, params) = endpoint.into_parts();
+            (Terminal::GroupFallback(fallback_pipeline), params)
         }
         FindResult::RouteNotFound => (
             Terminal::Fallback(pipeline.fallback_handler().clone()),
@@ -265,7 +273,9 @@ async fn handle_impl(
         .await;
     #[cfg(not(feature = "middleware"))]
     let response = match terminal {
-        Terminal::Route(route_pipeline) => route_pipeline.call(request).await,
+        Terminal::Route(route_pipeline) | Terminal::GroupFallback(route_pipeline) => {
+            route_pipeline.call(request).await
+        }
         Terminal::Fallback(fallback) => fallback.call(request).await,
         Terminal::MethodNotAllowed(allowed) => status!(405; [
             (ALLOW, allowed.as_ref())

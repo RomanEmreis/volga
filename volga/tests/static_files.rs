@@ -48,13 +48,24 @@ async fn it_responds_with_fallback_file() {
 
     let response = server
         .client()
-        .get(server.url("/test/thing"))
+        .get(server.url("/static/test/thing"))
         .send()
         .await
         .unwrap();
 
     assert!(response.status().is_success());
     assert_eq!(response.headers().get("Content-Type").unwrap(), "text/html");
+
+    // The group serves its fallback file under its own prefix, not across the application
+    // (#257).
+    let outside = server
+        .client()
+        .get(server.url("/test/thing"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(outside.status(), 404);
 
     server.shutdown().await;
 }
@@ -437,9 +448,9 @@ async fn it_does_not_report_a_conditional_write_as_not_modified() {
     let etag = shell.headers().get("etag").unwrap().clone();
     let last_modified = shell.headers().get("last-modified").unwrap().clone();
 
-    // The fallback answers a route that was not found whatever the method was, so a write to
-    // an unknown path reaches the shell too. A validator answers "your copy is current",
-    // which is no answer to a `POST` - and the tag it would match describes the shell rather
+    // A write to an unknown path reaches the route the shell answers under, which answers
+    // `GET` and `HEAD` alone (#256). A validator answers "your copy is current", which is no
+    // answer to a `POST` either - and the tag it would match describes the shell rather
     // than anything this request was aimed at.
     let posted = server
         .client()
@@ -450,7 +461,7 @@ async fn it_does_not_report_a_conditional_write_as_not_modified() {
         .await
         .unwrap();
 
-    assert_ne!(posted.status(), 304);
+    assert_eq!(posted.status(), 405);
 
     let put = server
         .client()
@@ -461,7 +472,7 @@ async fn it_does_not_report_a_conditional_write_as_not_modified() {
         .await
         .unwrap();
 
-    assert_ne!(put.status(), 304);
+    assert_eq!(put.status(), 405);
 
     // HEAD is a request for a representation, so it still validates.
     let head = server

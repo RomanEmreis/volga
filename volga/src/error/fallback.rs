@@ -5,9 +5,13 @@ use std::{marker::PhantomData, sync::Arc};
 
 use crate::{
     HttpRequest, HttpResult,
-    http::{FromRequestParts, GenericHandler, IntoResponse, marker},
+    error::Error,
+    http::{FromRequestParts, GenericHandler, IntoResponse, endpoints::handlers::Handler, marker},
     status,
 };
+
+#[cfg(feature = "middleware")]
+use crate::middleware::{HttpContext, NextFn};
 
 /// Trait for types that represents a fallback handler
 pub trait FallbackHandler {
@@ -28,6 +32,17 @@ where
     pub(crate) fn new(func: F) -> Self {
         Self(func, PhantomData)
     }
+
+    /// Reads the fallback's arguments out of `req`
+    #[inline]
+    fn args(req: HttpRequest) -> Result<Args, Error> {
+        // Nothing matched, so there is no route to read a body for; the
+        // parts carry everything a fallback can act on, and unlike the
+        // payload trait behind `FromRequest` this one is public, so an
+        // extractor defined outside the crate works here.
+        let (parts, _) = req.into_parts();
+        Args::from_parts(&parts)
+    }
 }
 
 impl<F, Args, R, M> FallbackHandler for FallbackFunc<F, Args, M>
@@ -39,13 +54,37 @@ where
     #[inline]
     fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult> {
         Box::pin(async move {
-            // Nothing matched, so there is no route to read a body for; the
-            // parts carry everything a fallback can act on, and unlike the
-            // payload trait behind `FromRequest` this one is public, so an
-            // extractor defined outside the crate works here.
-            let (parts, _) = req.into_parts();
-            let args = Args::from_parts(&parts)?;
+            let args = Self::args(req)?;
             self.0.call(args).await.into_response()
+        })
+    }
+}
+
+/// A route group's fallback answers at the end of a route pipeline - the group's middleware
+/// in front of it - so it is reached the way a route handler is, while reading the request
+/// the way the application fallback does.
+impl<F, Args, R, M> Handler for FallbackFunc<F, Args, M>
+where
+    F: GenericHandler<Args, M, Output = R>,
+    Args: FromRequestParts + Send + 'static,
+    R: IntoResponse + 'static,
+    M: 'static,
+{
+    #[inline]
+    #[cfg(not(feature = "middleware"))]
+    fn call(&self, req: HttpRequest) -> BoxFuture<'_, HttpResult> {
+        FallbackHandler::call(self, req)
+    }
+
+    #[cfg(feature = "middleware")]
+    fn into_next(self: Arc<Self>) -> NextFn {
+        Arc::new(move |ctx: HttpContext| -> BoxFuture<'static, HttpResult> {
+            let (req, _, _) = ctx.into_parts();
+            let this = Arc::clone(&self);
+            Box::pin(async move {
+                let args = Self::args(req.freeze())?;
+                this.0.call(args).await.into_response()
+            })
         })
     }
 }

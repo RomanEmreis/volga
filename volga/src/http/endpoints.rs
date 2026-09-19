@@ -30,6 +30,9 @@ pub(crate) enum FindResult {
     RouteNotFound,
     MethodNotFound(Arc<str>),
     Ok(Endpoint),
+    /// No route answers the path, and the route group claiming its prefix answers with its
+    /// own fallback, whatever the method
+    Fallback(Endpoint),
 }
 
 /// Describes the endpoint that could be either a request handler
@@ -98,8 +101,18 @@ impl Endpoints {
             None => return FindResult::RouteNotFound,
         };
 
-        let Some(handlers) = &route_params.route.handlers else {
-            return FindResult::RouteNotFound;
+        // Nothing is mapped here for any method, so this is no route - but a route group
+        // claimed the position, and its fallback answers every method at it
+        let Some(handlers) = route_params.route.endpoints() else {
+            return match route_params.route.fallback.as_deref() {
+                Some(fallback) => FindResult::Fallback(Endpoint::new(
+                    fallback.pipeline.clone(),
+                    labelled(route_params.params, fallback.params.as_deref()),
+                    #[cfg(feature = "middleware")]
+                    fallback.cors.clone().unwrap_or_default(),
+                )),
+                None => FindResult::RouteNotFound,
+            };
         };
 
         #[cfg(feature = "middleware")]
@@ -118,7 +131,7 @@ impl Endpoints {
                     |handler| {
                         FindResult::Ok(Endpoint::new(
                             handler.pipeline.clone(),
-                            labelled(route_params.params, handler),
+                            labelled(route_params.params, handler.params.as_deref()),
                             #[cfg(feature = "middleware")]
                             handler.cors.clone().unwrap_or_default(),
                         ))
@@ -133,7 +146,7 @@ impl Endpoints {
             |handler| {
                 FindResult::Ok(Endpoint::new(
                     handler.pipeline.clone(),
-                    labelled(route_params.params, handler),
+                    labelled(route_params.params, handler.params.as_deref()),
                     #[cfg(feature = "middleware")]
                     handler.cors.clone().unwrap_or_default(),
                 ))
@@ -152,6 +165,52 @@ impl Endpoints {
     #[cfg(feature = "middleware")]
     pub(crate) fn map_layer(&mut self, method: Method, pattern: &str, handler: Layer) {
         self.routes.insert(pattern, method, handler);
+    }
+
+    /// Maps a route the framework answers on the application's behalf, unless a route is
+    /// mapped at `pattern` for `method` already
+    ///
+    /// The route is left out of the route listing, and a route mapped by hand for `method`
+    /// at `pattern` later on takes its place.
+    #[inline]
+    #[cfg(feature = "static-files")]
+    pub(crate) fn map_implicit(&mut self, method: Method, pattern: &str, pipeline: RoutePipeline) {
+        self.routes.insert_implicit(pattern, method, pipeline);
+    }
+
+    /// Maps the fallback answering every method at `pattern` while no route is mapped there,
+    /// replacing the one mapped there already
+    #[inline]
+    pub(crate) fn map_fallback(&mut self, pattern: &str, handler: RouteHandler) {
+        self.routes.insert_fallback(pattern, handler);
+    }
+
+    /// Inserts a route group's middleware ahead of the layers the fallback at `pattern`
+    /// already holds
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn prepend_fallback_layers(&mut self, pattern: &str, layers: &[MiddlewareFn]) {
+        if let Some(fallback) = self
+            .routes
+            .find_mut(pattern)
+            .and_then(|route| route.fallback_mut())
+        {
+            fallback.prepend(layers);
+        }
+    }
+
+    /// Binds CORS headers to the fallback at `pattern`, unless something has already bound
+    /// a policy of its own to it
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn bind_fallback_cors_if_unset(&mut self, pattern: &str, cors: CorsOverride) {
+        if let Some(fallback) = self
+            .routes
+            .find_mut(pattern)
+            .and_then(|route| route.fallback_mut())
+        {
+            fallback.cors.get_or_insert(cors);
+        }
     }
 
     /// Binds CORS headers to the route handler
@@ -222,25 +281,26 @@ impl Endpoints {
     }
 }
 
+/// Labels the matched path arguments with `names`, the parameter names of the endpoint
+/// answering
+///
+/// The tree binds them under the names of whichever route reached each position first, and
+/// an endpoint carries names of its own only when it was written with different ones - so
+/// this is a branch and nothing else for every route that agrees with the tree.
+#[inline]
+fn labelled(mut params: PathArgs, names: Option<&[Arc<str>]>) -> PathArgs {
+    if let Some(names) = names {
+        params.rename(names);
+    }
+    params
+}
+
 /// Picks the endpoint that answers `method`
 ///
 /// A `GET` route answers a `HEAD` request that has no route of its own: `HEAD` is `GET`
 /// without content (RFC 9110 Section 9.3.2), so the request travels through everything
 /// that route travels through, and the body is dropped on the way out. A `HEAD` mapped by
 /// hand is found here first and keeps the `GET` route out of it.
-/// Labels the matched path arguments with the parameter names of the endpoint answering
-///
-/// The tree binds them under the names of whichever route reached each position first, and
-/// an endpoint carries names of its own only when it was written with different ones - so
-/// this is a branch and nothing else for every route that agrees with the tree.
-#[inline]
-fn labelled(mut params: PathArgs, endpoint: &RouteEndpoint) -> PathArgs {
-    if let Some(names) = endpoint.params.as_deref() {
-        params.rename(names);
-    }
-    params
-}
-
 #[inline]
 fn endpoint_for<'route>(
     handlers: &'route [RouteEndpoint],
@@ -393,6 +453,121 @@ mod tests {
                 _ => panic!("{method} must have matched"),
             }
         }
+    }
+
+    /// Looks `method` on `path` up in `endpoints`
+    fn find(endpoints: &Endpoints, method: Method, path: &str) -> FindResult {
+        let request = Request::builder()
+            .method(method)
+            .uri(format!("https://example.com{path}"))
+            .body(())
+            .unwrap();
+
+        endpoints.find(
+            request.method(),
+            request.uri(),
+            #[cfg(feature = "middleware")]
+            false,
+            #[cfg(feature = "middleware")]
+            &HeaderMap::new(),
+        )
+    }
+
+    #[test]
+    fn it_finds_the_fallback_where_no_route_is_mapped() {
+        let mut endpoints = Endpoints::new();
+
+        endpoints.map_route(Method::GET, "/api/models", Func::new(|| async { ok!() }));
+        endpoints.map_fallback("/api", Func::new(|| async { ok!() }));
+        endpoints.map_fallback("/api/{*rest}", Func::new(|| async { ok!() }));
+
+        for method in [Method::GET, Method::DELETE, Method::OPTIONS] {
+            for path in ["/api", "/api/nope"] {
+                assert!(
+                    matches!(
+                        find(&endpoints, method.clone(), path),
+                        FindResult::Fallback(_)
+                    ),
+                    "{method} {path}"
+                );
+            }
+        }
+
+        // A route answers its own position, for the methods it has and with a 405 for the
+        // rest
+        assert!(matches!(
+            find(&endpoints, Method::GET, "/api/models"),
+            FindResult::Ok(_)
+        ));
+        match find(&endpoints, Method::POST, "/api/models") {
+            FindResult::MethodNotFound(allow) => assert_eq!(allow.as_ref(), "GET,HEAD"),
+            _ => panic!("expected the route's 405"),
+        }
+
+        assert!(matches!(
+            find(&endpoints, Method::GET, "/other"),
+            FindResult::RouteNotFound
+        ));
+    }
+
+    /// The fallback binds the rest of the path under the name it reads it with
+    #[test]
+    fn it_binds_the_rest_of_the_path_for_the_fallback() {
+        let mut endpoints = Endpoints::new();
+
+        endpoints.map_route(Method::GET, "/api/{*path}", Func::new(|| async { ok!() }));
+        endpoints.map_fallback("/api/{*rest}", Func::new(|| async { ok!() }));
+
+        match find(&endpoints, Method::GET, "/api/a/b") {
+            FindResult::Ok(endpoint) => {
+                assert_eq!(endpoint.params.first().unwrap().name.as_ref(), "path")
+            }
+            _ => panic!("the route answers its own method"),
+        }
+
+        // Another method at that position is the route's 405, not the fallback's: the
+        // route took the position over
+        assert!(matches!(
+            find(&endpoints, Method::PUT, "/api/a/b"),
+            FindResult::MethodNotFound(_)
+        ));
+
+        let mut endpoints = Endpoints::new();
+        endpoints.map_route(Method::POST, "/api/{*path}", Func::new(|| async { ok!() }));
+        endpoints.map_fallback("/other/{*rest}", Func::new(|| async { ok!() }));
+
+        match find(&endpoints, Method::DELETE, "/other/a/b") {
+            FindResult::Fallback(endpoint) => {
+                let arg = endpoint.params.first().unwrap();
+                assert_eq!((arg.name.as_ref(), arg.value.as_ref()), ("rest", "a/b"));
+            }
+            _ => panic!("the fallback answers"),
+        }
+    }
+
+    /// A preflight looks for the endpoint of the method it asks about, and a fallback is
+    /// not one: it answers the preflight request itself, as it answers every method
+    #[test]
+    #[cfg(feature = "middleware")]
+    fn it_finds_the_fallback_for_a_preflight() {
+        use crate::headers::{ACCESS_CONTROL_REQUEST_METHOD, HeaderValue, ORIGIN};
+
+        let mut endpoints = Endpoints::new();
+        endpoints.map_fallback("/api/{*rest}", Func::new(|| async { ok!() }));
+
+        let mut headers = HeaderMap::new();
+        headers.insert(ORIGIN, HeaderValue::from_static("https://example.test"));
+        headers.insert(
+            ACCESS_CONTROL_REQUEST_METHOD,
+            HeaderValue::from_static("GET"),
+        );
+
+        let request = Request::options("https://example.com/api/nope")
+            .body(())
+            .unwrap();
+        let found = endpoints.find(request.method(), request.uri(), true, &headers);
+
+        assert!(matches!(found, FindResult::Fallback(_)));
     }
 
     #[test]

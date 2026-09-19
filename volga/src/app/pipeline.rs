@@ -29,6 +29,12 @@ pub(crate) enum Terminal {
     /// No route matched the path: the application fallback answers.
     Fallback(PipelineFallbackHandler),
 
+    /// No route matched the path, and the route group claiming its prefix answers with its
+    /// own fallback, through the group's middleware. It runs through a pipeline the way a
+    /// route does, but it is not one: once taken it leaves no terminal behind, so the
+    /// middleware on the way still sees a request no route matched.
+    GroupFallback(RoutePipeline),
+
     /// The path matched but the method did not: `405` with an `Allow` header
     /// listing the methods the path does have.
     MethodNotAllowed(Arc<str>),

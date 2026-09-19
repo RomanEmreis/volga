@@ -118,15 +118,17 @@
 //! literal - rather than by giving one position two names.
 
 use crate::App;
-use crate::http::IntoResponse;
+use crate::error::FallbackFunc;
 use crate::http::endpoints::{
     args::FromRequest,
-    handlers::{Func, GenericHandler},
+    handlers::{Func, GenericHandler, RouteHandler},
     route::{canonical_path, is_canonical_path, join_path},
 };
+use crate::http::{FromRequestParts, IntoResponse};
 use hyper::Method;
 use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 #[cfg(feature = "openapi")]
 use crate::openapi::{OpenApiRouteConfig, RouteKey};
@@ -138,6 +140,10 @@ use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 use crate::fs::static_files::StaticMount;
 
 const QUERY: &[u8] = b"QUERY";
+
+/// The catch-all a route group's fallback reads the rest of the path with, under the group's
+/// prefix
+const FALLBACK_TAIL: &str = "{*rest}";
 
 /// Routes mapping
 impl App {
@@ -689,6 +695,9 @@ pub struct RouteGroup<'a> {
     pub(crate) routes: Vec<GroupRoute>,
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
+    /// The patterns this group and its sub-groups mapped a fallback at
+    #[cfg(feature = "middleware")]
+    pub(crate) fallbacks: Vec<Box<str>>,
     /// The CORS policy of this group, if it configured one
     #[cfg(feature = "middleware")]
     pub(crate) cors: Option<CorsOverride>,
@@ -823,6 +832,21 @@ impl<'a> RouteGroup<'a> {
             self.routes = routes;
         }
 
+        // A fallback is not a route, so there is nothing to describe in an OpenAPI document,
+        // but it answers under this group's prefix on the group's behalf, and it takes the
+        // group's middleware and CORS policy the way a route does
+        #[cfg(feature = "middleware")]
+        for pattern in self.fallbacks.iter() {
+            let endpoints = self.app.pipeline.endpoints_mut();
+
+            if !self.middleware.is_empty() {
+                endpoints.prepend_fallback_layers(pattern, &self.middleware);
+            }
+            if let Some(cors) = self.cors.clone() {
+                endpoints.bind_fallback_cors_if_unset(pattern, cors);
+            }
+        }
+
         // A mount answers under this group's prefix rather than through a route, so it
         // takes the group's middleware here instead of having it attached to a route. It
         // carries the same pipeline a route carries, so an outer scope wraps an inner one
@@ -904,6 +928,8 @@ impl<'a> RouteGroup<'a> {
             #[cfg(feature = "middleware")]
             middleware: Vec::new(),
             #[cfg(feature = "middleware")]
+            fallbacks: Vec::new(),
+            #[cfg(feature = "middleware")]
             cors: None,
             #[cfg(feature = "static-files")]
             mounts: Vec::new(),
@@ -920,6 +946,11 @@ impl<'a> RouteGroup<'a> {
         f(&mut child);
         child.apply();
 
+        // Taken out while the sub-group is still being read, for the same reason as the
+        // mounts below
+        #[cfg(feature = "middleware")]
+        let fallbacks = std::mem::take(&mut child.fallbacks);
+
         // A static file mount the sub-group asked for belongs to this group as well. It is
         // taken over before the routes below, so that the sub-group is done being read
         // before this group is read again.
@@ -935,6 +966,12 @@ impl<'a> RouteGroup<'a> {
             if !self.is_recorded(&route.method, &route.pattern) {
                 self.routes.push(route);
             }
+        }
+
+        // ... and so do the fallbacks it mapped, by the same rule
+        #[cfg(feature = "middleware")]
+        for pattern in fallbacks {
+            self.record_fallback(pattern);
         }
     }
 
@@ -957,6 +994,100 @@ impl<'a> RouteGroup<'a> {
         self.record(&method, &pattern);
         self.app.map_route_owned(method, pattern, handler)
     }
+
+    /// Adds a fallback handler for the requests under this group's prefix that no route
+    /// answers.
+    ///
+    /// It is [`App::map_fallback`] for one part of the URL space: a request aimed at a path
+    /// under the prefix - or at the prefix itself - that no route is mapped at is answered
+    /// here, whatever its method, instead of by the application's fallback. What a request
+    /// is answered with is decided by the router the way it decides between routes, so:
+    ///
+    /// - **The most specific prefix wins.** A literal segment is read before a catch-all at
+    ///   every position, so the fallback of `/api` answers `/api/nope` ahead of anything
+    ///   mapped under `/` - a `/{*path}` route, or the fallback file of a static file mount
+    ///   at the root - and the fallback of `/api/v2` answers `/api/v2/nope` ahead of that
+    ///   of `/api`.
+    /// - **A route answers first.** A route mapped at the path the request is aimed at
+    ///   answers it, for its own method, and a request for another method is answered
+    ///   `405` with the methods it does have - exactly as it is without a fallback. That
+    ///   holds for a route mapped at the prefix itself as well.
+    /// - **The group's middleware runs around it.** Whatever the group - and every group
+    ///   around it - put in front of its routes is put in front of its fallback, so an
+    ///   unauthenticated request for an unknown path under an `authorize`d group is refused
+    ///   the way one for a known path is, rather than told which paths exist. The group's
+    ///   CORS policy applies to it too.
+    ///
+    /// The handler takes the same arguments [`App::map_fallback`] does - anything
+    /// implementing [`FromRequestParts`] - and the path the request was aimed at is there to
+    /// read through [`Uri`](crate::http::Uri). A fallback is not a route: it is neither
+    /// listed with the routes nor described in an OpenAPI document, and
+    /// [`HttpContext::matched_route`](crate::middleware::HttpContext::matched_route) reads
+    /// `false` for a request it answers, so a CORS preflight for a path only a fallback
+    /// answers is not answered as though that path were an endpoint.
+    ///
+    /// Mapping a second fallback where one is mapped replaces it, together with the
+    /// middleware bound to it.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, http::Uri, not_found, ok};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// app.group("/api", |api| {
+    ///     api.map_get("/models", || async { ok!("models") });
+    ///
+    ///     // GET /api/nope, POST /api/v1/whatever, DELETE /api -> 404 from the API
+    ///     // POST /api/models                               -> 405, a route is there
+    ///     api.map_fallback(|uri: Uri| async move {
+    ///         not_found!("no endpoint at {}", uri.path())
+    ///     });
+    /// });
+    ///# app.run().await
+    ///# }
+    /// ```
+    pub fn map_fallback<F, Args, R, M>(&mut self, handler: F) -> &mut Self
+    where
+        F: GenericHandler<Args, M, Output = R>,
+        Args: FromRequestParts + Send + 'static,
+        R: IntoResponse + 'static,
+        M: 'static,
+    {
+        let handler: RouteHandler = Arc::new(FallbackFunc::new(handler));
+
+        // The catch-all reads at least one segment, so the prefix itself is a position of
+        // its own
+        for pattern in [
+            join_path(&self.prefix, ""),
+            join_path(&self.prefix, FALLBACK_TAIL),
+        ] {
+            self.app
+                .pipeline
+                .endpoints_mut()
+                .map_fallback(&pattern, Arc::clone(&handler));
+
+            #[cfg(feature = "middleware")]
+            self.record_fallback(pattern.into());
+        }
+
+        self
+    }
+
+    /// Remembers a fallback mapped at `pattern` by this group or by one of its sub-groups,
+    /// so that the group's configuration reaches it when the group closure returns.
+    ///
+    /// A second fallback at one pattern replaces the first rather than adding one, so the
+    /// group configures it once.
+    #[inline]
+    #[cfg(feature = "middleware")]
+    fn record_fallback(&mut self, pattern: Box<str>) {
+        if !self.fallbacks.contains(&pattern) {
+            self.fallbacks.push(pattern);
+        }
+    }
 }
 
 macro_rules! define_route_group_methods {
@@ -970,6 +1101,8 @@ macro_rules! define_route_group_methods {
                     routes: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
                     middleware: Vec::with_capacity(4),
+                    #[cfg(feature = "middleware")]
+                    fallbacks: Vec::new(),
                     #[cfg(feature = "middleware")]
                     cors: None,
                     #[cfg(feature = "static-files")]
@@ -1096,6 +1229,32 @@ mod tests {
         });
 
         assert_eq!(count, 1);
+    }
+
+    /// A fallback takes the configuration of every group around it, as a route does, and a
+    /// fallback mapped twice at one prefix is one fallback to configure
+    #[cfg(feature = "middleware")]
+    #[test]
+    fn it_records_the_fallbacks_of_a_group_and_its_sub_groups() {
+        let mut app = App::new();
+        let mut fallbacks = Vec::new();
+
+        app.group("/api", |api| {
+            api.map_fallback(|| async { "api" });
+            api.group("/v2", |v2| {
+                v2.map_fallback(|| async { "v2" });
+                v2.map_fallback(|| async { "v2 again" });
+            });
+            api.group("", |same| {
+                same.map_fallback(|| async { "api again" });
+            });
+            fallbacks = api.fallbacks.clone();
+        });
+
+        assert_eq!(
+            fallbacks.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["/api", "/api/{*rest}", "/api/v2", "/api/v2/{*rest}"]
+        );
     }
 
     #[cfg(any(feature = "middleware", feature = "openapi"))]

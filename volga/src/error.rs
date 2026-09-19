@@ -290,6 +290,12 @@ impl App {
     /// place a matched route's handler would occupy, so the middleware around
     /// it runs as usual and the per-request scope is there to read.
     ///
+    /// It answers what nothing else claims: a route group can claim its own
+    /// prefix with a fallback of its own -
+    /// [`RouteGroup::map_fallback`](crate::routing::RouteGroup::map_fallback) -
+    /// and the fallback file of a static file mount answers a `GET` under the
+    /// mount's prefix, so neither of them reaches this one.
+    ///
     /// It takes the same arguments [`map_err`](Self::map_err) does - anything
     /// implementing [`FromRequestParts`], which covers headers, the URI,
     /// cookies, [`ClientIp`](crate::ClientIp) and [`Dc<T>`](crate::di::Dc).

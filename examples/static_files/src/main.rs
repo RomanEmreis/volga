@@ -22,7 +22,8 @@ async fn main() -> std::io::Result<()> {
     // Configures static web server
     // - answers "/" with the index file, or with a listing of the content root
     // - answers "/{path}" with the file of that name, at any depth
-    // - falls back to 404.html for anything neither a file nor a route answers
+    // - falls back to 404.html for a GET or HEAD neither a file nor a route answers,
+    //   and answers any other method there with 405
     app.use_static_files();
 
     app.run().await
