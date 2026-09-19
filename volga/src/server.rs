@@ -34,7 +34,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
         cancellation_token: CancellationToken,
     ) {
         if let Some(instance) = env.upgrade() {
-            let scope = Scope::new(env, self.peer_addr, cancellation_token);
+            let scope = Scope::new(&instance, self.peer_addr, cancellation_token);
             self.serve_core(scope, instance, watcher).await;
         } else {
             #[cfg(feature = "tracing")]
