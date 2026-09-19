@@ -70,9 +70,15 @@ impl Service<Request<Incoming>> for Scope {
 }
 
 impl Scope {
-    pub(crate) fn new(env: Weak<AppEnv>, peer_addr: SocketAddr) -> Self {
+    /// `cancellation_token` is the connection's own: a child of the token the server cancels
+    /// when its shutdown runs out of time, so it fires then as well as when the connection fails
+    pub(crate) fn new(
+        env: Weak<AppEnv>,
+        peer_addr: SocketAddr,
+        cancellation_token: CancellationToken,
+    ) -> Self {
         Self {
-            cancellation_token: CancellationToken::new(),
+            cancellation_token,
             peer_addr,
             env,
         }
@@ -224,6 +230,7 @@ async fn handle_impl(
     parts.extensions.insert(HttpRequestScope {
         client_ip: ClientIp(peer_addr),
         cancellation_token,
+        shutdown: env.shutdown.clone(),
         body_limit: env.body_limit,
         params,
         #[cfg(feature = "ws")]

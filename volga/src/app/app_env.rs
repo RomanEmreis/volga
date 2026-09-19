@@ -2,7 +2,10 @@
 
 use super::App;
 use super::pipeline::Pipeline;
-use crate::{Limit, headers::HeaderValue, http::request::request_body_limit::RequestBodyLimit};
+use crate::{
+    Limit, ShutdownHandle, headers::HeaderValue,
+    http::request::request_body_limit::RequestBodyLimit,
+};
 use std::io::Error;
 
 #[cfg(any(
@@ -72,6 +75,9 @@ pub(crate) struct AppEnv {
 
     /// Request body limit
     pub(super) body_limit: RequestBodyLimit,
+
+    /// Shutdown handle of the running server, handed to the requests that extract it
+    pub(super) shutdown: ShutdownHandle,
 
     /// HTTP/2 resource and backpressure limits.
     #[cfg(feature = "http2")]
@@ -213,6 +219,7 @@ impl TryFrom<App> for AppEnv {
 
         let app_instance = Self {
             body_limit: app.body_limit,
+            shutdown: app.shutdown_handle.unwrap_or_default(),
             pipeline: app.pipeline.build(),
             max_header_count: app.max_header_count,
             max_header_size: app.max_header_size,

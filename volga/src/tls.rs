@@ -2,7 +2,7 @@
 
 use crate::{
     App,
-    app::AppEnv,
+    app::{AppEnv, shutdown::drain_connections},
     error::Error,
     headers::{HOST, HeaderMap, HeaderValue},
 };
@@ -20,8 +20,9 @@ use std::{
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::watch,
-    time::sleep,
+    task::JoinHandle,
 };
+use tokio_util::sync::CancellationToken;
 
 use tokio_rustls::{
     TlsAcceptor,
@@ -734,11 +735,17 @@ impl App {
         self
     }
 
+    /// Serves the HTTPS redirection on `http_port` until the server shuts down.
+    ///
+    /// The returned task ends once the listener's own connections have drained or been closed,
+    /// so the caller awaits it to return with none of them still running.
+    #[must_use = "the redirection listener has to be awaited for its connections to be drained"]
     pub(super) fn run_https_redirection_middleware(
         socket: SocketAddr,
         http_port: u16,
         shutdown_tx: Arc<watch::Sender<()>>,
-    ) {
+        shutdown_timeout: Duration,
+    ) -> JoinHandle<()> {
         tokio::spawn(async move {
             let https_port = socket.port();
             let socket = SocketAddr::new(socket.ip(), http_port);
@@ -747,25 +754,30 @@ impl App {
 
             if let Ok(tcp_listener) = TcpListener::bind(socket).await {
                 let graceful_shutdown = GracefulShutdown::new();
+                let force_close = CancellationToken::new();
                 loop {
                     let (stream, _) = tokio::select! {
                         _ = shutdown_tx.closed() => break,
                         Ok(connection) = tcp_listener.accept() => connection
                     };
-                    Self::serve_http_redirection(https_port, stream, &graceful_shutdown);
+                    Self::serve_http_redirection(
+                        https_port,
+                        stream,
+                        &graceful_shutdown,
+                        force_close.child_token(),
+                    );
                 }
-                tokio::select! {
-                    _ = sleep(Duration::from_secs(super::app::GRACEFUL_SHUTDOWN_TIMEOUT)) => (),
-                    _ = graceful_shutdown.shutdown() => {
-                        #[cfg(feature = "tracing")]
-                        tracing::info!("shutting down HTTPS redirection...");
-                    },
+                let _drained =
+                    drain_connections(graceful_shutdown, shutdown_timeout, &force_close).await;
+                #[cfg(feature = "tracing")]
+                if _drained {
+                    tracing::info!("shutting down HTTPS redirection...");
                 }
             } else {
                 #[cfg(feature = "tracing")]
                 tracing::error!("unable to start HTTPS redirection listener");
             }
-        });
+        })
     }
 
     #[inline]
@@ -773,6 +785,7 @@ impl App {
         https_port: u16,
         stream: TcpStream,
         graceful_shutdown: &GracefulShutdown,
+        closed: CancellationToken,
     ) {
         let io = TokioIo::new(stream);
         let watcher = graceful_shutdown.watcher();
@@ -792,9 +805,14 @@ impl App {
             let connection = connection_builder
                 .serve_connection(io, HttpsRedirectionMiddleware::new(https_port));
 
-            if let Err(_err) = watcher.watch(connection).await {
-                #[cfg(feature = "tracing")]
-                tracing::error!("error serving connection: {_err:#}");
+            tokio::select! {
+                result = watcher.watch(connection) => {
+                    if let Err(_err) = result {
+                        #[cfg(feature = "tracing")]
+                        tracing::error!("error serving connection: {_err:#}");
+                    }
+                },
+                _ = closed.cancelled() => {},
             }
         });
     }

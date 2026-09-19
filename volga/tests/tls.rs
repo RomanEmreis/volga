@@ -545,3 +545,63 @@ async fn shutdown_does_not_wait_for_a_stalled_tls_handshake() {
         .expect("server task panicked")
         .expect("server returned an error");
 }
+
+/// The HTTPS redirection listener drains its connections on shutdown the way the server does,
+/// and `run` returns only once it has: a client that never finishes its request on the
+/// redirection port is closed when the timeout runs out, not left open past `run` (#254)
+#[tokio::test]
+async fn shutdown_closes_a_stalled_redirection_connection_before_run_returns() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use volga::App;
+
+    init_crypto();
+
+    let port = TestServer::get_free_port();
+    let http_port = TestServer::get_free_port();
+    let (app, handle) = App::with_shutdown();
+    let app = app
+        .bind(format!("127.0.0.1:{port}"))
+        .without_greeter()
+        .with_shutdown_timeout(Duration::from_millis(500))
+        .set_tls(TlsConfig::from_pem_files(
+            "tests/tls/server.pem",
+            "tests/tls/server.key",
+        ))
+        .with_tls(|tls| tls.with_https_redirection().with_http_port(http_port));
+    let task = tokio::spawn(async move { app.run().await });
+
+    // A request that never ends keeps the redirection connection busy. It has to be one the
+    // listener reads as unfinished rather than malformed, which would close it straight away:
+    // an HTTP/1.1 head with no blank line, or, where only HTTP/2 is served, half its preface
+    #[cfg(feature = "http1")]
+    let unfinished: &[u8] = b"GET /tls HTTP/1.1\r\nHost: localhost\r\n";
+    #[cfg(not(feature = "http1"))]
+    let unfinished: &[u8] = b"PRI * HTTP/2.0\r\n";
+
+    let mut stalled = connect(http_port).await;
+    stalled.write_all(unfinished).await.unwrap();
+    // Give the listener a moment to take the connection in
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let started = Instant::now();
+    handle.shutdown();
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .expect("server did not exit after the shutdown timeout")
+        .expect("server task panicked")
+        .expect("server returned an error");
+
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_millis(500),
+        "run returned before the redirection connection was drained: {elapsed:?}"
+    );
+
+    // Closed by the time `run` returned: what is left to read - an HTTP/2 server's SETTINGS
+    // and GOAWAY frames - is already there, and the end of the stream follows it right away
+    let mut rest = Vec::new();
+    tokio::time::timeout(Duration::from_millis(200), stalled.read_to_end(&mut rest))
+        .await
+        .expect("the redirection connection outlived run")
+        .ok();
+}

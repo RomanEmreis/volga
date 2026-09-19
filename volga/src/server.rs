@@ -5,6 +5,7 @@ use hyper::rt::{Read, Write};
 use hyper_util::server::graceful::Watcher;
 use std::net::SocketAddr;
 use std::sync::Weak;
+use tokio_util::sync::CancellationToken;
 
 #[cfg(all(feature = "http1", not(feature = "http2")))]
 pub(super) mod http1;
@@ -26,9 +27,14 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     }
 
     #[inline]
-    pub(super) async fn serve(self, env: Weak<AppEnv>, watcher: Watcher) {
+    pub(super) async fn serve(
+        self,
+        env: Weak<AppEnv>,
+        watcher: Watcher,
+        cancellation_token: CancellationToken,
+    ) {
         if let Some(instance) = env.upgrade() {
-            let scope = Scope::new(env, self.peer_addr);
+            let scope = Scope::new(env, self.peer_addr, cancellation_token);
             self.serve_core(scope, instance, watcher).await;
         } else {
             #[cfg(feature = "tracing")]
