@@ -13,8 +13,9 @@
 //!   directory created while the server is running is served like any other.
 //! * The request target is used as it arrived rather than taken apart into route parameters
 //!   and put back together, at any depth.
-//! * Nothing is registered in the router, so no route is shadowed by static content, none of
-//!   it shows up in the route listing, and none of it has to be described in an OpenAPI spec.
+//! * The files register nothing in the router, so no route is shadowed by static content,
+//!   none of it shows up in the route listing, and none of it has to be described in an
+//!   OpenAPI spec.
 //! * A file answers before any route does. The mount is what a request under it reaches
 //!   first, so a file that exists is served even where a route was mapped for the same path.
 //!   Mount the files under a group prefix to keep them to one part of the URL space.
@@ -22,8 +23,36 @@
 //!   after compression to have the files compressed, after CORS to have the headers on them,
 //!   and before whatever should not run for a file that is served from disk.
 //!
-//! A request nothing under the content root answers goes on to routing, so
-//! [`App::map_fallback_to_file`] still answers it - an SPA shell is served exactly as before.
+//! A request nothing under the content root answers goes on to routing.
+//!
+//! # The fallback file
+//!
+//! A single-page application renders its client-side routes from one shell, so a navigation
+//! to any of them has to be answered with that file. With a fallback file set
+//! ([`HostEnv::with_fallback_file`]), [`App::use_static_files`] and
+//! [`RouteGroup::use_static_files`] serve it - and [`App::map_fallback_to_file`] serves it on
+//! its own - through a `GET` route under the mount's prefix, mapped at the prefix itself and
+//! at `{*path}` below it. A `HEAD` is answered by it the way one is by any `GET` route. It is
+//! a route rather than a fallback, so the router resolves it the way it resolves every route:
+//!
+//! * **It answers what is left.** A file answers first, and a route mapped at the path a
+//!   request is aimed at answers before the shell does - a literal segment and a parameter
+//!   are read before a catch-all at every position. A `GET` route mapped by hand at one of
+//!   the shell's own two positions takes that position over, whichever was mapped first.
+//! * **It answers `GET` and `HEAD` alone.** The shell is how a client-side URL renders the
+//!   application, and a browser navigates with `GET`. Any other method reaching it is
+//!   answered `405` with `Allow: GET,HEAD`, as at any `GET` route - so a mistyped API call
+//!   is refused where it is made instead of being answered `200` with an HTML page. That
+//!   includes a write to the path of a file, which the mount leaves to routing.
+//! * **It is scoped to its prefix.** A mount under `/app` serves the shell under `/app` and
+//!   nowhere else, inside the group's middleware, as it serves the files. A route group
+//!   under the prefix claims its own part of it with [`RouteGroup::map_fallback`], which the
+//!   router prefers for being deeper: the fallback of `/api` answers `/api/nope` ahead of a
+//!   shell served under `/`.
+//! * **It stays out of sight.** The route is not listed with the application's routes, not
+//!   described in an OpenAPI document, and it is not the application's fallback: it and
+//!   [`App::map_fallback`] do not replace each other, and the latter still answers whatever
+//!   lies outside the prefix.
 //!
 //! # How a file is validated
 //!
@@ -61,7 +90,10 @@ use crate::{
     html, html_file,
     http::{
         IntoResponse, Method, StatusCode,
-        endpoints::route::{RoutePipeline, is_dynamic_segment, join_path, split_path},
+        endpoints::{
+            handlers::{Func, RouteHandler},
+            route::{Layer, RoutePipeline, is_dynamic_segment, join_path, split_path},
+        },
     },
     middleware::{HttpContext, Middleware, MiddlewareFn, NextFn},
     routing::RouteGroup,
@@ -87,14 +119,19 @@ use path::{Target, resolve};
 
 const ACCESS_DENIED_MESSAGE: &str = "Access is denied.";
 
-/// A static file mount: everything under the content root, answered under a path prefix.
+/// The catch-all the fallback file answers under a mount with, below the mount point
+const SHELL_TAIL: &str = "{*path}";
+
+/// A static file mount: everything under the content root, answered under a path prefix -
+/// and, when it serves the fallback file too, the route that file answers under the same
+/// prefix.
 ///
 /// A mount is middleware, and it carries the pipeline a route carries - the group's
 /// middleware ahead of the layer that answers with the file. It is created when
-/// `use_static_assets` is called, takes the middleware of every scope around it while those
-/// scopes close, and is composed and registered by [`mount`](Self::mount) at the end. The
-/// two states are the two states of [`RoutePipeline`] and need no second type here, as they
-/// need none for a route.
+/// `use_static_assets` or `use_static_files` is called, takes the middleware of every scope
+/// around it while those scopes close, and is composed and registered by
+/// [`mount`](Self::mount) at the end. The two states are the two states of [`RoutePipeline`]
+/// and need no second type here, as they need none for a route.
 pub(crate) struct StaticMount {
     /// The prefix this mount answers under, without a trailing slash. Empty for a mount
     /// that answers the whole application.
@@ -103,6 +140,10 @@ pub(crate) struct StaticMount {
     /// The pipeline that answers with the file, headed by the middleware of the scope this
     /// mount belongs to.
     pipeline: RoutePipeline,
+
+    /// The pipeline of the route answering with the fallback file, headed by the same
+    /// middleware. `None` for a mount that serves the files alone.
+    shell: Option<RoutePipeline>,
 }
 
 impl Middleware for StaticMount {
@@ -189,7 +230,16 @@ impl StaticMount {
         Self {
             prefix: prefix.trim_end_matches('/').into(),
             pipeline: RoutePipeline::ending_in(serve_layer()),
+            shell: None,
         }
+    }
+
+    /// Serves the fallback file under this mount as well: whatever a `GET` or a `HEAD` is
+    /// aimed at under the prefix, when no file and no route answers it.
+    #[inline]
+    pub(crate) fn with_shell(mut self) -> Self {
+        self.shell = Some(shell());
+        self
     }
 
     /// Puts the middleware of an enclosing scope in front of this mount, where a route
@@ -197,15 +247,19 @@ impl StaticMount {
     #[inline]
     pub(crate) fn prepend(&mut self, layers: &[MiddlewareFn]) {
         self.pipeline.prepend(layers);
+        if let Some(shell) = self.shell.as_mut() {
+            shell.prepend(layers);
+        }
     }
 
-    /// Composes this mount's pipeline and registers it in the application's.
+    /// Composes this mount's pipeline and registers it in the application's, along with the
+    /// route of the fallback file when the mount serves one.
     ///
-    /// A mount that could never answer is reported and left out of the chain: a prefix that
-    /// carries a route parameter, and a prefix another mount already answers. A second mount
-    /// on one prefix would answer nothing the first did not, and the middleware it carries
-    /// would never run, so registering it would only cost every request a second look at the
-    /// filesystem while looking like a second policy applies.
+    /// A mount that could never answer is reported and left out, fallback file and all: a
+    /// prefix that carries a route parameter, and a prefix another mount already answers. A
+    /// second mount on one prefix would answer nothing the first did not, and the middleware
+    /// it carries would never run, so registering it would only cost every request a second
+    /// look at the filesystem while looking like a second policy applies.
     #[inline]
     pub(crate) fn mount(mut self, app: &mut App) {
         // A mount is matched against the request target as it is written. A route parameter
@@ -231,9 +285,37 @@ impl StaticMount {
             return;
         }
 
+        if let Some(shell) = self.shell.take() {
+            map_shell(app, &self.prefix, shell);
+        }
+
         self.pipeline.compose();
         app.attach(self);
     }
+}
+
+/// The pipeline of the route answering with the fallback file, with no middleware in front
+/// of it yet
+#[inline]
+fn shell() -> RoutePipeline {
+    let handler: RouteHandler = Func::new(fallback);
+    Layer::Handler(handler).into()
+}
+
+/// Maps the route that answers a `GET` or a `HEAD` under `prefix` with the fallback file: the
+/// prefix itself, and every path below it.
+///
+/// It is a route rather than the application's fallback, so it is scoped to the prefix it is
+/// mapped under, and the router answers the rest of what reaches it - a `405` with the methods
+/// it has for any other method, and whatever the application mapped at a path, for the path.
+/// It is mapped as an implicit route, left out of the route listing and of the OpenAPI
+/// document, and a `GET` route the application maps by hand at one of its two positions
+/// takes that position over, whichever of the two was mapped first.
+fn map_shell(app: &mut App, prefix: &str, pipeline: RoutePipeline) {
+    let endpoints = app.pipeline.endpoints_mut();
+
+    endpoints.map_implicit_get(&join_path(prefix, ""), pipeline.clone());
+    endpoints.map_implicit_get(&join_path(prefix, SHELL_TAIL), pipeline);
 }
 
 /// What a request that a mount answers is answered with.
@@ -276,9 +358,9 @@ fn is_retrieval(method: &Method) -> bool {
 /// Decides what, if anything, under the content root answers `target`.
 ///
 /// `None` is a request the mount declines: nothing is there under that name, so routing has
-/// its turn and the application's fallback - [`App::map_fallback_to_file`] among them -
-/// answers it. That is the common answer for a request aimed at a route rather than a file,
-/// and it costs a single failed `metadata` call.
+/// its turn - a route, the fallback file's route under this prefix, or the application's
+/// fallback answers it. That is the common answer for a request aimed at a route rather than
+/// a file, and it costs a single failed `metadata` call.
 #[inline]
 async fn probe(env: &HostEnv, target: Target) -> Option<Serving> {
     match target {
@@ -379,7 +461,8 @@ async fn respond(serving: &Serving, method: &Method, headers: &HeaderMap) -> Htt
     }
 }
 
-/// Answers a request no route was found for with the fallback file.
+/// Answers a `GET` or a `HEAD` that nothing else under a mount answers with the fallback
+/// file. See [`map_shell`] for where that is.
 #[inline]
 async fn fallback(method: Method, env: HostEnv, headers: HttpHeaders) -> HttpResult {
     let policy = env.shell_policy();
@@ -392,7 +475,7 @@ async fn fallback(method: Method, env: HostEnv, headers: HttpHeaders) -> HttpRes
 /// Answers with a file addressed by a stable name - the fallback one.
 ///
 /// The shell is served `no-cache` by default, which is a promise that it will be revalidated
-/// rather than that it will be re-sent: the fallback file is reached by its own handler rather
+/// rather than that it will be re-sent: the fallback file is reached by its own route rather
 /// than through the static file mount, so it has to run the request's validators itself or
 /// every reload would pay for a full body.
 #[inline]
@@ -499,7 +582,8 @@ impl RouteGroup<'_> {
     ///
     /// > **Note:** a group's CORS policy is bound to the routes the group mapped, and a file
     /// > is served without going through one - so the policy that reaches these files is the
-    /// > application's, configured with [`App::with_cors`](crate::App::with_cors).
+    /// > application's, configured with [`App::with_cors`](crate::App::with_cors). The same
+    /// > goes for the fallback file [`use_static_files`](Self::use_static_files) serves.
     ///
     /// # Example
     /// ```no_run
@@ -521,10 +605,14 @@ impl RouteGroup<'_> {
         self
     }
 
-    /// Configures a static files server under this group's prefix
+    /// Serves the static files of the hosting environment under this group's prefix, and the
+    /// fallback file for whatever else a `GET` or a `HEAD` under it is aimed at.
     ///
-    /// This method combines logic [`RouteGroup::use_static_assets`] and [`App::map_fallback_to_file`].
-    /// The last one is called if the `fallback_path` is explicitly provided in [`HostEnv`].
+    /// This is [`RouteGroup::use_static_assets`], plus - when a fallback file is set with
+    /// [`HostEnv::with_fallback_file`] - that file served under this group's prefix the way
+    /// [`App::map_fallback_to_file`] serves it under the root: see the
+    /// [module documentation](crate::fs::static_files#the-fallback-file). It answers under
+    /// this prefix alone, and it runs inside the group's middleware, as the files do.
     ///
     /// # Example
     /// ```no_run
@@ -532,29 +620,38 @@ impl RouteGroup<'_> {
     ///
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let mut app = App::new();
+    /// let mut app = App::new()
+    ///     .with_host_env(|env| env.with_fallback_file("index.html"));
     ///
-    /// // Enables static file server
-    /// app.group("/static", |g| {
+    /// // GET /app/assets/app.js -> the file
+    /// // GET /app/settings      -> index.html
+    /// // GET /elsewhere         -> 404
+    /// app.group("/app", |g| {
     ///     g.use_static_files();
     /// });
     /// # app.run().await
     /// # }
     /// ```
     pub fn use_static_files(&mut self) -> &mut Self {
-        // Enable fallback to file if it's provided
-        if self.app.host_env.fallback_path().is_some() {
-            self.app.map_fallback_to_file();
-        }
-        self.use_static_assets()
+        let mount = StaticMount::new(&self.prefix);
+        let mount = if self.app.host_env.fallback_path().is_some() {
+            mount.with_shell()
+        } else {
+            mount
+        };
+
+        self.mounts.push(mount);
+        self
     }
 }
 
 impl App {
-    /// Configures a static files server
+    /// Serves the static files of the hosting environment, and the fallback file for
+    /// whatever else a `GET` or a `HEAD` is aimed at.
     ///
-    /// This method combines logic [`App::use_static_assets`] and [`App::map_fallback_to_file`].
-    /// The last one is called if the `fallback_path` is explicitly provided in [`HostEnv`].
+    /// This is [`App::use_static_assets`], plus [`App::map_fallback_to_file`] when a fallback
+    /// file is set with [`HostEnv::with_fallback_file`] - the usual setup for a single-page
+    /// application, whose client-side routes all render the one shell.
     ///
     /// # Example
     /// ```no_run
@@ -562,20 +659,26 @@ impl App {
     ///
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
-    /// let mut app = App::new();
+    /// let mut app = App::new()
+    ///     .with_host_env(|env| env.with_fallback_file("index.html"));
     ///
-    /// // Enables static file server
+    /// // GET /assets/app.js -> the file
+    /// // GET /settings      -> index.html
+    /// // POST /settings     -> 405, Allow: GET,HEAD
     /// app.use_static_files();
     /// # app.run().await
     /// # }
     /// ```
     pub fn use_static_files(&mut self) -> &mut Self {
-        // Enable fallback to file if it's provided
-        if self.host_env.fallback_path().is_some() {
-            self.map_fallback_to_file();
-        }
+        let mount = StaticMount::new("");
+        let mount = if self.host_env.fallback_path().is_some() {
+            mount.with_shell()
+        } else {
+            mount
+        };
 
-        self.use_static_assets()
+        mount.mount(self);
+        self
     }
 
     /// Serves the static files of the hosting environment.
@@ -607,8 +710,15 @@ impl App {
         self
     }
 
-    /// Adds a special fallback handler that redirects to a specified file
-    /// when unregistered resource is requested
+    /// Answers a `GET` or a `HEAD` that no route answers with the fallback file set with
+    /// [`HostEnv::with_fallback_file`].
+    ///
+    /// The file is served by a route covering every path - `/` and `/{*path}` - for `GET`
+    /// and `HEAD`, so a request for any other method is answered `405` with
+    /// `Allow: GET,HEAD` rather than with the file: see the
+    /// [module documentation](crate::fs::static_files#the-fallback-file) for what else that
+    /// settles. It is not the application's fallback, so it and [`App::map_fallback`] do not
+    /// replace each other.
     ///
     /// # Example
     /// ```no_run
@@ -627,7 +737,8 @@ impl App {
     /// # }
     /// ```
     pub fn map_fallback_to_file(&mut self) -> &mut Self {
-        self.map_fallback(fallback)
+        map_shell(self, "", shell());
+        self
     }
 }
 
@@ -1199,6 +1310,61 @@ mod tests {
         for prefix in ["", "/"] {
             assert_eq!(StaticMount::new(prefix).prefix.as_ref(), "", "{prefix}");
         }
+    }
+
+    /// The route the fallback file answers under is not one the application wrote, so it is
+    /// not listed as one of its routes
+    #[test]
+    #[cfg(debug_assertions)]
+    fn it_leaves_the_fallback_file_out_of_the_route_listing() {
+        let mut app = App::new().with_host_env(|env| {
+            env.with_content_root("tests/static")
+                .with_fallback_file("index.html")
+        });
+
+        app.map_get("/health", || async { "up" });
+        app.use_static_files();
+        app.group("/static", |g| {
+            g.use_static_files();
+        });
+
+        let routes = app.pipeline.endpoints().collect();
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0], (Method::GET, "/health"));
+    }
+
+    /// With no fallback file configured, a mount serves the files alone and maps no route
+    #[test]
+    fn it_maps_no_route_without_a_fallback_file() {
+        let mut app = App::new().with_host_env(|env| env.with_content_root("tests/static"));
+        app.use_static_files();
+
+        for path in ["/", "/deep/link"] {
+            assert!(
+                !app.pipeline.endpoints_mut().contains(&Method::GET, path),
+                "{path}"
+            );
+        }
+    }
+
+    /// A mount refused for its prefix is refused whole, so its fallback file is not served
+    /// there either
+    #[test]
+    fn it_maps_no_fallback_file_under_a_refused_mount() {
+        let mut app = App::new().with_host_env(|env| {
+            env.with_content_root("tests/static")
+                .with_fallback_file("index.html")
+        });
+        app.group("/{tenant}", |g| {
+            g.use_static_files();
+        });
+
+        assert!(
+            !app.pipeline
+                .endpoints_mut()
+                .contains(&Method::GET, "/acme/deep/link")
+        );
     }
 
     #[tokio::test]

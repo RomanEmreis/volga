@@ -12,11 +12,12 @@ use crate::headers::{
 ///
 /// Only `GET` and `HEAD` are answered this way. A validator says the client's *copy* is
 /// current, which is an answer to a request for a representation and to nothing else - RFC
-/// 9110 Section 13.1.3 has `If-Modified-Since` ignored outright on any other method. This
-/// matters because the fallback file is served for a route that was not found whatever the
-/// method was, so without the guard a conditional `POST` to an unknown path would be told
-/// `304 Not Modified` - a write reported as a cache hit, against a tag describing the shell
-/// rather than anything the request was aimed at.
+/// 9110 Section 13.1.3 has `If-Modified-Since` ignored outright on any other method. The
+/// fallback file once answered every method, and without this guard a conditional `POST` to
+/// an unknown path was told `304 Not Modified` - a write reported as a cache hit, against a
+/// tag describing the shell rather than anything the request was aimed at. The file answers
+/// `GET` and `HEAD` alone now, but the rule belongs to the validators rather than to whoever
+/// calls them, so it stays here.
 ///
 /// `If-None-Match` then decides on its own whenever it is present: RFC 9110 Section 13.1.3
 /// has a recipient ignore `If-Modified-Since` in that case, the entity tag being the more

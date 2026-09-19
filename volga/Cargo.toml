@@ -34,7 +34,7 @@ smallvec = "1.15.1"
 # optional
 arc-swap = { version = "1.9.2", optional = true }
 toml = { version = "1.1.2",   optional = true }
-async-compression = { version = "0.4.44", features = ["tokio"], optional = true }
+async-compression = { version = "0.4.48", features = ["tokio"], optional = true }
 base64 = { workspace = true, optional = true }
 cookie = { version = "0.18.2", features = ["percent-encode"], optional = true }
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"], optional = true }
@@ -72,7 +72,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 uuid = { workspace = true, features = ["v4"] }
 criterion = { version = "0.8.2", features = ["async_tokio"] }
 tempfile = { workspace = true }
-trybuild = "1.0.120"
+trybuild = "1.0.121"
 
 [features]
 # Default HTTP/1 only server
