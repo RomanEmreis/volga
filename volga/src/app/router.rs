@@ -125,7 +125,7 @@ use crate::http::endpoints::{
     route::{canonical_path, is_canonical_path, join_path},
 };
 
-#[cfg(feature = "middleware")]
+#[cfg(any(feature = "middleware", feature = "openapi"))]
 use crate::http::endpoints::route::same_position;
 use crate::http::{FromRequestParts, IntoResponse};
 use hyper::Method;
@@ -143,10 +143,6 @@ use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 use crate::fs::static_files::StaticMount;
 
 const QUERY: &[u8] = b"QUERY";
-
-/// The catch-all a route group's fallback reads the rest of the path with, under the group's
-/// prefix
-const FALLBACK_TAIL: &str = "{*rest}";
 
 /// Routes mapping
 impl App {
@@ -698,7 +694,7 @@ pub struct RouteGroup<'a> {
     pub(crate) routes: Vec<GroupRoute>,
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
-    /// The patterns this group and its sub-groups mapped a fallback at
+    /// The prefixes this group and its sub-groups mapped a fallback under
     #[cfg(feature = "middleware")]
     pub(crate) fallbacks: Vec<Box<str>>,
     /// The CORS policy of this group, if it configured one
@@ -764,31 +760,33 @@ impl<'a> RouteGroup<'a> {
     )]
     fn record(&mut self, method: &Method, pattern: &str) {
         #[cfg(any(feature = "middleware", feature = "openapi"))]
-        {
-            if self.is_recorded(method, pattern) {
-                return;
-            }
-
-            self.routes.push(GroupRoute {
-                method: method.clone(),
-                pattern: Box::from(pattern),
-            });
-        }
+        self.record_route(GroupRoute {
+            method: method.clone(),
+            pattern: Box::from(pattern),
+        });
     }
 
-    /// Returns `true` if this group has already recorded the route `method` and `pattern`
-    /// name, whether it mapped it itself or a sub-group did.
+    /// Remembers `route` as registered by this group, whether it mapped it itself or a
+    /// sub-group did.
     ///
-    /// Mapping the same method and pattern twice registers one route - the second handler
-    /// lands on the endpoint the first one made - so the group configures it once. Two
-    /// spellings of one dynamic route are not caught here: that ambiguity is a problem of
-    /// its own, and this is not the place to hide it.
+    /// Mapping a route where one is mapped replaces it rather than adding one, so the group
+    /// configures it once. A route is compared the way the router reads it rather than the
+    /// way it is spelled: `/users/{id:integer}` and `/users/{id}` are one route, and
+    /// recording both would put the group's middleware in front of it twice. It is kept
+    /// under the spelling it was mapped as last, which is the one the router and the OpenAPI
+    /// document are left with. Two *names* for one parameter on one verb are an ambiguity of
+    /// their own, reported where the second one is mapped.
     #[inline]
     #[cfg(any(feature = "middleware", feature = "openapi"))]
-    fn is_recorded(&self, method: &Method, pattern: &str) -> bool {
-        self.routes
-            .iter()
-            .any(|route| route.method == *method && route.pattern.as_ref() == pattern)
+    fn record_route(&mut self, route: GroupRoute) {
+        let recorded = self.routes.iter_mut().find(|recorded| {
+            recorded.method == route.method && same_position(&recorded.pattern, &route.pattern)
+        });
+
+        match recorded {
+            Some(recorded) => recorded.pattern = route.pattern,
+            None => self.routes.push(route),
+        }
     }
 
     /// Applies the group's configuration to every route it registered.
@@ -839,14 +837,14 @@ impl<'a> RouteGroup<'a> {
         // but it answers under this group's prefix on the group's behalf, and it takes the
         // group's middleware and CORS policy the way a route does
         #[cfg(feature = "middleware")]
-        for pattern in self.fallbacks.iter() {
+        for prefix in self.fallbacks.iter() {
             let endpoints = self.app.pipeline.endpoints_mut();
 
             if !self.middleware.is_empty() {
-                endpoints.prepend_fallback_layers(pattern, &self.middleware);
+                endpoints.prepend_fallback_layers(prefix, &self.middleware);
             }
             if let Some(cors) = self.cors.clone() {
-                endpoints.bind_fallback_cors_if_unset(pattern, cors);
+                endpoints.bind_fallback_cors_if_unset(prefix, cors);
             }
         }
 
@@ -966,9 +964,7 @@ impl<'a> RouteGroup<'a> {
         // check as one this group mapped itself.
         #[cfg(any(feature = "middleware", feature = "openapi"))]
         for route in child.routes.drain(..) {
-            if !self.is_recorded(&route.method, &route.pattern) {
-                self.routes.push(route);
-            }
+            self.record_route(route);
         }
 
         // ... and so do the fallbacks it mapped, by the same rule
@@ -1022,8 +1018,11 @@ impl<'a> RouteGroup<'a> {
     ///   CORS policy applies to it too.
     ///
     /// The handler takes the same arguments [`App::map_fallback`] does - anything
-    /// implementing [`FromRequestParts`] - and the path the request was aimed at is there to
-    /// read through [`Uri`](crate::http::Uri). A fallback is not a route: it is neither
+    /// implementing [`FromRequestParts`]. It binds the parameters its prefix declares and
+    /// nothing else, the same at the prefix and below it, and the path the request was aimed
+    /// at is there to read through [`Uri`](crate::http::Uri). Under a prefix that ends in a
+    /// catch-all, `/files/{*path}`, it answers what that catch-all reads, and binds it as the
+    /// prefix names it. A fallback is not a route: it is neither
     /// listed with the routes nor described in an OpenAPI document, and
     /// [`HttpContext::matched_route`](crate::middleware::HttpContext::matched_route) reads
     /// `false` for a request it answers, so a CORS preflight for a path only a fallback
@@ -1060,42 +1059,36 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         let handler: RouteHandler = Arc::new(FallbackFunc::new(handler));
+        let prefix = join_path(&self.prefix, "");
 
-        // The catch-all reads at least one segment, so the prefix itself is a position of
-        // its own
-        for pattern in [
-            join_path(&self.prefix, ""),
-            join_path(&self.prefix, FALLBACK_TAIL),
-        ] {
-            self.app
-                .pipeline
-                .endpoints_mut()
-                .map_fallback(&pattern, Arc::clone(&handler));
+        self.app
+            .pipeline
+            .endpoints_mut()
+            .map_fallback(&prefix, handler);
 
-            #[cfg(feature = "middleware")]
-            self.record_fallback(pattern.into());
-        }
+        #[cfg(feature = "middleware")]
+        self.record_fallback(prefix.into());
 
         self
     }
 
-    /// Remembers a fallback mapped at `pattern` by this group or by one of its sub-groups,
+    /// Remembers a fallback mapped under `prefix` by this group or by one of its sub-groups,
     /// so that the group's configuration reaches it when the group closure returns.
     ///
-    /// A second fallback at one position replaces the first rather than adding one, so the
-    /// group configures it once - and a position is compared the way the router reads it,
-    /// not the way it is spelled. Two sub-groups under `/{tenant}` and `/{org}` map their
+    /// A second fallback under one prefix replaces the first rather than adding one, so the
+    /// group configures it once - and a prefix is compared the way the router reads it, not
+    /// the way it is spelled. Two sub-groups under `/{tenant}` and `/{org}` map their
     /// fallbacks at one resource, and recording both spellings would put this group's
     /// middleware in front of the one fallback left there twice.
     #[inline]
     #[cfg(feature = "middleware")]
-    fn record_fallback(&mut self, pattern: Box<str>) {
+    fn record_fallback(&mut self, prefix: Box<str>) {
         if !self
             .fallbacks
             .iter()
-            .any(|recorded| same_position(recorded, &pattern))
+            .any(|recorded| same_position(recorded, &prefix))
         {
-            self.fallbacks.push(pattern);
+            self.fallbacks.push(prefix);
         }
     }
 }
@@ -1225,6 +1218,42 @@ mod tests {
         );
     }
 
+    /// A route mapped again under another spelling of its parameters is one route, recorded
+    /// once under the spelling it was mapped as last - by the group itself or by a sub-group
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
+    #[test]
+    fn it_records_a_route_once_under_the_spelling_it_was_mapped_as_last() {
+        let mut app = App::new();
+        let mut routes = Vec::new();
+
+        app.group("/api", |api| {
+            api.map_get("/{id:integer}", || async { "typed" });
+            api.map_get("/{id}", || async { "plain" });
+            api.map_post("/{id}", || async { "posted" });
+
+            api.map_get("/users/{id}", || async { "parent" });
+            api.group("/users", |users| {
+                users.map_get("/{id:integer}", || async { "child" });
+            });
+
+            routes = api.routes.clone();
+        });
+
+        let recorded = routes
+            .iter()
+            .map(|route| (route.method.clone(), route.pattern.to_string()))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            recorded,
+            vec![
+                (Method::GET, "/api/{id}".to_string()),
+                (Method::POST, "/api/{id}".to_string()),
+                (Method::GET, "/api/users/{id:integer}".to_string()),
+            ]
+        );
+    }
+
     #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]
     fn it_records_routes_mapped_by_a_sub_group_in_the_parent() {
@@ -1263,7 +1292,7 @@ mod tests {
 
         assert_eq!(
             fallbacks.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
-            ["/api", "/api/{*rest}", "/api/v2", "/api/v2/{*rest}"]
+            ["/api", "/api/v2"]
         );
     }
 
@@ -1290,8 +1319,20 @@ mod tests {
 
         assert_eq!(
             fallbacks.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
-            ["/api/{tenant}", "/api/{tenant}/{*rest}"]
+            ["/api/{tenant}"]
         );
+    }
+
+    /// A catch-all reads everything below the prefix it ends, and nothing can follow one, so
+    /// a fallback under such a prefix is mapped at the prefix alone rather than panicking on
+    /// a tail of its own
+    #[test]
+    fn it_maps_a_fallback_under_a_prefix_ending_in_a_catch_all() {
+        let mut app = crate::App::new();
+
+        app.group("/files/{*path}", |files| {
+            files.map_fallback(|| async { "files" });
+        });
     }
 
     #[cfg(any(feature = "middleware", feature = "openapi"))]

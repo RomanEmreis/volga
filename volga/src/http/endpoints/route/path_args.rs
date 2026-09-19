@@ -85,6 +85,13 @@ impl PathArgs {
         let _ = self.encoded.take();
     }
 
+    /// Removes the last arg, the one read furthest into the path.
+    #[inline]
+    pub(crate) fn pop(&mut self) -> Option<PathArg> {
+        let _ = self.encoded.take();
+        self.args.pop()
+    }
+
     /// Restures a query string of this route
     #[inline]
     pub(crate) fn encoded(&self) -> Result<&str, Error> {

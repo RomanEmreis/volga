@@ -265,6 +265,57 @@ async fn it_configures_one_route_for_paths_that_differ_only_in_empty_segments() 
     server.shutdown().await;
 }
 
+/// A parameter's type annotation is not part of what the router reads, so a route mapped
+/// again with the annotation dropped replaces the first, and the group configures the one
+/// route left once.
+#[tokio::test]
+async fn it_configures_one_route_for_spellings_that_differ_only_in_parameter_types() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", |api| {
+            api.map_get("/{id:integer}", || async { "typed" });
+            api.map_get("/{id}", || async { "plain" });
+            api.wrap(mark!(&group_trace, "group"));
+        });
+    })
+    .await;
+
+    assert_eq!(trace_of(&server, &trace, "/api/7").await, ["group"]);
+
+    server.shutdown().await;
+}
+
+/// ... and the same holds when a sub-group maps the second spelling: the parent reaches the
+/// one route under whichever spelling the sub-group left it, once.
+#[tokio::test]
+async fn it_configures_a_route_a_sub_group_respells_only_once() {
+    let trace = Trace::default();
+    let group_trace = Arc::clone(&trace);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", |api| {
+            api.map_get("/users/{id:integer}", || async { "parent" });
+
+            api.group("/users", |users| {
+                users.map_get("/{id}", || async { "child" });
+                users.wrap(mark!(&group_trace, "sub-group"));
+            });
+
+            api.wrap(mark!(&group_trace, "group"));
+        });
+    })
+    .await;
+
+    assert_eq!(
+        trace_of(&server, &trace, "/api/users/7").await,
+        ["group", "sub-group"]
+    );
+
+    server.shutdown().await;
+}
+
 /// A group whose prefix and route are both the root names the root route, the same one
 /// a `map_get("/")` outside the group names.
 #[cfg(feature = "openapi")]
@@ -407,6 +458,42 @@ async fn it_tags_a_route_mapped_twice_only_once() {
 
     assert_eq!(
         spec["paths"]["/api/hello"]["get"]["tags"],
+        serde_json::json!(["/api"])
+    );
+
+    server.shutdown().await;
+}
+
+/// The group records a respelled route under the spelling it was mapped as last, which is
+/// the one the OpenAPI document keeps - so the group's configuration reaches that operation.
+#[cfg(feature = "openapi")]
+#[tokio::test]
+async fn it_tags_a_route_mapped_under_two_spellings_once() {
+    let server = TestServer::builder()
+        .configure(|app| app.with_open_api(|open_api| open_api))
+        .setup(|app| {
+            app.use_open_api();
+
+            app.group("/api", |api| {
+                api.map_get("/{id}", || async { "plain" });
+                api.map_get("/{id:integer}", || async { "typed" });
+            });
+        })
+        .build()
+        .await;
+
+    let spec: serde_json::Value = server
+        .client()
+        .get(server.url("/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        spec["paths"]["/api/{id}"]["get"]["tags"],
         serde_json::json!(["/api"])
     );
 

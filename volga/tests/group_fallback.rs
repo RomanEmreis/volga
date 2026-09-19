@@ -230,6 +230,97 @@ async fn it_binds_the_parameters_of_a_parameterized_prefix() {
     server.shutdown().await;
 }
 
+/// The rest of the path below the prefix is read by a catch-all the application never wrote,
+/// so the fallback reads the parameters its prefix declares and nothing else - a strict
+/// `NamedPath<T>` reads them below the prefix as it does at it, and a prefix parameter named
+/// like that catch-all is not doubled by it.
+#[tokio::test]
+async fn it_binds_the_parameters_of_its_prefix_alone() {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Tenant {
+        tenant: String,
+    }
+
+    #[derive(Deserialize)]
+    struct Rest {
+        rest: String,
+    }
+
+    let server = TestServer::spawn(|app| {
+        app.group("/tenants/{tenant}", |tenant| {
+            tenant.map_fallback(|params: NamedPath<Tenant>| async move {
+                not_found!("tenant {}", params.tenant)
+            });
+        });
+        app.group("/x/{rest}", |x| {
+            x.map_fallback(
+                |params: NamedPath<Rest>| async move { not_found!("rest {}", params.rest) },
+            );
+        });
+    })
+    .await;
+
+    for path in [
+        "/tenants/acme",
+        "/tenants/acme/missing",
+        "/tenants/acme/a/b",
+    ] {
+        assert_eq!(
+            get(&server, path).await,
+            (404, "tenant acme".into()),
+            "{path}"
+        );
+    }
+    for path in ["/x/acme", "/x/acme/missing"] {
+        assert_eq!(
+            get(&server, path).await,
+            (404, "rest acme".into()),
+            "{path}"
+        );
+    }
+
+    server.shutdown().await;
+}
+
+/// A prefix ending in a catch-all reads everything below it already, so the fallback answers
+/// there alone - with the catch-all bound as the prefix names it - instead of panicking on a
+/// tail that could never follow it.
+#[tokio::test]
+async fn it_answers_below_a_prefix_ending_in_a_catch_all() {
+    #[derive(Deserialize)]
+    struct Files {
+        path: String,
+    }
+
+    let server = TestServer::spawn(|app| {
+        app.group("/files/{*path}", |files| {
+            files.map_fallback(|params: NamedPath<Files>| async move {
+                not_found!("no file {}", params.path)
+            });
+        });
+        app.group("/docs/{*path}", |docs| {
+            docs.map_get("/", |path: String| async move { ok!("doc {path}") });
+            docs.map_fallback(|| async { not_found!("docs") });
+        });
+    })
+    .await;
+
+    assert_eq!(
+        get(&server, "/files/a/b").await,
+        (404, "no file a/b".into())
+    );
+    // The catch-all reads at least one segment, so `/files` is outside the prefix
+    assert_eq!(get(&server, "/files").await, (404, String::new()));
+
+    // A route at the catch-all takes the position over, as anywhere else
+    assert_eq!(get(&server, "/docs/a/b").await, (200, "doc a/b".into()));
+    let (status, _, allow) = send(&server, Method::DELETE, "/docs/a/b").await;
+    assert_eq!((status, allow.as_deref()), (405, Some("GET,HEAD")));
+
+    server.shutdown().await;
+}
+
 /// A second fallback at one prefix replaces the first, as a second handler for one route
 /// does.
 #[tokio::test]

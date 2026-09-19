@@ -140,6 +140,11 @@ pub(super) struct Fallback {
     /// The CORS policy bound to this fallback, `None` while nothing has bound one
     #[cfg(feature = "middleware")]
     pub(super) cors: Option<CorsOverride>,
+    /// Set on the fallback a route group maps below its prefix, where the rest of the path
+    /// is read by a catch-all the application never wrote. That binding is dropped before
+    /// the request is labelled, so a fallback sees the parameters its prefix declares and
+    /// nothing else - the same at the prefix and below it.
+    pub(super) hides_tail: bool,
 }
 
 /// Represents route path node
@@ -283,12 +288,13 @@ impl RouteEndpoint {
 impl Fallback {
     /// Creates a [`Fallback`] answering with `handler`
     #[inline]
-    fn new(handler: RouteHandler, params: Option<Box<[Arc<str>]>>) -> Self {
+    fn new(handler: RouteHandler, params: Option<Box<[Arc<str>]>>, hides_tail: bool) -> Self {
         Self {
             pipeline: Layer::Handler(handler).into(),
             params,
             #[cfg(feature = "middleware")]
             cors: None,
+            hides_tail,
         }
     }
 
@@ -342,12 +348,20 @@ impl RouteNode {
         resource.insert_implicit(pipeline, &written, &bound);
     }
 
-    /// Maps the fallback answering at `path`, replacing the one already mapped there
-    pub(super) fn insert_fallback(&mut self, path: &str, handler: RouteHandler) {
-        let (resource, written, bound) = self.reach(path);
+    /// Maps the fallback answering at `path`, replacing the one already mapped there.
+    ///
+    /// `hides_tail` says that `path` ends in a catch-all of the router's own - see
+    /// [`Fallback::hides_tail`] - so the names it is labelled with leave that one out.
+    pub(super) fn insert_fallback(&mut self, path: &str, handler: RouteHandler, hides_tail: bool) {
+        let (resource, mut written, mut bound) = self.reach(path);
+
+        if hides_tail {
+            written.pop();
+            bound.pop();
+        }
 
         let params = (written != bound).then(|| Box::from(written.as_slice()));
-        resource.fallback = Some(Box::new(Fallback::new(handler, params)));
+        resource.fallback = Some(Box::new(Fallback::new(handler, params, hides_tail)));
     }
 
     /// Reaches the resource `path` names, creating the nodes on the way there, along with
@@ -1083,6 +1097,7 @@ pub(super) fn make_allowed_str<const N: usize>(
 /// A parameter is matched by the position it sits at rather than by what it is called or
 /// what it is typed as, so `/{tenant}/{*rest}`, `/{org}/{*path}` and `/{id:integer}/{*rest}`
 /// all reach one resource - and anything keyed by a pattern has to count them as one.
+#[cfg(any(feature = "middleware", feature = "openapi"))]
 pub(crate) fn same_position(left: &str, right: &str) -> bool {
     let mut left = split_path(left);
     let mut right = split_path(right);
@@ -1099,6 +1114,7 @@ pub(crate) fn same_position(left: &str, right: &str) -> bool {
 /// Returns `true` when two segments of a pattern occupy one position: the same literal, two
 /// parameters, or two catch-alls
 #[inline]
+#[cfg(any(feature = "middleware", feature = "openapi"))]
 fn same_segment(left: &str, right: &str) -> bool {
     match (is_dynamic_segment(left), is_dynamic_segment(right)) {
         (true, true) => is_catch_all_segment(left) == is_catch_all_segment(right),
@@ -1526,6 +1542,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(feature = "middleware", feature = "openapi"))]
     fn it_reads_one_position_under_any_spelling_of_its_parameters() {
         use super::same_position;
 
@@ -2238,7 +2255,7 @@ mod tests {
 
     /// Maps a fallback at `path`
     fn insert_fallback(route: &mut RouteNode, path: &str) {
-        route.insert_fallback(path, Func::new(|| async { ok!() }));
+        route.insert_fallback(path, Func::new(|| async { ok!() }), false);
     }
 
     #[test]
