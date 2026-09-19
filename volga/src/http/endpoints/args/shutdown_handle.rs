@@ -18,10 +18,12 @@ impl TryFrom<&Extensions> for ShutdownHandle {
     #[inline]
     fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
         // A handle that never fires would leave a stream waiting on it running to the end of
-        // the shutdown, so a request that did not come through a running server is an error
+        // the shutdown, so a request that did not come through a running server is an error.
+        // The server's token is cloned here, for the handler that asked for it, rather than
+        // for every request - see `HttpRequestScope::shutdown`
         extensions
             .get::<HttpRequestScope>()
-            .map(|scope| scope.shutdown.clone())
+            .map(|scope| ShutdownHandle::clone(&scope.shutdown))
             .ok_or_else(|| Error::server_error("Server Error: shutdown handle is not available"))
     }
 }
@@ -65,7 +67,7 @@ mod tests {
 
     fn scope_with(shutdown: ShutdownHandle) -> HttpRequestScope {
         HttpRequestScope {
-            shutdown,
+            shutdown: std::sync::Arc::new(shutdown),
             ..HttpRequestScope::default()
         }
     }

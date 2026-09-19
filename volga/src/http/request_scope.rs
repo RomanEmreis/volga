@@ -10,11 +10,6 @@ use crate::{
     http::{endpoints::route::PathArgs, request::request_body_limit::RequestBodyLimit},
 };
 
-#[cfg(any(
-    feature = "rate-limiting",
-    feature = "config",
-    all(test, feature = "ws")
-))]
 use std::sync::Arc;
 
 #[cfg(feature = "ws")]
@@ -54,7 +49,11 @@ pub(crate) struct HttpRequestScope {
     pub(crate) cancellation_token: CancellationToken,
 
     /// The running server's shutdown handle, fired as soon as its shutdown starts.
-    pub(crate) shutdown: ShutdownHandle,
+    ///
+    /// Shared by the requests of one connection rather than cloned for each: cloning a
+    /// [`ShutdownHandle`] locks a mutex every clone of the server's handle shares. See
+    /// [`Scope`](crate::app::scope::Scope).
+    pub(crate) shutdown: Arc<ShutdownHandle>,
 
     /// Request body size limit.
     pub(crate) body_limit: RequestBodyLimit,
@@ -115,7 +114,7 @@ impl Default for HttpRequestScope {
         Self {
             client_ip: ClientIp(SocketAddr::from(([0, 0, 0, 0], 0))),
             cancellation_token: CancellationToken::new(),
-            shutdown: ShutdownHandle::new(),
+            shutdown: Arc::new(ShutdownHandle::new()),
             body_limit: RequestBodyLimit::Disabled,
             params: PathArgs::default(),
             #[cfg(feature = "ws")]
@@ -165,7 +164,7 @@ mod tests {
         HttpRequestScope {
             client_ip: ClientIp(SocketAddr::from(([127, 0, 0, 1], 4321))),
             cancellation_token: CancellationToken::new(),
-            shutdown: ShutdownHandle::new(),
+            shutdown: Arc::new(ShutdownHandle::new()),
             body_limit: RequestBodyLimit::Enabled(1024),
             params: PathArgs::default(),
             ..HttpRequestScope::default()

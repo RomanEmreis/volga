@@ -1,9 +1,6 @@
 use futures_util::{TryFutureExt, future::BoxFuture};
 use std::net::SocketAddr;
-use std::sync::Weak;
-
-#[cfg(feature = "ws")]
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio_util::sync::CancellationToken;
 
 use hyper::{
@@ -17,7 +14,7 @@ use hyper::{
 use hyper::header::ALLOW;
 
 use crate::{
-    ClientIp, HttpBody, HttpRequest, HttpResult, Limit,
+    ClientIp, HttpBody, HttpRequest, HttpResult, Limit, ShutdownHandle,
     app::{AppEnv, pipeline::Terminal},
     error::{Error, handler::extract_error_args},
     headers::CACHE_CONTROL,
@@ -47,6 +44,16 @@ const REQUEST_HEADERS_TOO_LARGE_MESSAGE: &str = "Request headers too large.";
 pub(crate) struct Scope {
     pub(crate) env: Weak<AppEnv>,
     pub(crate) cancellation_token: CancellationToken,
+    /// The server's shutdown handle, cloned once for this connection and shared by its
+    /// requests.
+    ///
+    /// A [`ShutdownHandle`] is a [`CancellationToken`], and cloning or dropping one locks the
+    /// token's mutex - the same mutex for every clone of it, since they are one token. Cloned
+    /// from the server's handle per request, it put one mutex in front of every request on
+    /// every worker, twice. Behind a connection's own `Arc`, a request touches only a count
+    /// no other connection writes, and the token is cloned only for a handler that extracts
+    /// it.
+    shutdown: Arc<ShutdownHandle>,
     peer_addr: SocketAddr,
 }
 
@@ -63,6 +70,7 @@ impl Service<Request<Incoming>> for Scope {
                 self.peer_addr,
                 self.env.clone(),
                 self.cancellation_token.clone(),
+                Arc::clone(&self.shutdown),
             )
             .map_ok(Into::into),
         )
@@ -70,17 +78,20 @@ impl Service<Request<Incoming>> for Scope {
 }
 
 impl Scope {
+    /// Creates the scope of a connection to the application `env`.
+    ///
     /// `cancellation_token` is the connection's own: a child of the token the server cancels
     /// when its shutdown runs out of time, so it fires then as well as when the connection fails
     pub(crate) fn new(
-        env: Weak<AppEnv>,
+        env: &Arc<AppEnv>,
         peer_addr: SocketAddr,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
+            env: Arc::downgrade(env),
             cancellation_token,
+            shutdown: Arc::new(env.shutdown.clone()),
             peer_addr,
-            env,
         }
     }
 
@@ -89,6 +100,7 @@ impl Scope {
         peer_addr: SocketAddr,
         env: Weak<AppEnv>,
         cancellation_token: CancellationToken,
+        shutdown: Arc<ShutdownHandle>,
     ) -> HttpResult {
         let env = match env.upgrade() {
             Some(shared) => shared,
@@ -118,7 +130,7 @@ impl Scope {
             .as_ref()
             .filter(|hsts| hsts.applies_to(request.uri(), request.headers()));
 
-        let response = handle_impl(request, peer_addr, &env, cancellation_token).await;
+        let response = handle_impl(request, peer_addr, &env, cancellation_token, shutdown).await;
 
         finalize_response(
             method,
@@ -137,6 +149,7 @@ async fn handle_impl(
     peer_addr: SocketAddr,
     env: &AppEnv,
     cancellation_token: CancellationToken,
+    shutdown: Arc<ShutdownHandle>,
 ) -> HttpResult {
     {
         let headers = request.headers();
@@ -238,7 +251,7 @@ async fn handle_impl(
     parts.extensions.insert(HttpRequestScope {
         client_ip: ClientIp(peer_addr),
         cancellation_token,
-        shutdown: env.shutdown.clone(),
+        shutdown,
         body_limit: env.body_limit,
         params,
         #[cfg(feature = "ws")]
