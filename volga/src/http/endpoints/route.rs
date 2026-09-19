@@ -124,11 +124,6 @@ pub(super) struct RouteEndpoint {
     /// The CORS policy bound to this route, `None` while nothing has bound one
     #[cfg(feature = "middleware")]
     pub(super) cors: Option<CorsOverride>,
-    /// Set on an endpoint the framework maps on the application's behalf - the route the
-    /// fallback file answers under a static file mount. It is left out of the route
-    /// listing, and a route mapped by hand for its method takes its place instead of being
-    /// reported as a second name for it.
-    pub(super) implicit: bool,
 }
 
 /// What answers every method at a resource no route is mapped at: the fallback of the route
@@ -162,6 +157,16 @@ pub(super) struct Resource {
 
     /// Cached allowed methods header value
     allowed_methods: Option<Arc<str>>,
+
+    /// Set while the `GET` endpoint here is implicit: mapped by the framework on the
+    /// application's behalf - the route the fallback file answers under a static file
+    /// mount. It is left out of the route listing, and a `GET` route mapped by hand takes its
+    /// place instead of being reported as a second name for it.
+    ///
+    /// Kept here rather than on the endpoint: an implicit endpoint is only ever a `GET`, and a
+    /// flag on every endpoint would grow each of the ones a request scans - and the four held
+    /// inline in every resource - for the sake of that one.
+    pub(super) implicit_get: bool,
 
     /// What answers here while no route is mapped here for any method, if a route group
     /// claimed this position with a fallback of its own.
@@ -241,7 +246,6 @@ impl RouteEndpoint {
             params,
             #[cfg(feature = "middleware")]
             cors: None,
-            implicit: false,
         }
     }
 
@@ -330,12 +334,12 @@ impl RouteNode {
         resource.insert_handler(method, handler, &written, &bound, path);
     }
 
-    /// Maps an [implicit](RouteEndpoint::implicit) endpoint for `method` at `path`, unless
-    /// an endpoint is mapped there for it already - by hand, or by an earlier call.
+    /// Maps an [implicit](Resource::implicit_get) `GET` endpoint at `path`, unless a `GET`
+    /// endpoint is mapped there already - by hand, or by an earlier call.
     #[cfg(feature = "static-files")]
-    pub(super) fn insert_implicit(&mut self, path: &str, method: Method, pipeline: RoutePipeline) {
+    pub(super) fn insert_implicit(&mut self, path: &str, pipeline: RoutePipeline) {
         let (resource, written, bound) = self.reach(path);
-        resource.insert_implicit(method, pipeline, &written, &bound);
+        resource.insert_implicit(pipeline, &written, &bound);
     }
 
     /// Maps the fallback answering at `path`, replacing the one already mapped there
@@ -646,6 +650,7 @@ impl Resource {
         Self {
             handlers: None,
             allowed_methods: None,
+            implicit_get: false,
             fallback: None,
         }
     }
@@ -722,7 +727,10 @@ impl Resource {
 
         // An implicit endpoint was not written by the application, so it is not listed as
         // one of its routes - and nor is a fallback, which is not a route at all
-        for handler in handlers.iter().filter(|handler| !handler.implicit) {
+        for handler in handlers
+            .iter()
+            .filter(|handler| !(self.implicit_get && handler.method == Method::GET))
+        {
             // A route is listed the way it was written, which is the name the tree binds
             // unless another verb reached one of these positions first
             let route_path = spell_route(segments, handler.params.as_deref());
@@ -744,9 +752,15 @@ impl Resource {
     ) {
         if let Some(handlers) = self.handlers.as_ref()
             && let Some((other_method, other_written)) =
-                conflicting_endpoint(handlers, &method, written, bound)
+                conflicting_endpoint(handlers, self.implicit_get, &method, written, bound)
         {
             ambiguous_route(path, &method, written, &other_method, &other_written);
+        }
+
+        // A handler mapped by hand for `GET` takes the implicit endpoint's place below, and
+        // the endpoint is the application's from then on
+        if method == Method::GET && matches!(handler, Layer::Handler(_)) {
+            self.implicit_get = false;
         }
 
         // A pattern naming its parameters the way the tree already binds them - the route
@@ -778,7 +792,7 @@ impl Resource {
         self.allowed_methods = Some(make_allowed_str(handlers));
     }
 
-    /// Maps an implicit endpoint for `method` here, unless one is mapped for it already.
+    /// Maps an implicit `GET` endpoint here, unless a `GET` endpoint is mapped already.
     ///
     /// Nothing is reported either way: an implicit endpoint only answers what the
     /// application left unanswered, so one mapped by hand keeps its place, and an implicit
@@ -786,25 +800,24 @@ impl Resource {
     #[cfg(feature = "static-files")]
     fn insert_implicit(
         &mut self,
-        method: Method,
         pipeline: RoutePipeline,
         written: &ParamNames,
         bound: &ParamNames,
     ) {
         let handlers = self.handlers.get_or_insert_with(SmallVec::new);
-        let Err(i) = handlers.binary_search_by(|r| r.cmp(&method)) else {
+        let Err(i) = handlers.binary_search_by(|r| r.cmp(&Method::GET)) else {
             return;
         };
 
         let mut endpoint = RouteEndpoint::new(
-            method,
+            Method::GET,
             (written != bound).then(|| Box::from(written.as_slice())),
         );
         endpoint.pipeline = pipeline;
-        endpoint.implicit = true;
 
         handlers.insert(i, endpoint);
         self.allowed_methods = Some(make_allowed_str(handlers));
+        self.implicit_get = true;
     }
 }
 
@@ -861,12 +874,13 @@ fn tail<'path>(path: &'path str, segment: &'path str) -> &'path str {
 /// `bound` is what the tree binds on the way to this node, which is what an endpoint was
 /// written with unless it says otherwise.
 ///
-/// An implicit endpoint conflicts with nothing: the application never wrote its pattern, so
-/// there is no name of its own to contradict, and a route mapped by hand for its method
-/// takes its place.
+/// An implicit endpoint - the `GET` one, while `implicit_get` is set - conflicts with
+/// nothing: the application never wrote its pattern, so there is no name of its own to
+/// contradict, and a route mapped by hand for its method takes its place.
 #[inline]
 fn conflicting_endpoint(
     handlers: &[RouteEndpoint],
+    implicit_get: bool,
     method: &Method,
     written: &ParamNames,
     bound: &ParamNames,
@@ -874,7 +888,7 @@ fn conflicting_endpoint(
     handlers
         .iter()
         .find(|endpoint| {
-            !endpoint.implicit
+            !(implicit_get && endpoint.method == Method::GET)
                 && (endpoint.method == *method || answers_for(&endpoint.method, method))
                 && endpoint.params(bound) != written.as_slice()
         })
@@ -1062,6 +1076,35 @@ pub(super) fn make_allowed_str<const N: usize>(
     }
 
     Arc::from(allowed)
+}
+
+/// Returns `true` when `left` and `right` name one position in the tree
+///
+/// A parameter is matched by the position it sits at rather than by what it is called or
+/// what it is typed as, so `/{tenant}/{*rest}`, `/{org}/{*path}` and `/{id:integer}/{*rest}`
+/// all reach one resource - and anything keyed by a pattern has to count them as one.
+pub(crate) fn same_position(left: &str, right: &str) -> bool {
+    let mut left = split_path(left);
+    let mut right = split_path(right);
+
+    loop {
+        match (left.next(), right.next()) {
+            (None, None) => return true,
+            (Some(left), Some(right)) if same_segment(left, right) => continue,
+            _ => return false,
+        }
+    }
+}
+
+/// Returns `true` when two segments of a pattern occupy one position: the same literal, two
+/// parameters, or two catch-alls
+#[inline]
+fn same_segment(left: &str, right: &str) -> bool {
+    match (is_dynamic_segment(left), is_dynamic_segment(right)) {
+        (true, true) => is_catch_all_segment(left) == is_catch_all_segment(right),
+        (false, false) => left == right,
+        _ => false,
+    }
 }
 
 /// Returns `true` if `path` already names a route the way the router reads it
@@ -1480,6 +1523,30 @@ mod tests {
             untyped_path("/at/12:00"),
             Cow::Borrowed("/at/12:00")
         ));
+    }
+
+    #[test]
+    fn it_reads_one_position_under_any_spelling_of_its_parameters() {
+        use super::same_position;
+
+        for (left, right) in [
+            ("/api/{tenant}", "/api/{org}"),
+            ("/api/{tenant}/{*rest}", "/api/{org}/{*path}"),
+            ("/api/{id:integer}/{*rest}", "/api/{id}/{*rest}"),
+            ("/api/", "//api"),
+            ("/", ""),
+        ] {
+            assert!(same_position(left, right), "{left} {right}");
+        }
+
+        for (left, right) in [
+            ("/api/{id}", "/api/{*rest}"),
+            ("/api/{id}", "/api/id"),
+            ("/api", "/api/{*rest}"),
+            ("/api/v1", "/api/v2"),
+        ] {
+            assert!(!same_position(left, right), "{left} {right}");
+        }
     }
 
     #[test]
@@ -2084,17 +2151,19 @@ mod tests {
         use super::{Layer, RoutePipeline};
 
         let handler: RouteHandler = Func::new(|| async { ok!() });
-        route.insert_implicit(path, Method::GET, RoutePipeline::from(Layer::from(handler)));
+        route.insert_implicit(path, RoutePipeline::from(Layer::from(handler)));
     }
 
     /// Whether the `GET` endpoint answering `path` is an implicit one
     #[cfg(feature = "static-files")]
     fn answered_implicitly(route: &RouteNode, path: &str) -> bool {
-        route
-            .find(path)
-            .and_then(|found| found.route.handler(&Method::GET))
-            .expect("a GET endpoint answers")
-            .implicit
+        let found = route.find(path).expect("a route answers");
+        assert!(
+            found.route.handler(&Method::GET).is_some(),
+            "a GET endpoint answers"
+        );
+
+        found.route.implicit_get
     }
 
     /// A route mapped by hand where an implicit one is takes its place - even under another

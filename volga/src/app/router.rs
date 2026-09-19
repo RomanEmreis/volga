@@ -124,6 +124,9 @@ use crate::http::endpoints::{
     handlers::{Func, GenericHandler, RouteHandler},
     route::{canonical_path, is_canonical_path, join_path},
 };
+
+#[cfg(feature = "middleware")]
+use crate::http::endpoints::route::same_position;
 use crate::http::{FromRequestParts, IntoResponse};
 use hyper::Method;
 use std::borrow::Cow;
@@ -1079,12 +1082,19 @@ impl<'a> RouteGroup<'a> {
     /// Remembers a fallback mapped at `pattern` by this group or by one of its sub-groups,
     /// so that the group's configuration reaches it when the group closure returns.
     ///
-    /// A second fallback at one pattern replaces the first rather than adding one, so the
-    /// group configures it once.
+    /// A second fallback at one position replaces the first rather than adding one, so the
+    /// group configures it once - and a position is compared the way the router reads it,
+    /// not the way it is spelled. Two sub-groups under `/{tenant}` and `/{org}` map their
+    /// fallbacks at one resource, and recording both spellings would put this group's
+    /// middleware in front of the one fallback left there twice.
     #[inline]
     #[cfg(feature = "middleware")]
     fn record_fallback(&mut self, pattern: Box<str>) {
-        if !self.fallbacks.contains(&pattern) {
+        if !self
+            .fallbacks
+            .iter()
+            .any(|recorded| same_position(recorded, &pattern))
+        {
             self.fallbacks.push(pattern);
         }
     }
@@ -1254,6 +1264,33 @@ mod tests {
         assert_eq!(
             fallbacks.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
             ["/api", "/api/{*rest}", "/api/v2", "/api/v2/{*rest}"]
+        );
+    }
+
+    /// A parameter is matched by the position it sits at, so two sub-groups naming or typing
+    /// one position differently map their fallbacks at one resource, and it is recorded once
+    #[cfg(feature = "middleware")]
+    #[test]
+    fn it_records_one_fallback_for_every_spelling_of_its_position() {
+        let mut app = App::new();
+        let mut fallbacks = Vec::new();
+
+        app.group("/api", |api| {
+            api.group("/{tenant}", |g| {
+                g.map_fallback(|| async { "tenant" });
+            });
+            api.group("/{org}", |g| {
+                g.map_fallback(|| async { "org" });
+            });
+            api.group("/{id:integer}", |g| {
+                g.map_fallback(|| async { "id" });
+            });
+            fallbacks = api.fallbacks.clone();
+        });
+
+        assert_eq!(
+            fallbacks.iter().map(AsRef::as_ref).collect::<Vec<&str>>(),
+            ["/api/{tenant}", "/api/{tenant}/{*rest}"]
         );
     }
 

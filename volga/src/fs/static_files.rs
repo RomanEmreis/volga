@@ -314,8 +314,8 @@ fn shell() -> RoutePipeline {
 fn map_shell(app: &mut App, prefix: &str, pipeline: RoutePipeline) {
     let endpoints = app.pipeline.endpoints_mut();
 
-    endpoints.map_implicit(Method::GET, &join_path(prefix, ""), pipeline.clone());
-    endpoints.map_implicit(Method::GET, &join_path(prefix, SHELL_TAIL), pipeline);
+    endpoints.map_implicit_get(&join_path(prefix, ""), pipeline.clone());
+    endpoints.map_implicit_get(&join_path(prefix, SHELL_TAIL), pipeline);
 }
 
 /// What a request that a mount answers is answered with.

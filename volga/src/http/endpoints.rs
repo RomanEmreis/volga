@@ -167,15 +167,15 @@ impl Endpoints {
         self.routes.insert(pattern, method, handler);
     }
 
-    /// Maps a route the framework answers on the application's behalf, unless a route is
-    /// mapped at `pattern` for `method` already
+    /// Maps a `GET` route the framework answers on the application's behalf, unless a `GET`
+    /// route is mapped at `pattern` already
     ///
-    /// The route is left out of the route listing, and a route mapped by hand for `method`
-    /// at `pattern` later on takes its place.
+    /// The route is left out of the route listing, and a `GET` route mapped by hand at
+    /// `pattern` later on takes its place.
     #[inline]
     #[cfg(feature = "static-files")]
-    pub(crate) fn map_implicit(&mut self, method: Method, pattern: &str, pipeline: RoutePipeline) {
-        self.routes.insert_implicit(pattern, method, pipeline);
+    pub(crate) fn map_implicit_get(&mut self, pattern: &str, pipeline: RoutePipeline) {
+        self.routes.insert_implicit(pattern, pipeline);
     }
 
     /// Maps the fallback answering every method at `pattern` while no route is mapped there,

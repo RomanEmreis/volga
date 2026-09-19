@@ -321,6 +321,47 @@ async fn it_runs_the_group_middleware_around_its_fallback() {
     server.shutdown().await;
 }
 
+/// Two sub-groups naming one position differently map their fallbacks at one resource - the
+/// later replaces the earlier - and the middleware of the group around them runs around the
+/// one fallback left there once, not once per spelling.
+#[cfg(feature = "middleware")]
+#[tokio::test]
+async fn it_runs_the_group_middleware_once_for_a_fallback_mapped_under_two_spellings() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let runs = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&runs);
+
+    let server = TestServer::spawn(move |app| {
+        app.group("/api", move |api| {
+            api.wrap(move |ctx, next| {
+                let counter = Arc::clone(&counter);
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    next(ctx).await
+                }
+            });
+            api.group("/{tenant}", |g| {
+                g.map_fallback(|| async { not_found!("tenant") });
+            });
+            api.group("/{org}", |g| {
+                g.map_fallback(|| async { not_found!("org") });
+            });
+        });
+    })
+    .await;
+
+    for path in ["/api/acme/nope", "/api/acme"] {
+        runs.store(0, Ordering::SeqCst);
+
+        assert_eq!(get(&server, path).await, (404, "org".into()), "{path}");
+        assert_eq!(runs.load(Ordering::SeqCst), 1, "{path}");
+    }
+
+    server.shutdown().await;
+}
+
 /// A fallback is not a route, so middleware reading `matched_route` tells a request it
 /// answers apart from one a route answers - the group's own middleware included.
 #[cfg(feature = "middleware")]
