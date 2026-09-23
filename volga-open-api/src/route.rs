@@ -687,6 +687,21 @@ impl OpenApiRouteConfig {
         if self.operation_id.is_none() {
             self.operation_id = other.operation_id.clone();
         }
+
+        // An input taken on from `other` comes with what `other` could not describe of it:
+        // its query parameters are added to these, and its body is taken where there is none
+        let inherits_body = self.request_schema.is_none();
+        self.undescribed.extend(
+            other
+                .undescribed
+                .iter()
+                .filter(|input| match input.kind {
+                    InputKind::RequestBody => inherits_body,
+                    InputKind::QueryParameters => true,
+                })
+                .cloned(),
+        );
+
         if self.request_schema.is_none() {
             self.request_schema = other.request_schema.clone();
         }
@@ -1143,6 +1158,67 @@ mod tests {
         assert_eq!(parameters.len(), 1);
         assert_eq!(parameters[0].schema.schema_type.as_deref(), Some("string"));
         assert!(!parameters[0].required);
+    }
+
+    fn kinds(cfg: &OpenApiRouteConfig) -> Vec<InputKind> {
+        cfg.undescribed_inputs()
+            .iter()
+            .map(|input| input.kind())
+            .collect()
+    }
+
+    /// A group's inputs reach a route with what could not be described of them: its query
+    /// parameters always, since they are added to the route's, and its body only where the
+    /// route has none of its own to keep
+    #[test]
+    fn merge_outer_inherits_the_undescribed_inputs_it_inherits() {
+        let group = OpenApiRouteConfig::default()
+            .consumes_query::<Flat>()
+            .consumes_json::<Flat>();
+
+        let bare = OpenApiRouteConfig::default().merge_outer(&group);
+        assert_eq!(
+            kinds(&bare),
+            [InputKind::QueryParameters, InputKind::RequestBody]
+        );
+
+        let own_body = OpenApiRouteConfig::default()
+            .consumes_json::<Payload>()
+            .merge_outer(&group);
+        assert_eq!(kinds(&own_body), [InputKind::QueryParameters]);
+        assert!(
+            own_body
+                .request_schema
+                .as_ref()
+                .and_then(|schema| schema.properties.as_ref())
+                .is_some_and(|properties| properties.contains_key("name")),
+            "the route keeps its own body"
+        );
+
+        // A route's own undescribed body is the one kept, and reported once
+        let own_flat_body = OpenApiRouteConfig::default()
+            .consumes_json::<Vec<Flat>>()
+            .merge_outer(&group);
+        let bodies = own_flat_body
+            .undescribed_inputs()
+            .iter()
+            .filter(|input| input.kind() == InputKind::RequestBody)
+            .map(|input| input.type_name())
+            .collect::<Vec<_>>();
+        assert_eq!(bodies, [std::any::type_name::<Vec<Flat>>()]);
+    }
+
+    #[test]
+    fn merge_outer_inherits_no_input_a_group_describes_by_hand() {
+        let group = OpenApiRouteConfig::default()
+            .consumes_query::<Flat>()
+            .with_query_schema(
+                OpenApiSchema::object().with_property("name", OpenApiSchema::string()),
+            );
+
+        let merged = OpenApiRouteConfig::default().merge_outer(&group);
+
+        assert!(merged.undescribed_inputs().is_empty());
     }
 
     #[test]
