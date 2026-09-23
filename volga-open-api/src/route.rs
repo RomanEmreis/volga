@@ -13,7 +13,7 @@ use mime::{
 use super::{
     op::OpenApiOperation,
     param::OpenApiParameter,
-    schema::{FieldConstraint, OpenApiSchema, Probe},
+    schema::{FieldConstraint, OpenApiSchema, Probe, Probed, ReadAsMap},
 };
 
 /// Converts a value into an HTTP status code.
@@ -79,6 +79,62 @@ pub enum ConstraintTarget {
     },
 }
 
+/// A handler input an operation describes without its fields.
+///
+/// Fields are inferred by driving the type's `Deserialize` impl and recording what it asks
+/// for. A struct with a `#[serde(flatten)]` field asks to be read as a map instead - so that
+/// the keys it does not name can be collected for the flattened member - and a map does not
+/// say which keys it takes, so none of the struct's fields can be inferred, the ones declared
+/// beside the flattened member included. Such a request body is described as an object
+/// without properties - or as any value, when the struct sits somewhere inside it - and such
+/// query parameters are not described at all.
+///
+/// Describing the input by hand, with [`OpenApiRouteConfig::with_request_schema`] or
+/// [`OpenApiRouteConfig::with_query_schema`], takes it off
+/// [`OpenApiRouteConfig::undescribed_inputs`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UndescribedInput {
+    kind: InputKind,
+    type_name: &'static str,
+    read_as_map: Option<String>,
+}
+
+impl UndescribedInput {
+    fn new<T>(kind: InputKind, found: ReadAsMap) -> Self {
+        Self {
+            kind,
+            type_name: std::any::type_name::<T>(),
+            read_as_map: (!found.at_root).then_some(found.expecting),
+        }
+    }
+
+    /// Returns what the input is read into
+    pub fn kind(&self) -> InputKind {
+        self.kind
+    }
+
+    /// Returns the type the extractor reads, as [`std::any::type_name`] spells it
+    pub fn type_name(&self) -> &'static str {
+        self.type_name
+    }
+
+    /// Returns what serde expects of the struct it reads as a map, when that struct sits
+    /// inside the type rather than being the type itself: `struct Name`, for a derived one
+    pub fn read_as_map(&self) -> Option<&str> {
+        self.read_as_map.as_deref()
+    }
+}
+
+/// What a handler input is read into
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InputKind {
+    /// The request body
+    RequestBody,
+    /// The query parameters
+    QueryParameters,
+}
+
 /// Per-route OpenAPI metadata.
 #[derive(Clone, Debug, Default)]
 pub struct OpenApiRouteConfig {
@@ -92,9 +148,16 @@ pub struct OpenApiRouteConfig {
     request_content_type: Option<String>,
     responses: BTreeMap<u16, ResponseBody>,
     extra_parameters: Vec<OpenApiParameter>,
+    undescribed: Vec<UndescribedInput>,
 }
 
 impl OpenApiRouteConfig {
+    /// Returns the handler inputs this operation describes without their fields, because
+    /// they cannot be inferred - see [`UndescribedInput`].
+    pub fn undescribed_inputs(&self) -> &[UndescribedInput] {
+        &self.undescribed
+    }
+
     /// Returns how many parameters this operation already describes.
     ///
     /// Taken before an extractor is described and handed back through [`ConstraintTarget`],
@@ -161,9 +224,27 @@ impl OpenApiRouteConfig {
     }
 
     /// Sets the request body schema for this operation.
+    ///
+    /// This is how a body whose fields cannot be inferred is described - see
+    /// [`UndescribedInput`].
     pub fn with_request_schema(mut self, schema: OpenApiSchema) -> Self {
         self.request_schema = Some(schema);
+        self.undescribed
+            .retain(|input| input.kind != InputKind::RequestBody);
         self
+    }
+
+    /// Describes the query parameters by hand: one for each property of `schema`, required
+    /// when its `required` list names it - the way a `Query<T>` extractor describes the
+    /// fields of `T`.
+    ///
+    /// This is how a query whose fields cannot be inferred is described - see
+    /// [`UndescribedInput`]. A parameter this operation already describes under the same
+    /// name is replaced.
+    pub fn with_query_schema(mut self, schema: OpenApiSchema) -> Self {
+        self.undescribed
+            .retain(|input| input.kind != InputKind::QueryParameters);
+        self.with_query_parameters(schema)
     }
 
     /// Sets the response schema for this operation.
@@ -448,9 +529,26 @@ impl OpenApiRouteConfig {
         mut self,
         content_type: &str,
     ) -> Self {
-        if let Some((schema, example)) = schema_and_example_from_deserialize::<T>() {
-            self.request_schema = Some(schema.with_title(type_display_name::<T>()));
-            self.request_example = Some(example);
+        match probe::<T>() {
+            Probed::Shape(schema, example) => {
+                self.request_schema = Some(schema.with_title(type_display_name::<T>()));
+                self.request_example = Some(example);
+            }
+            Probed::ReadAsMap(found) => {
+                // What is known is that a body is sent: an object, when the struct read as a
+                // map is the body itself, and anything at all when it sits inside it - a
+                // `Vec` of them is an array. No example: one without the fields would be
+                // an example of a request the server refuses
+                let schema = if found.at_root {
+                    OpenApiSchema::object()
+                } else {
+                    OpenApiSchema::empty()
+                };
+                self.request_schema = Some(schema.with_title(type_display_name::<T>()));
+                self.undescribed
+                    .push(UndescribedInput::new::<T>(InputKind::RequestBody, found));
+            }
+            Probed::Nothing => {}
         }
         self.request_content_type = Some(content_type.to_string());
         self
@@ -515,9 +613,22 @@ impl OpenApiRouteConfig {
     }
 
     fn with_query_parameters_from_deserialize<T: DeserializeOwned>(mut self) -> Self {
-        if let Some((schema, _)) = schema_and_example_from_deserialize::<T>()
-            && let Some(properties) = schema.properties
-        {
+        match probe::<T>() {
+            Probed::Shape(schema, _) => self.with_query_parameters(schema),
+            Probed::ReadAsMap(found) => {
+                self.undescribed.push(UndescribedInput::new::<T>(
+                    InputKind::QueryParameters,
+                    found,
+                ));
+                self
+            }
+            Probed::Nothing => self,
+        }
+    }
+
+    /// Adds a query parameter for each property of `schema`
+    fn with_query_parameters(mut self, schema: OpenApiSchema) -> Self {
+        if let Some(properties) = schema.properties {
             let required = schema.required.unwrap_or_default();
 
             for (name, property_schema) in properties {
@@ -528,8 +639,11 @@ impl OpenApiRouteConfig {
         self
     }
 
+    /// A struct read as a map is not reported here: the route template names every path
+    /// parameter whatever the extractor describes, and types them when it spells a type -
+    /// `{id:integer}` - which is all a `Path<T>` gets as well
     fn with_named_path_parameters_from_deserialize<T: DeserializeOwned>(mut self) -> Self {
-        if let Some((schema, _)) = schema_and_example_from_deserialize::<T>()
+        if let Probed::Shape(schema, _) = probe::<T>()
             && let Some(properties) = schema.properties
         {
             for (name, property_schema) in properties {
@@ -707,7 +821,7 @@ fn intern_schema_if_object_named(
     OpenApiSchema::reference(&name)
 }
 
-fn schema_and_example_from_deserialize<T: DeserializeOwned>() -> Option<(OpenApiSchema, Value)> {
+fn probe<T: DeserializeOwned>() -> Probed {
     let mut probe = Probe::new();
     let _ = T::deserialize(&mut probe);
     probe.finish()
@@ -724,7 +838,7 @@ fn type_display_name<T>() -> String {
 #[cfg(test)]
 #[allow(unused)]
 mod tests {
-    use super::{ConstraintTarget, IntoStatusCode, OpenApiRouteConfig, ResponseBody};
+    use super::{ConstraintTarget, InputKind, IntoStatusCode, OpenApiRouteConfig, ResponseBody};
     use crate::{
         op::OpenApiOperation,
         schema::{FieldConstraint, OpenApiSchema, SchemaConstraint},
@@ -858,6 +972,177 @@ mod tests {
         // A typed `Option` used to make the whole probe fail, dropping every parameter
         assert_eq!(names, vec!["per_page", "sort"]);
         assert!(!cfg.extra_parameters[1].required);
+    }
+
+    #[derive(Deserialize)]
+    #[allow(dead_code)]
+    struct Inner {
+        name: String,
+    }
+
+    #[derive(Deserialize)]
+    #[allow(dead_code)]
+    struct Flat {
+        #[serde(flatten)]
+        inner: Inner,
+        page: u32,
+    }
+
+    fn body_schema(cfg: &OpenApiRouteConfig) -> serde_json::Value {
+        let mut operation = OpenApiOperation::default();
+        let mut schemas = BTreeMap::new();
+        cfg.apply_to_operation(&mut operation, &mut schemas);
+
+        let operation = serde_json::to_value(&operation).expect("operation serializes");
+        operation["requestBody"]["content"]["application/json"]["schema"].clone()
+    }
+
+    #[test]
+    fn consumes_json_reports_a_body_read_as_a_map() {
+        let cfg = OpenApiRouteConfig::default().consumes_json::<Flat>();
+
+        let [input] = cfg.undescribed_inputs() else {
+            panic!("one undescribed input: {:?}", cfg.undescribed_inputs());
+        };
+        assert_eq!(input.kind(), InputKind::RequestBody);
+        assert_eq!(input.type_name(), std::any::type_name::<Flat>());
+        assert_eq!(input.read_as_map(), None);
+
+        // An object is all that is known, and an example without the fields would be one
+        // the server refuses
+        assert_eq!(
+            body_schema(&cfg),
+            json!({ "type": "object", "title": "Flat" })
+        );
+        assert!(cfg.request_example.is_none());
+    }
+
+    #[test]
+    fn consumes_json_reports_a_struct_read_as_a_map_inside_the_body() {
+        let cfg = OpenApiRouteConfig::default().consumes_json::<Vec<Flat>>();
+
+        let [input] = cfg.undescribed_inputs() else {
+            panic!("one undescribed input: {:?}", cfg.undescribed_inputs());
+        };
+        assert_eq!(input.kind(), InputKind::RequestBody);
+        assert_eq!(input.read_as_map(), Some("struct Flat"));
+
+        // The body is an array here, so publishing the struct's object would be wrong
+        assert_eq!(body_schema(&cfg)["type"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn consumes_form_reports_a_body_read_as_a_map() {
+        let cfg = OpenApiRouteConfig::default().consumes_form::<Flat>();
+
+        let [input] = cfg.undescribed_inputs() else {
+            panic!("one undescribed input: {:?}", cfg.undescribed_inputs());
+        };
+        assert_eq!(input.kind(), InputKind::RequestBody);
+        assert_eq!(
+            cfg.request_content_type.as_deref(),
+            Some("application/x-www-form-urlencoded")
+        );
+    }
+
+    #[test]
+    fn consumes_json_does_not_report_a_map() {
+        let cfg =
+            OpenApiRouteConfig::default().consumes_json::<std::collections::HashMap<String, u32>>();
+
+        assert!(cfg.undescribed_inputs().is_empty());
+        assert!(cfg.request_schema.is_some());
+    }
+
+    #[test]
+    fn consumes_query_reports_a_query_read_as_a_map() {
+        let cfg = OpenApiRouteConfig::default().consumes_query::<Flat>();
+
+        let [input] = cfg.undescribed_inputs() else {
+            panic!("one undescribed input: {:?}", cfg.undescribed_inputs());
+        };
+        assert_eq!(input.kind(), InputKind::QueryParameters);
+        assert!(cfg.extra_parameters.is_empty());
+    }
+
+    #[test]
+    fn consumes_named_path_leaves_a_struct_read_as_a_map_to_the_template() {
+        let cfg = OpenApiRouteConfig::default().consumes_named_path::<Flat>();
+
+        assert!(cfg.undescribed_inputs().is_empty());
+        assert!(cfg.extra_parameters.is_empty());
+    }
+
+    #[test]
+    fn with_request_schema_describes_an_undescribed_body() {
+        let cfg = OpenApiRouteConfig::default()
+            .consumes_query::<Flat>()
+            .consumes_json::<Flat>()
+            .with_request_schema(
+                OpenApiSchema::object()
+                    .with_property("name", OpenApiSchema::string())
+                    .with_property("page", OpenApiSchema::integer())
+                    .with_required(["name", "page"]),
+            );
+
+        // The query is still undescribed; only the body was described by hand
+        let kinds = cfg
+            .undescribed_inputs()
+            .iter()
+            .map(|input| input.kind())
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, vec![InputKind::QueryParameters]);
+        assert_eq!(
+            body_schema(&cfg)["properties"]["page"]["type"],
+            json!("integer")
+        );
+    }
+
+    #[test]
+    fn with_query_schema_describes_an_undescribed_query() {
+        let cfg = OpenApiRouteConfig::default()
+            .consumes_json::<Flat>()
+            .consumes_query::<Flat>()
+            .with_query_schema(
+                OpenApiSchema::object()
+                    .with_property("name", OpenApiSchema::string())
+                    .with_property("page", OpenApiSchema::integer())
+                    .with_required(["page"]),
+            );
+
+        let kinds = cfg
+            .undescribed_inputs()
+            .iter()
+            .map(|input| input.kind())
+            .collect::<Vec<_>>();
+        assert_eq!(kinds, vec![InputKind::RequestBody]);
+
+        let parameters = cfg
+            .extra_parameters
+            .iter()
+            .map(|p| (p.name.as_str(), p.location.as_str(), p.required))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parameters,
+            vec![("name", "query", false), ("page", "query", true)]
+        );
+    }
+
+    #[test]
+    fn with_query_schema_replaces_a_parameter_of_the_same_name() {
+        let cfg = OpenApiRouteConfig::default()
+            .consumes_query::<Page>()
+            .with_query_schema(
+                OpenApiSchema::object().with_property("page", OpenApiSchema::string()),
+            );
+
+        let mut operation = OpenApiOperation::default();
+        cfg.apply_to_operation(&mut operation, &mut BTreeMap::new());
+
+        let parameters = operation.parameters.expect("parameters");
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].schema.schema_type.as_deref(), Some("string"));
+        assert!(!parameters[0].required);
     }
 
     #[test]

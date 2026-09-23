@@ -789,6 +789,15 @@ impl App {
             eprintln!("{message}");
         }
 
+        #[cfg(all(debug_assertions, feature = "openapi"))]
+        for (route, input) in self.openapi.undescribed_inputs() {
+            let message = crate::openapi::undescribed_input_warning(route, input);
+            #[cfg(feature = "tracing")]
+            tracing::warn!("{message}");
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("{message}");
+        }
+
         let socket = tcp_listener.local_addr()?;
 
         let no_delay = self.no_delay;

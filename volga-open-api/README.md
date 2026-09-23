@@ -154,6 +154,29 @@ For `Deserialize` types, schemas and examples are inferred automatically.
 
 For `Serialize`-only types, response schema must be specified explicitly.
 
+### Types serde reads as a map
+
+serde reads a struct with a `#[serde(flatten)]` field as a map, so that it can collect the keys the struct does not name for the flattened member - and a map does not say which keys it takes. None of such a struct's fields can be inferred, including the ones declared beside the flattened member: a request body is described as an object without properties (or as any value, when the struct sits inside it, as in a `Vec`), and query parameters are not described at all. Debug builds name each such input at startup.
+
+Describe them by hand instead:
+
+```rust
+use volga::openapi::OpenApiSchema;
+
+let schema = OpenApiSchema::object()
+    .with_property("name", OpenApiSchema::string())
+    .with_property("page", OpenApiSchema::integer())
+    .with_required(["name", "page"]);
+
+app.map_post("/search", search)
+    .open_api(|cfg| cfg.with_request_schema(schema.clone()));
+
+app.map_get("/search", search_by_query)
+    .open_api(|cfg| cfg.with_query_schema(schema));
+```
+
+Path parameters are named by the route template whatever the extractor describes; spell their types there - `{id:integer}`.
+
 ## Caching
 
 Swagger UI is served with:

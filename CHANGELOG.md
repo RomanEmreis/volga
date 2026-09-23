@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.11.2
+
+## Added
+* `volga::openapi::OpenApiSchema`, the schema `OpenApiRouteConfig::with_request_schema` and `with_response_schema` take. It was public but not exported, so a schema could not be built outside the crate, and neither method could be called with one. It is exported from `volga-open-api` as well.
+* `OpenApiRouteConfig::with_query_schema` describes the query parameters by hand, from an object schema: one parameter for each property, required when the schema's `required` list names it - the way `Query<T>` describes the fields of `T`. A parameter the operation already describes under the same name is replaced. (#220)
+* `OpenApiRouteConfig::undescribed_inputs` lists the handler inputs an operation describes without their fields, as `UndescribedInput`s - see Fixed below. Describing one by hand, with `with_request_schema` or `with_query_schema`, takes it off the list. (#220)
+
+## Fixed
+* A type with a `#[serde(flatten)]` field was described with none of its fields, the ones declared beside the flattened member included, and nothing said so: a `Json<T>` or `Form<T>` body was published as an object without properties, together with an example of `{}` that the server refuses, and a `Query<T>` published no parameters at all. serde reads such a struct as a map, to collect the keys it does not name for the flattened member, and a map does not say which keys it takes - so no fields can be inferred from it. That is still so, but it is no longer silent: debug builds name each such input at startup, with the type serde reads as a map and how to describe the input by hand, and the example is gone. A type holding such a struct - a `Vec` of them, or a struct with one as a field - used to be published as that struct's object, even where it is an array; its body is now described as any value. The probe tells such a struct from an actual map by how it reads a key - as a field identifier, where a map reads its key type - so a `HashMap` body is still an object and is not reported. `NamedPath<T>` is not reported either: the route template names every path parameter regardless, as it does for `Path<T>`. (#220)
+
 # 0.11.1
 
 ## Added

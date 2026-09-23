@@ -16,8 +16,8 @@ use std::{
 use volga_open_api::ui_html;
 
 pub use volga_open_api::{
-    ConstraintTarget, FieldConstraint, OpenApiConfig, OpenApiDocument, OpenApiRegistry,
-    OpenApiRouteConfig, OpenApiSpec, SchemaConstraint,
+    ConstraintTarget, FieldConstraint, InputKind, OpenApiConfig, OpenApiDocument, OpenApiRegistry,
+    OpenApiRouteConfig, OpenApiSchema, OpenApiSpec, SchemaConstraint, UndescribedInput,
 };
 
 pub(super) const OPEN_API_NOT_EXPOSED_WARN: &str =
@@ -49,6 +49,66 @@ pub(super) fn undescribed_catch_all_warning(
          path cannot carry two operations for one method.",
         catch_all.method, catch_all.pattern, by.method, by.pattern
     )
+}
+
+/// Reports a handler input an OpenAPI document describes without its fields, and how to
+/// describe it by hand
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub(super) fn undescribed_input_warning(route: &RouteKey, input: &UndescribedInput) -> String {
+    let type_name = short_type_name(input.type_name());
+
+    let (described, fix) = match input.kind() {
+        InputKind::QueryParameters => (
+            format!("none of the query parameters of `{type_name}`"),
+            "Describe them by hand with `.open_api(|c| c.with_query_schema(..))`.",
+        ),
+        _ => {
+            let shape = if input.read_as_map().is_some() {
+                "any value"
+            } else {
+                "an object without any fields"
+            };
+            (
+                format!("its request body `{type_name}` as {shape}"),
+                "Describe the body by hand with `.open_api(|c| c.with_request_schema(..))`.",
+            )
+        }
+    };
+
+    let read_as_map = match input.read_as_map() {
+        Some(expecting) => format!("`{expecting}` inside it"),
+        None => format!("`{type_name}`"),
+    };
+
+    format!(
+        "OpenAPI: `{} {}` describes {described}: serde reads {read_as_map} as a map, as it does \
+         a struct with a `#[serde(flatten)]` field, and a map does not name the keys it takes. \
+         {fix}",
+        route.method, route.pattern
+    )
+}
+
+/// Spells a type the way code in scope of it does: `alloc::vec::Vec<app::Flat>` as
+/// `Vec<Flat>`
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+fn short_type_name(type_name: &str) -> String {
+    let mut out = String::with_capacity(type_name.len());
+    // Where the path being read started, so that its module prefix can be dropped
+    let mut path_start = 0;
+    let mut chars = type_name.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == ':' && chars.peek() == Some(&':') {
+            chars.next();
+            out.truncate(path_start);
+        } else {
+            out.push(c);
+            if !(c.is_alphanumeric() || c == '_') {
+                path_start = out.len();
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Default)]
@@ -204,6 +264,34 @@ impl OpenApiState {
             (left.pattern.as_ref(), left.method.as_str())
                 .cmp(&(right.pattern.as_ref(), right.method.as_str()))
         });
+        undescribed
+    }
+
+    /// The handler inputs OpenAPI documents describe without their fields, each with the
+    /// route that reads it - empty unless OpenAPI is configured.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    pub(super) fn undescribed_inputs(&self) -> Vec<(&RouteKey, &UndescribedInput)> {
+        if self.registry.is_none() {
+            return Vec::new();
+        }
+
+        let mut undescribed: Vec<_> = self
+            .route_configs
+            .iter()
+            .flat_map(|(key, cfg)| {
+                cfg.undescribed_inputs()
+                    .iter()
+                    .map(move |input| (key, input))
+            })
+            .collect();
+
+        // Sorted by route alone, so that the inputs of one route keep the order its
+        // handler reads them in
+        undescribed.sort_by(|(left, _), (right, _)| {
+            (left.pattern.as_ref(), left.method.as_str())
+                .cmp(&(right.pattern.as_ref(), right.method.as_str()))
+        });
+
         undescribed
     }
 
@@ -998,6 +1086,131 @@ mod tests {
 
         // Nothing is left out of a document that does not exist
         assert!(OpenApiState::default().undescribed_catch_alls().is_empty());
+    }
+
+    mod flattened {
+        use serde::Deserialize;
+
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        pub(super) struct Inner {
+            name: String,
+        }
+
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        pub(super) struct Flat {
+            #[serde(flatten)]
+            inner: Inner,
+            page: u32,
+        }
+    }
+
+    use flattened::Flat;
+
+    #[test]
+    fn it_names_the_inputs_it_describes_without_their_fields() {
+        let (mut state, _) = configured_state();
+
+        let search = key(Method::GET, "/search");
+        state.on_route_mapped(
+            search.clone(),
+            super::OpenApiRouteConfig::default().consumes_query::<Flat>(),
+        );
+
+        let items = key(Method::POST, "/items");
+        state.on_route_mapped(
+            items.clone(),
+            super::OpenApiRouteConfig::default()
+                .consumes_query::<Flat>()
+                .consumes_json::<Flat>(),
+        );
+
+        let batch = key(Method::POST, "/batch");
+        state.on_route_mapped(
+            batch.clone(),
+            super::OpenApiRouteConfig::default().consumes_json::<Vec<Flat>>(),
+        );
+
+        let warnings = state
+            .undescribed_inputs()
+            .into_iter()
+            .map(|(route, input)| super::undescribed_input_warning(route, input))
+            .collect::<Vec<_>>();
+
+        // By route, then in the order the handler reads its inputs
+        assert_eq!(
+            warnings,
+            [
+                "OpenAPI: `POST /batch` describes its request body `Vec<Flat>` as any value: \
+                 serde reads `struct Flat` inside it as a map, as it does a struct with a \
+                 `#[serde(flatten)]` field, and a map does not name the keys it takes. \
+                 Describe the body by hand with `.open_api(|c| c.with_request_schema(..))`.",
+                "OpenAPI: `POST /items` describes none of the query parameters of `Flat`: \
+                 serde reads `Flat` as a map, as it does a struct with a `#[serde(flatten)]` \
+                 field, and a map does not name the keys it takes. Describe them by hand with \
+                 `.open_api(|c| c.with_query_schema(..))`.",
+                "OpenAPI: `POST /items` describes its request body `Flat` as an object without \
+                 any fields: serde reads `Flat` as a map, as it does a struct with a \
+                 `#[serde(flatten)]` field, and a map does not name the keys it takes. \
+                 Describe the body by hand with `.open_api(|c| c.with_request_schema(..))`.",
+                "OpenAPI: `GET /search` describes none of the query parameters of `Flat`: \
+                 serde reads `Flat` as a map, as it does a struct with a `#[serde(flatten)]` \
+                 field, and a map does not name the keys it takes. Describe them by hand with \
+                 `.open_api(|c| c.with_query_schema(..))`.",
+            ]
+        );
+
+        // Describing an input by hand is what the warning asks for, and ends it
+        state.update_route_config(&search, |cfg| {
+            cfg.with_query_schema(
+                super::OpenApiSchema::object()
+                    .with_property("page", super::OpenApiSchema::integer()),
+            )
+        });
+        state.update_route_config(&items, |cfg| {
+            cfg.with_request_schema(super::OpenApiSchema::object())
+        });
+
+        let left = state
+            .undescribed_inputs()
+            .into_iter()
+            .map(|(route, input)| (route.pattern.as_ref(), input.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            left,
+            [
+                ("/batch", super::InputKind::RequestBody),
+                ("/items", super::InputKind::QueryParameters),
+            ]
+        );
+    }
+
+    #[test]
+    fn it_names_no_inputs_without_a_document_to_describe_them_in() {
+        let mut state = OpenApiState::default();
+        state.on_route_mapped(
+            key(Method::POST, "/items"),
+            super::OpenApiRouteConfig::default().consumes_json::<Flat>(),
+        );
+
+        assert!(state.undescribed_inputs().is_empty());
+    }
+
+    #[test]
+    fn it_spells_a_type_without_its_module_paths() {
+        for (full, short) in [
+            ("app::Flat", "Flat"),
+            ("alloc::vec::Vec<app::models::Flat>", "Vec<Flat>"),
+            (
+                "core::option::Option<(u32, alloc::string::String)>",
+                "Option<(u32, String)>",
+            ),
+            ("&str", "&str"),
+            ("Flat", "Flat"),
+        ] {
+            assert_eq!(super::short_type_name(full), short);
+        }
     }
 
     /// OpenAPI templates a path one segment at a time, so a catch-all is described as the

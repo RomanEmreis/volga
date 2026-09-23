@@ -2,7 +2,10 @@
 
 use serde::{
     Deserialize, Deserializer, Serialize,
-    de::{DeserializeSeed, Error as DeError, IntoDeserializer, MapAccess, SeqAccess, Visitor},
+    de::{
+        DeserializeSeed, Error as DeError, Expected, IntoDeserializer, MapAccess, SeqAccess,
+        Visitor,
+    },
 };
 use serde_json::{Map, Number, Value, json};
 use std::{
@@ -178,8 +181,9 @@ enum SizeKeyword {
 }
 
 impl OpenApiSchema {
-    /// An entirely unset schema, which every constructor below starts from
-    fn empty() -> Self {
+    /// An entirely unset schema, which every constructor below starts from - and, published
+    /// as it is, one that any value satisfies
+    pub(super) fn empty() -> Self {
         Self {
             schema_ref: None,
             schema_type: None,
@@ -481,17 +485,73 @@ impl DeError for ProbeError {
     }
 }
 
+/// What probing a type found out about its shape
+///
+/// Made once per extractor described and taken apart right away, so the shape is not boxed.
+#[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
+pub(super) enum Probed {
+    /// The shape of the type, and an example of it
+    Shape(OpenApiSchema, Value),
+    /// The type is, or contains, a struct serde reads as a map - see [`ReadAsMap`]
+    ReadAsMap(ReadAsMap),
+    /// Nothing: the type asked for something the probe does not describe, such as an enum
+    Nothing,
+}
+
+/// A struct serde reads as a map, whose fields the probe cannot see.
+///
+/// serde reads a struct with a `#[serde(flatten)]` field as a map, so that the keys the
+/// struct does not name itself can be collected for the flattened member - and a map does
+/// not say which keys it takes. No [`Deserializer`] can learn them, so the probe reports the
+/// struct instead of describing it as an object without properties, which is what it would
+/// otherwise look like.
+///
+/// Such a struct is told from an actual map by how it reads a key: as a field identifier,
+/// where a map reads its key type - a `String`, say.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ReadAsMap {
+    /// What the struct's `Visitor` says it expects: `struct Name`, for a derived one
+    pub(super) expecting: String,
+    /// Whether the struct is the probed type itself, rather than one inside it
+    pub(super) at_root: bool,
+}
+
 pub(super) struct Probe {
     root: Option<(OpenApiSchema, Value)>,
+    /// How far below the probed type the probe is: its fields are one level down
+    depth: usize,
+    /// The struct read as a map the probe stopped at, if it met one
+    read_as_map: Option<ReadAsMap>,
 }
 
 impl Probe {
     pub(super) fn new() -> Self {
-        Self { root: None }
+        Self {
+            root: None,
+            depth: 0,
+            read_as_map: None,
+        }
     }
 
-    pub(super) fn finish(self) -> Option<(OpenApiSchema, Value)> {
-        self.root
+    pub(super) fn finish(self) -> Probed {
+        // A struct read as a map anywhere inside the type leaves its shape incomplete,
+        // whatever the probe gathered around it
+        if let Some(read_as_map) = self.read_as_map {
+            return Probed::ReadAsMap(read_as_map);
+        }
+        match self.root {
+            Some((schema, example)) => Probed::Shape(schema, example),
+            None => Probed::Nothing,
+        }
+    }
+
+    /// Probes a value one level below the current one
+    fn descend<R>(&mut self, probe: impl FnOnce(&mut Self) -> R) -> R {
+        self.depth += 1;
+        let value = probe(self);
+        self.depth -= 1;
+        value
     }
 }
 
@@ -638,7 +698,7 @@ impl<'de> Deserializer<'de> for &mut Probe {
         // The inner type is probed by this very `Probe`: forwarding it to `deserialize_any`
         // instead would answer every inner type with a unit, which a `String` (or any other
         // typed) visitor rejects - and one rejected field drops the whole schema.
-        let out = visitor.visit_some(&mut *self)?;
+        let out = self.descend(|probe| visitor.visit_some(probe))?;
 
         if let Some((schema, example)) = self.root.take() {
             self.root = Some((schema.nullable(), example));
@@ -663,8 +723,14 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
+        // Rendered up front: the visitor is gone by the time a key shows it is a struct
+        let expecting = (&visitor as &dyn Expected).to_string();
+
         self.root = Some((OpenApiSchema::object(), Value::Object(Map::new())));
-        visitor.visit_map(EmptyMapAccess)
+        visitor.visit_map(MapProbeAccess {
+            probe: self,
+            expecting: Some(expecting),
+        })
     }
 
     fn deserialize_struct<V>(
@@ -736,7 +802,7 @@ impl<'de, 'a> SeqAccess<'de> for SeqProbeAccess<'a> {
         }
 
         self.yielded = true;
-        let v = seed.deserialize(&mut *self.probe)?;
+        let v = self.probe.descend(|probe| seed.deserialize(probe))?;
         Ok(Some(v))
     }
 }
@@ -778,7 +844,7 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
         let field = self.fields[self.idx];
         self.idx += 1;
 
-        let v = seed.deserialize(&mut *self.parent)?;
+        let v = self.parent.descend(|probe| seed.deserialize(probe))?;
 
         if let Some((field_schema, field_example)) = self.parent.root.take() {
             let is_required = field_schema.nullable != Some(true) && field_example != Value::Null;
@@ -804,15 +870,43 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
     }
 }
 
-struct EmptyMapAccess;
-impl<'de> MapAccess<'de> for EmptyMapAccess {
+/// An empty map, which asks for one key first to learn whether it is a struct read as one
+struct MapProbeAccess<'a> {
+    probe: &'a mut Probe,
+    /// What the map's visitor expects, until its first key is asked for
+    expecting: Option<String>,
+}
+
+impl<'de, 'a> MapAccess<'de> for MapProbeAccess<'a> {
     type Error = ProbeError;
 
-    fn next_key_seed<K>(&mut self, _seed: K) -> Result<Option<K::Value>, Self::Error>
+    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
     where
         K: DeserializeSeed<'de>,
     {
-        Ok(None)
+        let Some(expecting) = self.expecting.take() else {
+            return Ok(None);
+        };
+
+        // No key is produced either way - the key probe refuses every request - so all
+        // that comes of this is learning how the map reads its keys
+        let mut reads_fields = false;
+        let _ = seed.deserialize(KeyProbe {
+            reads_fields: &mut reads_fields,
+        });
+
+        if !reads_fields {
+            return Ok(None);
+        }
+
+        self.probe.read_as_map.get_or_insert(ReadAsMap {
+            expecting,
+            at_root: self.probe.depth == 0,
+        });
+
+        // The struct cannot be completed without its fields, and neither can anything it
+        // sits in, so the probe stops here rather than guess at the rest
+        Err(ProbeError("a struct read as a map".into()))
     }
 
     fn next_value_seed<V>(&mut self, _seed: V) -> Result<V::Value, Self::Error>
@@ -823,10 +917,156 @@ impl<'de> MapAccess<'de> for EmptyMapAccess {
     }
 }
 
+/// Reads the first key of a map, reporting whether it is read as a struct's field
+/// identifier - which is how serde reads the keys of a struct it reads as a map
+struct KeyProbe<'a> {
+    reads_fields: &'a mut bool,
+}
+
+impl<'de, 'a> Deserializer<'de> for KeyProbe<'a> {
+    type Error = ProbeError;
+
+    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        Err(ProbeError("no keys".into()))
+    }
+
+    fn deserialize_identifier<V>(self, _visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: Visitor<'de>,
+    {
+        *self.reads_fields = true;
+        Err(ProbeError("no keys".into()))
+    }
+
+    serde::forward_to_deserialize_any! {
+        bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+        bytes byte_buf option unit unit_struct newtype_struct seq tuple
+        tuple_struct map struct enum ignored_any
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeSet, HashMap};
+
+    impl Probed {
+        fn shape(self) -> Option<(OpenApiSchema, Value)> {
+            match self {
+                Probed::Shape(schema, example) => Some((schema, example)),
+                _ => None,
+            }
+        }
+    }
+
+    fn probe<T: serde::de::DeserializeOwned>() -> Probed {
+        let mut probe = Probe::new();
+        let _ = T::deserialize(&mut probe);
+        probe.finish()
+    }
+
+    #[derive(Deserialize)]
+    #[allow(dead_code)]
+    struct Inner {
+        name: String,
+    }
+
+    #[derive(Deserialize)]
+    #[allow(dead_code)]
+    struct Flat {
+        #[serde(flatten)]
+        inner: Inner,
+        page: u32,
+    }
+
+    #[test]
+    fn probe_reports_a_struct_with_a_flattened_field() {
+        let Probed::ReadAsMap(found) = probe::<Flat>() else {
+            panic!("a struct read as a map should be reported");
+        };
+
+        assert_eq!(found.expecting, "struct Flat");
+        assert!(found.at_root);
+    }
+
+    #[test]
+    fn probe_reports_a_struct_read_as_a_map_inside_the_type() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Outer {
+            id: u32,
+            flat: Flat,
+        }
+
+        for probed in [
+            probe::<Outer>(),
+            probe::<Vec<Flat>>(),
+            probe::<Option<Flat>>(),
+        ] {
+            let Probed::ReadAsMap(found) = probed else {
+                panic!("a struct read as a map should be reported: {probed:?}");
+            };
+
+            assert_eq!(found.expecting, "struct Flat");
+            assert!(!found.at_root);
+        }
+    }
+
+    #[test]
+    fn probe_reports_a_struct_with_only_optional_fields_around_a_flattened_one() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Optional {
+            #[serde(flatten)]
+            rest: HashMap<String, String>,
+            page: Option<u32>,
+        }
+
+        assert!(matches!(probe::<Optional>(), Probed::ReadAsMap(_)));
+    }
+
+    #[test]
+    fn probe_describes_a_map_as_an_object() {
+        let Probed::Shape(schema, example) = probe::<HashMap<String, u32>>() else {
+            panic!("a map should be described");
+        };
+
+        assert_eq!(schema.schema_type.as_deref(), Some("object"));
+        assert!(schema.properties.is_none());
+        assert_eq!(example, json!({}));
+    }
+
+    #[test]
+    fn probe_describes_a_map_inside_a_struct() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Tagged {
+            tags: HashMap<String, String>,
+            page: u32,
+        }
+
+        let (schema, _) = probe::<Tagged>()
+            .shape()
+            .expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["tags"].schema_type.as_deref(), Some("object"));
+        assert_eq!(props["page"].schema_type.as_deref(), Some("integer"));
+    }
+
+    #[test]
+    fn probe_reports_nothing_for_an_enum() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        enum Kind {
+            One,
+        }
+
+        assert!(matches!(probe::<Kind>(), Probed::Nothing));
+    }
 
     #[test]
     fn schema_from_example_object_keeps_properties() {
@@ -919,7 +1159,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = Input::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let required = schema.required.expect("required list");
         assert!(required.contains(&"required_name".to_string()));
@@ -936,7 +1176,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
@@ -952,7 +1192,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
@@ -968,7 +1208,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("number"));
@@ -984,7 +1224,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
@@ -1000,7 +1240,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
@@ -1016,7 +1256,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
@@ -1032,7 +1272,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
@@ -1048,7 +1288,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
@@ -1064,7 +1304,7 @@ mod tests {
 
         let mut probe = Probe::new();
         let _ = NumericInput::deserialize(&mut probe);
-        let (schema, _) = probe.finish().expect("schema should be produced");
+        let (schema, _) = probe.finish().shape().expect("schema should be produced");
 
         let props = schema.properties.expect("properties");
         assert_eq!(props["value"].schema_type.as_deref(), Some("integer"));
