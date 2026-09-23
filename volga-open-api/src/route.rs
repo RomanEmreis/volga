@@ -689,7 +689,9 @@ impl OpenApiRouteConfig {
         }
 
         // An input taken on from `other` comes with what `other` could not describe of it:
-        // its query parameters are added to these, and its body is taken where there is none
+        // its query parameters are added to these, and its body is taken where there is none -
+        // example included, since an example is one of the body it was made for. A body kept
+        // here keeps its own example, or its lack of one
         let inherits_body = self.request_schema.is_none();
         self.undescribed.extend(
             other
@@ -702,23 +704,27 @@ impl OpenApiRouteConfig {
                 .cloned(),
         );
 
-        if self.request_schema.is_none() {
+        if inherits_body {
             self.request_schema = other.request_schema.clone();
+            if self.request_example.is_none() {
+                self.request_example = other.request_example.clone();
+            }
         }
-        if self.request_example.is_none() {
-            self.request_example = other.request_example.clone();
-        }
+
         if self.request_content_type.is_none() {
             self.request_content_type = other.request_content_type.clone();
         }
+
         for (status, body) in &other.responses {
             self.responses
                 .entry(*status)
                 .or_insert_with(|| body.clone());
         }
+
         if !other.extra_parameters.is_empty() {
             self.extra_parameters.extend(other.extra_parameters.clone());
         }
+
         match (&mut self.docs, &other.docs) {
             (None, Some(d)) => self.docs = Some(d.clone()),
             (Some(dst), Some(src)) => {
@@ -1206,6 +1212,27 @@ mod tests {
             .map(|input| input.type_name())
             .collect::<Vec<_>>();
         assert_eq!(bodies, [std::any::type_name::<Vec<Flat>>()]);
+    }
+
+    /// An example is an example of the body it was made for, so it goes with that body: a
+    /// route with a body of its own keeps its own example, or its lack of one
+    #[test]
+    fn merge_outer_takes_an_example_only_with_the_body_it_belongs_to() {
+        let group = OpenApiRouteConfig::default().consumes_json::<Payload>();
+        assert!(group.request_example.is_some());
+
+        let flat = OpenApiRouteConfig::default()
+            .consumes_json::<Flat>()
+            .merge_outer(&group);
+        assert!(flat.request_example.is_none());
+
+        let by_hand = OpenApiRouteConfig::default()
+            .with_request_schema(OpenApiSchema::string())
+            .merge_outer(&group);
+        assert!(by_hand.request_example.is_none());
+
+        let bare = OpenApiRouteConfig::default().merge_outer(&group);
+        assert_eq!(bare.request_example, group.request_example);
     }
 
     #[test]
