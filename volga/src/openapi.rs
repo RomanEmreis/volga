@@ -351,17 +351,30 @@ impl OpenApiState {
         renamed
     }
 
+    /// Returns `true` when some document describes `key` - see [`plan_position`]
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    fn is_described(&self, registry: &OpenApiRegistry, key: &RouteKey) -> bool {
+        plan_position(registry, &self.position_routes(key))
+            .iter()
+            .any(|plan| plan.routes.iter().any(|(route, _)| *route == key))
+    }
+
     /// The handler inputs OpenAPI documents describe without their fields, each with the
     /// route that reads it - empty unless OpenAPI is configured.
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     pub(super) fn undescribed_inputs(&self) -> Vec<(&RouteKey, &UndescribedInput)> {
-        if self.registry.is_none() {
+        let Some(registry) = self.registry.as_ref() else {
             return Vec::new();
-        }
+        };
 
         let mut undescribed: Vec<_> = self
             .route_configs
             .iter()
+            .filter(|(key, cfg)| {
+                // A route no document describes - a catch-all left out of every one of
+                // its documents - describes none of its inputs either
+                !cfg.undescribed_inputs().is_empty() && self.is_described(registry, key)
+            })
             .flat_map(|(key, cfg)| {
                 cfg.undescribed_inputs()
                     .iter()
@@ -1589,6 +1602,46 @@ mod tests {
         );
 
         assert!(state.undescribed_inputs().is_empty());
+    }
+
+    /// A catch-all left out of every document it is bound to describes nothing, its inputs
+    /// included - it is reported as left out instead
+    #[test]
+    fn it_names_no_inputs_of_a_catch_all_left_out_of_every_document() {
+        let (mut state, _) = configured_state();
+
+        state.on_route_mapped(
+            key(Method::GET, "/files/{*path}"),
+            super::OpenApiRouteConfig::default().consumes_query::<Flat>(),
+        );
+        map(&mut state, Method::GET, "/files/{id}", "one segment");
+
+        assert!(state.undescribed_inputs().is_empty());
+        assert_eq!(state.undescribed_catch_alls().len(), 1);
+    }
+
+    /// A catch-all still described in one of its documents describes its inputs there
+    #[test]
+    fn it_names_the_inputs_of_a_catch_all_described_in_another_document() {
+        let (mut state, _) = two_docs_state();
+
+        let catch_all = key(Method::GET, "/files/{*path}");
+        state.on_route_mapped(
+            catch_all.clone(),
+            super::OpenApiRouteConfig::default().consumes_query::<Flat>(),
+        );
+        state.update_route_config(&catch_all, |cfg| cfg.with_docs(["v1", "admin"]));
+        map(&mut state, Method::GET, "/files/{id}", "one segment");
+
+        let named = state
+            .undescribed_inputs()
+            .into_iter()
+            .map(|(route, input)| (route.pattern.as_ref(), input.kind()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            named,
+            [("/files/{*path}", super::InputKind::QueryParameters)]
+        );
     }
 
     #[test]
