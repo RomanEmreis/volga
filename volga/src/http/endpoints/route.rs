@@ -848,7 +848,7 @@ fn bind_param(written: &mut ParamNames, bound: &mut ParamNames, name: &str, name
 
 /// The name a `{name}`, `{name:type}` or `{*name}` segment binds its value as
 #[inline(always)]
-fn param_name(segment: &str) -> &str {
+pub(crate) fn param_name(segment: &str) -> &str {
     // expects a placeholder but safely handles unexpected input
     let Some(inner) = segment
         .strip_prefix(OPEN_BRACKET)

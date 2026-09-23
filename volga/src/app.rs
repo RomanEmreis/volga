@@ -790,6 +790,15 @@ impl App {
         }
 
         #[cfg(all(debug_assertions, feature = "openapi"))]
+        for (route, template, docs) in self.openapi.renamed_routes() {
+            let message = crate::openapi::renamed_route_warning(route, template, &docs);
+            #[cfg(feature = "tracing")]
+            tracing::warn!("{message}");
+            #[cfg(not(feature = "tracing"))]
+            eprintln!("{message}");
+        }
+
+        #[cfg(all(debug_assertions, feature = "openapi"))]
         for (route, input) in self.openapi.undescribed_inputs() {
             let message = crate::openapi::undescribed_input_warning(route, input);
             #[cfg(feature = "tracing")]

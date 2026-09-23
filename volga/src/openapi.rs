@@ -5,12 +5,15 @@ use crate::{
     headers::{CacheControl, ETag, Header, HttpHeaders},
     http::{
         Method,
-        endpoints::route::{is_catch_all_segment, is_dynamic_segment, split_path, untyped_path},
+        endpoints::route::{
+            is_catch_all_segment, is_dynamic_segment, param_name, split_path, untyped_path,
+        },
     },
 };
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    cmp::Reverse,
+    collections::{BTreeMap, HashMap},
     sync::Arc,
 };
 use volga_open_api::ui_html;
@@ -48,6 +51,40 @@ pub(super) fn undescribed_catch_all_warning(
          one-segment path parameter, which `{} {}` already is in {there}, and one templated \
          path cannot carry two operations for one method.",
         catch_all.method, catch_all.pattern, by.method, by.pattern
+    )
+}
+
+/// Reports a route OpenAPI documents describe under the parameter names of other routes at
+/// its position, and the names it is described under
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub(super) fn renamed_route_warning(
+    route: &RouteKey,
+    template: &RouteKey,
+    docs: &[&str],
+) -> String {
+    let names = docs
+        .iter()
+        .map(|doc| format!("`{doc}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let renames = route
+        .param_names()
+        .into_iter()
+        .zip(template.param_names())
+        .filter(|(own, to)| own != to)
+        .map(|(own, to)| format!("`{own}` as `{to}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!(
+        "OpenAPI: `{} {}` is described as `{}` in {names}, with {renames}. A templated path \
+         takes one set of parameter names, so the routes at one position are described under \
+         the names most of them are written with, the first in alphabetical order on a tie. \
+         Naming the parameters alike describes each route under its own.",
+        route.method,
+        route.pattern,
+        spell_template(&template.pattern, param_name)
     )
 }
 
@@ -116,9 +153,10 @@ pub(super) struct OpenApiState {
     pub(super) registry: Option<OpenApiRegistry>,
     pub(super) config: Option<OpenApiConfig>,
     pub(super) route_configs: HashMap<RouteKey, OpenApiRouteConfig>,
-    /// Whether a catch-all route has been mapped. Until one is, no route shares an operation
-    /// with a catch-all, and a route is written to the registry without looking for one.
-    has_catch_alls: bool,
+    /// The routes mapped at each position of an OpenAPI path template - see
+    /// [`RouteKey::position`] - which a document describes together. A route alone at its
+    /// position is written to the registry on its own.
+    positions: HashMap<Box<str>, Vec<RouteKey>>,
     /// The spelling each mapped route was last mapped under, keyed by the route it names -
     /// see [`RouteKey::untyped`] - so that mapping a route again under another spelling finds
     /// the configuration it replaces.
@@ -153,45 +191,48 @@ impl RouteKey {
             .is_some_and(is_catch_all_segment)
     }
 
-    /// Returns `true` when `other` is mapped for this route's method at this route's position
-    /// in an OpenAPI path template - so an OpenAPI document describes the two as one
-    /// operation.
+    /// The position this route is at in an OpenAPI path template, whatever it calls its
+    /// parameters: `/files/{name}` and `/files/{*path}` are both at `/files/{}`.
     ///
     /// OpenAPI templates a path one segment at a time, so a catch-all is described as the
-    /// parameter it would be in one segment: `/files/{*path}` and `/files/{id}` are one
-    /// templated path there, and an operation written for one would be merged into the
-    /// other's, or overwrite it.
+    /// parameter it would be in one segment, and a document takes one templated path for a
+    /// position - see [`plan_position`].
     #[inline]
-    fn shares_operation_with(&self, other: &RouteKey) -> bool {
-        self.method == other.method && is_same_template(&self.pattern, &other.pattern)
+    fn position(&self) -> Box<str> {
+        spell_template(&self.pattern, |_| "")
+    }
+
+    /// The names this route's parameters are written with, in path order
+    #[inline]
+    fn param_names(&self) -> Vec<&str> {
+        split_path(&self.pattern)
+            .filter(|segment| is_dynamic_segment(segment))
+            .map(param_name)
+            .collect()
     }
 }
 
-/// Returns `true` when two route patterns spell one OpenAPI path template: the same number
-/// of segments, with a literal wherever the other has that literal and a parameter wherever
-/// the other has any parameter.
+/// Spells a route pattern the way OpenAPI templates it, with each parameter named `name`
+/// calls it
 #[inline]
-fn is_same_template(left: &str, right: &str) -> bool {
-    let mut left = split_path(left);
-    let mut right = split_path(right);
-
-    loop {
-        match (left.next(), right.next()) {
-            (None, None) => return true,
-            (Some(l), Some(r)) => {
-                let same = match (is_dynamic_segment(l), is_dynamic_segment(r)) {
-                    (true, true) => true,
-                    (false, false) => l == r,
-                    _ => false,
-                };
-
-                if !same {
-                    return false;
-                }
-            }
-            _ => return false,
+fn spell_template(pattern: &str, name: impl Fn(&str) -> &str) -> Box<str> {
+    let mut path = String::with_capacity(pattern.len());
+    for segment in split_path(pattern) {
+        path.push('/');
+        if is_dynamic_segment(segment) {
+            path.push('{');
+            path.push_str(name(segment));
+            path.push('}');
+        } else {
+            path.push_str(segment);
         }
     }
+
+    if path.is_empty() {
+        path.push('/');
+    }
+
+    path.into()
 }
 
 impl OpenApiState {
@@ -201,28 +242,31 @@ impl OpenApiState {
         self.config.as_ref().is_some_and(|cfg| !cfg.exposed)
     }
 
-    /// The routes sharing an OpenAPI operation with `key`, `key` included once it is mapped.
-    /// See [`RouteKey::shares_operation_with`].
+    /// The routes mapped at `key`'s position, `key` included once it is mapped - see
+    /// [`RouteKey::position`].
     #[inline]
-    fn operation_group(&self, key: &RouteKey) -> Vec<(&RouteKey, &OpenApiRouteConfig)> {
-        self.route_configs
-            .iter()
-            .filter(|(other, _)| key.shares_operation_with(other))
+    fn position_routes(&self, key: &RouteKey) -> Vec<(&RouteKey, &OpenApiRouteConfig)> {
+        self.positions
+            .get(&key.position())
+            .map(|keys| self.routes(keys))
+            .unwrap_or_default()
+    }
+
+    /// The routes `keys` name, with their configurations
+    #[inline]
+    fn routes<'a>(&'a self, keys: &'a [RouteKey]) -> Vec<(&'a RouteKey, &'a OpenApiRouteConfig)> {
+        keys.iter()
+            .filter_map(|key| self.route_configs.get_key_value(key))
             .collect()
     }
 
-    /// The routes sharing an OpenAPI operation with `key`, when a catch-all is among them.
+    /// The routes sharing an OpenAPI operation with `key`, `key` included once it is mapped:
+    /// the ones mapped for its method at its position.
     #[inline]
-    fn catch_all_group(&self, key: &RouteKey) -> Option<Vec<(&RouteKey, &OpenApiRouteConfig)>> {
-        if !self.has_catch_alls {
-            return None;
-        }
-
-        let group = self.operation_group(key);
+    fn operation_group(&self, key: &RouteKey) -> Vec<(&RouteKey, &OpenApiRouteConfig)> {
+        let mut group = self.position_routes(key);
+        group.retain(|(other, _)| other.method == key.method);
         group
-            .iter()
-            .any(|(other, _)| other.is_catch_all())
-            .then_some(group)
     }
 
     /// The catch-all routes left out of OpenAPI documents, each with the route whose
@@ -265,6 +309,46 @@ impl OpenApiState {
                 .cmp(&(right.pattern.as_ref(), right.method.as_str()))
         });
         undescribed
+    }
+
+    /// The routes OpenAPI documents describe under the parameter names of other routes at
+    /// their position, each with a route whose names it is described under and the
+    /// documents it is described so in - empty unless OpenAPI is configured.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    pub(super) fn renamed_routes(&self) -> Vec<(&RouteKey, &RouteKey, Vec<&str>)> {
+        let Some(registry) = self.registry.as_ref() else {
+            return Vec::new();
+        };
+
+        let mut renamed: Vec<(&RouteKey, &RouteKey, Vec<&str>)> = Vec::new();
+
+        for keys in self.positions.values().filter(|keys| keys.len() > 1) {
+            let routes = self.routes(keys);
+
+            for plan in plan_position(registry, &routes) {
+                let names = plan.template.param_names();
+
+                for (key, _) in plan.routes {
+                    if key.param_names() == names {
+                        continue;
+                    }
+
+                    // One line for a route described alike in several documents
+                    match renamed.iter_mut().find(|(route, template, _)| {
+                        *route == key && template.param_names() == names
+                    }) {
+                        Some((_, _, docs)) => docs.push(plan.doc),
+                        None => renamed.push((key, plan.template, vec![plan.doc])),
+                    }
+                }
+            }
+        }
+
+        renamed.sort_by(|(left, _, _), (right, _, _)| {
+            (left.pattern.as_ref(), left.method.as_str())
+                .cmp(&(right.pattern.as_ref(), right.method.as_str()))
+        });
+        renamed
     }
 
     /// The handler inputs OpenAPI documents describe without their fields, each with the
@@ -317,8 +401,6 @@ impl OpenApiState {
     /// Applies new route registration
     #[inline]
     pub(super) fn on_route_mapped(&mut self, key: RouteKey, auto: OpenApiRouteConfig) {
-        self.has_catch_alls |= key.is_catch_all();
-
         // Mapping a handler where one is mapped replaces the route, and a type annotation is
         // not part of what the router reads - so a route mapped again under another spelling
         // replaces the configuration of the one it was mapped as, rather than leaving it to be
@@ -329,8 +411,19 @@ impl OpenApiState {
             .filter(|previous| *previous != key)
             .and_then(|previous| self.route_configs.remove_entry(&previous));
 
-        if let (Some((previous, _)), Some(registry)) = (&replaced, self.registry.as_ref()) {
-            registry.remove_route(&previous.method, &previous.pattern);
+        if let Some((previous, _)) = &replaced {
+            if let Some(keys) = self.positions.get_mut(&previous.position()) {
+                keys.retain(|other| other != previous);
+            }
+
+            if let Some(registry) = self.registry.as_ref() {
+                registry.remove_route(&previous.method, &previous.pattern);
+            }
+        }
+
+        let keys = self.positions.entry(key.position()).or_default();
+        if !keys.contains(&key) {
+            keys.push(key.clone());
         }
 
         let remapped = self.route_configs.insert(key.clone(), auto).is_some() || replaced.is_some();
@@ -339,21 +432,26 @@ impl OpenApiState {
 
     /// Writes a mapped route's configuration to the registry, if one is configured.
     ///
-    /// A route sharing its operation with a catch-all rewrites that whole operation group,
-    /// since which document describes which of them depends on all of their configurations
-    /// at once. Every other route is written on its own, as it always was.
+    /// A route sharing its position with others rewrites every route there, since the
+    /// documents that describe each of them, and the names they are described under, depend
+    /// on all of their configurations at once - see [`plan_position`]. A route alone at its
+    /// position is written on its own, as it always was.
     #[inline]
     fn write_route(&self, key: &RouteKey, remapped: bool) {
         let Some(registry) = self.registry.as_ref() else {
             return;
         };
 
-        if let Some(group) = self.catch_all_group(key) {
-            describe_group(registry, &group);
+        let routes = self.position_routes(key);
+        if routes.len() > 1 {
+            describe_position(registry, &routes);
             return;
         }
 
-        let cfg = &self.route_configs[key];
+        let Some(cfg) = self.route_configs.get(key) else {
+            return;
+        };
+
         if remapped {
             registry.rebind_route(&key.method, &key.pattern, cfg);
         } else {
@@ -369,52 +467,123 @@ impl OpenApiState {
             return;
         };
 
-        for (key, cfg) in &self.route_configs {
-            if let Some(group) = self.catch_all_group(key) {
-                // A group is written once, by the member that sorts first
-                let first = group
-                    .iter()
-                    .map(|(other, _)| (other.pattern.as_ref(), other.method.as_str()))
-                    .min();
-
-                if first == Some((key.pattern.as_ref(), key.method.as_str())) {
-                    describe_group(registry, &group);
+        for keys in self.positions.values() {
+            match self.routes(keys).as_slice() {
+                [] => {}
+                [(key, cfg)] => {
+                    registry.register_route(&key.method, &key.pattern, cfg);
+                    registry.apply_route_config(&key.method, &key.pattern, cfg);
                 }
-                continue;
+                routes => describe_position(registry, routes),
             }
-
-            registry.register_route(&key.method, &key.pattern, cfg);
-            registry.apply_route_config(&key.method, &key.pattern, cfg);
         }
     }
 }
 
-/// Writes the operations of routes that share one, with a catch-all among them, from their
-/// configurations alone.
-///
-/// Each route is described in the documents it is placed in - see [`placement`] - except that
-/// a catch-all is left out of every document a parameter route of the group is described in:
-/// the parameter route is the one such a document can describe faithfully. So a catch-all
-/// bound to `v1` beside a parameter route bound to `admin` is described in `v1`, and moving
-/// the parameter route out of a document gives the catch-all its place there back.
-fn describe_group(registry: &OpenApiRegistry, group: &[(&RouteKey, &OpenApiRouteConfig)]) {
-    for (key, _) in group {
-        registry.remove_route(&key.method, &key.pattern);
-    }
+/// How one document describes the routes at one position
+#[derive(Debug)]
+struct DocumentPlan<'a> {
+    doc: &'a str,
+    /// A route whose parameter names the position is templated with in this document
+    template: &'a RouteKey,
+    /// The routes this document describes there, under the template's names
+    routes: Vec<(&'a RouteKey, &'a OpenApiRouteConfig)>,
+}
 
-    let taken: HashSet<&str> = group
+/// Plans how each document describes the routes at one position.
+///
+/// A route is described in the documents it is placed in - see [`placement`] - except that
+/// a catch-all is left out of every document a parameter route of its method is described in:
+/// the two would be one operation there, and the parameter route is the one such a document
+/// can describe faithfully. So a catch-all bound to `v1` beside a parameter route bound to
+/// `admin` is described in `v1`, and moving the parameter route out of a document gives the
+/// catch-all its place there back.
+///
+/// A document takes one templated path for one position - OpenAPI forbids two that differ in
+/// their parameter names alone - so every route described there is described under one set of
+/// names: the one most of them are written with, the smallest on a tie. A route written with
+/// others has its path parameters renamed, which the wire does not notice, since a path
+/// parameter is read by position - but they are not the names its handler reads.
+fn plan_position<'a>(
+    registry: &'a OpenApiRegistry,
+    routes: &[(&'a RouteKey, &'a OpenApiRouteConfig)],
+) -> Vec<DocumentPlan<'a>> {
+    let placed: Vec<_> = routes
         .iter()
-        .filter(|(key, _)| !key.is_catch_all())
-        .flat_map(|(_, cfg)| placement(registry, cfg))
+        .map(|&(key, cfg)| (key, cfg, placement(registry, cfg)))
         .collect();
 
-    for (key, cfg) in group {
-        let mut docs = placement(registry, cfg);
-        if key.is_catch_all() {
-            docs.retain(|doc| !taken.contains(doc));
-        }
+    registry
+        .specs()
+        .iter()
+        .filter_map(|spec| {
+            let doc = spec.name.as_str();
+            let here: Vec<_> = placed
+                .iter()
+                .filter(|(_, _, docs)| docs.contains(&doc))
+                .map(|&(key, cfg, _)| (key, cfg))
+                .collect();
 
-        registry.describe_route_in(&key.method, &key.pattern, cfg, &docs);
+            let routes: Vec<_> = here
+                .iter()
+                .copied()
+                .filter(|(key, _)| {
+                    !key.is_catch_all()
+                        || !here
+                            .iter()
+                            .any(|(other, _)| other.method == key.method && !other.is_catch_all())
+                })
+                .collect();
+
+            let template = spelled_by_most(&routes)?;
+            Some(DocumentPlan {
+                doc,
+                template,
+                routes,
+            })
+        })
+        .collect()
+}
+
+/// A route written with the parameter names most of `routes` are written with, the smallest
+/// names on a tie; `None` when there are no routes
+fn spelled_by_most<'a>(routes: &[(&'a RouteKey, &OpenApiRouteConfig)]) -> Option<&'a RouteKey> {
+    let mut spellings: BTreeMap<Vec<&str>, (usize, &RouteKey)> = BTreeMap::new();
+    for &(key, _) in routes {
+        spellings
+            .entry(key.param_names())
+            .and_modify(|(count, _)| *count += 1)
+            .or_insert((1, key));
+    }
+
+    // Visited from the smallest names up, and the first of the most common is kept
+    spellings
+        .into_values()
+        .min_by_key(|(count, _)| Reverse(*count))
+        .map(|(_, key)| key)
+}
+
+/// Writes the operations of every route at one position from their configurations alone -
+/// see [`plan_position`].
+fn describe_position(registry: &OpenApiRegistry, routes: &[(&RouteKey, &OpenApiRouteConfig)]) {
+    let Some((first, _)) = routes.first() else {
+        return;
+    };
+
+    // Whatever was written at this position, under whichever names, goes: every route there
+    // is written again below
+    registry.remove_position(&first.pattern);
+
+    for plan in plan_position(registry, routes) {
+        for (key, cfg) in plan.routes {
+            registry.describe_route_as(
+                &key.method,
+                &key.pattern,
+                &plan.template.pattern,
+                cfg,
+                &[plan.doc],
+            );
+        }
     }
 }
 
@@ -1086,6 +1255,231 @@ mod tests {
 
         // Nothing is left out of a document that does not exist
         assert!(OpenApiState::default().undescribed_catch_alls().is_empty());
+    }
+
+    /// The path parameters `method` has at `path`, by name and schema type
+    fn path_params(paths: &Value, path: &str, method: &str) -> Vec<(String, Value)> {
+        paths[path][method]["parameters"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|parameter| parameter["in"] == "path")
+            .map(|parameter| {
+                let name = parameter["name"].as_str().expect("parameter name");
+                (name.to_string(), parameter["schema"]["type"].clone())
+            })
+            .collect()
+    }
+
+    fn path_keys(paths: &Value) -> Vec<&str> {
+        paths
+            .as_object()
+            .expect("paths")
+            .keys()
+            .map(String::as_str)
+            .collect()
+    }
+
+    /// OpenAPI forbids two templated paths that differ in their parameter names alone, so the
+    /// routes at one position are described under one set of names
+    #[test]
+    fn it_describes_the_routes_at_one_position_under_one_set_of_names() {
+        let (mut state, registry) = configured_state();
+
+        map(&mut state, Method::GET, "/users/{id}", "read");
+        map(&mut state, Method::POST, "/users/{name}", "write");
+
+        let paths = paths(&registry);
+        assert_eq!(path_keys(&paths), ["/users/{id}"]);
+        assert_eq!(summary(&paths, "/users/{id}", "get"), "read");
+        assert_eq!(summary(&paths, "/users/{id}", "post"), "write");
+        assert_eq!(
+            path_params(&paths, "/users/{id}", "post"),
+            [("id".to_string(), Value::from("string"))]
+        );
+    }
+
+    #[test]
+    fn it_takes_the_names_most_routes_at_a_position_are_written_with_in_any_order() {
+        let routes = [
+            (Method::GET, "/posts/{slug}"),
+            (Method::PUT, "/posts/{slug}"),
+            (Method::DELETE, "/posts/{id}"),
+        ];
+
+        for rotation in 0..routes.len() {
+            let (mut state, registry) = configured_state();
+            for (method, pattern) in routes.iter().cycle().skip(rotation).take(routes.len()) {
+                map(&mut state, method.clone(), pattern, pattern);
+            }
+
+            let paths = paths(&registry);
+            assert_eq!(path_keys(&paths), ["/posts/{slug}"]);
+            assert_eq!(
+                path_params(&paths, "/posts/{slug}", "delete"),
+                [("slug".to_string(), Value::from("string"))]
+            );
+        }
+    }
+
+    #[test]
+    fn it_describes_a_catch_all_under_the_names_of_its_position() {
+        let (mut state, registry) = configured_state();
+
+        map(&mut state, Method::GET, "/files/{*path}", "the rest");
+        map(&mut state, Method::POST, "/files/{id}", "upload");
+
+        let paths = paths(&registry);
+        assert_eq!(path_keys(&paths), ["/files/{id}"]);
+        assert_eq!(summary(&paths, "/files/{id}", "get"), "the rest");
+        assert_eq!(
+            path_params(&paths, "/files/{id}", "get"),
+            [("id".to_string(), Value::from("string"))]
+        );
+    }
+
+    /// A catch-all left out of a document is not described there, so its names count for
+    /// nothing either
+    #[test]
+    fn it_names_a_position_after_the_routes_a_document_describes() {
+        let (mut state, registry) = configured_state();
+
+        map(&mut state, Method::GET, "/files/{*rest}", "the rest");
+        map(&mut state, Method::GET, "/files/{a}", "one segment");
+        map(&mut state, Method::POST, "/files/{rest}", "upload");
+
+        let paths = paths(&registry);
+        assert_eq!(path_keys(&paths), ["/files/{a}"]);
+        assert_eq!(summary(&paths, "/files/{a}", "get"), "one segment");
+        assert_eq!(summary(&paths, "/files/{a}", "post"), "upload");
+    }
+
+    #[test]
+    fn it_names_a_position_in_each_document_after_the_routes_described_there() {
+        let (mut state, registry) = two_docs_state();
+
+        map(&mut state, Method::GET, "/users/{id}", "read");
+        map(&mut state, Method::POST, "/users/{name}", "write");
+        state.update_route_config(&key(Method::POST, "/users/{name}"), |cfg| {
+            cfg.with_doc("admin")
+        });
+
+        // Each document describes one route there, under the names it is written with
+        assert_eq!(path_keys(&paths_in(&registry, "v1")), ["/users/{id}"]);
+        assert_eq!(path_keys(&paths_in(&registry, "admin")), ["/users/{name}"]);
+
+        state.update_route_config(&key(Method::GET, "/users/{id}"), |cfg| {
+            cfg.with_docs(["v1", "admin"])
+        });
+
+        let admin = paths_in(&registry, "admin");
+        assert_eq!(path_keys(&admin), ["/users/{id}"]);
+        assert_eq!(summary(&admin, "/users/{id}", "get"), "read");
+        assert_eq!(summary(&admin, "/users/{id}", "post"), "write");
+        assert_eq!(path_keys(&paths_in(&registry, "v1")), ["/users/{id}"]);
+    }
+
+    /// Each parameter is renamed after the position it is at, so two routes naming two
+    /// positions the other way around swap their names, and keep their own types
+    #[test]
+    fn it_renames_path_parameters_by_position() {
+        let (mut state, registry) = configured_state();
+
+        map(&mut state, Method::GET, "/pairs/{a}/{b}", "read");
+        state.on_route_mapped(
+            key(Method::POST, "/pairs/{b:integer}/{a}"),
+            super::OpenApiRouteConfig::default(),
+        );
+
+        let paths = paths(&registry);
+        assert_eq!(path_keys(&paths), ["/pairs/{a}/{b}"]);
+        assert_eq!(
+            path_params(&paths, "/pairs/{a}/{b}", "post"),
+            [
+                ("a".to_string(), Value::from("integer")),
+                ("b".to_string(), Value::from("string")),
+            ]
+        );
+    }
+
+    /// A `NamedPath<T>` describes its fields under the names its route is written with, and
+    /// they are renamed with the route's own parameters rather than added beside them
+    #[test]
+    fn it_renames_the_path_parameters_a_named_path_describes() {
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct ByName {
+            name: u32,
+        }
+
+        let (mut state, registry) = configured_state();
+
+        state.on_route_mapped(
+            key(Method::POST, "/users/{name}"),
+            super::OpenApiRouteConfig::default().consumes_named_path::<ByName>(),
+        );
+        map(&mut state, Method::GET, "/users/{id}", "read");
+
+        assert_eq!(
+            path_params(&paths(&registry), "/users/{id}", "post"),
+            [("id".to_string(), Value::from("integer"))]
+        );
+    }
+
+    #[test]
+    fn it_describes_a_position_under_one_set_of_names_when_replaying_routes() {
+        let mut state = OpenApiState::default();
+        map(&mut state, Method::GET, "/users/{id}", "read");
+        map(&mut state, Method::POST, "/users/{name}", "write");
+
+        let config = OpenApiConfig::new().with_specs([OpenApiSpec::new("v1")]);
+        let registry = OpenApiRegistry::new(config.clone());
+        state.registry = Some(registry.clone());
+        state.config = Some(config);
+        state.replay_all_routes_to_registry();
+
+        let paths = paths(&registry);
+        assert_eq!(path_keys(&paths), ["/users/{id}"]);
+        assert_eq!(summary(&paths, "/users/{id}", "post"), "write");
+    }
+
+    #[test]
+    fn it_names_the_routes_it_describes_under_other_names() {
+        let (mut state, _) = two_docs_state();
+
+        map(&mut state, Method::GET, "/users/{id}", "read");
+        map(&mut state, Method::POST, "/users/{name}", "write");
+        state.update_route_config(&key(Method::POST, "/users/{name}"), |cfg| {
+            cfg.with_docs(["v1", "admin"])
+        });
+        map(&mut state, Method::GET, "/pairs/{a}/{b}", "read");
+        map(&mut state, Method::POST, "/pairs/{b}/{a}", "write");
+
+        let warnings = state
+            .renamed_routes()
+            .into_iter()
+            .map(|(route, template, docs)| super::renamed_route_warning(route, template, &docs))
+            .collect::<Vec<_>>();
+
+        // `admin` describes the write route alone, under its own names
+        assert_eq!(
+            warnings,
+            [
+                "OpenAPI: `POST /pairs/{b}/{a}` is described as `/pairs/{a}/{b}` in `v1`, with \
+                 `b` as `a`, `a` as `b`. A templated path takes one set of parameter names, so \
+                 the routes at one position are described under the names most of them are \
+                 written with, the first in alphabetical order on a tie. Naming the parameters \
+                 alike describes each route under its own.",
+                "OpenAPI: `POST /users/{name}` is described as `/users/{id}` in `v1`, with \
+                 `name` as `id`. A templated path takes one set of parameter names, so the \
+                 routes at one position are described under the names most of them are written \
+                 with, the first in alphabetical order on a tie. Naming the parameters alike \
+                 describes each route under its own.",
+            ]
+        );
+
+        // Nothing is renamed in a document that does not exist
+        assert!(OpenApiState::default().renamed_routes().is_empty());
     }
 
     mod flattened {

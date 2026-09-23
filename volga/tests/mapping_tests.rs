@@ -177,6 +177,73 @@ async fn it_describes_the_route_that_answers_when_a_path_is_mapped_again() {
     server.shutdown().await;
 }
 
+/// OpenAPI forbids two templated paths that differ in their parameter names alone, so routes
+/// naming one position differently share one path in the document - while each still binds
+/// the name it was written with (#253).
+#[cfg(feature = "openapi")]
+#[tokio::test]
+async fn it_describes_routes_naming_one_position_differently_under_one_path() {
+    let server = TestServer::builder()
+        .configure(|app| app.with_open_api(|open_api| open_api))
+        .setup(|app| {
+            app.use_open_api();
+
+            app.map_get("/users/{id}", |id: String| async move { id });
+            app.map_post("/users/{name}", |name: String| async move { name });
+            app.map_get("/files/{*path}", |path: String| async move { path });
+            app.map_post("/files/{id}", |id: String| async move { id });
+        })
+        .build()
+        .await;
+
+    let spec: serde_json::Value = server
+        .client()
+        .get(server.url("/openapi.json"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    let paths = spec["paths"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(path, item)| {
+            let methods = item
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            (path.clone(), methods)
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        paths,
+        [
+            ("/files/{id}".to_string(), vec!["get".into(), "post".into()]),
+            ("/users/{id}".to_string(), vec!["get".into(), "post".into()]),
+        ]
+    );
+    assert_eq!(
+        spec["paths"]["/users/{id}"]["post"]["parameters"][0]["name"],
+        "id"
+    );
+
+    let response = server
+        .client()
+        .post(server.url("/users/alice"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.text().await.unwrap(), "alice");
+
+    server.shutdown().await;
+}
+
 #[tokio::test]
 async fn it_maps_to_head_request() {
     let server = TestServer::spawn(|app| {

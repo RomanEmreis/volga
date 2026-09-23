@@ -177,6 +177,10 @@ app.map_get("/search", search_by_query)
 
 Path parameters are named by the route template whatever the extractor describes; spell their types there - `{id:integer}`.
 
+### Routes naming one position differently
+
+OpenAPI takes one templated path for one position, so routes that name a path parameter differently - `GET /users/{id}` beside `POST /users/{name}` - are described under one path in each document: named the way most of the routes described there are written, the first in alphabetical order on a tie. The other routes' path parameters are renamed to match. The wire does not notice, since a path parameter is read by position, but the handler reads its own name, so debug builds name each renamed route at startup. Naming the parameters alike describes every route under its own names.
+
 ## Caching
 
 Swagger UI is served with:
