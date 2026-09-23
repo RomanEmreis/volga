@@ -156,7 +156,7 @@ For `Serialize`-only types, response schema must be specified explicitly.
 
 ### Types serde reads as a map
 
-serde reads a struct with a `#[serde(flatten)]` field as a map, so that it can collect the keys the struct does not name for the flattened member - and a map does not say which keys it takes. None of such a struct's fields can be inferred, including the ones declared beside the flattened member: a request body is described as an object without properties (or as any value, when the struct sits inside it, as in a `Vec`), and query parameters are not described at all. Debug builds name each such input at startup.
+serde reads a struct with a `#[serde(flatten)]` field as a map, so that it can collect the keys the struct does not name for the flattened member - and a map does not say which keys it takes. None of such a struct's fields can be inferred, including the ones declared beside the flattened member: a request body is described as an object without properties (or as any value, when the struct sits inside it, as in a `Vec`), and query parameters are not described at all. Debug builds name each such input at startup. A struct that renames what it expects with `#[serde(expecting = "..")]` is not recognized as one, and is described as before.
 
 Describe them by hand instead:
 

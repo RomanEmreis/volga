@@ -507,8 +507,16 @@ pub(super) enum Probed {
 /// struct instead of describing it as an object without properties, which is what it would
 /// otherwise look like.
 ///
-/// Such a struct is told from an actual map by how it reads a key: as a field identifier,
-/// where a map reads its key type - a `String`, say.
+/// Such a struct is told from an actual map by two things serde's derive gives it: its
+/// visitor expects `struct Name`, and it reads a key as a field identifier. Neither is
+/// enough alone. A map whose key type is an identifier of its own - a
+/// `#[serde(field_identifier)]` enum - reads its keys the same way, but its visitor
+/// expects `a map`; and a visitor says nothing of how the keys are read.
+///
+/// A struct that renames what it expects, with `#[serde(expecting = "..")]`, no longer says
+/// it is one, and is taken for the map it is read as. That is the safer mistake: taking a
+/// map for such a struct would describe whatever holds it as any value, while taking the
+/// struct for a map describes it as an object without properties, as it always was.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ReadAsMap {
     /// What the struct's `Visitor` says it expects: `struct Name`, for a derived one
@@ -723,13 +731,16 @@ impl<'de> Deserializer<'de> for &mut Probe {
     where
         V: Visitor<'de>,
     {
-        // Rendered up front: the visitor is gone by the time a key shows it is a struct
+        // Rendered up front: the visitor is gone by the time a key shows it is a struct.
+        // A visitor that does not say it expects a struct is taken at its word, and its
+        // keys are not asked about at all - see [`ReadAsMap`]
         let expecting = (&visitor as &dyn Expected).to_string();
+        let expecting = expecting.starts_with(STRUCT_EXPECTING).then_some(expecting);
 
         self.root = Some((OpenApiSchema::object(), Value::Object(Map::new())));
         visitor.visit_map(MapProbeAccess {
             probe: self,
-            expecting: Some(expecting),
+            expecting,
         })
     }
 
@@ -870,10 +881,14 @@ impl<'de, 'a> MapAccess<'de> for StructProbeAccess<'a> {
     }
 }
 
+/// What the visitor serde's derive writes for a struct expects, up to the struct's name
+const STRUCT_EXPECTING: &str = "struct ";
+
 /// An empty map, which asks for one key first to learn whether it is a struct read as one
 struct MapProbeAccess<'a> {
     probe: &'a mut Probe,
-    /// What the map's visitor expects, until its first key is asked for
+    /// What the map's visitor expects, until its first key is asked for - `None` from the
+    /// start for a visitor that does not expect a struct
     expecting: Option<String>,
 }
 
@@ -1055,6 +1070,64 @@ mod tests {
         let props = schema.properties.expect("properties");
         assert_eq!(props["tags"].schema_type.as_deref(), Some("object"));
         assert_eq!(props["page"].schema_type.as_deref(), Some("integer"));
+    }
+
+    /// A key type of its own may be read as an identifier too, the way a struct reads its
+    /// keys - the map around it is still a map
+    #[derive(Deserialize, PartialEq, Eq, Hash)]
+    #[serde(field_identifier, rename_all = "snake_case")]
+    #[allow(dead_code)]
+    enum Label {
+        Name,
+        Tag,
+    }
+
+    #[test]
+    fn probe_describes_a_map_with_identifier_keys_as_an_object() {
+        let Probed::Shape(schema, _) = probe::<HashMap<Label, String>>() else {
+            panic!("a map should be described");
+        };
+
+        assert_eq!(schema.schema_type.as_deref(), Some("object"));
+    }
+
+    #[test]
+    fn probe_describes_a_map_with_identifier_keys_inside_a_struct() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct Labelled {
+            labels: HashMap<Label, String>,
+            page: u32,
+        }
+
+        let (schema, _) = probe::<Labelled>()
+            .shape()
+            .expect("schema should be produced");
+
+        let props = schema.properties.expect("properties");
+        assert_eq!(props["labels"].schema_type.as_deref(), Some("object"));
+        assert_eq!(props["page"].schema_type.as_deref(), Some("integer"));
+    }
+
+    /// A struct that renames what it expects no longer says it is one, so it is taken for
+    /// the map it is read as - described as an object without properties, and not reported
+    #[test]
+    fn probe_takes_a_struct_expecting_something_else_for_a_map() {
+        #[derive(Deserialize)]
+        #[serde(expecting = "a search request")]
+        #[allow(dead_code)]
+        struct Search {
+            #[serde(flatten)]
+            inner: Inner,
+            page: u32,
+        }
+
+        let Probed::Shape(schema, _) = probe::<Search>() else {
+            panic!("the struct should be taken for a map");
+        };
+
+        assert_eq!(schema.schema_type.as_deref(), Some("object"));
+        assert!(schema.properties.is_none());
     }
 
     #[test]
