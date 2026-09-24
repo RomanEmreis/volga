@@ -5,7 +5,7 @@ Fast, simple, and high-performance web framework for Rust, built on top of
 Volga is designed to make building HTTP services straightforward and explicit,
 while keeping performance predictable and overhead minimal.
 
-[![latest](https://img.shields.io/badge/latest-0.11.1-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.11.2-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://releases.rs/docs/1.90.0/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
@@ -48,7 +48,7 @@ Volga is a good fit if you:
 ### Dependencies
 ```toml
 [dependencies]
-volga = "0.11.1"
+volga = "0.11.2"
 tokio = { version = "1", features = ["full"] }
 ```
 ### Simple request handler
