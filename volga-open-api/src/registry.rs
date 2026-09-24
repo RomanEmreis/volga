@@ -10,7 +10,7 @@ use super::{
     config::{OpenApiConfig, OpenApiSpec},
     doc::{OpenApiComponents, OpenApiDocument, OpenApiInfo},
     op::OpenApiOperation,
-    param::normalize_openapi_path,
+    param::{is_same_hierarchy, normalize_openapi_path, rename_path_parameters},
     route::OpenApiRouteConfig,
 };
 
@@ -82,6 +82,74 @@ impl OpenApiRegistry {
     ) {
         self.register_in(method, path, docs);
         self.apply_in(method, path, cfg, docs);
+    }
+
+    /// Describes a route in `docs` alone, under the path `template` spells, replacing the
+    /// operation its method has there.
+    ///
+    /// `template` is a pattern at the route's own position that names its parameters
+    /// otherwise - another route's. A document takes one set of names for one templated
+    /// path, so a route at a position other routes name differently is described under
+    /// theirs: its path parameters are renamed position by position, after the ones its
+    /// configuration describes are merged in under the names the route was written with.
+    /// A name no document carries is skipped.
+    ///
+    /// The operation is built from `cfg` alone, as [`Self::rebind_route`] builds it.
+    pub fn describe_route_as(
+        &self,
+        method: &Method,
+        path: &str,
+        template: &str,
+        cfg: &OpenApiRouteConfig,
+        docs: &[&str],
+    ) {
+        if self.is_excluded_path(path) {
+            return;
+        }
+
+        let (_, own_params) = normalize_openapi_path(path);
+        let (spec_path, template_params) = normalize_openapi_path(template);
+        let method_lc = method.as_str().to_ascii_lowercase();
+
+        let mut documents = self.lock();
+        for doc_name in docs {
+            let Some(doc) = documents.get_mut(*doc_name) else {
+                continue;
+            };
+
+            let mut op = OpenApiOperation::default();
+            if !own_params.is_empty() {
+                op.parameters = Some(own_params.clone());
+            }
+
+            cfg.apply_to_operation(&mut op, &mut doc.components.schemas);
+
+            if let Some(parameters) = op.parameters.as_mut() {
+                rename_path_parameters(parameters, &own_params, &template_params);
+            }
+
+            doc.paths
+                .entry(spec_path.clone())
+                .or_default()
+                .insert(method_lc.clone(), op);
+        }
+    }
+
+    /// Removes every operation at the position `path` is at from every spec, whatever the
+    /// parameters there are named - see [`Self::describe_route_as`].
+    pub fn remove_position(&self, path: &str) {
+        if self.is_excluded_path(path) {
+            return;
+        }
+
+        let (spec_path, _) = normalize_openapi_path(path);
+
+        let mut docs = self.lock();
+        for doc in docs.values_mut() {
+            doc.paths
+                .retain(|other, _| !is_same_hierarchy(other, &spec_path));
+            doc.prune_unreferenced_components();
+        }
     }
 
     /// Returns the names of the documents a route configured with `cfg` is described in: the
@@ -400,6 +468,76 @@ mod tests {
         let admin = registry.document_by_name("admin").expect("admin document");
         assert!(!v1.paths.contains_key("/files/{path}"));
         assert!(admin.paths["/files/{path}"].contains_key("get"));
+    }
+
+    #[test]
+    fn describe_route_as_describes_a_route_under_the_template_names() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        registry.describe_route_as(
+            &Method::POST,
+            "/users/{name:integer}/posts/{*rest}",
+            "/users/{id}/posts/{post}",
+            &OpenApiRouteConfig::default().with_summary("write"),
+            &["admin", "missing"],
+        );
+
+        let v1 = registry.document_by_name("v1").expect("v1 document");
+        let admin = registry.document_by_name("admin").expect("admin document");
+        assert!(v1.paths.is_empty());
+
+        let op = &admin.paths["/users/{id}/posts/{post}"]["post"];
+        assert_eq!(op.summary.as_deref(), Some("write"));
+
+        let parameters = op
+            .parameters
+            .as_deref()
+            .expect("path parameters")
+            .iter()
+            .map(|p| (p.name.as_str(), p.schema.schema_type.as_deref()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parameters,
+            [("id", Some("integer")), ("post", Some("string"))]
+        );
+    }
+
+    #[test]
+    fn describe_route_as_replaces_the_operation_of_its_method() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+
+        let first = OpenApiRouteConfig::default().with_summary("first");
+        registry.describe_route_as(&Method::GET, "/users/{id}", "/users/{id}", &first, &["v1"]);
+        registry.describe_route_as(
+            &Method::GET,
+            "/users/{id}",
+            "/users/{id}",
+            &OpenApiRouteConfig::default(),
+            &["v1"],
+        );
+
+        let v1 = registry.document_by_name("v1").expect("v1 document");
+        assert!(v1.paths["/users/{id}"]["get"].summary.is_none());
+    }
+
+    #[test]
+    fn remove_position_removes_every_spelling_of_one_position() {
+        let registry = OpenApiRegistry::new(config_with_specs());
+        let both = OpenApiRouteConfig::default().with_docs(["v1", "admin"]);
+
+        registry.register_route(&Method::GET, "/users/{id}", &both);
+        registry.register_route(&Method::POST, "/users/{name}", &both);
+        registry.register_route(&Method::PUT, "/users/{*rest}", &both);
+        registry.register_route(&Method::GET, "/users/me", &both);
+        registry.register_route(&Method::GET, "/users/{id}/posts", &both);
+
+        registry.remove_position("/users/{anything}");
+
+        for doc in ["v1", "admin"] {
+            let doc = registry.document_by_name(doc).expect("document");
+            let paths = doc.paths.keys().map(String::as_str).collect::<Vec<_>>();
+            assert_eq!(paths, ["/users/me", "/users/{id}/posts"]);
+        }
     }
 
     #[test]

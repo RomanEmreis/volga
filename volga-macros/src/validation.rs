@@ -295,10 +295,12 @@ fn render_constraints(field: &Field<'_>) -> Vec<TokenStream> {
                 };
                 if field.flattened {
                     // The child has no property of its own to hang them on, so its
-                    // constraints belong to this level the way its fields do. Nothing
-                    // reads them yet: the schema probe does not expand a flattened struct,
-                    // so such a type publishes no properties at all - but when it does,
-                    // these land on the properties the client actually sends
+                    // constraints belong to this level the way its fields do. No inferred
+                    // schema has those properties, though: serde reads a struct with a
+                    // flattened field as a map, which names no fields for the schema probe
+                    // to find (#220), so these are published nowhere today - they are kept
+                    // so that any schema naming those properties gets them where the client
+                    // actually sends them
                     out.push(quote! { __constraints.extend(#table()); });
                 } else if is_seq {
                     out.push(record(quote! { Each(#table) }));
