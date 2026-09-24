@@ -3,6 +3,14 @@ name: Fuzz
 on:
   pull_request:
     branches: ["main"]
+    # Documentation alone gives the fuzzers nothing new to build or run. None of these checks
+    # is a required one, so the whole workflow can be left out; `rust.yml` has required checks
+    # and skips job by job instead. Keep in step with `DOCS_ONLY` there.
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".github/CODEOWNERS"
+      - ".github/ISSUE_TEMPLATE/**"
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:

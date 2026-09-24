@@ -12,6 +12,77 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # A change to documentation alone - Markdown, the license, issue templates - gives the
+  # compiler nothing new to check, so the build, lint and test jobs are skipped for it.
+  #
+  # This cannot be `paths-ignore` on the trigger: `format_check`, `clippy_check`,
+  # `doc_check`, `audit`, `build`, `test` and `coverage` are required checks, and a workflow
+  # that never starts leaves them waiting forever, which blocks the pull request. A job
+  # skipped by its `if` reports as passed instead.
+  #
+  # It fails open. Only a diff that was read, and names documentation alone, skips anything;
+  # an event it does not know, a diff it could not read, or this job failing outright runs
+  # everything. That is why the jobs it gates test for `!= 'false'` rather than `== 'true'`,
+  # and why they start from `!cancelled()`: without a status function of its own, an `if`
+  # runs only when every job it needs succeeded, this one included - so it has to name
+  # `format_check`'s result itself.
+  #
+  # Only the jobs with nothing upstream but `format_check` are gated; `build`, `test`,
+  # `cross_platform` and `coverage` are skipped with them. `format_check` and `audit` always
+  # run: the path check reads every file name, documentation included, and an advisory can
+  # be published against a `Cargo.lock` nobody changed.
+  #
+  # `fuzz.yml` skips documentation-only pull requests too, by the same list.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request checks out the merge commit GitHub tests, and its first parent
+          # is the base branch as it stands - so the two commits are all the diff needs
+          fetch-depth: 2
+      - name: Tell code changes from documentation ones
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          # Keep in step with `paths-ignore` in fuzz.yml
+          DOCS_ONLY: '^(.*\.md|LICENSE|\.github/CODEOWNERS|\.github/ISSUE_TEMPLATE/.*)$'
+        run: |
+          set -uo pipefail
+
+          base=""
+          case "$EVENT" in
+            pull_request)
+              base="HEAD^1"
+              ;;
+            push)
+              # All zeros for a branch that did not exist before the push
+              if [[ ! "$BEFORE" =~ ^0*$ ]] && git fetch --no-tags --depth=1 origin "$BEFORE"; then
+                base="$BEFORE"
+              fi
+              ;;
+          esac
+
+          code=true
+          # `--no-renames` lists both sides of a rename, so moving a source file under
+          # `docs/` still counts as a code change
+          if [ -n "$base" ] && files="$(git diff --no-renames --name-only "$base" HEAD)"; then
+            echo "Changed files:"
+            echo "$files"
+            # An empty diff leaves one empty line, which is not documentation either
+            if ! grep -qvE "$DOCS_ONLY" <<< "$files"; then
+              code=false
+              echo "::notice::Documentation changed alone; the build, lint and test jobs are skipped."
+            fi
+          else
+            echo "No diff to read for a '$EVENT' event; running everything."
+          fi
+
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   format_check:
     runs-on: ubuntu-latest
     steps:
@@ -42,7 +113,8 @@ jobs:
         
   clippy_check:
     runs-on: ubuntu-latest
-    needs: format_check
+    needs: [format_check, changes]
+    if: ${{ !cancelled() && needs.format_check.result == 'success' && needs.changes.outputs.code != 'false' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +129,8 @@ jobs:
 
   transport_guard_check:
     runs-on: ubuntu-latest
-    needs: format_check
+    needs: [format_check, changes]
+    if: ${{ !cancelled() && needs.format_check.result == 'success' && needs.changes.outputs.code != 'false' }}
 
     # `volga` and `volga-oauth-client` each refuse to build without an HTTP transport, and
     # say so through `compile_error!`. A `trybuild` case cannot reach either: it is built
@@ -90,7 +163,8 @@ jobs:
 
   msrv_check:
     runs-on: ubuntu-latest
-    needs: format_check
+    needs: [format_check, changes]
+    if: ${{ !cancelled() && needs.format_check.result == 'success' && needs.changes.outputs.code != 'false' }}
 
     # Every other job runs on the runner's default stable toolchain, so the MSRV
     # advertised by `rust-version` in the workspace manifest (and by the README
@@ -109,7 +183,8 @@ jobs:
 
   workspace_check:
     runs-on: ubuntu-latest
-    needs: format_check
+    needs: [format_check, changes]
+    if: ${{ !cancelled() && needs.format_check.result == 'success' && needs.changes.outputs.code != 'false' }}
 
     # `default-members` excludes `examples/*`, so no other job ever compiles them
     # and a dependency bump can leave an example behind without failing CI.
@@ -138,7 +213,8 @@ jobs:
 
   doc_check:
     runs-on: ubuntu-latest
-    needs: format_check
+    needs: [format_check, changes]
+    if: ${{ !cancelled() && needs.format_check.result == 'success' && needs.changes.outputs.code != 'false' }}
 
     steps:
       - uses: actions/checkout@v4
