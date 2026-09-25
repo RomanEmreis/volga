@@ -96,12 +96,11 @@ impl HeaderError {
 
     #[inline]
     fn from_max_size_reached(error: MaxSizeReached) -> Error {
-        Error {
-            status: StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
-            inner: format!("Header: {error}").into(),
-            instance: None,
-            response: None,
-        }
+        Error::from_parts(
+            StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
+            None,
+            format!("Header: {error}"),
+        )
     }
 }
 

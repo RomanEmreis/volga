@@ -83,6 +83,9 @@ pub trait IntoError {
     /// describes nothing. That suits most errors: the error handler decides how they look,
     /// and the status of one is known only when it happens.
     ///
+    /// Available with the `openapi` feature only, so an implementation of it has to be
+    /// compiled with that feature too.
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{error::{Error, IntoError}, http::StatusCode, openapi::OpenApiRouteConfig};

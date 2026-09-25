@@ -33,19 +33,42 @@ pub mod problem;
 pub(crate) type BoxError = Box<dyn StdError + Send + Sync>;
 
 /// Generic error
-#[derive(Debug)]
 pub struct Error {
     /// HTTP status code
     pub(crate) status: StatusCode,
 
-    /// An instance where this error happened
-    pub(crate) instance: Option<String>,
-
     /// Inner error object
     pub(crate) inner: BoxError,
 
-    /// A response this error answers with, attached by [`Error::with_response`]
-    pub(crate) response: Option<AttachedResponse>,
+    /// The instance and the attached response, allocated only once either is set
+    ///
+    /// Most errors carry neither until the error handler names the instance, so keeping them
+    /// out of line holds an `Error` - and with it every `Result<T, Error>`, an extractor's
+    /// included - at a status code and three words.
+    pub(crate) extras: Option<Box<ErrorExtras>>,
+}
+
+/// The parts of an [`Error`] most errors leave empty
+#[derive(Debug, Default)]
+pub(crate) struct ErrorExtras {
+    /// An instance where the error happened
+    instance: Option<String>,
+
+    /// A response the error answers with, attached by [`Error::with_response`]
+    response: Option<AttachedResponse>,
+}
+
+impl ErrorExtras {
+    /// Boxes an instance, leaving an error without one without extras
+    #[inline]
+    fn of_instance(instance: Option<String>) -> Option<Box<Self>> {
+        instance.map(|instance| {
+            Box::new(Self {
+                instance: Some(instance),
+                response: None,
+            })
+        })
+    }
 }
 
 /// The response an [`Error`] answers with in place of the one its error handler would build
@@ -53,8 +76,8 @@ pub struct Error {
 /// The `Mutex` is there for `Sync` alone: [`HttpBody`](crate::HttpBody) is `Send` but not
 /// `Sync`, while an [`Error`] has to be both, since it travels as a [`BoxError`] and inside an
 /// [`io::Error`](IoError). The response is only ever reached by value, so the lock is never
-/// taken. Boxed, it costs the error one pointer, and [`HttpResult`](crate::HttpResult) stays
-/// the size of an [`HttpResponse`].
+/// taken. It is boxed apart from the instance, so an error with an instance alone - which is
+/// every error the error handler sees - allocates no room for a response.
 pub(crate) struct AttachedResponse(Box<Mutex<HttpResponse>>);
 
 impl AttachedResponse {
@@ -74,6 +97,23 @@ impl fmt::Debug for AttachedResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // The body is not `Debug`, and the status is the error's own
         f.debug_struct("AttachedResponse").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Flat, as if the extras were fields of their own
+        let response = self
+            .extras
+            .as_ref()
+            .and_then(|extras| extras.response.as_ref());
+
+        f.debug_struct("Error")
+            .field("status", &self.status)
+            .field("instance", &self.instance())
+            .field("inner", &self.inner)
+            .field("response", &response)
+            .finish()
     }
 }
 
@@ -99,24 +139,14 @@ impl From<Infallible> for Error {
 impl From<serde_json::Error> for Error {
     #[inline]
     fn from(err: serde_json::Error) -> Error {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            inner: err.into(),
-            instance: None,
-            response: None,
-        }
+        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
     }
 }
 
 impl From<serde_urlencoded::ser::Error> for Error {
     #[inline]
     fn from(err: serde_urlencoded::ser::Error) -> Error {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            inner: err.into(),
-            instance: None,
-            response: None,
-        }
+        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
     }
 }
 
@@ -147,12 +177,7 @@ impl From<IoError> for Error {
 impl From<hyper::http::Error> for Error {
     #[inline]
     fn from(err: hyper::http::Error) -> Self {
-        Self {
-            instance: None,
-            inner: err.into(),
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            response: None,
-        }
+        Self::from_parts(StatusCode::INTERNAL_SERVER_ERROR, None, err)
     }
 }
 
@@ -166,58 +191,37 @@ impl From<Error> for IoError {
 impl From<fmt::Error> for Error {
     #[inline]
     fn from(err: fmt::Error) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            inner: err.into(),
-            instance: None,
-            response: None,
-        }
+        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
     }
 }
 
 impl From<InvalidStatusCode> for Error {
     #[inline]
     fn from(err: InvalidStatusCode) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            inner: err.into(),
-            instance: None,
-            response: None,
-        }
+        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
     }
 }
 
 impl Error {
     /// Creates a new [`Error`]
     pub fn new(instance: &str, err: impl Into<BoxError>) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            inner: err.into(),
-            instance: Some(instance.into()),
-            response: None,
-        }
+        Self::from_parts(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Some(instance.into()),
+            err,
+        )
     }
 
     /// Creates an internal server error
     #[inline]
     pub fn server_error(err: impl Into<BoxError>) -> Self {
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            inner: err.into(),
-            instance: None,
-            response: None,
-        }
+        Self::from_parts(StatusCode::INTERNAL_SERVER_ERROR, None, err)
     }
 
     /// Creates a client error
     #[inline]
     pub fn client_error(err: impl Into<BoxError>) -> Self {
-        Self {
-            status: StatusCode::BAD_REQUEST,
-            inner: err.into(),
-            instance: None,
-            response: None,
-        }
+        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
     }
 
     /// Creates [`Error`] from status code, instance and underlying error
@@ -229,9 +233,8 @@ impl Error {
     ) -> Self {
         Self {
             status,
-            instance,
             inner: err.into(),
-            response: None,
+            extras: ErrorExtras::of_instance(instance),
         }
     }
 
@@ -244,7 +247,19 @@ impl Error {
     /// Returns an instance where this error happened
     #[inline]
     pub fn instance(&self) -> Option<&str> {
-        self.instance.as_deref()
+        self.extras
+            .as_ref()
+            .and_then(|extras| extras.instance.as_deref())
+    }
+
+    /// Sets the instance where this error happened, unless it has one already
+    #[inline]
+    pub(crate) fn set_instance_if_none(&mut self, instance: impl FnOnce() -> String) {
+        let extras = self.extras.get_or_insert_with(Box::default);
+
+        if extras.instance.is_none() {
+            extras.instance = Some(instance());
+        }
     }
 
     /// Unwraps the inner error
@@ -258,7 +273,8 @@ impl Error {
     ///
     /// A response attached with [`with_response`](Self::with_response) is dropped.
     pub fn into_parts(self) -> (StatusCode, Option<String>, BoxError) {
-        (self.status, self.instance, self.inner)
+        let instance = self.extras.and_then(|extras| extras.instance);
+        (self.status, instance, self.inner)
     }
 
     /// Makes the error answer with `response` instead of the response its error handler
@@ -310,7 +326,8 @@ impl Error {
         match response.into_response() {
             Ok(mut response) => {
                 *response.status_mut() = self.status;
-                self.response = Some(AttachedResponse::new(response));
+                self.extras.get_or_insert_with(Box::default).response =
+                    Some(AttachedResponse::new(response));
             }
             Err(_err) => {
                 #[cfg(feature = "tracing")]
@@ -324,14 +341,20 @@ impl Error {
     /// [`with_response`](Self::with_response)
     #[inline]
     pub fn has_response(&self) -> bool {
-        self.response.is_some()
+        self.extras
+            .as_ref()
+            .is_some_and(|extras| extras.response.is_some())
     }
 
     /// Takes the response the error answers with, leaving the error without one; see
     /// [`with_response`](Self::with_response)
     #[inline]
     pub fn take_response(&mut self) -> Option<HttpResponse> {
-        self.response.take().map(AttachedResponse::into_inner)
+        self.extras
+            .as_mut()?
+            .response
+            .take()
+            .map(AttachedResponse::into_inner)
     }
 
     /// Check if the status is within 500-599.
@@ -368,12 +391,7 @@ impl Error {
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
-        Self {
-            instance: None,
-            inner: err.into(),
-            status,
-            response: None,
-        }
+        Self::from_parts(status, None, err)
     }
 }
 
@@ -712,15 +730,76 @@ mod tests {
     }
 
     #[test]
-    fn it_stays_send_sync_and_no_larger_than_a_response() {
+    fn it_stays_send_sync_and_small() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Error>();
 
-        // A handler's result is as large as its larger variant; the error must not be it
-        assert!(size_of::<Error>() <= size_of::<crate::HttpResponse>());
+        // A status code, the boxed inner error (two words) and the boxed extras (one word):
+        // an extractor's `Result<T, Error>` is this large for any `T` no larger than it
+        assert!(size_of::<Error>() <= 4 * size_of::<usize>());
+        assert_eq!(size_of::<Result<(), Error>>(), size_of::<Error>());
+        assert_eq!(size_of::<Result<u32, Error>>(), size_of::<Error>());
         assert_eq!(
             size_of::<crate::HttpResult>(),
             size_of::<crate::HttpResponse>()
+        );
+    }
+
+    #[test]
+    fn it_allocates_no_extras_without_an_instance_or_a_response() {
+        let err = Error::server_error("boom");
+
+        assert!(err.extras.is_none());
+        assert_eq!(err.instance(), None);
+        assert!(!err.has_response());
+    }
+
+    #[test]
+    fn it_sets_the_instance_only_when_it_has_none() {
+        let mut err = Error::server_error("boom");
+        err.set_instance_if_none(|| "/first".into());
+        err.set_instance_if_none(|| unreachable!("the instance is set already"));
+
+        assert_eq!(err.instance(), Some("/first"));
+
+        let mut err = Error::new("/own", "boom");
+        err.set_instance_if_none(|| "/uri".into());
+
+        assert_eq!(err.instance(), Some("/own"));
+    }
+
+    #[test]
+    fn it_keeps_the_instance_and_the_response_side_by_side() {
+        let mut err = Error::client_error("bad").with_response("body");
+        err.set_instance_if_none(|| "/uri".into());
+
+        assert!(err.has_response());
+        assert_eq!(err.instance(), Some("/uri"));
+
+        assert!(err.take_response().is_some());
+        assert_eq!(err.instance(), Some("/uri"));
+
+        let (status, instance, inner) = err.into_parts();
+
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(instance.as_deref(), Some("/uri"));
+        assert_eq!(inner.to_string(), "bad");
+    }
+
+    #[test]
+    fn it_debugs_as_a_flat_struct() {
+        let err = Error::new("/x", "boom");
+
+        assert_eq!(
+            format!("{err:?}"),
+            r#"Error { status: 500, instance: Some("/x"), inner: "boom", response: None }"#
+        );
+
+        let err = Error::client_error("bad").with_response("body");
+
+        assert_eq!(
+            format!("{err:?}"),
+            r#"Error { status: 400, instance: None, inner: "bad", response: Some(AttachedResponse { .. }) }"#
         );
     }
 }

@@ -269,7 +269,7 @@ async fn make_problem_details(mut err: Error) -> HttpResult {
     if let Some(response) = err.take_response() {
         return Ok(response);
     }
-    
+
     match crate::validation::try_into_problem(err) {
         Ok(problem) => problem.into_response(),
         Err(err) => ProblemDetails::from(err).into_response(),

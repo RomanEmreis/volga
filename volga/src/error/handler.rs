@@ -68,9 +68,7 @@ impl ErrorArgsSlot {
         match self {
             Self::Uri(uri) => {
                 let mut err = err;
-                if err.instance.is_none() {
-                    err.instance = Some(uri.to_string());
-                }
+                err.set_instance_if_none(|| uri.to_string());
                 default_error_handler(err).await
             }
             Self::Custom(args) => args.call(err).await,
@@ -127,7 +125,7 @@ where
 }
 
 /// Stores a pre-extracted handler invocation: the function, its arguments,
-/// and the request URI (for `err.instance`). Allocated once per request
+/// and the request URI (for the error's instance). Allocated once per request
 /// instead of cloning the full `Parts`.
 struct BoundErrorArgs<F, Args, M> {
     func: F,
@@ -145,9 +143,7 @@ where
 {
     fn call(self: Box<Self>, mut err: Error) -> BoxFuture<'static, HttpResult> {
         Box::pin(async move {
-            if err.instance.is_none() {
-                err.instance = Some(self.uri.to_string());
-            }
+            err.set_instance_if_none(|| self.uri.to_string());
             match self.func.map_err(err, self.args).await.into_response() {
                 Ok(resp) => Ok(resp),
                 Err(err) => default_error_handler(err).await,
@@ -164,9 +160,7 @@ struct DefaultErrorArgs {
 impl ErasedErrorArgs for DefaultErrorArgs {
     fn call(self: Box<Self>, mut err: Error) -> BoxFuture<'static, HttpResult> {
         Box::pin(async move {
-            if err.instance.is_none() {
-                err.instance = Some(self.uri.to_string());
-            }
+            err.set_instance_if_none(|| self.uri.to_string());
             default_error_handler(err).await
         })
     }
