@@ -100,6 +100,7 @@ impl HeaderError {
             status: StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE,
             inner: format!("Header: {error}").into(),
             instance: None,
+            response: None,
         }
     }
 }

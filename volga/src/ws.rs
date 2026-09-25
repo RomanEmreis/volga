@@ -5,7 +5,10 @@ use crate::http::endpoints::{
     args::{FromPayload, FromRequest, Payload},
     handlers::GenericHandler,
 };
-use crate::{App, HttpRequest, error::Error};
+use crate::{
+    App, HttpRequest,
+    error::{Error, IntoError},
+};
 
 pub use self::{
     args::{Message, MessageHandler, WebSocketHandler},
@@ -180,8 +183,10 @@ impl App {
     where
         F: MessageHandler<Msg, Args, M, Output = R> + 'static,
         Args: FromRequest + Clone + Send + 'static,
-        Msg: TryFrom<Message, Error = Error> + Send,
-        R: TryInto<Message, Error = Error> + Send,
+        Msg: TryFrom<Message> + Send,
+        Msg::Error: IntoError,
+        R: TryInto<Message> + Send,
+        R::Error: IntoError,
         M: 'static,
     {
         self.map_conn(pattern, move |req: HttpRequest| {

@@ -211,9 +211,14 @@ where
 pub(crate) type PipelineErrorHandler = Arc<dyn ErrorHandler + Send + Sync>;
 
 /// Default error handler that creates a [`HttpResult`] from error
+///
+/// An error carrying a response of its own - see [`Error::with_response`] - answers with it.
 #[inline]
-pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
-    status!(err.status.as_u16(), "{err}")
+pub(crate) async fn default_error_handler(mut err: Error) -> HttpResult {
+    match err.take_response() {
+        Some(response) => Ok(response),
+        None => status!(err.status.as_u16(), "{err}"),
+    }
 }
 
 /// Extracts error handler arguments from request parts before they are consumed.
@@ -266,6 +271,19 @@ mod tests {
 
         assert_eq!(response.status(), 400);
         assert_eq!(String::from_utf8_lossy(body), "Some error");
+    }
+
+    #[tokio::test]
+    async fn default_error_handler_answers_with_the_attached_response() {
+        let error = Error::client_error("Some error").with_response(status!(200, "custom"));
+        let response = default_error_handler(error).await;
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(response.status(), 400);
+        assert_eq!(String::from_utf8_lossy(body), "custom");
     }
 
     #[tokio::test]

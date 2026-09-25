@@ -643,6 +643,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "custom_error"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tokio",
+ "volga",
+]
+
+[[package]]
 name = "custom_request_headers"
 version = "0.1.0"
 dependencies = [

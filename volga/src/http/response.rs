@@ -83,6 +83,12 @@ impl HttpResponse {
         self.inner.status()
     }
 
+    /// Returns a mutable reference to the HTTP status code.
+    #[inline]
+    pub(crate) fn status_mut(&mut self) -> &mut StatusCode {
+        self.inner.status_mut()
+    }
+
     /// Represents a version of the HTTP spec.
     #[inline]
     pub fn version(&self) -> Version {

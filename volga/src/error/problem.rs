@@ -1,6 +1,6 @@
 //! Problem Details implementation
 
-use super::Error;
+use super::{Error, IntoError};
 use crate::{
     App,
     http::{HttpBody, HttpResult, IntoResponse, StatusCode},
@@ -83,6 +83,38 @@ impl<E: Serialize> IntoResponse for Problem<E> {
                 (crate::headers::CONTENT_TYPE, PROBLEM_JSON_MIME),
             ]
         )
+    }
+}
+
+/// A problem returned as a handler's `Err` answers with itself, as it would as the `Ok` value,
+/// and goes to the error handler first: the error carries the problem's status, its `detail`
+/// (or `title`) as the message and its `instance`. A handler set with
+/// [`map_err`](App::map_err) can answer with something else.
+///
+/// # Example
+/// ```no_run
+/// use volga::{App, Json, error::Problem};
+///
+/// # #[tokio::main]
+/// # async fn main() -> std::io::Result<()> {
+/// let mut app = App::new();
+///
+/// app.map_get("/items/{id}", |id: u64| -> Result<Json<u64>, Problem> {
+///     if id == 0 {
+///         return Err(Problem::new(404).with_detail("no item 0"));
+///     }
+///     Ok(Json(id))
+/// });
+/// # app.run().await
+/// # }
+/// ```
+impl<E: Serialize> IntoError for Problem<E> {
+    fn into_error(self) -> Error {
+        let status = StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let message = self.detail.as_deref().unwrap_or(&self.title).to_owned();
+        let instance = self.instance.clone();
+
+        Error::from_parts(status, instance, message).with_response(self)
     }
 }
 
@@ -230,13 +262,18 @@ impl<'a> RouteGroup<'a> {
 }
 
 /// Default error handler that creates problem details
+///
+/// An error carrying a response of its own - see [`Error::with_response`] - answers with it.
 #[inline]
-async fn make_problem_details(err: Error) -> Problem {
-    let err = match crate::validation::try_into_problem(err) {
-        Ok(problem) => return problem,
-        Err(err) => err,
-    };
-    Problem::from(err)
+async fn make_problem_details(mut err: Error) -> HttpResult {
+    if let Some(response) = err.take_response() {
+        return Ok(response);
+    }
+    
+    match crate::validation::try_into_problem(err) {
+        Ok(problem) => problem.into_response(),
+        Err(err) => ProblemDetails::from(err).into_response(),
+    }
 }
 
 /// Returns a URL to the RFC 9110 section depending on status code
@@ -254,7 +291,7 @@ pub fn get_problem_type_url(status: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::error::{Error, Problem, ProblemDetails};
+    use crate::error::{Error, IntoError, Problem, ProblemDetails};
     use crate::http::{IntoResponse, StatusCode};
     use http_body_util::BodyExt;
     use serde::{Deserialize, Serialize};
@@ -473,5 +510,69 @@ mod tests {
 
             assert_eq!(problem_details.status(), status);
         }
+    }
+
+    #[tokio::test]
+    async fn it_turns_a_problem_into_an_error_answering_with_the_problem() {
+        let mut err = ProblemDetails::new(409)
+            .with_detail("taken")
+            .with_instance("/users/1")
+            .into_error();
+
+        assert_eq!(err.status(), StatusCode::CONFLICT);
+        assert_eq!(err.to_string(), "taken");
+        assert_eq!(err.instance(), Some("/users/1"));
+
+        let mut response = err.take_response().unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            response.headers()["content-type"],
+            "application/problem+json"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(body),
+            r#"{"type":"https://tools.ietf.org/html/rfc9110#section-15.5.10","title":"Conflict","status":409,"detail":"taken","instance":"/users/1"}"#
+        );
+    }
+
+    #[test]
+    fn it_takes_the_title_of_a_problem_without_a_detail() {
+        let err = ProblemDetails::new(404).into_error();
+
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(err.to_string(), "Not Found");
+    }
+
+    #[test]
+    fn it_turns_a_problem_with_an_invalid_status_into_a_server_error() {
+        let err = ProblemDetails::new(1000).into_error();
+
+        assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(!err.has_response());
+    }
+
+    #[tokio::test]
+    async fn problem_details_answer_with_the_attached_response() {
+        let err = Error::client_error("bad").with_response("custom");
+        let mut response = super::make_problem_details(err).await.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(String::from_utf8_lossy(body), "custom");
+    }
+
+    #[tokio::test]
+    async fn problem_details_describe_an_error_without_a_response() {
+        let err = Error::from_parts(StatusCode::NOT_FOUND, Some("/x".into()), "missing");
+        let mut response = super::make_problem_details(err).await.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            String::from_utf8_lossy(body),
+            r#"{"type":"https://tools.ietf.org/html/rfc9110#section-15.5.5","title":"Not Found","status":404,"detail":"missing","instance":"/x"}"#
+        );
     }
 }

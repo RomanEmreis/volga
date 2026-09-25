@@ -7,16 +7,18 @@ use std::{
     error::Error as StdError,
     fmt,
     io::{Error as IoError, ErrorKind},
+    sync::{Mutex, PoisonError},
 };
 
 use super::{
-    App,
+    App, HttpResponse,
     http::{FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
 };
 
 pub use self::{
     fallback::{FallbackFunc, FallbackHandler},
     handler::{ErrorFunc, ErrorHandler},
+    into_error::IntoError,
 };
 
 #[cfg(feature = "problem-details")]
@@ -24,6 +26,7 @@ pub use self::problem::{Problem, ProblemDetails};
 
 pub mod fallback;
 pub mod handler;
+mod into_error;
 #[cfg(feature = "problem-details")]
 pub mod problem;
 
@@ -40,6 +43,38 @@ pub struct Error {
 
     /// Inner error object
     pub(crate) inner: BoxError,
+
+    /// A response this error answers with, attached by [`Error::with_response`]
+    pub(crate) response: Option<AttachedResponse>,
+}
+
+/// The response an [`Error`] answers with in place of the one its error handler would build
+///
+/// The `Mutex` is there for `Sync` alone: [`HttpBody`](crate::HttpBody) is `Send` but not
+/// `Sync`, while an [`Error`] has to be both, since it travels as a [`BoxError`] and inside an
+/// [`io::Error`](IoError). The response is only ever reached by value, so the lock is never
+/// taken. Boxed, it costs the error one pointer, and [`HttpResult`](crate::HttpResult) stays
+/// the size of an [`HttpResponse`].
+pub(crate) struct AttachedResponse(Box<Mutex<HttpResponse>>);
+
+impl AttachedResponse {
+    #[inline]
+    fn new(response: HttpResponse) -> Self {
+        Self(Box::new(Mutex::new(response)))
+    }
+
+    #[inline]
+    fn into_inner(self) -> HttpResponse {
+        // Nothing locks it, so nothing can have poisoned it
+        self.0.into_inner().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+impl fmt::Debug for AttachedResponse {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The body is not `Debug`, and the status is the error's own
+        f.debug_struct("AttachedResponse").finish_non_exhaustive()
+    }
 }
 
 impl fmt::Display for Error {
@@ -68,6 +103,7 @@ impl From<serde_json::Error> for Error {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),
             instance: None,
+            response: None,
         }
     }
 }
@@ -79,6 +115,7 @@ impl From<serde_urlencoded::ser::Error> for Error {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),
             instance: None,
+            response: None,
         }
     }
 }
@@ -114,6 +151,7 @@ impl From<hyper::http::Error> for Error {
             instance: None,
             inner: err.into(),
             status: StatusCode::INTERNAL_SERVER_ERROR,
+            response: None,
         }
     }
 }
@@ -132,6 +170,7 @@ impl From<fmt::Error> for Error {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),
             instance: None,
+            response: None,
         }
     }
 }
@@ -143,6 +182,7 @@ impl From<InvalidStatusCode> for Error {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),
             instance: None,
+            response: None,
         }
     }
 }
@@ -154,6 +194,7 @@ impl Error {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             inner: err.into(),
             instance: Some(instance.into()),
+            response: None,
         }
     }
 
@@ -164,6 +205,7 @@ impl Error {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             inner: err.into(),
             instance: None,
+            response: None,
         }
     }
 
@@ -174,6 +216,7 @@ impl Error {
             status: StatusCode::BAD_REQUEST,
             inner: err.into(),
             instance: None,
+            response: None,
         }
     }
 
@@ -188,6 +231,7 @@ impl Error {
             status,
             instance,
             inner: err.into(),
+            response: None,
         }
     }
 
@@ -204,13 +248,90 @@ impl Error {
     }
 
     /// Unwraps the inner error
+    ///
+    /// A response attached with [`with_response`](Self::with_response) is dropped.
     pub fn into_inner(self) -> BoxError {
         self.inner
     }
 
     /// Unwraps the error into a tuple of status code, instance value and underlying error
+    ///
+    /// A response attached with [`with_response`](Self::with_response) is dropped.
     pub fn into_parts(self) -> (StatusCode, Option<String>, BoxError) {
         (self.status, self.instance, self.inner)
+    }
+
+    /// Makes the error answer with `response` instead of the response its error handler
+    /// would build
+    ///
+    /// The error is still an error. A handler set with [`map_err`](App::map_err) receives it
+    /// and can answer with something else, or return the error to answer with this response.
+    /// The default error handler and
+    /// [`use_problem_details`](App::use_problem_details) answer with the response unchanged.
+    ///
+    /// The response takes the error's status, whatever status it was built with, so a body
+    /// can be passed alone, such as a [`Json`](crate::Json) value. The status, the instance
+    /// and the message stay what they were, for whatever reads the error. If `response`
+    /// fails to build, the error is returned without it and answers as it would have.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, Json, error::{Error, IntoError}, http::StatusCode};
+    /// use serde::Serialize;
+    ///
+    /// #[derive(Serialize)]
+    /// struct ErrorBody {
+    ///     code: &'static str,
+    /// }
+    ///
+    /// enum ApiError {
+    ///     NotFound,
+    /// }
+    ///
+    /// impl IntoError for ApiError {
+    ///     fn into_error(self) -> Error {
+    ///         match self {
+    ///             ApiError::NotFound => Error::from_parts(StatusCode::NOT_FOUND, None, "not found")
+    ///                 .with_response(Json(ErrorBody { code: "not_found" })),
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// // 404 with {"code":"not_found"}
+    /// app.map_get("/items/{id}", |_id: u64| Err::<Json<u64>, _>(ApiError::NotFound));
+    /// # app.run().await
+    /// # }
+    /// ```
+    pub fn with_response(mut self, response: impl IntoResponse) -> Self {
+        match response.into_response() {
+            Ok(mut response) => {
+                *response.status_mut() = self.status;
+                self.response = Some(AttachedResponse::new(response));
+            }
+            Err(_err) => {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("a response attached to an error failed to build: {_err}");
+            }
+        }
+        self
+    }
+
+    /// Returns `true` if the error answers with a response of its own; see
+    /// [`with_response`](Self::with_response)
+    #[inline]
+    pub fn has_response(&self) -> bool {
+        self.response.is_some()
+    }
+
+    /// Takes the response the error answers with, leaving the error without one; see
+    /// [`with_response`](Self::with_response)
+    #[inline]
+    pub fn take_response(&mut self) -> Option<HttpResponse> {
+        self.response.take().map(AttachedResponse::into_inner)
     }
 
     /// Check if the status is within 500-599.
@@ -251,6 +372,7 @@ impl Error {
             instance: None,
             inner: err.into(),
             status,
+            response: None,
         }
     }
 }
@@ -547,5 +669,58 @@ mod tests {
         assert!(err.is_client_error());
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
         assert_eq!(err.instance(), None);
+    }
+
+    #[tokio::test]
+    async fn it_attaches_a_response_under_its_own_status() {
+        use http_body_util::BodyExt;
+
+        let mut err = Error::from_parts(StatusCode::NOT_FOUND, None, "missing")
+            .with_response(crate::Json(serde_json::json!({ "code": "missing" })));
+
+        assert!(err.has_response());
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(err.to_string(), "missing");
+
+        let mut response = err.take_response().unwrap();
+
+        assert!(!err.has_response());
+        assert!(err.take_response().is_none());
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers()["content-type"], "application/json");
+
+        let body = response.body_mut().collect().await.unwrap().to_bytes();
+        assert_eq!(body, r#"{"code":"missing"}"#);
+    }
+
+    #[test]
+    fn it_drops_a_response_that_fails_to_build() {
+        let err = Error::client_error("bad").with_response(Error::server_error("render"));
+
+        assert!(!err.has_response());
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(err.to_string(), "bad");
+    }
+
+    #[test]
+    fn it_keeps_the_attached_response_through_an_io_error() {
+        let err = Error::client_error("bad").with_response("body");
+        let err = Error::from(IoError::from(err));
+
+        assert!(err.has_response());
+        assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn it_stays_send_sync_and_no_larger_than_a_response() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Error>();
+
+        // A handler's result is as large as its larger variant; the error must not be it
+        assert!(size_of::<Error>() <= size_of::<crate::HttpResponse>());
+        assert_eq!(
+            size_of::<crate::HttpResult>(),
+            size_of::<crate::HttpResponse>()
+        );
     }
 }

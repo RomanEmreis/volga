@@ -375,6 +375,11 @@ impl HttpRequestMut {
 /// * [`HttpRequestMut`] - returned as-is
 /// * `Result<HttpRequestMut, Error>` - propagated without modification
 ///
+/// The error type is `Error` alone, unlike a handler's, which takes any
+/// [`IntoError`](crate::error::IntoError): with one `Result` to convert from, `?` and a bare
+/// `Ok(..)` need no type annotation. An error of another type gets there through `?` when it
+/// has `From<T> for Error`, or as `Err(err.into_error())`.
+///
 /// # Examples
 ///
 /// Returning the request directly:
