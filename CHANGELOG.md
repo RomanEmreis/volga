@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-# Unreleased
+# 0.12.0
 
 ## Added
 * `volga::error::IntoError`: the `Err` of a handler's `Result<T, E>` goes to the error handler as an `Error`. It is implemented for volga's own error types (`std::io::Error`, `serde_json::Error`, `Infallible` and the rest), `StatusCode`, `(StatusCode, E)`, strings (`500`), `Box<dyn std::error::Error + Send + Sync>` (`500`) and `Problem<E>`, and not for integers. Every `IntoError` type also gets `From<T> for Error`, so `?` converts it too, and a type of your own needs this one impl. (#262)
