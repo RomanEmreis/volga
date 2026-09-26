@@ -110,6 +110,17 @@ pub trait With<Args>: Clone + Send + Sync + 'static {
 ///
 /// `M` is the filter's shape - [`marker::Async`] or [`marker::Immediate`] - inferred where the
 /// filter is registered: a filter may return a future or its verdict directly.
+///
+/// Neither impl applies to a filter whose verdict does not convert into [`FilterResult`], so
+/// rustc cannot tell which shape was meant and reports this trait rather than the conversion.
+/// The message below names what a verdict can be.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a filter",
+    label = "not a filter",
+    note = "a filter is an `async fn` or a closure returning a future, or a plain `fn` or closure returning its verdict directly, taking up to 10 borrowing extractors as arguments",
+    note = "the verdict is `bool`, `()`, `FilterResult` or `Result<(), E>`, where `E` is `volga::error::Error` or implements `volga::error::IntoError`, as the `Err` of a handler's `Result` does",
+    note = "it must also be `Clone + Send + Sync + 'static`, which a closure capturing a non-`Send` value is not"
+)]
 pub trait Filter<Args, M = marker::Async>: Clone + Send + Sync + 'static {
     /// Return type
     type Output: Into<FilterResult>;

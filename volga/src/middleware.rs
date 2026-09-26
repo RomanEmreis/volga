@@ -229,16 +229,17 @@ impl App {
     /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
-    /// A request the filter stops goes to the error handler, answering with the status of what
-    /// the filter returned:
+    /// The `Err` takes what a handler's does: an [`Error`](crate::error::Error), or any type
+    /// implementing [`IntoError`](crate::error::IntoError). A request the filter stops goes to
+    /// the error handler, answering with the status of what the filter returned:
     /// - `false`: `400 Bad Request` with a generic message
-    /// - `Err` of an [`Error`](crate::error::Error): the error's own status, instance and
-    ///   attached response, as it would from a handler
-    /// - `Err` of a [`std::io::Error`]: the status its kind maps to, as it would from a handler
-    /// - `Err` of any other error, a string included: `400 Bad Request` with that message
-    ///
-    /// An error type of your own implementing [`IntoError`](crate::error::IntoError) keeps its
-    /// status once the filter returns it as `Err(Error::from(err))`.
+    /// - `Err` of an [`Error`](crate::error::Error) or of an [`IntoError`](crate::error::IntoError)
+    ///   type: the status the error converts with, as it would from a handler - a `StatusCode`,
+    ///   a [`std::io::Error`] by its kind, an `OAuthError` by its code, an error's instance and
+    ///   attached response
+    /// - `Err` of a string or a `Box<dyn std::error::Error + Send + Sync>`: `400 Bad Request`
+    ///   with that message, where a handler answers `500`. Such an error has no status of its
+    ///   own, and a filter's error is taken for the reason the request is refused.
     ///
     /// > **Note:** [`Path`](crate::http::endpoints::args::path::Path) and [`NamedPath`](crate::http::endpoints::args::path::NamedPath) extractors are not meaningful in a global
     /// > filter context since they depend on route-specific parameters. Use
@@ -278,10 +279,9 @@ impl App {
     ///# }
     /// ```
     ///
-    /// A filter answering with a status of its own returns an [`Error`](crate::error::Error)
-    /// with that status:
+    /// A filter answering with a status of its own returns an error with that status:
     /// ```no_run
-    /// use volga::{App, error::Error, headers::HttpHeaders, http::StatusCode};
+    /// use volga::{App, headers::HttpHeaders, http::StatusCode};
     ///
     ///# #[tokio::main]
     ///# async fn main() -> std::io::Result<()> {
@@ -290,7 +290,7 @@ impl App {
     /// // 401 Unauthorized without the header
     /// app.filter(|headers: HttpHeaders| match headers.get_raw("x-api-key") {
     ///     Some(_) => Ok(()),
-    ///     None => Err(Error::from_parts(StatusCode::UNAUTHORIZED, None, "missing API key")),
+    ///     None => Err((StatusCode::UNAUTHORIZED, "missing API key")),
     /// });
     ///
     /// app.map_get("/sum", |x: i32, y: i32| x + y);
@@ -582,16 +582,17 @@ impl<'a> Route<'a> {
     /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
-    /// A request the filter stops goes to the error handler, answering with the status of what
-    /// the filter returned:
+    /// The `Err` takes what a handler's does: an [`Error`](crate::error::Error), or any type
+    /// implementing [`IntoError`](crate::error::IntoError). A request the filter stops goes to
+    /// the error handler, answering with the status of what the filter returned:
     /// - `false`: `400 Bad Request` with a generic message
-    /// - `Err` of an [`Error`](crate::error::Error): the error's own status, instance and
-    ///   attached response, as it would from a handler
-    /// - `Err` of a [`std::io::Error`]: the status its kind maps to, as it would from a handler
-    /// - `Err` of any other error, a string included: `400 Bad Request` with that message
-    ///
-    /// An error type of your own implementing [`IntoError`](crate::error::IntoError) keeps its
-    /// status once the filter returns it as `Err(Error::from(err))`.
+    /// - `Err` of an [`Error`](crate::error::Error) or of an [`IntoError`](crate::error::IntoError)
+    ///   type: the status the error converts with, as it would from a handler - a `StatusCode`,
+    ///   a [`std::io::Error`] by its kind, an `OAuthError` by its code, an error's instance and
+    ///   attached response
+    /// - `Err` of a string or a `Box<dyn std::error::Error + Send + Sync>`: `400 Bad Request`
+    ///   with that message, where a handler answers `500`. Such an error has no status of its
+    ///   own, and a filter's error is taken for the reason the request is refused.
     ///
     /// # Example
     /// ```no_run
@@ -933,16 +934,17 @@ impl<'a> RouteGroup<'a> {
     /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
-    /// A request the filter stops goes to the error handler, answering with the status of what
-    /// the filter returned:
+    /// The `Err` takes what a handler's does: an [`Error`](crate::error::Error), or any type
+    /// implementing [`IntoError`](crate::error::IntoError). A request the filter stops goes to
+    /// the error handler, answering with the status of what the filter returned:
     /// - `false`: `400 Bad Request` with a generic message
-    /// - `Err` of an [`Error`](crate::error::Error): the error's own status, instance and
-    ///   attached response, as it would from a handler
-    /// - `Err` of a [`std::io::Error`]: the status its kind maps to, as it would from a handler
-    /// - `Err` of any other error, a string included: `400 Bad Request` with that message
-    ///
-    /// An error type of your own implementing [`IntoError`](crate::error::IntoError) keeps its
-    /// status once the filter returns it as `Err(Error::from(err))`.
+    /// - `Err` of an [`Error`](crate::error::Error) or of an [`IntoError`](crate::error::IntoError)
+    ///   type: the status the error converts with, as it would from a handler - a `StatusCode`,
+    ///   a [`std::io::Error`] by its kind, an `OAuthError` by its code, an error's instance and
+    ///   attached response
+    /// - `Err` of a string or a `Box<dyn std::error::Error + Send + Sync>`: `400 Bad Request`
+    ///   with that message, where a handler answers `500`. Such an error has no status of its
+    ///   own, and a filter's error is taken for the reason the request is refused.
     ///
     /// > **Note:** [`Path`](crate::http::endpoints::args::path::Path) and [`NamedPath`](crate::http::endpoints::args::path::NamedPath) extractors are not meaningful in a
     /// > route group filter context since they depend on route-specific parameters. Use

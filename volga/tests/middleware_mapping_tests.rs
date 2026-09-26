@@ -9,6 +9,7 @@ use volga::headers::{Header, HttpHeaders, headers};
 use volga::http::FilterResult;
 use volga::middleware::{HttpContext, NextFn};
 use volga::test::TestServer;
+use volga::validation::ValidationError;
 use volga::{HttpRequestMut, HttpResponse, Json, ok, status};
 
 headers! {
@@ -376,8 +377,26 @@ async fn it_answers_a_filter_err_with_the_status_of_its_error() {
         });
         app.map_get("/io", || "ok")
             .filter(|| Err::<(), _>(IoError::new(ErrorKind::NotFound, "gone")));
+        app.map_get("/status", || "ok")
+            .filter(|| Err::<(), _>(StatusCode::UNAUTHORIZED));
+        app.map_get("/tuple", || "ok")
+            .filter(|| Err::<(), _>((StatusCode::CONFLICT, "taken")));
+        app.map_get("/validation", || "ok").filter(|| {
+            Err::<(), _>(
+                ValidationError::message("bad").with_status(StatusCode::UNPROCESSABLE_ENTITY),
+            )
+        });
         app.map_get("/string", || "ok")
             .filter(|| Err::<(), _>("nope"));
+        app.map_get("/string-with-error", || "ok")
+            .filter(|| FilterResult::err().with_error(String::from("nope")));
+        app.map_get("/boxed", || "ok")
+            .filter(|| Err::<(), Box<dyn std::error::Error + Send + Sync>>("boxed".into()));
+        app.map_get("/parse", || "ok").filter(|| {
+            "x".parse::<i32>()
+                .map(|_| ())
+                .map_err(|err| (StatusCode::BAD_REQUEST, err))
+        });
         app.map_get("/false", || "ok").filter(|| false);
         app.group("/group", |api| {
             api.filter(|| {
@@ -392,7 +411,13 @@ async fn it_answers_a_filter_err_with_the_status_of_its_error() {
         ("/volga", 401, "no key"),
         ("/with-error", 403, "forbidden"),
         ("/io", 404, "gone"),
+        ("/status", 401, "Unauthorized"),
+        ("/tuple", 409, "taken"),
+        ("/validation", 422, "bad"),
         ("/string", 400, "nope"),
+        ("/string-with-error", 400, "nope"),
+        ("/boxed", 400, "boxed"),
+        ("/parse", 400, "invalid digit found in string"),
         (
             "/false",
             400,
@@ -466,7 +491,9 @@ async fn it_answers_a_filter_err_with_the_response_its_error_carries() {
     server.shutdown().await;
 }
 
+// A `Problem` is as large as it is, and an `Err` of one is what the `/problem` route is about
 #[cfg(feature = "problem-details")]
+#[allow(clippy::result_large_err)]
 #[tokio::test]
 async fn it_answers_a_filter_err_under_problem_details() {
     let server = TestServer::spawn(|app| {
@@ -475,6 +502,9 @@ async fn it_answers_a_filter_err_under_problem_details() {
             .filter(|| Err::<(), _>(Error::from_parts(StatusCode::UNAUTHORIZED, None, "no key")));
         app.map_get("/carried", || "ok")
             .filter(|| Err::<(), _>(denied()));
+        app.map_get("/problem", || "ok").filter(|| {
+            Err::<(), _>(volga::error::ProblemDetails::new(422).with_detail("field is invalid"))
+        });
     })
     .await;
 
@@ -490,6 +520,45 @@ async fn it_answers_a_filter_err_under_problem_details() {
         get(&server, "/carried").await,
         (403, "application/json".into(), r#""denied""#.into())
     );
+
+    let (status, content_type, body) = get(&server, "/problem").await;
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+    assert_eq!(status, 422);
+    assert_eq!(content_type, "application/problem+json");
+    assert_eq!(body["detail"], "field is invalid");
+
+    server.shutdown().await;
+}
+
+#[cfg(feature = "oauth")]
+#[tokio::test]
+async fn it_answers_a_filter_oauth_error_with_the_status_of_its_code() {
+    use volga::auth::oauth::{OAuthError, OAuthErrorCode};
+
+    let server = TestServer::spawn(|app| {
+        app.map_get("/invalid-token", || "ok")
+            .filter(|| Err::<(), _>(OAuthError::new(OAuthErrorCode::InvalidToken)));
+        app.group("/scoped", |api| {
+            api.filter(|| Err::<(), _>(OAuthError::new(OAuthErrorCode::InsufficientScope)));
+            api.map_get("/test", || "ok");
+        });
+    })
+    .await;
+
+    let cases = [
+        ("/invalid-token", 401, "invalid_token"),
+        ("/scoped/test", 403, "insufficient_scope"),
+    ];
+
+    for (path, status, body) in cases {
+        let (actual_status, _, actual_body) = get(&server, path).await;
+        assert_eq!(
+            (actual_status, actual_body.as_str()),
+            (status, body),
+            "{path}"
+        );
+    }
 
     server.shutdown().await;
 }
