@@ -229,6 +229,17 @@ impl App {
     /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
     ///
+    /// A request the filter stops goes to the error handler, answering with the status of what
+    /// the filter returned:
+    /// - `false`: `400 Bad Request` with a generic message
+    /// - `Err` of an [`Error`](crate::error::Error): the error's own status, instance and
+    ///   attached response, as it would from a handler
+    /// - `Err` of a [`std::io::Error`]: the status its kind maps to, as it would from a handler
+    /// - `Err` of any other error, a string included: `400 Bad Request` with that message
+    ///
+    /// An error type of your own implementing [`IntoError`](crate::error::IntoError) keeps its
+    /// status once the filter returns it as `Err(Error::from(err))`.
+    ///
     /// > **Note:** [`Path`](crate::http::endpoints::args::path::Path) and [`NamedPath`](crate::http::endpoints::args::path::NamedPath) extractors are not meaningful in a global
     /// > filter context since they depend on route-specific parameters. Use
     /// > them only when registering a filter for a specific route.
@@ -261,6 +272,26 @@ impl App {
     /// let mut app = App::new();
     ///
     /// app.filter(|headers: HttpHeaders| headers.get_raw("x-api-key").is_some());
+    ///
+    /// app.map_get("/sum", |x: i32, y: i32| x + y);
+    ///# app.run().await
+    ///# }
+    /// ```
+    ///
+    /// A filter answering with a status of its own returns an [`Error`](crate::error::Error)
+    /// with that status:
+    /// ```no_run
+    /// use volga::{App, error::Error, headers::HttpHeaders, http::StatusCode};
+    ///
+    ///# #[tokio::main]
+    ///# async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// // 401 Unauthorized without the header
+    /// app.filter(|headers: HttpHeaders| match headers.get_raw("x-api-key") {
+    ///     Some(_) => Ok(()),
+    ///     None => Err(Error::from_parts(StatusCode::UNAUTHORIZED, None, "missing API key")),
+    /// });
     ///
     /// app.map_get("/sum", |x: i32, y: i32| x + y);
     ///# app.run().await
@@ -550,6 +581,17 @@ impl<'a> Route<'a> {
     /// Adds a filter middleware handler for this route that would return
     /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
+    ///
+    /// A request the filter stops goes to the error handler, answering with the status of what
+    /// the filter returned:
+    /// - `false`: `400 Bad Request` with a generic message
+    /// - `Err` of an [`Error`](crate::error::Error): the error's own status, instance and
+    ///   attached response, as it would from a handler
+    /// - `Err` of a [`std::io::Error`]: the status its kind maps to, as it would from a handler
+    /// - `Err` of any other error, a string included: `400 Bad Request` with that message
+    ///
+    /// An error type of your own implementing [`IntoError`](crate::error::IntoError) keeps its
+    /// status once the filter returns it as `Err(Error::from(err))`.
     ///
     /// # Example
     /// ```no_run
@@ -890,6 +932,17 @@ impl<'a> RouteGroup<'a> {
     /// Adds a filter middleware handler for a group of routes that would return
     /// either `bool`, [`Result`] or [`FilterResult`](crate::http::FilterResult)
     /// and breaks the middleware chain if it's a `false` or [`Err`] values
+    ///
+    /// A request the filter stops goes to the error handler, answering with the status of what
+    /// the filter returned:
+    /// - `false`: `400 Bad Request` with a generic message
+    /// - `Err` of an [`Error`](crate::error::Error): the error's own status, instance and
+    ///   attached response, as it would from a handler
+    /// - `Err` of a [`std::io::Error`]: the status its kind maps to, as it would from a handler
+    /// - `Err` of any other error, a string included: `400 Bad Request` with that message
+    ///
+    /// An error type of your own implementing [`IntoError`](crate::error::IntoError) keeps its
+    /// status once the filter returns it as `Err(Error::from(err))`.
     ///
     /// > **Note:** [`Path`](crate::http::endpoints::args::path::Path) and [`NamedPath`](crate::http::endpoints::args::path::NamedPath) extractors are not meaningful in a
     /// > route group filter context since they depend on route-specific parameters. Use

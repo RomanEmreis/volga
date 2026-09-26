@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-# Unreleased
+# 0.12.0
 
 ## Added
 * `volga::error::IntoError`: the `Err` of a handler's `Result<T, E>` goes to the error handler as an `Error`. It is implemented for volga's own error types (`std::io::Error`, `serde_json::Error`, `Infallible` and the rest), `StatusCode`, `(StatusCode, E)`, strings (`500`), `Box<dyn std::error::Error + Send + Sync>` (`500`) and `Problem<E>`, and not for integers. Every `IntoError` type also gets `From<T> for Error`, so `?` converts it too, and a type of your own needs this one impl. (#262)
@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - A type with its own `From<T> for Error` still converts with `?`, but can't be a handler's `Err` until it implements `IntoError` in place of `From`.
 * `Error` is 32 bytes instead of 48 on 64-bit targets, and an extractor's `Result<T, Error>` shrinks with it whenever `T` is smaller than 48 bytes. (#262)
 * The compile error for a handler's return type names `IntoError` as the requirement for a `Result`'s `Err`.
+
+## Fixed
+* A filter answered `400` for every `Err`. A `volga::Error` was wrapped in a new `400` error, so the status it was created with, its instance and the response attached with `Error::with_response` were lost, and `map_err` got the wrapper with the error nested inside. A filter returning `Err(Error)`, or `FilterResult::with_error` given one, now answers with that error as it is, as a handler does: `Err(Error::from_parts(StatusCode::UNAUTHORIZED, ..))` answers `401`. An `Err(std::io::Error)` answers with the status its kind maps to, as from a handler (`NotFound` -> `404`, `PermissionDenied` -> `403`, `Other` -> `500`), so a filter's `Err` is no longer always a `4xx`. `false` and any other error, a string included, still answer `400`. (#263)
 
 # 0.11.2
 

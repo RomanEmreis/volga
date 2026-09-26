@@ -3,14 +3,33 @@
 #![cfg(all(feature = "test", feature = "middleware"))]
 
 use hyper::StatusCode;
+use std::io::{Error as IoError, ErrorKind};
 use volga::error::Error;
 use volga::headers::{Header, HttpHeaders, headers};
+use volga::http::FilterResult;
 use volga::middleware::{HttpContext, NextFn};
 use volga::test::TestServer;
-use volga::{HttpRequestMut, HttpResponse, ok};
+use volga::{HttpRequestMut, HttpResponse, Json, ok, status};
 
 headers! {
     (XTest, "x-test")
+}
+
+/// Status, `Content-Type` and body of a `GET`
+async fn get(server: &TestServer, path: &str) -> (u16, String, String) {
+    let res = server.client().get(server.url(path)).send().await.unwrap();
+    let status = res.status().as_u16();
+    let content_type = res
+        .headers()
+        .get("content-type")
+        .map(|v| v.to_str().unwrap().to_owned())
+        .unwrap_or_default();
+    (status, content_type, res.text().await.unwrap())
+}
+
+/// A `403` answering with a JSON body of its own
+fn denied() -> Error {
+    Error::from_parts(StatusCode::FORBIDDEN, None, "nope").with_response(Json("denied"))
 }
 
 #[tokio::test]
@@ -339,6 +358,138 @@ async fn it_adds_valid_filter_middleware_for_group() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "Pass!");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_answers_a_filter_err_with_the_status_of_its_error() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/volga", || "ok")
+            .filter(|| Err::<(), _>(Error::from_parts(StatusCode::UNAUTHORIZED, None, "no key")));
+        app.map_get("/with-error", || "ok").filter(|| {
+            FilterResult::err().with_error(Error::from_parts(
+                StatusCode::FORBIDDEN,
+                None,
+                "forbidden",
+            ))
+        });
+        app.map_get("/io", || "ok")
+            .filter(|| Err::<(), _>(IoError::new(ErrorKind::NotFound, "gone")));
+        app.map_get("/string", || "ok")
+            .filter(|| Err::<(), _>("nope"));
+        app.map_get("/false", || "ok").filter(|| false);
+        app.group("/group", |api| {
+            api.filter(|| {
+                Err::<(), _>(Error::from_parts(StatusCode::UNAUTHORIZED, None, "no key"))
+            });
+            api.map_get("/test", || "ok");
+        });
+    })
+    .await;
+
+    let cases = [
+        ("/volga", 401, "no key"),
+        ("/with-error", 403, "forbidden"),
+        ("/io", 404, "gone"),
+        ("/string", 400, "nope"),
+        (
+            "/false",
+            400,
+            "Validation: One or more request parameters are incorrect",
+        ),
+        ("/group/test", 401, "no key"),
+    ];
+
+    for (path, status, body) in cases {
+        let (actual_status, _, actual_body) = get(&server, path).await;
+        assert_eq!(
+            (actual_status, actual_body.as_str()),
+            (status, body),
+            "{path}"
+        );
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_hands_a_filter_err_to_map_err_as_it_is() {
+    let server = TestServer::spawn(|app| {
+        app.map_err(|err: Error| async move {
+            let (status, instance, inner) = err.into_parts();
+            let nested = inner.downcast_ref::<Error>().is_some();
+            status!(
+                status.as_u16(),
+                "instance={} nested={nested}",
+                instance.unwrap_or_default()
+            )
+        });
+        app.map_get("/test", || "ok").filter(|| {
+            Err::<(), _>(Error::from_parts(
+                StatusCode::FORBIDDEN,
+                Some("/custom".into()),
+                "nope",
+            ))
+        });
+    })
+    .await;
+
+    let (status, _, body) = get(&server, "/test").await;
+
+    assert_eq!(status, 403);
+    assert_eq!(body, "instance=/custom nested=false");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_answers_a_filter_err_with_the_response_its_error_carries() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/route", || "ok")
+            .filter(|| Err::<(), _>(denied()));
+        app.group("/group", |api| {
+            api.filter(|| FilterResult::err().with_error(denied()));
+            api.map_get("/test", || "ok");
+        });
+    })
+    .await;
+
+    for path in ["/route", "/group/test"] {
+        assert_eq!(
+            get(&server, path).await,
+            (403, "application/json".into(), r#""denied""#.into()),
+            "{path}"
+        );
+    }
+
+    server.shutdown().await;
+}
+
+#[cfg(feature = "problem-details")]
+#[tokio::test]
+async fn it_answers_a_filter_err_under_problem_details() {
+    let server = TestServer::spawn(|app| {
+        app.use_problem_details();
+        app.map_get("/status", || "ok")
+            .filter(|| Err::<(), _>(Error::from_parts(StatusCode::UNAUTHORIZED, None, "no key")));
+        app.map_get("/carried", || "ok")
+            .filter(|| Err::<(), _>(denied()));
+    })
+    .await;
+
+    let (status, content_type, body) = get(&server, "/status").await;
+    let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+    assert_eq!(status, 401);
+    assert_eq!(content_type, "application/problem+json");
+    assert_eq!(body["status"], 401);
+    assert_eq!(body["detail"], "no key");
+
+    assert_eq!(
+        get(&server, "/carried").await,
+        (403, "application/json".into(), r#""denied""#.into())
+    );
 
     server.shutdown().await;
 }
