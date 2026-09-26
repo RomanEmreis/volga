@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# Unreleased
+
+## Added
+* `volga::error::IntoError`: the `Err` of a handler's `Result<T, E>` goes to the error handler as an `Error`. It is implemented for volga's own error types (`std::io::Error`, `serde_json::Error`, `Infallible` and the rest), `StatusCode`, `(StatusCode, E)`, strings (`500`), `Box<dyn std::error::Error + Send + Sync>` (`500`) and `Problem<E>`, and not for integers. Every `IntoError` type also gets `From<T> for Error`, so `?` converts it too, and a type of your own needs this one impl. (#262)
+* `Error::with_response`, `has_response` and `take_response`: an error can carry the response it answers with, such as a JSON body or a `Problem`, and still reach `map_err`. The default handler and `use_problem_details` send that response unchanged, with the error's status. (#262)
+* `IntoError::describe_openapi` (feature `openapi`) lets an error type describe its responses. `Result<T, E>` now describes both `T` and `E`. (#262)
+* WebSocket conversions (`map_msg`, `WebSocket::on_msg`, `send` and `recv`, `WsSink::send`, `WsStream::recv`) accept any error that converts into `Error`, not only `Error` itself. As a result, a `map_msg` handler can reply with a `Message`. (#262)
+* A `custom_error` example.
+
+## Changed
+* **Breaking:** a handler's `Err` is now handled as an error, not as a second response. `E` must be `Error` or implement `IntoError`, instead of implementing `IntoResponse`, and the error goes through the error handler. This applies to handlers, `map_err`, `map_fallback`, `with` and `map_ok`. (#262)
+  - `Err(String)` and other strings answer `500` instead of `200`. This still compiles, so nothing flags it.
+  - `Err(StatusCode)` and `Err(Problem)` keep their status but now reach `map_err`. `Err(StatusCode)` answers with its canonical reason instead of an empty body, or with problem details under `use_problem_details`.
+  - `Err(HttpResponse)`, `Err(Json<T>)` and other response types no longer compile.
+  - A type with its own `From<T> for Error` still converts with `?`, but can't be a handler's `Err` until it implements `IntoError` in place of `From`.
+* `Error` is 32 bytes instead of 48 on 64-bit targets, and an extractor's `Result<T, Error>` shrinks with it whenever `T` is smaller than 48 bytes. (#262)
+* The compile error for a handler's return type names `IntoError` as the requirement for a `Result`'s `Err`.
+
 # 0.11.2
 
 ## Added

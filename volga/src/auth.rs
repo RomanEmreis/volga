@@ -801,7 +801,7 @@ mod tests {
         let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::UNAUTHORIZED);
-        assert!(error.instance.is_none());
+        assert!(error.instance().is_none());
     }
 
     #[test]
@@ -810,7 +810,7 @@ mod tests {
         let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::UNAUTHORIZED);
-        assert!(error.instance.is_none());
+        assert!(error.instance().is_none());
     }
 
     #[test]
@@ -818,7 +818,7 @@ mod tests {
         let error = Error::from_jwt_error(base64_jwt_error());
 
         assert_eq!(error.status, StatusCode::UNAUTHORIZED);
-        assert!(error.instance.is_none());
+        assert!(error.instance().is_none());
     }
 
     #[test]
@@ -829,7 +829,7 @@ mod tests {
         let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::UNAUTHORIZED);
-        assert!(error.instance.is_none());
+        assert!(error.instance().is_none());
     }
 
     #[test]
@@ -838,6 +838,6 @@ mod tests {
         let error = Error::from_jwt_error(jwt_error);
 
         assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert!(error.instance.is_none());
+        assert!(error.instance().is_none());
     }
 }

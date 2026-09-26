@@ -24,10 +24,10 @@ const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 pub(super) struct WebSocketError;
 
-impl From<tokio_tungstenite::tungstenite::Error> for Error {
+impl crate::error::IntoError for tokio_tungstenite::tungstenite::Error {
     #[inline]
-    fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
-        Error::server_error(err)
+    fn into_error(self) -> Error {
+        Error::server_error(self)
     }
 }
 
@@ -180,8 +180,10 @@ impl App {
     where
         F: MessageHandler<Msg, Args, M, Output = R> + 'static,
         Args: FromRequest + Clone + Send + 'static,
-        Msg: TryFrom<Message, Error = Error> + Send,
-        R: TryInto<Message, Error = Error> + Send,
+        Msg: TryFrom<Message> + Send,
+        Msg::Error: Into<Error>,
+        R: TryInto<Message> + Send,
+        R::Error: Into<Error>,
         M: 'static,
     {
         self.map_conn(pattern, move |req: HttpRequest| {

@@ -21,7 +21,7 @@ form_urlencoded = "1.2.2"
 http = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["client"] }
-hyper-rustls = { version = "0.27.9", default-features = false, features = ["tls12", "webpki-tokio", "aws-lc-rs"] }
+hyper-rustls = { version = "0.27.10", default-features = false, features = ["tls12", "webpki-tokio", "aws-lc-rs"] }
 hyper-util = { workspace = true, features = ["client", "client-legacy", "tokio"] }
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"], optional = true }
 serde = { workspace = true, features = ["derive"] }

@@ -26,10 +26,10 @@ impl FromContainer for () {
     }
 }
 
-impl From<error::Error> for Error {
+impl crate::error::IntoError for error::Error {
     #[inline]
-    fn from(err: error::Error) -> Self {
-        Error::server_error(err.to_string())
+    fn into_error(self) -> Error {
+        Error::server_error(self.to_string())
     }
 }
 

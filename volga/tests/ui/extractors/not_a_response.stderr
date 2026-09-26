@@ -9,7 +9,7 @@ help: the trait `IntoResponse` is not implemented for `NotAResponse`
   |
 3 | struct NotAResponse;
   | ^^^^^^^^^^^^^^^^^^^
-  = note: a handler returns `HttpResult`, or anything that converts into one: `()`, `&'static str`, `String`, `Json<T>`, `Form<T>`, `ByteStream`, `HttpResponse`, or a `Result<T, E>` / `Option<T>` around them
+  = note: a handler returns `HttpResult`, or anything that converts into one: `()`, `&'static str`, `String`, `Json<T>`, `Form<T>`, `ByteStream`, `HttpResponse`, an `Option<T>` around them, or a `Result<T, E>` around them with an `E` implementing `volga::error::IntoError`
   = note: the `ok!`, `created!`, `bad_request!` and `status!` macros build one for you
   = help: the following other types implement trait `IntoResponse`:
             &'static str

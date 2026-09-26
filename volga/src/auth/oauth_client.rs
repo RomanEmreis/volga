@@ -463,7 +463,7 @@ fn discovery_error(err: ClientError) -> Error {
     Error::server_error(format!("OAuth issuer discovery failed: {err}"))
 }
 
-impl From<ClientError> for Error {
+impl crate::error::IntoError for ClientError {
     /// Converts a [`ClientError`] into a [`volga::Error`](crate::error::Error),
     /// so a handler that talks to an authorization server can propagate the
     /// failure with `?`.
@@ -483,8 +483,8 @@ impl From<ClientError> for Error {
     /// A handler that wants to surface an authorization server's own error
     /// code to its caller should match on [`ClientError::Protocol`] instead
     /// of relying on this.
-    fn from(err: ClientError) -> Self {
-        let status = match &err {
+    fn into_error(self) -> Error {
+        let status = match &self {
             ClientError::Transport(_) => StatusCode::SERVICE_UNAVAILABLE,
             ClientError::Protocol(_) | ClientError::Http(_) | ClientError::Decode(_) => {
                 StatusCode::BAD_GATEWAY
@@ -492,7 +492,7 @@ impl From<ClientError> for Error {
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         };
 
-        Self::from_parts(status, None, err)
+        Error::from_parts(status, None, self)
     }
 }
 

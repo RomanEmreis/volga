@@ -617,23 +617,23 @@ impl TlsConfig {
     }
 }
 
-impl From<tokio_rustls::rustls::Error> for Error {
+impl crate::error::IntoError for tokio_rustls::rustls::Error {
     #[inline]
-    fn from(err: tokio_rustls::rustls::Error) -> Self {
-        Self::server_error(format!("TLS config error: {err}"))
+    fn into_error(self) -> Error {
+        Error::server_error(format!("TLS config error: {self}"))
     }
 }
 
-impl From<tokio_rustls::rustls::pki_types::pem::Error> for Error {
-    fn from(err: tokio_rustls::rustls::pki_types::pem::Error) -> Self {
-        Self::server_error(format!("TLS config error: {err}"))
+impl crate::error::IntoError for tokio_rustls::rustls::pki_types::pem::Error {
+    fn into_error(self) -> Error {
+        Error::server_error(format!("TLS config error: {self}"))
     }
 }
 
-impl From<tokio_rustls::rustls::server::VerifierBuilderError> for Error {
+impl crate::error::IntoError for tokio_rustls::rustls::server::VerifierBuilderError {
     #[inline]
-    fn from(err: tokio_rustls::rustls::server::VerifierBuilderError) -> Self {
-        Self::server_error(format!("TLS config error: {err}"))
+    fn into_error(self) -> Error {
+        Error::server_error(format!("TLS config error: {self}"))
     }
 }
 

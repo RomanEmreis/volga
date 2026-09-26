@@ -227,7 +227,7 @@ pub trait WebSocketHandler<Args>: Clone + Send + Sync + 'static {
 /// `M` is the handler's shape - [`marker::Async`] or [`marker::Immediate`] - inferred where the
 /// handler is registered: it may return a future or the reply directly. As with
 /// [`GenericHandler`](crate::http::GenericHandler), the `Immediate` impl's own
-/// `TryInto<Message, Error = Error>` bound is what keeps a future out of it.
+/// `TryInto<Message>` bound is what keeps a future out of it.
 pub trait MessageHandler<Msg: TryFrom<Message>, Args, M = marker::Async>:
     Clone + Send + Sync + 'static
 {
@@ -277,7 +277,8 @@ macro_rules! define_generic_message_handler ({ $($param:ident)* } => {
     where
         Func: Fn(Msg, $($param),*) -> R + Send + Sync + Clone + 'static,
         Msg: TryFrom<Message> + Send,
-        R: TryInto<Message, Error = Error> + Send,
+        R: TryInto<Message> + Send,
+        R::Error: Into<Error>,
     {
         type Output = R;
         type Future = std::future::Ready<R>;

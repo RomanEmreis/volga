@@ -1,7 +1,7 @@
 //! [`From ] trait implementations from various types into HTTP response
 
 use super::{HttpBody, HttpResponse, HttpResult};
-use crate::error::Error;
+use crate::error::{Error, IntoError};
 use crate::headers::{ContentType, HeaderMap};
 use crate::http::endpoints::args::byte_stream::IntoByteResult;
 use crate::http::{StatusCode, sse::SseStream};
@@ -23,7 +23,7 @@ use std::{borrow::Cow, convert::Infallible, io::Error as IoError};
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be returned from a request handler",
     label = "not a response",
-    note = "a handler returns `HttpResult`, or anything that converts into one: `()`, `&'static str`, `String`, `Json<T>`, `Form<T>`, `ByteStream`, `HttpResponse`, or a `Result<T, E>` / `Option<T>` around them",
+    note = "a handler returns `HttpResult`, or anything that converts into one: `()`, `&'static str`, `String`, `Json<T>`, `Form<T>`, `ByteStream`, `HttpResponse`, an `Option<T>` around them, or a `Result<T, E>` around them with an `E` implementing `volga::error::IntoError`",
     note = "the `ok!`, `created!`, `bad_request!` and `status!` macros build one for you"
 )]
 pub trait IntoResponse {
@@ -75,16 +75,16 @@ impl IntoResponse for Infallible {
     }
 }
 
-impl<T, E> IntoResponse for Result<T, E>
-where
-    T: IntoResponse,
-    E: IntoResponse,
-{
+/// `Ok` answers with `T`, and `Err` goes to the error handler as it is.
+///
+/// A handler's own [`HttpResult`] is this impl. It is separate from the one below because
+/// [`Error`] does not implement [`IntoError`]; the two never overlap.
+impl<T: IntoResponse> IntoResponse for Result<T, Error> {
     #[inline]
     fn into_response(self) -> HttpResult {
         match self {
             Ok(ok) => ok.into_response(),
-            Err(err) => err.into_response(),
+            Err(err) => Err(err),
         }
     }
 
@@ -93,6 +93,29 @@ where
         config: crate::openapi::OpenApiRouteConfig,
     ) -> crate::openapi::OpenApiRouteConfig {
         T::describe_openapi(config)
+    }
+}
+
+/// `Ok` answers with `T`. `Err` is turned into an [`Error`] through [`IntoError`] and goes to
+/// the error handler, so it is never answered as though it were a response.
+impl<T, E> IntoResponse for Result<T, E>
+where
+    T: IntoResponse,
+    E: IntoError,
+{
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        match self {
+            Ok(ok) => ok.into_response(),
+            Err(err) => Err(err.into_error()),
+        }
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
+        E::describe_openapi(T::describe_openapi(config))
     }
 }
 
@@ -715,6 +738,20 @@ mod tests {
             "text/plain; charset=utf-8"
         );
         assert_eq!(response.status(), 200);
+    }
+
+    #[test]
+    fn it_turns_an_err_into_an_error_rather_than_a_response() {
+        let err = Err::<&'static str, _>("boom").into_response().unwrap_err();
+
+        assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.to_string(), "boom");
+
+        let err = Err::<&'static str, _>(StatusCode::NOT_FOUND)
+            .into_response()
+            .unwrap_err();
+
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

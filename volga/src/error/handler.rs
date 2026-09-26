@@ -68,9 +68,7 @@ impl ErrorArgsSlot {
         match self {
             Self::Uri(uri) => {
                 let mut err = err;
-                if err.instance.is_none() {
-                    err.instance = Some(uri.to_string());
-                }
+                err.set_instance_if_none(|| uri.to_string());
                 default_error_handler(err).await
             }
             Self::Custom(args) => args.call(err).await,
@@ -127,7 +125,7 @@ where
 }
 
 /// Stores a pre-extracted handler invocation: the function, its arguments,
-/// and the request URI (for `err.instance`). Allocated once per request
+/// and the request URI (for the error's instance). Allocated once per request
 /// instead of cloning the full `Parts`.
 struct BoundErrorArgs<F, Args, M> {
     func: F,
@@ -145,9 +143,7 @@ where
 {
     fn call(self: Box<Self>, mut err: Error) -> BoxFuture<'static, HttpResult> {
         Box::pin(async move {
-            if err.instance.is_none() {
-                err.instance = Some(self.uri.to_string());
-            }
+            err.set_instance_if_none(|| self.uri.to_string());
             match self.func.map_err(err, self.args).await.into_response() {
                 Ok(resp) => Ok(resp),
                 Err(err) => default_error_handler(err).await,
@@ -164,9 +160,7 @@ struct DefaultErrorArgs {
 impl ErasedErrorArgs for DefaultErrorArgs {
     fn call(self: Box<Self>, mut err: Error) -> BoxFuture<'static, HttpResult> {
         Box::pin(async move {
-            if err.instance.is_none() {
-                err.instance = Some(self.uri.to_string());
-            }
+            err.set_instance_if_none(|| self.uri.to_string());
             default_error_handler(err).await
         })
     }
@@ -211,9 +205,14 @@ where
 pub(crate) type PipelineErrorHandler = Arc<dyn ErrorHandler + Send + Sync>;
 
 /// Default error handler that creates a [`HttpResult`] from error
+///
+/// An error carrying a response of its own - see [`Error::with_response`] - answers with it.
 #[inline]
-pub(crate) async fn default_error_handler(err: Error) -> HttpResult {
-    status!(err.status.as_u16(), "{err}")
+pub(crate) async fn default_error_handler(mut err: Error) -> HttpResult {
+    match err.take_response() {
+        Some(response) => Ok(response),
+        None => status!(err.status.as_u16(), "{err}"),
+    }
 }
 
 /// Extracts error handler arguments from request parts before they are consumed.
@@ -266,6 +265,19 @@ mod tests {
 
         assert_eq!(response.status(), 400);
         assert_eq!(String::from_utf8_lossy(body), "Some error");
+    }
+
+    #[tokio::test]
+    async fn default_error_handler_answers_with_the_attached_response() {
+        let error = Error::client_error("Some error").with_response(status!(200, "custom"));
+        let response = default_error_handler(error).await;
+        assert!(response.is_ok());
+
+        let mut response = response.unwrap();
+        let body = &response.body_mut().collect().await.unwrap().to_bytes();
+
+        assert_eq!(response.status(), 400);
+        assert_eq!(String::from_utf8_lossy(body), "custom");
     }
 
     #[tokio::test]
