@@ -3,6 +3,7 @@
 use super::{BoxError, Error};
 use crate::http::StatusCode;
 use std::borrow::Cow;
+use std::io::Error as IoError;
 
 /// Trait for types that can be the error of a request handler's [`Result`]
 ///
@@ -23,8 +24,21 @@ use std::borrow::Cow;
 ///   error type: `(StatusCode::BAD_REQUEST, "name is required")`
 /// - `String`, `&'static str`, `Cow<'static, str>`, `Box<str>`: `500` with that message
 /// - `Box<dyn std::error::Error + Send + Sync>`: `500`
-/// - [`Problem<E>`](crate::error::Problem) (feature `problem-details`): an error with the
+#[cfg_attr(
+    feature = "problem-details",
+    doc = "- [`Problem<E>`](crate::error::Problem) (feature `problem-details`): an error with the"
+)]
+#[cfg_attr(
+    not(feature = "problem-details"),
+    doc = "- `Problem<E>` (feature `problem-details`): an error with the"
+)]
 ///   problem's status, answering with the problem itself
+///
+/// It is also the error of a filter's `Result<(), E>` (feature `middleware`), which answers
+/// as a handler's does, with one exception. The strings and
+/// `Box<dyn std::error::Error + Send + Sync>` carry no status of their own, and answer `400`
+/// from a filter instead of `500`: there, such an error is taken for the reason the request
+/// is refused, as `false` is.
 ///
 /// Integers are left out on purpose: `Err(404)` reads as a status and as an application's
 /// error code alike, and `Err(StatusCode::NOT_FOUND)` says the same thing, checked at
@@ -111,6 +125,20 @@ pub trait IntoError {
     /// Converts the value into the [`Error`] the error handler receives
     fn into_error(self) -> Error;
 
+    /// Converts the value into the [`Error`] a filter that returns it answers with
+    ///
+    /// The same as [`into_error`](Self::into_error), except for the errors without a status
+    /// of their own - the strings and `Box<dyn std::error::Error + Send + Sync>` - which
+    /// answer `400` from a filter rather than `500`. Hidden, since it exists for those alone.
+    #[doc(hidden)]
+    #[inline]
+    fn into_filter_error(self) -> Error
+    where
+        Self: Sized,
+    {
+        self.into_error()
+    }
+
     /// Describes the responses this error answers with in the route's OpenAPI operation
     ///
     /// Called when a route whose handler returns `Result<T, Self>` is mapped. The default
@@ -178,12 +206,22 @@ impl IntoError for String {
     fn into_error(self) -> Error {
         Error::server_error(self)
     }
+
+    #[inline]
+    fn into_filter_error(self) -> Error {
+        Error::client_error(self)
+    }
 }
 
 impl IntoError for &'static str {
     #[inline]
     fn into_error(self) -> Error {
         Error::server_error(self)
+    }
+
+    #[inline]
+    fn into_filter_error(self) -> Error {
+        Error::client_error(self)
     }
 }
 
@@ -192,6 +230,11 @@ impl IntoError for Cow<'static, str> {
     fn into_error(self) -> Error {
         Error::server_error(self)
     }
+
+    #[inline]
+    fn into_filter_error(self) -> Error {
+        Error::client_error(self)
+    }
 }
 
 impl IntoError for Box<str> {
@@ -199,12 +242,29 @@ impl IntoError for Box<str> {
     fn into_error(self) -> Error {
         Error::server_error(String::from(self))
     }
+
+    #[inline]
+    fn into_filter_error(self) -> Error {
+        Error::client_error(String::from(self))
+    }
 }
 
 impl IntoError for BoxError {
     #[inline]
     fn into_error(self) -> Error {
         Error::server_error(self)
+    }
+
+    /// A boxed [`Error`] or [`io::Error`](IoError) keeps the status it has; any other boxed
+    /// error answers `400`
+    fn into_filter_error(self) -> Error {
+        match self.downcast::<Error>() {
+            Ok(err) => *err,
+            Err(err) => match err.downcast::<IoError>() {
+                Ok(err) => err.into_error(),
+                Err(err) => Error::client_error(err),
+            },
+        }
     }
 }
 
@@ -284,6 +344,57 @@ mod tests {
             assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(err.to_string(), "boom");
         }
+    }
+
+    #[test]
+    fn it_converts_an_error_without_a_status_into_a_client_error_for_a_filter() {
+        let errors = [
+            String::from("nope").into_filter_error(),
+            "nope".into_filter_error(),
+            Cow::<'static, str>::Borrowed("nope").into_filter_error(),
+            Box::<str>::from("nope").into_filter_error(),
+            BoxError::from("nope").into_filter_error(),
+        ];
+
+        for err in errors {
+            assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(err.to_string(), "nope");
+        }
+    }
+
+    #[test]
+    fn it_takes_a_volga_or_io_error_out_of_the_box_for_a_filter() {
+        let boxed = BoxError::from(Error::from_parts(
+            StatusCode::FORBIDDEN,
+            Some("/x".into()),
+            "nope",
+        ));
+        let err = boxed.into_filter_error();
+
+        assert_eq!(err.status(), StatusCode::FORBIDDEN);
+        assert_eq!(err.instance(), Some("/x"));
+        assert!(err.into_inner().downcast::<Error>().is_err());
+
+        let err = BoxError::from(IoError::new(ErrorKind::NotFound, "gone")).into_filter_error();
+
+        assert_eq!(err.status(), StatusCode::NOT_FOUND);
+        assert_eq!(err.to_string(), "gone");
+    }
+
+    #[test]
+    fn it_converts_any_other_error_for_a_filter_as_for_a_handler() {
+        let err = StatusCode::UNAUTHORIZED.into_filter_error();
+
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(err.to_string(), "Unauthorized");
+
+        let err = (StatusCode::CONFLICT, "taken").into_filter_error();
+
+        assert_eq!(err.status(), StatusCode::CONFLICT);
+
+        let err = IoError::other("boom").into_filter_error();
+
+        assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]

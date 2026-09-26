@@ -1,0 +1,20 @@
+error[E0277]: `{closure@$DIR/tests/ui/middleware/not_a_filter_verdict.rs:5:16: 5:18}` is not a filter
+ --> tests/ui/middleware/not_a_filter_verdict.rs:5:16
+  |
+5 |     app.filter(|| "1".parse::<i32>().map(|_| ()));
+  |         ------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ not a filter
+  |         |
+  |         required by a bound introduced by this call
+  |
+  = help: the trait `volga::middleware::Filter<_, _>` is not implemented for closure `{closure@$DIR/tests/ui/middleware/not_a_filter_verdict.rs:5:16: 5:18}`
+  = note: a filter is an `async fn` or a closure returning a future, or a plain `fn` or closure returning its verdict directly, taking up to 10 borrowing extractors as arguments
+  = note: the verdict is `bool`, `()`, `FilterResult` or `Result<(), E>`, where `E` is `volga::error::Error` or implements `volga::error::IntoError`, as the `Err` of a handler's `Result` does
+  = note: it must also be `Clone + Send + Sync + 'static`, which a closure capturing a non-`Send` value is not
+note: required by a bound in `middleware::<impl App>::filter`
+ --> src/middleware.rs
+  |
+  |     pub fn filter<F, Args, M>(&mut self, filter: F) -> &mut Self
+  |            ------ required by a bound in this associated function
+  |     where
+  |         F: Filter<Args, M>,
+  |            ^^^^^^^^^^^^^^^ required by this bound in `middleware::<impl App>::filter`

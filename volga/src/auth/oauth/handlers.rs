@@ -163,7 +163,14 @@ impl App {
     /// for `https://api.example.com/v1`).
     ///
     /// When bearer authentication is configured and no explicit
-    /// [`with_resource_metadata_url`] is set, the derived metadata URL is
+    #[cfg_attr(
+        feature = "jwt-auth",
+        doc = "[`with_resource_metadata_url`] is set, the derived metadata URL is"
+    )]
+    #[cfg_attr(
+        not(feature = "jwt-auth"),
+        doc = "`with_resource_metadata_url` (feature `jwt-auth`) is set, the derived metadata URL is"
+    )]
     /// advertised automatically in `WWW-Authenticate` challenges
     /// (RFC 9728 Section 5.1).
     ///
@@ -173,7 +180,10 @@ impl App {
     /// identifier is not a valid `http`/`https` URI or contains a query -
     /// these are startup misconfigurations.
     ///
-    /// [`with_resource_metadata_url`]: crate::auth::BearerAuthConfig::with_resource_metadata_url
+    #[cfg_attr(
+        feature = "jwt-auth",
+        doc = "[`with_resource_metadata_url`]: crate::auth::BearerAuthConfig::with_resource_metadata_url"
+    )]
     /// [`with_oauth_resource_metadata`]: App::with_oauth_resource_metadata
     /// [`set_oauth_resource_metadata`]: App::set_oauth_resource_metadata
     ///
