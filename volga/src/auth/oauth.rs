@@ -13,7 +13,14 @@
 //!   ([`grant`], [`client_auth`], [`token_type`], [`auth_scheme`]), spelled
 //!   the same way the client crates match on them, plus public signing keys
 //!   to publish ([`PublicJwk`], [`JwkSet`], [`JwsAlgorithm`] - the same
-//!   type as [`auth::Algorithm`](crate::auth::Algorithm), reachable here
+#![cfg_attr(
+    feature = "jwt-auth",
+    doc = "  type as [`auth::Algorithm`](crate::auth::Algorithm), reachable here"
+)]
+#![cfg_attr(
+    not(feature = "jwt-auth"),
+    doc = "  type as `auth::Algorithm`, reachable here"
+)]
 //!   without the `jwt-auth` feature) and PEM header inspection ([`pem`])
 //! * Built-in handlers serving the metadata documents from a volga
 //!   application: configure with

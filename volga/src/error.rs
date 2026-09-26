@@ -279,7 +279,14 @@ impl Error {
     /// The error is still an error. A handler set with [`map_err`](App::map_err) receives it
     /// and can answer with something else, or return the error to answer with this response.
     /// The default error handler and
-    /// [`use_problem_details`](App::use_problem_details) answer with the response unchanged.
+    #[cfg_attr(
+        feature = "problem-details",
+        doc = "[`use_problem_details`](App::use_problem_details) answer with the response unchanged."
+    )]
+    #[cfg_attr(
+        not(feature = "problem-details"),
+        doc = "`use_problem_details` (feature `problem-details`) answer with the response unchanged."
+    )]
     ///
     /// The response takes the error's status, whatever status it was built with, so a body
     /// can be passed alone, such as a [`Json`](crate::Json) value. The status, the instance
@@ -434,7 +441,14 @@ impl App {
     ///
     /// It takes the same arguments [`map_err`](Self::map_err) does - anything
     /// implementing [`FromRequestParts`], which covers headers, the URI,
-    /// cookies, [`ClientIp`](crate::ClientIp) and [`Dc<T>`](crate::di::Dc).
+    #[cfg_attr(
+        feature = "di",
+        doc = "cookies, [`ClientIp`](crate::ClientIp) and [`Dc<T>`](crate::di::Dc)."
+    )]
+    #[cfg_attr(
+        not(feature = "di"),
+        doc = "cookies, [`ClientIp`](crate::ClientIp) and `Dc<T>` (feature `di`)."
+    )]
     /// Not the body: nothing matched, so there is no route to say how a body
     /// should be read. Path parameters are out for the same reason -
     /// [`Path`](crate::Path) and [`NamedPath`](crate::NamedPath) have nothing

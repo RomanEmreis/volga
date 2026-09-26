@@ -222,6 +222,12 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --no-deps --all-features --locked
+      # With every feature on, every intra-doc link resolves. A link to an item behind a
+      # feature breaks only where that feature is off, as it is for a plain `cargo doc`
+      - name: Check documentation with the default features
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --locked -p volga
 
   build:
     environment: CICD

@@ -1024,7 +1024,14 @@ impl<'a> RouteGroup<'a> {
     /// catch-all, `/files/{*path}`, it answers what that catch-all reads, and binds it as the
     /// prefix names it. A fallback is not a route: it is neither
     /// listed with the routes nor described in an OpenAPI document, and
-    /// [`HttpContext::matched_route`](crate::middleware::HttpContext::matched_route) reads
+    #[cfg_attr(
+        feature = "middleware",
+        doc = "[`HttpContext::matched_route`](crate::middleware::HttpContext::matched_route) reads"
+    )]
+    #[cfg_attr(
+        not(feature = "middleware"),
+        doc = "`HttpContext::matched_route` (feature `middleware`) reads"
+    )]
     /// `false` for a request it answers, so a CORS preflight for a path only a fallback
     /// answers is not answered as though that path were an endpoint.
     ///

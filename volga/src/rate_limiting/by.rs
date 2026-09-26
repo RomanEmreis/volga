@@ -52,7 +52,11 @@ use crate::auth::{AuthClaims, Authenticated};
 /// Users construct `RateLimitKeySource` values via helper functions
 /// provided in the [`by`](crate::rate_limiting::by) module,
 /// such as [`by::ip`](crate::rate_limiting::by::ip)
-/// or [`by::user`](crate::rate_limiting::by::user).
+#[cfg_attr(
+    feature = "jwt-auth",
+    doc = "or [`by::user`](crate::rate_limiting::by::user)."
+)]
+#[cfg_attr(not(feature = "jwt-auth"), doc = "or `by::user` (feature `jwt-auth`).")]
 ///
 /// # Usage
 ///

@@ -24,7 +24,14 @@ use std::io::Error as IoError;
 ///   error type: `(StatusCode::BAD_REQUEST, "name is required")`
 /// - `String`, `&'static str`, `Cow<'static, str>`, `Box<str>`: `500` with that message
 /// - `Box<dyn std::error::Error + Send + Sync>`: `500`
-/// - [`Problem<E>`](crate::error::Problem) (feature `problem-details`): an error with the
+#[cfg_attr(
+    feature = "problem-details",
+    doc = "- [`Problem<E>`](crate::error::Problem) (feature `problem-details`): an error with the"
+)]
+#[cfg_attr(
+    not(feature = "problem-details"),
+    doc = "- `Problem<E>` (feature `problem-details`): an error with the"
+)]
 ///   problem's status, answering with the problem itself
 ///
 /// It is also the error of a filter's `Result<(), E>` (feature `middleware`), which answers
