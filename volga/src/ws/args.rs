@@ -1,6 +1,6 @@
 //! Type extractors and converters for WebSockets
 
-use crate::error::{Error, IntoError};
+use crate::error::Error;
 use crate::http::marker;
 use crate::ws::WebSocket;
 use bytes::Bytes;
@@ -278,7 +278,7 @@ macro_rules! define_generic_message_handler ({ $($param:ident)* } => {
         Func: Fn(Msg, $($param),*) -> R + Send + Sync + Clone + 'static,
         Msg: TryFrom<Message> + Send,
         R: TryInto<Message> + Send,
-        R::Error: IntoError,
+        R::Error: Into<Error>,
     {
         type Output = R;
         type Future = std::future::Ready<R>;

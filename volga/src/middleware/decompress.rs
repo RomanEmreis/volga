@@ -284,13 +284,13 @@ impl Display for DecompressionError {
     }
 }
 
-impl From<DecompressionError> for Error {
+impl crate::error::IntoError for DecompressionError {
     #[inline]
-    fn from(err: DecompressionError) -> Self {
+    fn into_error(self) -> Error {
         Error::from_parts(
             StatusCode::PAYLOAD_TOO_LARGE,
             None,
-            format!("Decompression error: {err}"),
+            format!("Decompression error: {self}"),
         )
     }
 }

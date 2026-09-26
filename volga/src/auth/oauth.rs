@@ -40,17 +40,17 @@ pub use volga_oauth_core::{
 
 mod handlers;
 
-impl From<OAuthError> for crate::error::Error {
+impl crate::error::IntoError for OAuthError {
     /// Converts an [`OAuthError`] into a [`volga::Error`](crate::error::Error),
     /// so OAuth failures can be propagated from handlers with `?`. The HTTP
     /// status is derived from the error code via [`OAuthErrorCode::status`].
     #[inline]
-    fn from(err: OAuthError) -> Self {
-        Self::from_parts(err.error.status(), None, err)
+    fn into_error(self) -> crate::error::Error {
+        crate::error::Error::from_parts(self.error.status(), None, self)
     }
 }
 
-impl From<jwk::UnsupportedAlgorithm> for crate::error::Error {
+impl crate::error::IntoError for jwk::UnsupportedAlgorithm {
     /// Converts a [`jwk::UnsupportedAlgorithm`] into a
     /// [`volga::Error`](crate::error::Error), so building a key to publish
     /// can be propagated from a handler with `?`.
@@ -59,8 +59,8 @@ impl From<jwk::UnsupportedAlgorithm> for crate::error::Error {
     /// cannot carry it is a misconfiguration of this server, never
     /// something a request caused.
     #[inline]
-    fn from(err: jwk::UnsupportedAlgorithm) -> Self {
-        Self::server_error(err)
+    fn into_error(self) -> crate::error::Error {
+        crate::error::Error::server_error(self)
     }
 }
 

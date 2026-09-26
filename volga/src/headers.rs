@@ -104,31 +104,31 @@ impl HeaderError {
     }
 }
 
-impl core::convert::From<InvalidHeaderValue> for Error {
+impl crate::error::IntoError for InvalidHeaderValue {
     #[inline]
-    fn from(error: InvalidHeaderValue) -> Self {
-        HeaderError::from_invalid_header_value(error)
+    fn into_error(self) -> Error {
+        HeaderError::from_invalid_header_value(self)
     }
 }
 
-impl core::convert::From<InvalidHeaderName> for Error {
+impl crate::error::IntoError for InvalidHeaderName {
     #[inline]
-    fn from(error: InvalidHeaderName) -> Self {
-        HeaderError::from_invalid_header_name(error)
+    fn into_error(self) -> Error {
+        HeaderError::from_invalid_header_name(self)
     }
 }
 
-impl core::convert::From<MaxSizeReached> for Error {
+impl crate::error::IntoError for MaxSizeReached {
     #[inline]
-    fn from(error: MaxSizeReached) -> Self {
-        HeaderError::from_max_size_reached(error)
+    fn into_error(self) -> Error {
+        HeaderError::from_max_size_reached(self)
     }
 }
 
-impl core::convert::From<ToStrError> for Error {
+impl crate::error::IntoError for ToStrError {
     #[inline]
-    fn from(error: ToStrError) -> Self {
-        HeaderError::from_to_str_error(error)
+    fn into_error(self) -> Error {
+        HeaderError::from_to_str_error(self)
     }
 }
 

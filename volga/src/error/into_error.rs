@@ -11,10 +11,13 @@ use std::borrow::Cow;
 /// [`App::map_err`](crate::App::map_err), or the default one. It is handled there as any other
 /// error is, whatever `E` is.
 ///
+/// It is the one impl an error type needs. Implementing it also gives `From<T> for Error`, so
+/// `?` converts the type wherever an [`Error`] is expected, such as in a handler returning
+/// [`HttpResult`](crate::HttpResult) or in middleware.
+///
 /// # Implemented for
-/// - every type with `From<T> for Error`: [`Error`] itself, [`std::io::Error`],
-///   `serde_json::Error`, [`Infallible`](std::convert::Infallible) and the rest of volga's
-///   own. A type of your own gets `IntoError` this way as well, from its `From` impl.
+/// - every error type volga converts into an [`Error`]: [`std::io::Error`], `serde_json::Error`,
+///   [`Infallible`](std::convert::Infallible) and the rest
 /// - [`StatusCode`]: an error with that status and its canonical reason as the message
 /// - `(StatusCode, E)`: an error with that status, wrapping `E`, which is a message or any
 ///   error type: `(StatusCode::BAD_REQUEST, "name is required")`
@@ -67,11 +70,42 @@ use std::borrow::Cow;
 ///
 /// An error answering with a body of its own attaches it with
 /// [`Error::with_response`].
+///
+/// # `IntoError` and `From`
+///
+/// `From<T> for Error` comes with `IntoError`, through a blanket impl, so a type implements
+/// `IntoError` and not `From`: having both is a conflict (E0119). A type with a `From` impl of
+/// its own still converts with `?`, but it is not a handler's `Err` until the body of its
+/// `from` moves into `into_error`. [`Error`] itself does not implement `IntoError`, since that
+/// would give it a second `From<Error>`; a handler's `Result<T, Error>` is answered by an impl
+/// of its own.
+///
+/// ```no_run
+/// use volga::{HttpResult, error::{Error, IntoError}, http::StatusCode, ok};
+///
+/// struct Gone;
+///
+/// impl IntoError for Gone {
+///     fn into_error(self) -> Error {
+///         Error::from_parts(StatusCode::GONE, None, "gone")
+///     }
+/// }
+///
+/// fn find() -> Result<u64, Gone> {
+///     Err(Gone)
+/// }
+///
+/// // `?` converts through the `From<Gone> for Error` that `IntoError` gives
+/// fn handler() -> HttpResult {
+///     let id = find()?;
+///     ok!("{id}")
+/// }
+/// ```
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be the error of a request handler's `Result`",
     label = "not an error",
     note = "the `Err` of a handler's `Result<T, E>` is turned into a `volga::error::Error` and handed to the error handler; `E` can be `Error`, `std::io::Error`, `StatusCode`, `(StatusCode, E)`, `String` or `&'static str`",
-    note = "implement `volga::error::IntoError` for `{Self}`, or `From<{Self}>` for `volga::error::Error`"
+    note = "implement `volga::error::IntoError` for `{Self}`; it gives `From<{Self}> for volga::error::Error` as well, so a `from` of its own moves into `into_error`"
 )]
 pub trait IntoError {
     /// Converts the value into the [`Error`] the error handler receives
@@ -110,13 +144,16 @@ pub trait IntoError {
     }
 }
 
-// Without `do_not_recommend`, a type that is not an error is reported as a missing
-// `From<T> for Error`, with every `From` impl listed, instead of with the text above
-#[diagnostic::do_not_recommend]
-impl<E: Into<Error>> IntoError for E {
+/// `?` converts every [`IntoError`] into an [`Error`]
+///
+/// This is why an error type needs `IntoError` alone, and why volga's own error types
+/// implement it rather than `From`: a `From<T> for Error` next to it would be a second impl of
+/// the same conversion. It does not overlap with the reflexive `From<Error> for Error`, because
+/// [`Error`] does not implement [`IntoError`].
+impl<E: IntoError> From<E> for Error {
     #[inline]
-    fn into_error(self) -> Error {
-        self.into()
+    fn from(err: E) -> Self {
+        err.into_error()
     }
 }
 
@@ -180,8 +217,16 @@ mod tests {
     use std::io::{Error as IoError, ErrorKind};
 
     #[test]
-    fn it_passes_an_error_through() {
-        let err = Error::from_parts(StatusCode::FORBIDDEN, Some("/x".into()), "nope").into_error();
+    fn it_passes_an_error_through_a_result() {
+        use crate::http::IntoResponse;
+
+        let err = Err::<&'static str, _>(Error::from_parts(
+            StatusCode::FORBIDDEN,
+            Some("/x".into()),
+            "nope",
+        ))
+        .into_response()
+        .unwrap_err();
 
         assert_eq!(err.status(), StatusCode::FORBIDDEN);
         assert_eq!(err.instance(), Some("/x"));
@@ -251,19 +296,55 @@ mod tests {
     }
 
     #[test]
-    fn it_converts_a_type_with_a_from_impl() {
+    fn it_gives_a_from_impl_for_the_question_mark() {
         struct Conflict;
 
-        impl From<Conflict> for Error {
-            fn from(_: Conflict) -> Self {
+        impl IntoError for Conflict {
+            fn into_error(self) -> Error {
                 Error::from_parts(StatusCode::CONFLICT, None, "conflict")
             }
         }
 
-        let err = Conflict.into_error();
+        fn fails() -> Result<(), Conflict> {
+            Err(Conflict)
+        }
+
+        fn propagates() -> Result<(), Error> {
+            fails()?;
+            Ok(())
+        }
+
+        let err = propagates().unwrap_err();
 
         assert_eq!(err.status(), StatusCode::CONFLICT);
         assert_eq!(err.to_string(), "conflict");
+        assert_eq!(Error::from(Conflict).status(), StatusCode::CONFLICT);
+    }
+
+    #[test]
+    fn it_is_implemented_for_every_error_type_volga_converts_from() {
+        fn into_error<T: IntoError>() {}
+
+        into_error::<std::convert::Infallible>();
+        into_error::<IoError>();
+        into_error::<serde_json::Error>();
+        into_error::<serde_urlencoded::ser::Error>();
+        into_error::<hyper::http::Error>();
+        into_error::<std::fmt::Error>();
+        into_error::<hyper::http::status::InvalidStatusCode>();
+        into_error::<crate::headers::InvalidHeaderValue>();
+        into_error::<crate::headers::InvalidHeaderName>();
+        into_error::<crate::headers::MaxSizeReached>();
+        into_error::<crate::headers::ToStrError>();
+        into_error::<crate::validation::ValidationError>();
+        into_error::<crate::validation::Invalid<IoError>>();
+
+        #[cfg(feature = "di")]
+        into_error::<crate::di::error::Error>();
+        #[cfg(feature = "ws")]
+        into_error::<tokio_tungstenite::tungstenite::Error>();
+        #[cfg(feature = "oauth")]
+        into_error::<crate::auth::oauth::OAuthError>();
     }
 
     #[test]

@@ -5,10 +5,7 @@ use crate::http::endpoints::{
     args::{FromPayload, FromRequest, Payload},
     handlers::GenericHandler,
 };
-use crate::{
-    App, HttpRequest,
-    error::{Error, IntoError},
-};
+use crate::{App, HttpRequest, error::Error};
 
 pub use self::{
     args::{Message, MessageHandler, WebSocketHandler},
@@ -27,10 +24,10 @@ const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 pub(super) struct WebSocketError;
 
-impl From<tokio_tungstenite::tungstenite::Error> for Error {
+impl crate::error::IntoError for tokio_tungstenite::tungstenite::Error {
     #[inline]
-    fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
-        Error::server_error(err)
+    fn into_error(self) -> Error {
+        Error::server_error(self)
     }
 }
 
@@ -184,9 +181,9 @@ impl App {
         F: MessageHandler<Msg, Args, M, Output = R> + 'static,
         Args: FromRequest + Clone + Send + 'static,
         Msg: TryFrom<Message> + Send,
-        Msg::Error: IntoError,
+        Msg::Error: Into<Error>,
         R: TryInto<Message> + Send,
-        R::Error: IntoError,
+        R::Error: Into<Error>,
         M: 'static,
     {
         self.map_conn(pattern, move |req: HttpRequest| {

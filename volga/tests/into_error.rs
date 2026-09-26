@@ -6,10 +6,10 @@
 
 use serde::Serialize;
 use volga::{
-    Json,
+    HttpResult, Json,
     error::{Error, IntoError},
     http::StatusCode,
-    status,
+    ok, status,
     test::TestServer,
 };
 
@@ -49,8 +49,9 @@ impl IntoError for ApiError {
 
 struct Gone;
 
-impl From<Gone> for Error {
-    fn from(_: Gone) -> Self {
+/// `IntoError` alone: it is a handler's `Err`, and `?` converts it into an `Error`
+impl IntoError for Gone {
+    fn into_error(self) -> Error {
         Error::from_parts(StatusCode::GONE, None, "gone")
     }
 }
@@ -67,7 +68,11 @@ async fn it_hands_every_err_to_the_error_handler() {
                 Err::<&'static str, _>((StatusCode::BAD_REQUEST, "name is required"))
             });
             app.map_get("/own", || Err::<&'static str, _>(ApiError::Conflict));
-            app.map_get("/from", || Err::<&'static str, _>(Gone));
+            app.map_get("/gone", || Err::<&'static str, _>(Gone));
+            app.map_get("/question-mark", || -> HttpResult {
+                Err::<(), _>(Gone)?;
+                ok!()
+            });
             app.map_get("/io", || {
                 Err::<&'static str, _>(std::io::Error::new(std::io::ErrorKind::NotFound, "no file"))
             });
@@ -81,7 +86,8 @@ async fn it_hands_every_err_to_the_error_handler() {
         ("/status", 404, "handled: Not Found"),
         ("/tuple", 400, "handled: name is required"),
         ("/own", 409, "handled: conflict"),
-        ("/from", 410, "handled: gone"),
+        ("/gone", 410, "handled: gone"),
+        ("/question-mark", 410, "handled: gone"),
         ("/io", 404, "handled: no file"),
     ];
 
@@ -317,12 +323,26 @@ mod openapi {
         }
     }
 
+    /// Converted with `?` as well, through the `From` that `IntoError` gives
+    struct Taken;
+
+    impl IntoError for Taken {
+        fn into_error(self) -> Error {
+            Error::from_parts(StatusCode::CONFLICT, None, "taken")
+        }
+
+        fn describe_openapi(config: OpenApiRouteConfig) -> OpenApiRouteConfig {
+            config.produces_text(409)
+        }
+    }
+
     #[tokio::test]
     async fn it_describes_the_responses_an_error_declares() {
         let server = TestServer::builder()
             .configure(|app| app.with_open_api(|config| config))
             .setup(|app| {
                 app.map_get("/declared", || Ok::<_, NotFound>(Json(1u8)));
+                app.map_get("/taken", || Ok::<_, Taken>(Json(1u8)));
                 app.map_get("/undeclared", || Ok::<_, String>(Json(1u8)));
                 app.use_open_api();
             })
@@ -346,8 +366,13 @@ mod openapi {
             .as_object()
             .unwrap();
 
+        let taken = spec["paths"]["/taken"]["get"]["responses"]
+            .as_object()
+            .unwrap();
+
         assert!(declared.contains_key("200"));
         assert!(declared["404"]["content"]["text/plain; charset=utf-8"].is_object());
+        assert!(taken["409"]["content"]["text/plain; charset=utf-8"].is_object());
         assert_eq!(undeclared.keys().collect::<Vec<_>>(), ["200"]);
 
         server.shutdown().await;
@@ -430,6 +455,65 @@ mod ws {
         let mut ws = server.ws("/ws").await;
         ws.send_text("as is").await;
         assert_eq!(ws.recv_text().await, "as is");
+
+        server.shutdown().await;
+    }
+}
+
+#[cfg(feature = "middleware")]
+mod tap_req {
+    use volga::{
+        HttpRequestMut,
+        error::{Error, IntoError},
+        http::StatusCode,
+        test::TestServer,
+    };
+
+    struct Forbidden;
+
+    impl IntoError for Forbidden {
+        fn into_error(self) -> Error {
+            Error::from_parts(StatusCode::FORBIDDEN, None, "forbidden")
+        }
+    }
+
+    fn check(req: &HttpRequestMut) -> Result<(), Forbidden> {
+        if req.uri().path().ends_with("/deny") {
+            return Err(Forbidden);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn it_converts_an_error_of_its_own_in_tap_req() {
+        let server = TestServer::spawn(|app| {
+            // `tap_req` takes `Result<HttpRequestMut, Error>` alone, so a bare `Ok(..)` after a
+            // `?` needs no annotation, and `?` converts through the `From` `IntoError` gives
+            app.map_get("/question-mark/{x}", |x: String| x).tap_req(
+                |req: HttpRequestMut| async move {
+                    check(&req)?;
+                    Ok(req)
+                },
+            );
+            app.map_get("/into/{x}", |x: String| x)
+                .tap_req(|req: HttpRequestMut| {
+                    if req.uri().path().ends_with("/deny") {
+                        return Err(Forbidden.into());
+                    }
+                    Ok(req)
+                });
+        })
+        .await;
+
+        for (path, status) in [
+            ("/question-mark/ok", 200),
+            ("/question-mark/deny", 403),
+            ("/into/ok", 200),
+            ("/into/deny", 403),
+        ] {
+            let res = server.client().get(server.url(path)).send().await.unwrap();
+            assert_eq!(res.status().as_u16(), status, "{path}");
+        }
 
         server.shutdown().await;
     }

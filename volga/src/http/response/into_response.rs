@@ -75,6 +75,27 @@ impl IntoResponse for Infallible {
     }
 }
 
+/// `Ok` answers with `T`, and `Err` goes to the error handler as it is.
+///
+/// A handler's own [`HttpResult`] is this impl. It is separate from the one below because
+/// [`Error`] does not implement [`IntoError`]; the two never overlap.
+impl<T: IntoResponse> IntoResponse for Result<T, Error> {
+    #[inline]
+    fn into_response(self) -> HttpResult {
+        match self {
+            Ok(ok) => ok.into_response(),
+            Err(err) => Err(err),
+        }
+    }
+
+    #[cfg(feature = "openapi")]
+    fn describe_openapi(
+        config: crate::openapi::OpenApiRouteConfig,
+    ) -> crate::openapi::OpenApiRouteConfig {
+        T::describe_openapi(config)
+    }
+}
+
 /// `Ok` answers with `T`. `Err` is turned into an [`Error`] through [`IntoError`] and goes to
 /// the error handler, so it is never answered as though it were a response.
 impl<T, E> IntoResponse for Result<T, E>

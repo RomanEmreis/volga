@@ -10,16 +10,17 @@ help: the trait `IntoError` is not implemented for `NotAnError`
 3 | struct NotAnError;
   | ^^^^^^^^^^^^^^^^^
   = note: the `Err` of a handler's `Result<T, E>` is turned into a `volga::error::Error` and handed to the error handler; `E` can be `Error`, `std::io::Error`, `StatusCode`, `(StatusCode, E)`, `String` or `&'static str`
-  = note: implement `volga::error::IntoError` for `NotAnError`, or `From<NotAnError>` for `volga::error::Error`
+  = note: implement `volga::error::IntoError` for `NotAnError`; it gives `From<NotAnError> for volga::error::Error` as well, so a `from` of its own moves into `into_error`
   = help: the following other types implement trait `IntoError`:
             &'static str
             (StatusCode, E)
             Box<(dyn std::error::Error + Send + Sync + 'static)>
             Box<str>
             Cow<'static, str>
-            Problem<E>
-            StatusCode
-            String
+            Infallible
+            Invalid<E>
+            InvalidHeaderName
+          and $N others
   = note: required for `Result<&str, NotAnError>` to implement `IntoResponse`
 note: required by a bound in `router::<impl App>::map_get`
  --> src/app/router.rs

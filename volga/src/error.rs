@@ -129,55 +129,51 @@ impl StdError for Error {
     }
 }
 
-impl From<Infallible> for Error {
+impl IntoError for Infallible {
     #[inline]
-    fn from(infallible: Infallible) -> Error {
-        match infallible {}
+    fn into_error(self) -> Error {
+        match self {}
     }
 }
 
-impl From<serde_json::Error> for Error {
+impl IntoError for serde_json::Error {
     #[inline]
-    fn from(err: serde_json::Error) -> Error {
-        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
+    fn into_error(self) -> Error {
+        Error::from_parts(StatusCode::BAD_REQUEST, None, self)
     }
 }
 
-impl From<serde_urlencoded::ser::Error> for Error {
+impl IntoError for serde_urlencoded::ser::Error {
     #[inline]
-    fn from(err: serde_urlencoded::ser::Error) -> Error {
-        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
+    fn into_error(self) -> Error {
+        Error::from_parts(StatusCode::BAD_REQUEST, None, self)
     }
 }
 
-impl From<IoError> for Error {
+impl IntoError for IoError {
     #[inline]
-    fn from(err: IoError) -> Self {
-        let kind = err.kind();
+    fn into_error(self) -> Error {
+        let kind = self.kind();
 
         if kind == ErrorKind::Other {
-            if let Some(inner) = err.into_inner() {
+            if let Some(inner) = self.into_inner() {
                 return match inner.downcast::<Error>() {
                     Ok(volga) => *volga,
-                    Err(inner) => {
-                        let err = IoError::new(kind, inner);
-                        Error::from_io_error_fallback(err)
-                    }
+                    Err(inner) => Error::from_io_error_fallback(IoError::new(kind, inner)),
                 };
             }
 
-            let err = IoError::new(kind, "io error (Other)");
-            return Error::from_io_error_fallback(err);
+            return Error::from_io_error_fallback(IoError::new(kind, "io error (Other)"));
         }
 
-        Error::from_io_error_fallback(err)
+        Error::from_io_error_fallback(self)
     }
 }
 
-impl From<hyper::http::Error> for Error {
+impl IntoError for hyper::http::Error {
     #[inline]
-    fn from(err: hyper::http::Error) -> Self {
-        Self::from_parts(StatusCode::INTERNAL_SERVER_ERROR, None, err)
+    fn into_error(self) -> Error {
+        Error::from_parts(StatusCode::INTERNAL_SERVER_ERROR, None, self)
     }
 }
 
@@ -188,17 +184,17 @@ impl From<Error> for IoError {
     }
 }
 
-impl From<fmt::Error> for Error {
+impl IntoError for fmt::Error {
     #[inline]
-    fn from(err: fmt::Error) -> Self {
-        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
+    fn into_error(self) -> Error {
+        Error::from_parts(StatusCode::BAD_REQUEST, None, self)
     }
 }
 
-impl From<InvalidStatusCode> for Error {
+impl IntoError for InvalidStatusCode {
     #[inline]
-    fn from(err: InvalidStatusCode) -> Self {
-        Self::from_parts(StatusCode::BAD_REQUEST, None, err)
+    fn into_error(self) -> Error {
+        Error::from_parts(StatusCode::BAD_REQUEST, None, self)
     }
 }
 

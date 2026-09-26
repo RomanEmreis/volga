@@ -1,10 +1,7 @@
 //! WebSocket streaming and messaging utils
 
 use super::Message;
-use crate::{
-    error::{Error, IntoError},
-    headers::HeaderValue,
-};
+use crate::{error::Error, headers::HeaderValue};
 
 use futures_util::{
     sink::{Sink, SinkExt},
@@ -129,9 +126,9 @@ impl WsSink {
     pub async fn send<T>(&mut self, msg: T) -> Result<(), Error>
     where
         T: TryInto<Message>,
-        T::Error: IntoError,
+        T::Error: Into<Error>,
     {
-        let msg = msg.try_into().map_err(IntoError::into_error)?.into();
+        let msg = msg.try_into().map_err(Into::into)?.into();
         self.0.send(msg).await.map_err(Error::from)
     }
 
@@ -198,7 +195,7 @@ impl WsStream {
     pub async fn recv<T>(&mut self) -> Option<Result<WsEvent<T>, Error>>
     where
         T: TryFrom<Message>,
-        T::Error: IntoError,
+        T::Error: Into<Error>,
     {
         loop {
             let msg = match self.recv_raw().await? {
@@ -210,11 +207,7 @@ impl WsStream {
                 WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
                 WsMessage::Close(frame) => return Some(Ok(WsEvent::Close(frame))),
                 WsMessage::Text(_) | WsMessage::Binary(_) => {
-                    return Some(
-                        T::try_from(msg)
-                            .map(WsEvent::Data)
-                            .map_err(IntoError::into_error),
-                    );
+                    return Some(T::try_from(msg).map(WsEvent::Data).map_err(Into::into));
                 }
                 WsMessage::Frame(_) => {
                     debug_assert!(
@@ -258,7 +251,7 @@ impl WebSocket {
     pub async fn recv<T>(&mut self) -> Option<Result<T, Error>>
     where
         T: TryFrom<Message>,
-        T::Error: IntoError,
+        T::Error: Into<Error>,
     {
         loop {
             let msg = match self.recv_raw().await? {
@@ -269,7 +262,7 @@ impl WebSocket {
             match msg.0 {
                 WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
                 WsMessage::Text(_) | WsMessage::Binary(_) => {
-                    return Some(T::try_from(msg).map_err(IntoError::into_error));
+                    return Some(T::try_from(msg).map_err(Into::into));
                 }
                 WsMessage::Frame(_) => {
                     debug_assert!(
@@ -299,9 +292,9 @@ impl WebSocket {
     pub async fn send<T>(&mut self, msg: T) -> Result<(), Error>
     where
         T: TryInto<Message>,
-        T::Error: IntoError,
+        T::Error: Into<Error>,
     {
-        let msg = msg.try_into().map_err(IntoError::into_error)?;
+        let msg = msg.try_into().map_err(Into::into)?;
         self.inner.send(msg.into_inner()).await.map_err(Error::from)
     }
 
@@ -325,9 +318,9 @@ impl WebSocket {
     where
         F: Fn(M) -> Fut + Send + 'static,
         M: TryFrom<Message>,
-        M::Error: IntoError,
+        M::Error: Into<Error>,
         R: TryInto<Message>,
-        R::Error: IntoError,
+        R::Error: Into<Error>,
         Fut: Future<Output = R> + Send,
     {
         while let Some(msg) = self.recv::<M>().await {

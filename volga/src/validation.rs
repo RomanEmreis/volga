@@ -53,8 +53,9 @@ pub mod valid;
 pub trait Validate {
     /// An error that describes why the validation did not pass.
     ///
-    /// The `Into<Error>` bound is what lets the failure carry its own status code.
-    /// A foreign error type that cannot implement it can be wrapped into [`Invalid`].
+    /// The `Into<Error>` bound is what lets the failure carry its own status code. A type of
+    /// your own gets it by implementing [`IntoError`](crate::error::IntoError); a foreign error
+    /// type, which cannot, can be wrapped into [`Invalid`].
     type Error: Into<Error>;
 
     /// Validates `self`
@@ -426,10 +427,10 @@ impl Display for ValidationError {
 
 impl StdError for ValidationError {}
 
-impl From<ValidationError> for Error {
+impl crate::error::IntoError for ValidationError {
     #[inline]
-    fn from(err: ValidationError) -> Self {
-        Error::from_parts(err.status, None, err)
+    fn into_error(self) -> Error {
+        Error::from_parts(self.status, None, self)
     }
 }
 
@@ -508,7 +509,8 @@ fn schema_constraints_within(
 /// Wraps a foreign error into something [`Validate::Error`] accepts.
 ///
 /// A validation crate's own error type and [`Error`] are both foreign to a user crate,
-/// so `impl From<TheirError> for volga::error::Error` cannot be written there.
+/// so neither `IntoError` nor `From<TheirError>` for `volga::error::Error` can be
+/// implemented there.
 /// `Invalid` is the newtype that bridges the two, responding with `400 Bad Request`.
 ///
 /// # Example
@@ -558,10 +560,10 @@ impl<E: StdError + 'static> StdError for Invalid<E> {
     }
 }
 
-impl<E: StdError + Send + Sync + 'static> From<Invalid<E>> for Error {
+impl<E: StdError + Send + Sync + 'static> crate::error::IntoError for Invalid<E> {
     #[inline]
-    fn from(err: Invalid<E>) -> Self {
-        Error::client_error(err.0)
+    fn into_error(self) -> Error {
+        Error::client_error(self.0)
     }
 }
 
