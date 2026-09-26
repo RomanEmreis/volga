@@ -227,7 +227,7 @@ jobs:
       - name: Check documentation with the default features
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --locked -p volga
+        run: cargo doc --no-deps --locked
 
   build:
     environment: CICD

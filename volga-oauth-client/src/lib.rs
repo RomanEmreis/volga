@@ -18,7 +18,14 @@
 //!   Section 2.1) and [`exchange_token`](OAuthClient::exchange_token)
 //!   (RFC 8693).
 //! * [`RegistrationClient`] - Dynamic Client Registration (RFC 7591).
-//! * [`Dpop`] - sender-constrained tokens (RFC 9449): a proof of possession
+#![cfg_attr(
+    feature = "dpop",
+    doc = "* [`Dpop`] - sender-constrained tokens (RFC 9449): a proof of possession"
+)]
+#![cfg_attr(
+    not(feature = "dpop"),
+    doc = "* `Dpop` (feature `dpop`) - sender-constrained tokens (RFC 9449): a proof of possession"
+)]
 //!   on every token request, the nonce round a server may demand, and the
 //!   proofs a caller attaches to its own resource requests.
 //!

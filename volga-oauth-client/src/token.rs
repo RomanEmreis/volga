@@ -79,7 +79,14 @@ impl TokenSet {
     ///
     /// A DPoP-bound token is not a bearer token: sending it as `Bearer`
     /// gives up the binding and is refused by any server that issued it.
-    /// [`Dpop::authorize`](crate::Dpop::authorize) presents it correctly;
+    #[cfg_attr(
+        feature = "dpop",
+        doc = "[`Dpop::authorize`](crate::Dpop::authorize) presents it correctly;"
+    )]
+    #[cfg_attr(
+        not(feature = "dpop"),
+        doc = "`Dpop::authorize` (feature `dpop`) presents it correctly;"
+    )]
     /// this is how a caller doing its own request handling tells the two
     /// apart. `token_type` is case-insensitive per RFC 6749 Section 5.1.
     ///
