@@ -3,8 +3,10 @@
 
 use serde::Deserialize;
 use std::collections::HashMap;
+use volga::error::Error;
+use volga::http::endpoints::args::{FromPathArg, PathArg};
 use volga::test::TestServer;
-use volga::{NamedPath, Path, Query, ok};
+use volga::{HttpResult, NamedPath, Path, Query, ok};
 
 #[derive(Deserialize)]
 struct User {
@@ -16,6 +18,15 @@ struct User {
 struct Repo {
     tenant: String,
     id: u32,
+}
+
+/// A path parameter of a type volga does not know about
+struct OrderId(u64);
+
+impl FromPathArg for OrderId {
+    fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+        arg.parse().map(OrderId)
+    }
 }
 
 #[tokio::test]
@@ -165,6 +176,136 @@ async fn it_reads_the_route_params_of_every_group_around_a_route() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "acme/volga@b0c85d6");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_reads_a_route_param_of_a_type_implementing_from_path_arg() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/positional/{id}", |id: OrderId| -> HttpResult {
+            ok!("positional:{}", id.0)
+        });
+        app.map_get("/path/{id}", |Path(id): Path<OrderId>| -> HttpResult {
+            ok!("path:{}", id.0)
+        });
+        app.map_get(
+            "/tuple/{id}/{line}",
+            |Path((id, line)): Path<(OrderId, u32)>| -> HttpResult { ok!("tuple:{}:{line}", id.0) },
+        );
+    })
+    .await;
+
+    for (path, expected) in [
+        ("/positional/42", "positional:42"),
+        ("/path/42", "path:42"),
+        ("/tuple/42/7", "tuple:42:7"),
+    ] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert!(response.status().is_success(), "{path}");
+        assert_eq!(response.text().await.unwrap(), expected, "{path}");
+    }
+
+    for path in ["/positional/nope", "/path/nope", "/tuple/nope/7"] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert_eq!(response.status(), 400, "{path}");
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+#[cfg(feature = "uuid")]
+async fn it_reads_a_uuid_route_param() {
+    use uuid::Uuid;
+
+    let server = TestServer::spawn(|app| {
+        app.map_get("/a/{id}", |id: Uuid| -> HttpResult { ok!("{id}") });
+        app.map_get("/b/{id}", |Path(id): Path<Uuid>| -> HttpResult {
+            ok!("{id}")
+        });
+        app.map_get("/c/{id}", |Path((id,)): Path<(Uuid,)>| -> HttpResult {
+            ok!("{id}")
+        });
+    })
+    .await;
+
+    let id = "0199a0f1-1111-7000-8000-000000000001";
+
+    for prefix in ["/a", "/b", "/c"] {
+        let response = server
+            .client()
+            .get(server.url(&format!("{prefix}/{id}")))
+            .send()
+            .await
+            .unwrap();
+
+        assert!(response.status().is_success(), "{prefix}");
+        assert_eq!(response.text().await.unwrap(), id, "{prefix}");
+
+        let response = server
+            .client()
+            .get(server.url(&format!("{prefix}/nope")))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 400, "{prefix}");
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_answers_500_when_a_handler_and_its_route_disagree_on_the_path_params() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/extra/{id}", |id: u32, extra: u32| -> HttpResult {
+            ok!("{id}:{extra}")
+        });
+        app.map_get(
+            "/optional/{id}",
+            |id: u32, extra: Option<u32>| -> HttpResult { ok!("{id}:{extra:?}") },
+        );
+        app.map_get(
+            "/users/{user_id}/orders/{order_id}",
+            |Path(id): Path<OrderId>| -> HttpResult { ok!("{}", id.0) },
+        );
+    })
+    .await;
+
+    // Twice, since a panic used to drop the connection rather than answer
+    for _ in 0..2 {
+        let response = server
+            .client()
+            .get(server.url("/extra/1"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 500);
+    }
+
+    let response = server
+        .client()
+        .get(server.url("/optional/1"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "1:None");
+
+    // `Path<T>` of a single type does not read the user's id as the order's
+    let response = server
+        .client()
+        .get(server.url("/users/7/orders/42"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 500);
 
     server.shutdown().await;
 }

@@ -97,6 +97,7 @@ full = [
     "validation-derive",
     "compression-full",
     "decompression-full",
+    "uuid",
     "ws"
 ]
 
@@ -143,6 +144,9 @@ decompression-full = ["decompression-brotli", "decompression-gzip", "decompressi
 decompression-brotli = ["middleware", "dep:async-compression", "async-compression?/brotli"]
 decompression-gzip = ["middleware", "dep:async-compression", "async-compression?/zlib", "async-compression?/gzip"]
 decompression-zstd = ["middleware", "dep:async-compression", "async-compression?/zstd"]
+
+# `uuid::Uuid` as a path parameter
+uuid = ["dep:uuid"]
 
 __fuzzing = []
 

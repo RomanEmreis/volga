@@ -87,7 +87,7 @@ use std::sync::Arc;
 use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
 pub(crate) use layer::{Layer, RoutePipeline};
-pub(crate) use path_args::{PathArg, PathArgs};
+pub use path_args::{PathArg, PathArgs};
 
 pub(crate) mod layer;
 pub(crate) mod path_args;
@@ -464,13 +464,15 @@ impl RouteNode {
         let mut bindings = Bindings::new();
         let route = self.search(path, split_path(path), &mut bindings)?;
 
-        let params = bindings
+        let args = bindings
             .into_iter()
             .map(|(name, value)| PathArg {
                 name: Arc::clone(name),
                 value: Box::from(value),
             })
             .collect();
+
+        let params = PathArgs::from_parts(args, None);
 
         Some(RouteParams { route, params })
     }

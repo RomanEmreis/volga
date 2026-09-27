@@ -116,7 +116,7 @@ impl Default for HttpRequestScope {
             cancellation_token: CancellationToken::new(),
             shutdown: Arc::new(ShutdownHandle::new()),
             body_limit: RequestBodyLimit::Disabled,
-            params: PathArgs::default(),
+            params: PathArgs::new(),
             #[cfg(feature = "ws")]
             error_handler: {
                 use crate::error::handler::DefaultErrorHandler;
@@ -166,7 +166,7 @@ mod tests {
             cancellation_token: CancellationToken::new(),
             shutdown: Arc::new(ShutdownHandle::new()),
             body_limit: RequestBodyLimit::Enabled(1024),
-            params: PathArgs::default(),
+            params: PathArgs::new(),
             ..HttpRequestScope::default()
         }
     }

@@ -70,10 +70,12 @@ pub type ValidForm<T> = Valid<Form<T>>;
 
 /// A [`NamedPath<T>`] payload that has been validated.
 ///
-/// Named rather than positional: `Path<T>` reads its payload through `FromPathArgs`, which
-/// is implemented for tuples alone, and a tuple is not a type a downstream crate can
-/// implement [`Validate`] for. `NamedPath<T>` deserializes the parameters into a struct,
-/// which is what a derived `Validate` is written against.
+/// Named rather than positional: a `Path<T>` of several parameters reads them into a tuple,
+/// and a tuple is not a type a downstream crate can implement [`Validate`] for.
+/// `NamedPath<T>` deserializes the parameters into a struct, which is what a derived
+/// `Validate` is written against. A single parameter of a type of your own, implementing
+/// [`FromPathArg`](crate::http::endpoints::args::FromPathArg), can be validated as
+/// `Valid<Path<T>>`.
 pub type ValidPath<T> = Valid<NamedPath<T>>;
 
 impl<E> Valid<E> {
