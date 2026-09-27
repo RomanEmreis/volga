@@ -256,6 +256,36 @@ async fn it_rejects_a_malformed_percent_encoded_path() {
     server.shutdown().await;
 }
 
+/// A path that does not decode is not the mount's to answer: routing answers it `400`,
+/// through the error handler, as it does anywhere else
+#[tokio::test]
+async fn it_hands_a_malformed_path_under_a_mount_to_the_error_handler() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_host_env(|env| {
+                env.with_content_root("tests/static")
+                    .with_fallback_file("index.html")
+            })
+        })
+        .setup(|app| {
+            app.use_static_files();
+            app.map_err(|error: volga::error::Error| async move {
+                volga::status!(error.status().as_u16(), text: "handled")
+            });
+        })
+        .build()
+        .await;
+
+    for path in ["/%zz.css", "/assets/%FF.css", "/%2"] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert_eq!(response.status(), 400, "{path}");
+        assert_eq!(response.text().await.unwrap(), "handled", "{path}");
+    }
+
+    server.shutdown().await;
+}
+
 #[tokio::test]
 async fn it_serves_the_shell_and_the_assets_with_different_cache_control() {
     let server = TestServer::builder()

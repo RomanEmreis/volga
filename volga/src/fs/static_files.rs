@@ -89,7 +89,7 @@ use crate::{
     error::Error,
     html, html_file,
     http::{
-        IntoResponse, Method, StatusCode,
+        Method, StatusCode,
         endpoints::{
             handlers::{Func, RouteHandler},
             route::{Layer, RoutePipeline, is_dynamic_segment, join_path, split_path},
@@ -159,17 +159,17 @@ impl Middleware for StaticMount {
         let target = if is_retrieval(ctx.request().method()) {
             resolve(ctx.request().uri().path(), &self.prefix)
         } else {
-            Ok(None)
+            None
         };
 
         let pipeline = self.pipeline.clone();
 
         async move {
             let mut ctx = ctx;
-            let target = match target {
-                Ok(Some(target)) => target,
-                Ok(None) => return next(ctx).await,
-                Err(err) => return err.into_response(),
+            // A path that does not decode is declined too: routing has decided on a `400`
+            // for it already, and answers it through the error handler
+            let Some(target) = target else {
+                return next(ctx).await;
             };
 
             let serving = match ctx.request().extensions().get::<HostEnv>() {
@@ -766,7 +766,7 @@ mod tests {
         method: Method,
         headers: HeaderMap,
     ) -> Option<HttpResult> {
-        let target = resolve(path, "").unwrap()?;
+        let target = resolve(path, "")?;
         let serving = probe(env, target).await?;
 
         Some(respond(&serving, &method, &headers).await)
@@ -1370,7 +1370,7 @@ mod tests {
     #[tokio::test]
     async fn it_denies_a_directory_when_listing_is_off() {
         let env = HostEnv::new("tests/static");
-        let target = resolve("/assets", "").unwrap().unwrap();
+        let target = resolve("/assets", "").unwrap();
 
         assert!(matches!(probe(&env, target).await, Some(Serving::Denied)));
     }

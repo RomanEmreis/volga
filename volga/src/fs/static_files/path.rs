@@ -1,9 +1,6 @@
 //! Resolving a request target to a path under the content root
 
-use crate::{
-    error::Error,
-    http::endpoints::route::{percent_decode, split_path},
-};
+use crate::http::endpoints::route::{percent_decode, split_path};
 use std::{
     ffi::OsStr,
     path::{Component, Path, PathBuf},
@@ -27,29 +24,30 @@ pub(crate) enum Target {
 /// so a mount and a route under one prefix answer the same requests. What is left is kept
 /// in the order it arrived, so what comes out addresses what the request asked for - there
 /// is nothing to reassemble and nothing to re-order. A target the mount does not answer is
-/// `Ok(None)`: it is outside the prefix, or it carries a segment that does not name a file
-/// in the directory before it - `.`, `..`, an encoded separator, a drive prefix. Those are
+/// `None`: it is outside the prefix, or it carries a segment that does not name a file in
+/// the directory before it - `.`, `..`, an encoded separator, a drive prefix. Those are
 /// refused rather than dropped, since dropping one would answer a path the request never
 /// asked for, and refusing them is what makes traversal impossible here rather than caught
 /// after the fact.
 ///
-/// An `Err` is a request target that is not a valid one at all - a malformed `%XX` escape,
-/// or one that does not decode to UTF-8.
-pub(crate) fn resolve(path: &str, prefix: &str) -> Result<Option<Target>, Error> {
-    let mut segments =
-        split_path(path).map(|segment| percent_decode(segment).map_err(|_| malformed_escape()));
+/// A request target that does not decode - a malformed `%XX` escape, or escapes that are
+/// not UTF-8 - is `None` as well. It is not the mount's to answer: the router decodes the
+/// same segments the same way, so the request goes on to the `400` routing already decided
+/// on, through the error handler, as any other malformed path does.
+pub(crate) fn resolve(path: &str, prefix: &str) -> Option<Target> {
+    let mut segments = split_path(path).map(percent_decode);
 
     for expected in split_path(prefix) {
-        match segments.next().transpose()? {
-            Some(segment) if segment == expected => continue,
-            _ => return Ok(None),
+        match segments.next()?.ok()? {
+            segment if segment == expected => continue,
+            _ => return None,
         }
     }
 
     let mut relative = PathBuf::new();
     for segment in segments {
-        if !push_normal(&mut relative, segment?.as_ref()) {
-            return Ok(None);
+        if !push_normal(&mut relative, segment.ok()?.as_ref()) {
+            return None;
         }
     }
 
@@ -59,7 +57,7 @@ pub(crate) fn resolve(path: &str, prefix: &str) -> Result<Option<Target>, Error>
         Target::Relative(relative)
     };
 
-    Ok(Some(target))
+    Some(target)
 }
 
 /// Pushes `segment` onto `path` when it names a single ordinary component, and returns
@@ -85,18 +83,13 @@ fn push_normal(path: &mut PathBuf, segment: &str) -> bool {
     }
 }
 
-#[inline]
-fn malformed_escape() -> Error {
-    Error::client_error("Static files error: malformed percent-encoding in the request path")
-}
-
 #[cfg(test)]
 mod tests {
     use super::{Target, resolve};
     use std::path::PathBuf;
 
     fn resolved(path: &str) -> Option<Target> {
-        resolve(path, "").unwrap()
+        resolve(path, "")
     }
 
     #[test]
@@ -199,26 +192,24 @@ mod tests {
     }
 
     #[test]
-    fn it_rejects_malformed_percent_encoding() {
+    fn it_declines_malformed_percent_encoding() {
         for path in ["/%", "/%2", "/%zz", "/%2z", "/app%.css"] {
-            assert!(
-                resolve(path, "").is_err(),
-                "expected `{path}` to be rejected"
-            );
+            assert_eq!(resolve(path, ""), None, "expected `{path}` to be declined");
         }
     }
 
     #[test]
-    fn it_rejects_percent_encoding_that_is_not_utf8() {
-        assert!(resolve("/%FF%FE", "").is_err());
+    fn it_declines_percent_encoding_that_is_not_utf8() {
+        assert_eq!(resolve("/%FF%FE", ""), None);
+        assert_eq!(resolve("/static/%FF", "/static"), None);
     }
 
     #[test]
     fn it_resolves_under_a_prefix() {
-        assert_eq!(resolve("/static", "/static").unwrap(), Some(Target::Root));
-        assert_eq!(resolve("/static/", "/static").unwrap(), Some(Target::Root));
+        assert_eq!(resolve("/static", "/static"), Some(Target::Root));
+        assert_eq!(resolve("/static/", "/static"), Some(Target::Root));
         assert_eq!(
-            resolve("/static/assets/app.css", "/static").unwrap(),
+            resolve("/static/assets/app.css", "/static"),
             Some(Target::Relative(
                 ["assets", "app.css"].iter().collect::<PathBuf>()
             ))
@@ -229,7 +220,7 @@ mod tests {
     fn it_declines_a_target_outside_the_prefix() {
         for path in ["/", "/index.html", "/staticky/app.css", "/api/static"] {
             assert_eq!(
-                resolve(path, "/static").unwrap(),
+                resolve(path, "/static"),
                 None,
                 "expected `{path}` to be declined"
             );
@@ -240,7 +231,7 @@ mod tests {
     fn it_reads_the_prefix_the_way_the_router_reads_a_route() {
         for path in ["//static/app.css", "/static//app.css", "/st%61tic/app.css"] {
             assert_eq!(
-                resolve(path, "/static").unwrap(),
+                resolve(path, "/static"),
                 Some(Target::Relative(PathBuf::from("app.css"))),
                 "expected `{path}` to be resolved"
             );
@@ -250,22 +241,19 @@ mod tests {
     #[test]
     fn it_matches_a_prefix_spelled_with_characters_that_are_encoded_on_the_wire() {
         assert_eq!(
-            resolve("/caf%C3%A9/my%20file.css", "/caf\u{e9}").unwrap(),
+            resolve("/caf%C3%A9/my%20file.css", "/caf\u{e9}"),
             Some(Target::Relative(PathBuf::from("my file.css")))
         );
-        assert_eq!(
-            resolve("/caf%C3%A9", "/caf\u{e9}").unwrap(),
-            Some(Target::Root)
-        );
+        assert_eq!(resolve("/caf%C3%A9", "/caf\u{e9}"), Some(Target::Root));
     }
 
     #[test]
     fn it_does_not_read_an_encoded_separator_as_the_end_of_the_prefix() {
-        assert_eq!(resolve("/static%2Fapp.css", "/static").unwrap(), None);
+        assert_eq!(resolve("/static%2Fapp.css", "/static"), None);
     }
 
     #[test]
     fn it_declines_a_traversal_out_of_the_prefix() {
-        assert_eq!(resolve("/static/../index.html", "/static").unwrap(), None);
+        assert_eq!(resolve("/static/../index.html", "/static"), None);
     }
 }

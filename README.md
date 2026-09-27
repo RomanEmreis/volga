@@ -32,15 +32,23 @@ Volga is a good fit if you:
 ## Features
 - HTTP/1 and HTTP/2
 - Explicit routing: route groups, typed path parameters, catch-all segments
-- Async and synchronous handlers and middleware
-- Composable middleware
+- Async and synchronous handlers, composable middleware
+- Typed request extraction, with validation
 - Dependency injection without derive macros
-- Typed request extraction
 - WebSockets, including WebSocket over HTTP/2
 - Streaming responses and Server-Sent Events
-- End-to-end OAuth 2.1/OIDC support
-- Full **Tokio** compatibility
-- Stable Rust **1.90+**
+- Full **Tokio** compatibility, stable Rust **1.90+**
+
+### Batteries included
+Each of these is a Cargo feature, so only what you enable is compiled in:
+
+- OpenAPI 3 documents and Swagger UI
+- Authentication: JWT bearer, Basic, and end-to-end OAuth 2.1/OIDC
+- TLS with HSTS and HTTPS redirection
+- Rate limiting, CORS, response compression and request decompression
+- Static files, with a fallback file for single-page apps
+- Cookies (signed and private), multipart, TOML configuration
+- RFC 9457 problem details and `tracing` integration
 
 ## Getting Started
 ```toml
