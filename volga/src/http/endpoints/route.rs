@@ -92,6 +92,7 @@ use crate::http::endpoints::handlers::RouteHandler;
 use crate::utils::str::memchr_split_nonempty;
 use hyper::Method;
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 #[cfg(feature = "middleware")]
@@ -227,13 +228,26 @@ pub(super) struct RouteNode {
     catch_all: Option<Box<CatchAll>>,
 }
 
-/// The parameters a backtracking search has bound so far, each as the name the tree binds
-/// and the part of the path it reads, as the request wrote it - both borrowed, so giving a
-/// branch up costs nothing
-type Bindings<'route, 'path> = SmallVec<[(&'route Arc<str>, &'path str); DEFAULT_DEPTH]>;
+/// The parameters a backtracking search has bound so far
+type Bindings<'route, 'path> = SmallVec<[Binding<'route, 'path>; DEFAULT_DEPTH]>;
 
-/// A segment of a request path as the request wrote it, and the text it decodes to
-type Segment<'path, 'text> = (&'path str, &'text str);
+/// A parameter a backtracking search has bound - borrowed, so giving a branch up costs nothing
+#[derive(Clone, Copy)]
+struct Binding<'route, 'path> {
+    /// The name the tree binds it as
+    name: &'route Arc<str>,
+    /// What it reads, as the request wrote it: one segment, or for a catch-all the rest of
+    /// the path from that segment on
+    value: &'path str,
+    /// The position of that segment among the segments of the path
+    segment: usize,
+    /// Set for a catch-all
+    tail: bool,
+}
+
+/// A segment of a request path: its position among the segments of the path, the segment as
+/// the request wrote it, and the text it decodes to
+type Segment<'path, 'text> = (usize, &'path str, &'text str);
 
 /// The result of a lookup: the route answering a path, `None` where none does, or
 /// [`MalformedPath`] for a path that does not decode
@@ -464,7 +478,7 @@ impl RouteNode {
             }
 
             let Some(next) = &current.dynamic_route else {
-                return self.find_backtracking(path, split_path(path).map(|s| (s, s)));
+                return Ok(self.find_backtracking(path));
             };
 
             params.push(PathArg {
@@ -475,7 +489,7 @@ impl RouteNode {
         }
 
         if !current.resource.is_mapped() {
-            return self.find_backtracking(path, split_path(path).map(|s| (s, s)));
+            return Ok(self.find_backtracking(path));
         }
 
         Ok(Some(RouteParams {
@@ -488,52 +502,78 @@ impl RouteNode {
     /// is compared, so a malformed one is found before the lookup starts, and the second
     /// pass reads the decoded text.
     ///
+    /// Each segment is decoded once. A parameter takes the text its segment decoded to, and
+    /// a catch-all is put together from the decoded segments it reads and the separators
+    /// between them, so nothing is decoded a second time or copied on the way out.
+    ///
     /// The greedy pass is skipped: the search reads the path in the same order and takes
     /// the route it would have taken first, and a path spelled this way is rare enough that
     /// the difference is not worth a second copy of the walk.
     #[inline(never)]
     fn find_encoded(&self, path: &str) -> Lookup<'_> {
-        let segments = split_path(path)
+        let mut segments = split_path(path)
             .map(|segment| percent_decode(segment).map(|text| (segment, text)))
             .collect::<Result<SmallVec<[_; DEFAULT_DEPTH]>, _>>()?;
 
-        self.find_backtracking(
-            path,
-            segments
-                .iter()
-                .map(|(segment, text)| (*segment, text.as_ref())),
-        )
+        let reading = segments
+            .iter()
+            .enumerate()
+            .map(|(i, (segment, text))| (i, *segment, text.as_ref()));
+
+        let mut bindings = Bindings::new();
+        let Some(route) = self.search(path, reading, &mut bindings) else {
+            return Ok(None);
+        };
+
+        // A catch-all is the last binding and reads segments nothing else binds, so the
+        // segments taken by the parameters before it are not among the ones it reads
+        let args = bindings
+            .into_iter()
+            .map(|binding| {
+                let value = if binding.tail {
+                    decoded_tail(path, &segments[binding.segment..]).into_boxed_str()
+                } else {
+                    Box::from(std::mem::take(&mut segments[binding.segment].1))
+                };
+
+                PathArg {
+                    name: Arc::clone(binding.name),
+                    value,
+                }
+            })
+            .collect();
+
+        let params = PathArgs::from_parts(args, None);
+
+        Ok(Some(RouteParams { route, params }))
     }
 
     /// The second pass, for a path the greedy walk could not place: every reading of it in
     /// precedence order, until one of them reaches a mapped route.
     ///
-    /// The search binds borrowed names and segments, and they are copied out - decoded -
-    /// only once a route is found, so a branch it gives up, and a path nothing answers,
-    /// allocate nothing.
+    /// The search binds borrowed names and segments, and they are copied out only once a
+    /// route is found - so a branch it gives up, and a path nothing answers, allocate
+    /// nothing.
     #[inline(never)]
-    fn find_backtracking<'path, 'text, I>(&self, path: &'path str, segments: I) -> Lookup<'_>
-    where
-        I: Iterator<Item = Segment<'path, 'text>> + Clone,
-    {
+    fn find_backtracking(&self, path: &str) -> Option<RouteParams<'_>> {
+        let reading = split_path(path)
+            .enumerate()
+            .map(|(i, segment)| (i, segment, segment));
+
         let mut bindings = Bindings::new();
-        let Some(route) = self.search(path, segments, &mut bindings) else {
-            return Ok(None);
-        };
+        let route = self.search(path, reading, &mut bindings)?;
 
         let args = bindings
             .into_iter()
-            .map(|(name, value)| {
-                Ok(PathArg {
-                    name: Arc::clone(name),
-                    value: percent_decode(value)?.into(),
-                })
+            .map(|binding| PathArg {
+                name: Arc::clone(binding.name),
+                value: Box::from(binding.value),
             })
-            .collect::<Result<_, MalformedPath>>()?;
+            .collect();
 
         let params = PathArgs::from_parts(args, None);
 
-        Ok(Some(RouteParams { route, params }))
+        Some(RouteParams { route, params })
     }
 
     /// Searches this subtree for the route answering `segments`, the unread rest of `path`:
@@ -541,9 +581,9 @@ impl RouteNode {
     /// unwinds to the deepest alternative it passed and gives up as little of the path as it
     /// has to. `bindings` is left as it was found unless a route is found.
     ///
-    /// A literal is compared with the text a segment decodes to, and a parameter binds the
-    /// segment as it is written, to be decoded once the search is over - which is also how a
-    /// catch-all binds the rest of `path`.
+    /// A literal is compared with the text a segment decodes to. A parameter binds the
+    /// segment where it sits, and a catch-all the rest of `path` from there, and what either
+    /// one reads is copied out once the search is over.
     ///
     /// The recursion cannot blow up. It only descends into a child that exists, so it goes
     /// no deeper than the longest route mapped; and a node in this tree sits at one depth,
@@ -559,7 +599,7 @@ impl RouteNode {
     where
         I: Iterator<Item = Segment<'path, 'text>> + Clone,
     {
-        let Some((segment, text)) = segments.next() else {
+        let Some((index, segment, text)) = segments.next() else {
             return self.resource.is_mapped().then_some(&self.resource);
         };
 
@@ -573,7 +613,12 @@ impl RouteNode {
 
         if let Some(dynamic) = &self.dynamic_route {
             let bound = bindings.len();
-            bindings.push((&dynamic.path, segment));
+            bindings.push(Binding {
+                name: &dynamic.path,
+                value: segment,
+                segment: index,
+                tail: false,
+            });
 
             if let Some(found) = dynamic.node.search(path, segments, bindings) {
                 return Some(found);
@@ -586,7 +631,12 @@ impl RouteNode {
             .as_deref()
             .filter(|catch_all| catch_all.resource.is_mapped())?;
 
-        bindings.push((&catch_all.name, tail(path, segment)));
+        bindings.push(Binding {
+            name: &catch_all.name,
+            value: tail(path, segment),
+            segment: index,
+            tail: true,
+        });
 
         Some(&catch_all.resource)
     }
@@ -934,8 +984,48 @@ pub(crate) fn param_name(segment: &str) -> &str {
 /// reads as a `/` like the ones around it.
 #[inline]
 fn tail<'path>(path: &'path str, segment: &'path str) -> &'path str {
-    let start = segment.as_ptr() as usize - path.as_ptr() as usize;
-    &path[start..]
+    &path[offset(path, segment)..]
+}
+
+/// What a catch-all binds on a path carrying percent-escapes: the rest of `path` from the
+/// first of `segments` on, each segment as the text it decoded to and the separators between
+/// them, and a trailing one, as the request wrote them - the [`tail`], decoded, without
+/// decoding any of it again.
+///
+/// `segments` are the ones [`split_path`] read out of `path` from that position on, each
+/// paired with the text it decodes to.
+///
+/// The string is sized exactly, so boxing it does not reallocate.
+#[inline]
+fn decoded_tail(path: &str, segments: &[(&str, Cow<'_, str>)]) -> String {
+    let Some((first, _)) = segments.first() else {
+        return String::new();
+    };
+
+    let start = offset(path, first);
+    let len = segments
+        .iter()
+        .fold(path.len() - start, |len, (segment, text)| {
+            len - segment.len() + text.len()
+        });
+
+    let mut value = String::with_capacity(len);
+    let mut written = start;
+    for (segment, text) in segments {
+        let at = offset(path, segment);
+        value.push_str(&path[written..at]);
+        value.push_str(text);
+        written = at + segment.len();
+    }
+    value.push_str(&path[written..]);
+
+    value
+}
+
+/// Where `segment`, a slice [`split_path`] read out of `path`, starts in it
+#[inline(always)]
+fn offset(path: &str, segment: &str) -> usize {
+    segment.as_ptr() as usize - path.as_ptr() as usize
 }
 
 /// Finds the endpoint at this node whose parameter names `method` has to agree with
@@ -1056,7 +1146,7 @@ fn misplaced_catch_all(path: &str) -> ! {
 #[cold]
 #[inline(never)]
 fn encoded_literal(path: &str, segment: &str) -> ! {
-    let decoded = percent_decode(segment).unwrap_or(std::borrow::Cow::Borrowed(segment));
+    let decoded = percent_decode(segment).unwrap_or(Cow::Borrowed(segment));
     panic!(
         "invalid route `{path}`: the segment `{segment}` carries a percent-escape, and a \
          request path is matched after it is decoded. Write the segment as the text it \
@@ -2509,5 +2599,57 @@ mod tests {
 
         assert_eq!(bound(&route, "/100%25"), Some(vec![]));
         assert_eq!(bound(&route, "/50%25off"), Some(vec![]));
+    }
+
+    /// Put together from the decoded segments, a tail reads as the raw tail decoded whole
+    #[test]
+    fn it_puts_a_decoded_tail_together_as_the_raw_tail_decodes() {
+        for path in [
+            "/files/a%20b",
+            "/files/a%20b/c",
+            "/files/a%20b//c%2Fd/",
+            "/files/%2F%2F/x//",
+            "/files/plain/100%25/caf%C3%A9",
+            "/files/a///",
+        ] {
+            let segments = split_path(path)
+                .map(|segment| (segment, super::percent_decode(segment).unwrap()))
+                .collect::<Vec<_>>();
+
+            let raw = super::tail(path, segments[1].0);
+            let tail = super::decoded_tail(path, &segments[1..]);
+
+            assert_eq!(tail, super::percent_decode(raw).unwrap(), "{path}");
+        }
+    }
+
+    #[test]
+    fn it_sizes_a_decoded_tail_exactly() {
+        let path = "/files/a%20b//c%2Fd/";
+        let segments = split_path(path)
+            .map(|segment| (segment, super::percent_decode(segment).unwrap()))
+            .collect::<Vec<_>>();
+
+        let tail = super::decoded_tail(path, &segments[1..]);
+        assert_eq!(tail, "a b//c/d/");
+        assert_eq!(tail.capacity(), tail.len());
+    }
+
+    #[test]
+    fn it_binds_an_encoded_path_the_way_it_binds_a_plain_one() {
+        let route = tree(&["/users/{id}/files/{*path}", "/{a}/{b}/{c}"]);
+
+        assert_eq!(
+            bound(&route, "/users/a%20b/files/c%2Fd//e/"),
+            args(&[("id", "a b"), ("path", "c/d//e/")])
+        );
+        assert_eq!(
+            bound(&route, "/users/a%20b/files/plain"),
+            args(&[("id", "a b"), ("path", "plain")])
+        );
+        assert_eq!(
+            bound(&route, "/x%31/y/z%32"),
+            args(&[("a", "x1"), ("b", "y"), ("c", "z2")])
+        );
     }
 }
