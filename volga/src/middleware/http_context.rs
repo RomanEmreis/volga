@@ -6,6 +6,7 @@ use crate::{
     app::pipeline::Terminal,
     error::Error,
     http::cors::{CorsHeaders, CorsOverride},
+    http::endpoints::route::MalformedPath,
     status,
 };
 
@@ -29,7 +30,7 @@ pub struct HttpContext {
     request: HttpRequestMut,
 
     /// What answers this request once the middleware chain has run: the matched
-    /// route's pipeline, a fallback, or a `405`. `None` once the terminal has been
+    /// route's pipeline, a fallback, a `405` or a `400`. `None` once the terminal has been
     /// taken, so a second execution has nothing left to run.
     terminal: Option<Terminal>,
 
@@ -270,6 +271,7 @@ impl HttpContext {
             Some(Terminal::MethodNotAllowed(allowed)) => status!(405; [
                 (ALLOW, allowed.as_ref())
             ]),
+            Some(Terminal::MalformedPath) => Err(Error::from(MalformedPath)),
             Some(Terminal::RouteTaken) | None => status!(405),
         }
     }

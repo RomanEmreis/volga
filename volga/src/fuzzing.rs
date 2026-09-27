@@ -139,7 +139,7 @@ pub fn fuzz_static_path(path: &str, prefix: &str) {
         use crate::fs::static_files::path::{Target, resolve};
         use std::path::Component;
 
-        let Ok(Some(Target::Relative(relative))) = resolve(path, prefix) else {
+        let Some(Target::Relative(relative)) = resolve(path, prefix) else {
             return;
         };
 

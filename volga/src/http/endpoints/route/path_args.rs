@@ -11,10 +11,11 @@ use std::sync::OnceLock;
 const QUERY_SEPARATOR: char = '&';
 const QUERY_KEY_VALUE_SEPARATOR: char = '=';
 const FORM_SPACE: char = '+';
+const FORM_ESCAPE: char = '%';
 
 /// The characters a form decoder reads as something other than themselves, and that a
-/// path carries as they are
-const FORM_ONLY: [char; 2] = [QUERY_SEPARATOR, FORM_SPACE];
+/// decoded path argument carries as they are
+const FORM_ONLY: [char; 3] = [QUERY_SEPARATOR, FORM_SPACE, FORM_ESCAPE];
 
 /// The path arguments a route matched, in the order its pattern declares them
 ///
@@ -34,7 +35,7 @@ pub struct PathArg {
     /// Argument name
     pub(crate) name: Arc<str>,
 
-    /// Argument value
+    /// Argument value, percent-decoded
     pub(crate) value: Box<str>,
 }
 
@@ -45,7 +46,11 @@ impl PathArg {
         &self.name
     }
 
-    /// Returns the value as it is written in the path, percent-escapes included.
+    /// Returns the value, percent-decoded: `%20` is read as a space, `%25` as a `%` and
+    /// `%2F` as a `/`, while a `+` is read as it is written.
+    ///
+    /// A path whose escapes are malformed, or do not decode to UTF-8, is answered `400`
+    /// before any route is looked up, so a value is always the text the client meant.
     #[inline]
     pub fn value(&self) -> &str {
         &self.value
@@ -258,18 +263,20 @@ fn encode(args: &SmallVec<[PathArg; DEFAULT_DEPTH]>) -> String {
 }
 
 /// Appends a value to the encoded args, escaping what form decoding reads differently from
-/// a path.
+/// the value itself.
 ///
-/// The encoded args are read back as a form, and two characters mean something there that
-/// they do not mean in a path (RFC 3986 Section 3.3), where both are literal:
+/// The encoded args are read back as a form, and the value has been percent-decoded
+/// already, so three characters mean something there that they do not mean in it:
 ///
 /// - `&` separates two pairs, so a value carrying one would end its own pair early and
 ///   start a pair the route never bound: `/files/a&admin=true` would read as `path=a` and
 ///   `admin=true`.
 /// - `+` is a space, so `/files/C++` would read as `C  `.
+/// - `%` starts an escape, so `/p/100%25`, decoded to `100%`, would be decoded a second time
+///   and read as an error, and `/p/%2520`, decoded to `%20`, as a space.
 ///
-/// A path segment may carry either, and a catch-all value carries whatever the rest of the
-/// path does. Percent-escapes are left for the decoder, which decodes them as it always has.
+/// A path segment may carry any of them, and a catch-all value carries whatever the rest of
+/// the path does. Every other character is read back as it is written.
 #[inline]
 fn push_value(result: &mut String, value: &str) {
     let mut rest = value;
@@ -277,7 +284,8 @@ fn push_value(result: &mut String, value: &str) {
         result.push_str(&rest[..at]);
         result.push_str(match rest.as_bytes()[at] {
             b'&' => "%26",
-            _ => "%2B",
+            b'+' => "%2B",
+            _ => "%25",
         });
         rest = &rest[at + 1..];
     }
@@ -363,18 +371,43 @@ mod tests {
         );
     }
 
-    /// Percent-escapes are left for the decoder, which is what `NamedPath<T>` has always
-    /// read them through
+    /// A value is decoded by the router already, so a `%` in it is a percent sign and is
+    /// read back as one rather than decoded again
     #[test]
-    fn it_leaves_percent_escapes_to_the_decoder() {
-        let args: PathArgs = smallvec::smallvec![arg("name", "John%20Doe%2B")].into();
+    fn it_reads_a_percent_sign_back_as_it_is() {
+        let args: PathArgs = smallvec::smallvec![
+            arg("name", "John Doe+"),
+            arg("rate", "100%"),
+            arg("raw", "%20")
+        ]
+        .into();
 
         let query_str = args.encoded().unwrap();
-        assert_eq!(query_str, "name=John%20Doe%2B");
+        assert_eq!(query_str, "name=John Doe%2B&rate=100%25&raw=%2520");
 
         let decoded: std::collections::HashMap<String, String> =
             serde_urlencoded::from_str(query_str).unwrap();
         assert_eq!(decoded["name"], "John Doe+");
+        assert_eq!(decoded["rate"], "100%");
+        assert_eq!(decoded["raw"], "%20");
+    }
+
+    /// Anything else a decoded value can carry is read back as it is written
+    #[test]
+    fn it_reads_any_decoded_value_back_as_it_is() {
+        let values = ["caf\u{e9}", "a/b", "a=b", "\u{0}", " ", "?#[]", "a%2Fb&c+d"];
+        let args: PathArgs = values
+            .iter()
+            .enumerate()
+            .map(|(i, value)| arg(&format!("v{i}"), value))
+            .collect();
+
+        let decoded: std::collections::HashMap<String, String> =
+            serde_urlencoded::from_str(args.encoded().unwrap()).unwrap();
+
+        for (i, value) in values.iter().enumerate() {
+            assert_eq!(decoded[&format!("v{i}")], *value);
+        }
     }
 
     #[test]

@@ -36,6 +36,8 @@ pub(crate) struct Endpoints {
 pub(crate) enum FindResult {
     RouteNotFound,
     MethodNotFound(Arc<str>),
+    /// The path does not decode, so no route can be looked up for it - `400`
+    MalformedPath,
     Ok(Endpoint),
     /// No route answers the path, and the route group claiming its prefix answers with its
     /// own fallback, whatever the method
@@ -104,8 +106,9 @@ impl Endpoints {
         #[cfg(feature = "middleware")] headers: &HeaderMap,
     ) -> FindResult {
         let route_params = match self.routes.find(uri.path()) {
-            Some(params) => params,
-            None => return FindResult::RouteNotFound,
+            Ok(Some(params)) => params,
+            Ok(None) => return FindResult::RouteNotFound,
+            Err(_) => return FindResult::MalformedPath,
         };
 
         // Nothing is mapped here for any method, so this is no route - but a route group
@@ -282,6 +285,8 @@ impl Endpoints {
     pub(crate) fn contains(&mut self, method: &Method, pattern: &str) -> bool {
         self.routes
             .find(pattern)
+            .ok()
+            .flatten()
             .map(|params| {
                 params
                     .route

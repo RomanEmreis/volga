@@ -1,104 +1,84 @@
 # Volga
-Fast, simple, and high-performance web framework for Rust, built on top of
-[Tokio](https://tokio.rs/) and [hyper](https://hyper.rs/).
+A fast, explicit web framework for Rust, built on [Tokio](https://tokio.rs/) and
+[hyper](https://hyper.rs/).
 
-Volga is designed to make building HTTP services straightforward and explicit,
-while keeping performance predictable and overhead minimal.
+Volga makes HTTP services straightforward to write and easy to read, with predictable
+performance and minimal overhead.
 
-[![latest](https://img.shields.io/badge/latest-0.12.0-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.13.0-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://releases.rs/docs/1.90.0/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
 [![Release](https://github.com/RomanEmreis/volga/actions/workflows/release.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/release.yml)
 
-> 💡 **Status**: Volga is currently in preview.  
-> The public API may change while core abstractions are being finalized.
+> 💡 **Status**: Volga is in preview. The public API may still change.
 
 [Tutorial](https://romanemreis.github.io/volga-docs/) | [API Docs](https://docs.rs/volga/latest/volga/) | [Examples](https://github.com/RomanEmreis/volga/tree/main/examples) | [Roadmap](https://github.com/RomanEmreis/volga/milestone/1)
 
 ## Why Volga?
 
-Volga focuses on clarity and control without sacrificing performance.
-
-It avoids hidden behavior and framework-driven magic.
-Macros are used sparingly and primarily to reduce boilerplate. Handlers, middleware, and routing behave exactly as they look in code.
+Volga favors clarity and control without giving up performance. Handlers, middleware and
+routing do what they look like they do, and macros are used sparingly, only to cut
+boilerplate.
 
 Volga is a good fit if you:
 
-- Want simple and readable handler signatures
+- Want handler signatures that read like plain functions
 - Care about predictable performance and low overhead
-- Need fine-grained control over the HTTP request/response lifecycle
-- Work with streaming, WebSockets, or long-lived connections
-- Prefer explicit APIs over code generation
+- Need fine-grained control over the request/response lifecycle
+- Work with streaming, WebSockets or long-lived connections
+- Prefer explicit APIs to code generation
 
 ## Features
-- HTTP/1 and HTTP/2 support
-- Explicit and robust routing
-- Async and synchronous handlers and middleware
-- Composable middlewares
-- Dependency Injection without derive macros
-- Typed request extraction
-- WebSockets and WebSocket-over-HTTP/2
-- Streaming-friendly HTTP
-- End-to-end OAuth 2.1/OIDC support
-- Full **Tokio** compatibility
-- Runs on stable Rust **1.90+**
+- HTTP/1 and HTTP/2
+- Explicit routing: route groups, typed path parameters, catch-all segments
+- Async and synchronous handlers, composable middleware
+- Typed request extraction, with validation
+- Dependency injection without derive macros
+- WebSockets, including WebSocket over HTTP/2
+- Streaming responses and Server-Sent Events
+- Full **Tokio** compatibility, stable Rust **1.90+**
+
+### Batteries included
+Each of these is a Cargo feature, so only what you enable is compiled in:
+
+- OpenAPI 3 documents and Swagger UI
+- Authentication: JWT bearer, Basic, and end-to-end OAuth 2.1/OIDC
+- TLS with HSTS and HTTPS redirection
+- Rate limiting, CORS, response compression and request decompression
+- Static files, with a fallback file for single-page apps
+- Cookies (signed and private), multipart, TOML configuration
+- RFC 9457 problem details and `tracing` integration
 
 ## Getting Started
-### Dependencies
 ```toml
 [dependencies]
-volga = "0.12.0"
+volga = "0.13.0"
 tokio = { version = "1", features = ["full"] }
 ```
-### Simple request handler
 ```rust
 use volga::{App, ok};
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut app = App::new();
-    
-    app.map_get("/hello/{name}", async |name: String| {
-        ok!("Hello {name}!")
-    });
-    
-    app.run().await
-}
-```
-This example demonstrates:
 
-* typed path parameter extraction
-* async request handlers
-* minimal setup with zero boilerplate
-
-### Synchronous handlers
-A handler with nothing to await can return its response directly, and one that blocks can be moved off the runtime with `blocking`:
-```rust
-use volga::{App, blocking};
-
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
-    let mut app = App::new();
-
-    app.map_get("/sum/{x}/{y}", |x: i32, y: i32| x + y);
-
-    app.map_get("/reports/{id}", blocking(|id: u32| {
-        std::fs::read_to_string(format!("reports/{id}.txt"))
-    }));
+    app.map_get("/hello/{name}", |name: String| ok!("Hello {name}!"));
 
     app.run().await
 }
 ```
+`name` is read from the path by its type, and a handler with nothing to await returns
+its response directly. An `async` handler is mapped the same way.
 
-More advanced examples (middleware, DI, auth, rate limiting) can be found in the
-[documentation](https://romanemreis.github.io/volga-docs/) and [here](https://github.com/RomanEmreis/volga/tree/main/examples).
+Middleware, dependency injection, auth, rate limiting, blocking handlers and more are
+covered in the [tutorial](https://romanemreis.github.io/volga-docs/) and the
+[examples](https://github.com/RomanEmreis/volga/tree/main/examples).
 
 ## Performance
-Volga is benchmarked using a minimal plaintext endpoint to measure raw request handling to measure baseline HTTP throughput.
-
-The benchmark harness is available here:
-https://github.com/RomanEmreis/volga-benchmark
+Volga is benchmarked with a minimal plaintext endpoint, which measures baseline HTTP
+throughput. The benchmark harness is at
+[volga-benchmark](https://github.com/RomanEmreis/volga-benchmark).
 
 ### Benchmark environment
 

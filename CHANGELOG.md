@@ -5,18 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-# 0.12.1
+# 0.13.0
 
 ## Added
-* `FromPathArg` is public, with `PathArg` and `PathArgs`, all in `volga::http::endpoints::args`. A type implementing it can be a path parameter: a handler argument of its own (`|id: OrderId|`), an element of a `Path<(..)>` tuple, or the `T` of `Path<T>`. `PathArg::parse` reads the value through `FromStr` and answers `400` if it does not parse, so a newtype needs one line. `PathArg::name` and `PathArg::value` read the argument as it is written, and `PathArgs::iter`, `len` and `is_empty` make `FromPathArgs` implementable for the first time. (#269)
-* The `uuid` feature makes `uuid::Uuid` a path parameter: `|id: Uuid|`, `Path<Uuid>` and `Path<(Uuid,)>`. It is part of `full`. (#269)
-* `Path<T>` takes a single path parameter type as well as a tuple: `Path<u32>`. Unlike `Path<(u32,)>`, it requires the route to declare exactly one parameter and answers `500` otherwise, so that `Path<OrderId>` on `/users/{user_id}/orders/{order_id}` cannot read the user's id as the order's. (#269)
-
-## Fixed
-* A handler taking more positional path parameters than its route declares panicked on every request, dropping the connection, or the whole process under `panic = "abort"`; `Option<T>` around the extra one did not help. It answers `500` now, and an extra `Option<T>` reads `None`. (#269)
+* `FromPathArg` is public, together with `PathArg` and `PathArgs`, in `volga::http::endpoints::args`. A type implementing it is a path parameter: a handler argument (`|id: OrderId|`), an element of a `Path<(..)>` tuple, or the `T` of `Path<T>`. `PathArg::parse` goes through `FromStr` and answers `400` on failure, so a newtype takes one line. `PathArgs::iter`, `len` and `is_empty` make `FromPathArgs` implementable. (#269)
+* The `uuid` feature, part of `full`, makes `uuid::Uuid` a path parameter: `|id: Uuid|`, `Path<Uuid>` and `Path<(Uuid,)>`. (#269)
+* `Path<T>` takes a single type as well as a tuple: `Path<u32>`. Unlike `Path<(u32,)>`, it answers `500` unless the route declares exactly one parameter, so `Path<OrderId>` on `/users/{user_id}/orders/{order_id}` cannot read the user's id. (#269)
 
 ## Changed
-* The compile error for a handler argument that is not an extractor names `FromPathArg` as the trait it lacks, and says that implementing it makes a type of your own a path parameter. The one for `Path<T>` of a struct with named fields points to `NamedPath<T>`. (#269)
+* **Breaking:** the router percent-decodes the path once, segment by segment, and every extractor reads the decoded value. (#252)
+  - Positional extractors (`String`, `u32`, `Path<T>`, `FromPathArg` types) read `John%20Doe` as `John Doe`, `100%25` as `100%` and `%31` into a `u32` as `1`. `PathArg::value` returns the decoded value. `+` stays a plus sign.
+  - `%2F` decodes to `/` inside its segment and never splits it: `GET /users/a%2Fb` binds `"a/b"` on `/users/{id}` and does not reach `/users/a/b`. A catch-all tail is decoded whole, so `GET /files/a%2Fb/c` binds `"a/b/c"`. The raw path stays in the request's URI.
+  - A malformed escape (`%zz`, a trailing `%2`) or escapes that are not UTF-8 (`%FF`) answer `400` before routing, through the global middleware and the error handler, as a `404` does. `NamedPath<T>` used to accept both.
+  - A literal segment written with a percent-escape (`/lit/a%20b`) panics where it is mapped, since it would only match `a%2520b`. Write the text it spells: `/lit/a b`. The prefix of a static file mount is checked the same way.
+  - A static file mount matches its prefix against the decoded segments, as the router does, so `/st%61tic/app.css` and `//static/app.css` are served under `/static`. It leaves a malformed path to the router, so that `400` reaches `map_err` and problem details instead of bypassing them.
+* The compile error for a handler argument that is not an extractor names `FromPathArg` as the missing trait, and says that implementing it makes a type a path parameter. For `Path<T>` of a struct with named fields, it points to `NamedPath<T>`. (#269)
+
+## Fixed
+* A handler taking more positional path parameters than its route declares panicked on every request, dropping the connection, or the whole process under `panic = "abort"`. It answers `500` now, and an extra `Option<T>` reads `None`. (#269)
+* The value a handler got for a percent-encoded parameter depended on the extractor. Positional extractors read it undecoded, `NamedPath<T>` decoded it leniently (a malformed escape kept, invalid UTF-8 replaced with `U+FFFD`), and the static file server decoded it strictly. See Changed. (#252)
+* A literal segment that is percent-encoded on the wire, such as `/caf\u{e9}` or `/lit/a b`, could never match, since the router compared literals with the raw path. `GET /caf%C3%A9` now reaches `/caf\u{e9}`. (#252)
 
 # 0.12.0
 

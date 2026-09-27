@@ -224,6 +224,11 @@ async fn handle_impl(
             PathArgs::new(),
             CorsOverride::Inherit,
         ),
+        FindResult::MalformedPath => (
+            Terminal::MalformedPath,
+            PathArgs::new(),
+            CorsOverride::Inherit,
+        ),
     };
 
     #[cfg(not(feature = "middleware"))]
@@ -243,6 +248,7 @@ async fn handle_impl(
         FindResult::MethodNotFound(allowed) => {
             (Terminal::MethodNotAllowed(allowed), PathArgs::new())
         }
+        FindResult::MalformedPath => (Terminal::MalformedPath, PathArgs::new()),
     };
 
     let error_handler = pipeline.error_handler();
@@ -293,6 +299,7 @@ async fn handle_impl(
         Terminal::MethodNotAllowed(allowed) => status!(405; [
             (ALLOW, allowed.as_ref())
         ]),
+        Terminal::MalformedPath => Err(Error::from(crate::http::endpoints::route::MalformedPath)),
     };
 
     match response {

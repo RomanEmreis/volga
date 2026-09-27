@@ -89,10 +89,12 @@ use crate::{
     error::Error,
     html, html_file,
     http::{
-        IntoResponse, Method, StatusCode,
+        Method, StatusCode,
         endpoints::{
             handlers::{Func, RouteHandler},
-            route::{Layer, RoutePipeline, is_dynamic_segment, join_path, split_path},
+            route::{
+                Layer, RoutePipeline, check_literal, is_dynamic_segment, join_path, split_path,
+            },
         },
     },
     middleware::{HttpContext, Middleware, MiddlewareFn, NextFn},
@@ -159,17 +161,17 @@ impl Middleware for StaticMount {
         let target = if is_retrieval(ctx.request().method()) {
             resolve(ctx.request().uri().path(), &self.prefix)
         } else {
-            Ok(None)
+            None
         };
 
         let pipeline = self.pipeline.clone();
 
         async move {
             let mut ctx = ctx;
-            let target = match target {
-                Ok(Some(target)) => target,
-                Ok(None) => return next(ctx).await,
-                Err(err) => return err.into_response(),
+            // A path that does not decode is declined too: routing has decided on a `400`
+            // for it already, and answers it through the error handler
+            let Some(target) = target else {
+                return next(ctx).await;
             };
 
             let serving = match ctx.request().extensions().get::<HostEnv>() {
@@ -260,8 +262,17 @@ impl StaticMount {
     /// second mount on one prefix would answer nothing the first did not, and the middleware
     /// it carries would never run, so registering it would only cost every request a second
     /// look at the filesystem while looking like a second policy applies.
+    ///
+    /// # Panics
+    /// if a literal segment of the prefix carries a percent-escape, as a route under that
+    /// prefix would. The prefix is compared with the decoded segments of a request, so
+    /// `/docs%20v1` would only answer `/docs%2520v1`; it is written `/docs v1`.
     #[inline]
     pub(crate) fn mount(mut self, app: &mut App) {
+        split_path(&self.prefix)
+            .filter(|segment| !is_dynamic_segment(segment))
+            .for_each(|segment| check_literal(&self.prefix, segment));
+
         // A mount is matched against the request target as it is written. A route parameter
         // is matched by the router, which knows nothing about this mount, and there is one
         // content root either way - so there is nothing for `/{tenant}` to answer under.
@@ -766,7 +777,7 @@ mod tests {
         method: Method,
         headers: HeaderMap,
     ) -> Option<HttpResult> {
-        let target = resolve(path, "").unwrap()?;
+        let target = resolve(path, "")?;
         let serving = probe(env, target).await?;
 
         Some(respond(&serving, &method, &headers).await)
@@ -1242,6 +1253,27 @@ mod tests {
         app.pipeline.middlewares_mut().pipeline.len()
     }
 
+    /// A mount with nothing but files under it registers no route, so it checks its prefix
+    /// the way a route would
+    #[test]
+    #[should_panic(expected = "the segment `docs%20v1` carries a percent-escape")]
+    fn it_rejects_a_prefix_written_with_a_percent_escape() {
+        let mut app = App::new();
+        app.group("/docs%20v1", |g| {
+            g.use_static_assets();
+        });
+    }
+
+    #[test]
+    fn it_registers_a_mount_under_a_prefix_spelled_as_its_text() {
+        let mut app = App::new();
+        app.group("/docs v1", |g| {
+            g.use_static_assets();
+        });
+
+        assert_eq!(registered(&mut app), 1);
+    }
+
     #[test]
     fn it_does_not_register_a_mount_under_a_parameterized_prefix() {
         let mut app = App::new();
@@ -1370,7 +1402,7 @@ mod tests {
     #[tokio::test]
     async fn it_denies_a_directory_when_listing_is_off() {
         let env = HostEnv::new("tests/static");
-        let target = resolve("/assets", "").unwrap().unwrap();
+        let target = resolve("/assets", "").unwrap();
 
         assert!(matches!(probe(&env, target).await, Some(Serving::Denied)));
     }
