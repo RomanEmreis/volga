@@ -18,7 +18,7 @@ use crate::{
 /// The terminal stage of the request pipeline: whatever answers the request
 /// once the global middleware chain has run.
 ///
-/// Routing happens before that chain, so which of the three answers is decided
+/// Routing happens before that chain, so which of them answers is decided
 /// up front. Carrying the decision through the chain instead of acting on it
 /// immediately is what keeps global middleware - and the per-request scope it
 /// reads - on requests that match no route.
@@ -38,6 +38,10 @@ pub(crate) enum Terminal {
     /// The path matched but the method did not: `405` with an `Allow` header
     /// listing the methods the path does have.
     MethodNotAllowed(Arc<str>),
+
+    /// The path does not decode - a malformed percent-escape, or escapes that are not
+    /// UTF-8 - so no route was looked up for it: `400`, through the error handler.
+    MalformedPath,
 
     /// The matched route's pipeline has been handed off and is running. The
     /// pipeline is consumable, the fact that routing matched is not - the

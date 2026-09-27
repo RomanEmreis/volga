@@ -115,15 +115,17 @@ pub trait FromPathArgs: Sized {
 /// `Cow<'static, str>`, `Box<[u8]>`, `CString`, `OsString`, `PathBuf` and, with the `uuid`
 /// feature, `uuid::Uuid`.
 ///
-/// The value is read as it is written in the path, percent-escapes included.
+/// The value is percent-decoded by the router before any extractor reads it, and a path
+/// that does not decode is answered `400` - see [`PathArg::value`].
 /// [`PathArg::parse`] reads it through [`FromStr`](std::str::FromStr) and answers `400` if
 /// it does not parse.
 ///
 /// # Security
-/// The value is not percent-decoded: `%2E%2E` and `%2F` arrive as they are, and a catch-all
-/// parameter (`{*rest}`) carries literal `/`s as well. A check made on the value, such as
-/// refusing `..` in a file name, has to be made on the form the value is used in - decode
-/// first, then check, never the other way around.
+/// The value is decoded already: `%2E%2E` arrives as `..` and `%2F` as `/`, so a single
+/// parameter can carry a separator, and a catch-all parameter (`{*rest}`) carries the
+/// separators between its segments as well. A check made on the value, such as refusing
+/// `..` or `/` in a file name, sees what the handler will use - do not decode it a second
+/// time after checking it.
 ///
 /// # Example
 /// ```no_run

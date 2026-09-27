@@ -108,7 +108,7 @@ async fn it_reads_a_tail_carrying_form_characters_by_name() {
         get(&server, "/files/a&admin=true/b").await,
         (200, "a&admin=true/b:None".into())
     );
-    // Percent-escapes are decoded by name, as for any parameter
+    // Percent-escapes are decoded, as for any parameter and through any extractor
     assert_eq!(
         get(&server, "/files/C++/a%2Fb").await,
         (200, "C++/a/b:None".into())

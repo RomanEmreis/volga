@@ -17,14 +17,14 @@
 //!   `/files/`, so that position can carry a route of its own.
 //! - **The value is the path as the request wrote it**, from the first segment the
 //!   catch-all reads to the end: separators inside it and a trailing one are kept.
-//!   `GET /files/a/b/` binds `"a/b/"`. It is decoded the way any parameter is: a positional
-//!   extractor (`String`, `Path<T>`) reads it undecoded, while `NamedPath<T>` decodes its
-//!   percent-escapes - so `GET /files/a%2Fb/c` reads as `"a%2Fb/c"` through the first and
-//!   `"a/b/c"` through the second.
+//!   `GET /files/a/b/` binds `"a/b/"`. It is percent-decoded the way any parameter is
+//!   (see [Percent-encoding](#percent-encoding)), so an encoded separator reads as a `/`
+//!   like the ones around it: `GET /files/a%2Fb/c` binds `"a/b/c"` through every
+//!   extractor. The path as it arrived is still there to read, in the request's URI.
 //! - **It is not a safe file system path.** Nothing in it is normalized, so a `..` segment
 //!   reaches the handler as the request wrote it: `GET /files/../../etc/passwd` binds
-//!   `"../../etc/passwd"`, and so does `GET /files/..%2F..%2Fetc/passwd` read through
-//!   `NamedPath<T>`. A handler that joins the value onto a directory has to reject
+//!   `"../../etc/passwd"`, and so does `GET /files/..%2F..%2Fetc/passwd`. A handler that
+//!   joins the value onto a directory has to reject
 //!   `..`, a root and a drive prefix itself, or resolve the joined path and check that it is
 //!   still under that directory. The static file server (`use_static_files`) does this for
 //!   the files it serves; a catch-all route does not.
@@ -57,12 +57,43 @@
 //! A catch-all is described in an OpenAPI document as the path parameter `{name}`, since
 //! OpenAPI templates a path one segment at a time and has no spelling for a value spanning
 //! several. A client generated from that document may percent-encode the `/` in the value
-//! it sends, and a positional extractor reads that value undecoded, as `%2F`. The same
+//! it sends, and the value is decoded back to the `/` it was. The same
 //! templating leaves no room for a catch-all beside a parameter route mapped for the same
 //! verb at the same position - `/files/{name}` and `/files/{*path}` - in one document, so
 //! where both are bound to a document the parameter route is described there and the
 //! catch-all is left out, with a warning at startup in debug builds. A document only the
 //! catch-all is bound to still describes it.
+//!
+//! # Percent-encoding
+//!
+//! A request path is matched as the text it spells rather than as the bytes it is written
+//! in. The router splits it on the separators the request wrote and percent-decodes each
+//! segment once, before it is compared with a literal or bound to a parameter:
+//!
+//! ```
+//!# use volga::App;
+//! let mut app = App::new();
+//!
+//! // GET /caf%C3%A9 reaches this route
+//! app.map_get("/caf\u{e9}", || async { "menu" });
+//!
+//! // GET /users/John%20Doe binds `name` as "John Doe"
+//! app.map_get("/users/{name}", |name: String| async move { name });
+//! ```
+//!
+//! - **Every extractor reads the decoded value** - a positional one (`String`, `u32`,
+//!   `Path<T>`, a `FromPathArg` type of your own) and `NamedPath<T>` alike: `%20` is a
+//!   space, `%25` a `%` and `%31` the `1` a `u32` parses. A `+` is a plus sign, not a space
+//!   (RFC 3986 Section 3.3).
+//! - **An encoded separator stays in its segment.** `%2F` decodes to a `/` inside the value
+//!   it belongs to and never starts a segment of its own, so `GET /users/a%2Fb` binds `id`
+//!   as `"a/b"` on `/users/{id}`, and does not reach `/users/a/b`.
+//! - **A path that does not decode is answered `400`**: a `%` not followed by two hex
+//!   digits, or escapes that do not decode to UTF-8. No route is looked up for it, and the
+//!   `400` reaches the error handler and the global middleware the way a `404` does.
+//! - **A literal segment is written as the text it spells.** One carrying a
+//!   percent-escape - `/a%20b` - panics where it is mapped, since it would only answer a
+//!   request writing it as `/a%2520b`; write it as `/a b` instead.
 //!
 //! # Ambiguous routes
 //!

@@ -63,6 +63,17 @@
 //! parameter behind a dead-end literal, and a request answered by nothing all pay for, on
 //! top of the greedy walk that came before it.
 //!
+//! ## Percent-encoding
+//!
+//! A path is matched as the text it spells rather than as the bytes it is written in. It
+//! is split on the separators the request wrote, and each segment is percent-decoded
+//! before it is compared with a literal or bound to a parameter, so `/caf%C3%A9` reaches
+//! the route mapped as `/caf\u{e9}`, and every extractor reads a parameter the same way.
+//! An encoded separator, `%2F`, is decoded inside the segment it sits in and never starts
+//! one of its own. A path carrying no `%` - nearly every one - is read as it is, at the
+//! cost of one scan for that byte; a path carrying one is decoded up front and looked up
+//! in the second pass, and a malformed one answers `400` without being looked up at all.
+//!
 //! ## Use of `SmallVec`
 //!
 //! `SmallVec` is used for short collections such as `PathArgs`, which typically
@@ -88,9 +99,11 @@ use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
 pub(crate) use layer::{Layer, RoutePipeline};
 pub use path_args::{PathArg, PathArgs};
+pub(crate) use percent::{MalformedPath, percent_decode};
 
 pub(crate) mod layer;
 pub(crate) mod path_args;
+pub(crate) mod percent;
 
 const OPEN_BRACKET: char = '{';
 const CLOSE_BRACKET: char = '}';
@@ -215,8 +228,16 @@ pub(super) struct RouteNode {
 }
 
 /// The parameters a backtracking search has bound so far, each as the name the tree binds
-/// and the part of the path it reads - both borrowed, so giving a branch up costs nothing
+/// and the part of the path it reads, as the request wrote it - both borrowed, so giving a
+/// branch up costs nothing
 type Bindings<'route, 'path> = SmallVec<[(&'route Arc<str>, &'path str); DEFAULT_DEPTH]>;
+
+/// A segment of a request path as the request wrote it, and the text it decodes to
+type Segment<'path, 'text> = (&'path str, &'text str);
+
+/// The result of a lookup: the route answering a path, `None` where none does, or
+/// [`MalformedPath`] for a path that does not decode
+pub(super) type Lookup<'route> = Result<Option<RouteParams<'route>>, MalformedPath>;
 
 /// Parameters of a route
 pub(super) struct RouteParams<'route> {
@@ -333,8 +354,9 @@ impl RouteNode {
     ///
     /// # Panics
     /// if this route is a second name for one already mapped for `method`, or for the
-    /// `GET` that a `HEAD` answers - see [`ambiguous_route`] - or if a catch-all parameter
-    /// is followed by another segment - see [`misplaced_catch_all`].
+    /// `GET` that a `HEAD` answers - see [`ambiguous_route`] - if a catch-all parameter
+    /// is followed by another segment - see [`misplaced_catch_all`] - or if a literal
+    /// segment carries a percent-escape - see [`encoded_literal`].
     pub(super) fn insert(&mut self, path: &str, method: Method, handler: Layer) {
         let (resource, written, bound) = self.reach(path);
         resource.insert_handler(method, handler, &written, &bound, path);
@@ -369,7 +391,8 @@ impl RouteNode {
     /// at - the same names, unless another route reached a position first.
     ///
     /// # Panics
-    /// if a catch-all parameter is followed by another segment - see [`misplaced_catch_all`].
+    /// if a catch-all parameter is followed by another segment - see [`misplaced_catch_all`] -
+    /// or if a literal segment carries a percent-escape - see [`encoded_literal`].
     fn reach(&mut self, path: &str) -> (&mut Resource, ParamNames, ParamNames) {
         let mut current = self;
         let mut segments = split_path(path);
@@ -383,6 +406,9 @@ impl RouteNode {
             };
 
             if !is_dynamic_segment(segment) {
+                if percent::has_escape(segment) {
+                    encoded_literal(path, segment);
+                }
                 current = current.insert_static_node(segment);
                 continue;
             }
@@ -416,11 +442,16 @@ impl RouteNode {
     /// stop answering `/a/b` the moment some unrelated route mapped `/a/b/c`. A catch-all
     /// is read after both, where neither leads anywhere.
     ///
-    /// See [the module documentation](self) for why this takes two passes. The first one
-    /// is written out here rather than chained to the second, which keeps the result it
-    /// finds from being moved through an `Option` on the way out.
+    /// See [the module documentation](self) for why this takes two passes, and for how a
+    /// path carrying percent-escapes is read. The first pass is written out here rather than
+    /// chained to the second, which keeps the result it finds from being moved through an
+    /// `Option` on the way out.
     #[inline]
-    pub(super) fn find(&self, path: &str) -> Option<RouteParams<'_>> {
+    pub(super) fn find(&self, path: &str) -> Lookup<'_> {
+        if percent::is_encoded(path) {
+            return self.find_encoded(path);
+        }
+
         // The first pass: the literal where one is mapped, the parameter otherwise, with no
         // record of what it passed over and no look at a catch-all
         let mut current = self;
@@ -433,7 +464,7 @@ impl RouteNode {
             }
 
             let Some(next) = &current.dynamic_route else {
-                return self.find_backtracking(path);
+                return self.find_backtracking(path, split_path(path).map(|s| (s, s)));
             };
 
             params.push(PathArg {
@@ -444,37 +475,65 @@ impl RouteNode {
         }
 
         if !current.resource.is_mapped() {
-            return self.find_backtracking(path);
+            return self.find_backtracking(path, split_path(path).map(|s| (s, s)));
         }
 
-        Some(RouteParams {
+        Ok(Some(RouteParams {
             route: &current.resource,
             params,
-        })
+        }))
+    }
+
+    /// Finds handlers by a path carrying a `%`: every segment is decoded before any of them
+    /// is compared, so a malformed one is found before the lookup starts, and the second
+    /// pass reads the decoded text.
+    ///
+    /// The greedy pass is skipped: the search reads the path in the same order and takes
+    /// the route it would have taken first, and a path spelled this way is rare enough that
+    /// the difference is not worth a second copy of the walk.
+    #[inline(never)]
+    fn find_encoded(&self, path: &str) -> Lookup<'_> {
+        let segments = split_path(path)
+            .map(|segment| percent_decode(segment).map(|text| (segment, text)))
+            .collect::<Result<SmallVec<[_; DEFAULT_DEPTH]>, _>>()?;
+
+        self.find_backtracking(
+            path,
+            segments
+                .iter()
+                .map(|(segment, text)| (*segment, text.as_ref())),
+        )
     }
 
     /// The second pass, for a path the greedy walk could not place: every reading of it in
     /// precedence order, until one of them reaches a mapped route.
     ///
-    /// The search binds borrowed names and segments, and they are copied out only once a
-    /// route is found - so a branch it gives up, and a path nothing answers, allocate
-    /// nothing.
+    /// The search binds borrowed names and segments, and they are copied out - decoded -
+    /// only once a route is found, so a branch it gives up, and a path nothing answers,
+    /// allocate nothing.
     #[inline(never)]
-    fn find_backtracking(&self, path: &str) -> Option<RouteParams<'_>> {
+    fn find_backtracking<'path, 'text, I>(&self, path: &'path str, segments: I) -> Lookup<'_>
+    where
+        I: Iterator<Item = Segment<'path, 'text>> + Clone,
+    {
         let mut bindings = Bindings::new();
-        let route = self.search(path, split_path(path), &mut bindings)?;
+        let Some(route) = self.search(path, segments, &mut bindings) else {
+            return Ok(None);
+        };
 
         let args = bindings
             .into_iter()
-            .map(|(name, value)| PathArg {
-                name: Arc::clone(name),
-                value: Box::from(value),
+            .map(|(name, value)| {
+                Ok(PathArg {
+                    name: Arc::clone(name),
+                    value: percent_decode(value)?.into(),
+                })
             })
-            .collect();
+            .collect::<Result<_, MalformedPath>>()?;
 
         let params = PathArgs::from_parts(args, None);
 
-        Some(RouteParams { route, params })
+        Ok(Some(RouteParams { route, params }))
     }
 
     /// Searches this subtree for the route answering `segments`, the unread rest of `path`:
@@ -482,25 +541,29 @@ impl RouteNode {
     /// unwinds to the deepest alternative it passed and gives up as little of the path as it
     /// has to. `bindings` is left as it was found unless a route is found.
     ///
+    /// A literal is compared with the text a segment decodes to, and a parameter binds the
+    /// segment as it is written, to be decoded once the search is over - which is also how a
+    /// catch-all binds the rest of `path`.
+    ///
     /// The recursion cannot blow up. It only descends into a child that exists, so it goes
     /// no deeper than the longest route mapped; and a node in this tree sits at one depth,
     /// reached only after exactly that many segments have been read, so no node is visited
     /// twice within a lookup. The work is bounded by the nodes the path can reach, never by
     /// the number of ways it could be read.
-    fn search<'route, 'path, I>(
+    fn search<'route, 'path, 'text, I>(
         &'route self,
         path: &'path str,
         mut segments: I,
         bindings: &mut Bindings<'route, 'path>,
     ) -> Option<&'route Resource>
     where
-        I: Iterator<Item = &'path str> + Clone,
+        I: Iterator<Item = Segment<'path, 'text>> + Clone,
     {
-        let Some(segment) = segments.next() else {
+        let Some((segment, text)) = segments.next() else {
             return self.resource.is_mapped().then_some(&self.resource);
         };
 
-        if let Ok(i) = self.static_routes.binary_search_by(|r| r.cmp(segment))
+        if let Ok(i) = self.static_routes.binary_search_by(|r| r.cmp(text))
             && let Some(found) = self.static_routes[i]
                 .node
                 .search(path, segments.clone(), bindings)
@@ -866,7 +929,9 @@ pub(crate) fn param_name(segment: &str) -> &str {
 
 /// The rest of `path` from `segment` on, where `segment` is one [`split_path`] read out of
 /// `path` - which is what a catch-all binds: every segment from the position it sits at to
-/// the end, with the separators between them, and a trailing one, as the request wrote them
+/// the end, with the separators between them, and a trailing one, as the request wrote them.
+/// It is percent-decoded as a whole once the lookup is over, so an encoded separator in it
+/// reads as a `/` like the ones around it.
 #[inline]
 fn tail<'path>(path: &'path str, segment: &'path str) -> &'path str {
     let start = segment.as_ptr() as usize - path.as_ptr() as usize;
@@ -979,6 +1044,23 @@ fn misplaced_catch_all(path: &str) -> ! {
         "invalid route `{path}`: a catch-all parameter reads the rest of the path, so it can \
          only be the last segment of a route. Move it to the end, or map what follows it as \
          a route of its own."
+    );
+}
+
+/// Reports a literal segment written with a percent-escape
+///
+/// A request path is decoded before it is matched, so a literal is compared with the text a
+/// segment spells rather than with how it is written on the wire: `/a%20b` would answer
+/// `GET /a%2520b` and nothing else. Mapping it quietly would leave a route that answered
+/// its own spelling until now answering none.
+#[cold]
+#[inline(never)]
+fn encoded_literal(path: &str, segment: &str) -> ! {
+    let decoded = percent_decode(segment).unwrap_or(std::borrow::Cow::Borrowed(segment));
+    panic!(
+        "invalid route `{path}`: the segment `{segment}` carries a percent-escape, and a \
+         request path is matched after it is decoded. Write the segment as the text it \
+         spells - `{decoded}` - and a request writing it as `{segment}` will reach it."
     );
 }
 
@@ -1240,6 +1322,13 @@ mod tests {
     };
     use crate::ok;
     use hyper::Method;
+
+    impl RouteNode {
+        /// Looks up a path that is known to decode
+        fn find_ok(&self, path: &str) -> Option<super::RouteParams<'_>> {
+            self.find(path).expect("a well-formed path")
+        }
+    }
     use smallvec::SmallVec;
     use std::sync::Arc;
 
@@ -1256,7 +1345,7 @@ mod tests {
         let mut route = RouteNode::new();
         route.insert(path, Method::GET, handler.into());
 
-        let route_params = route.find(path);
+        let route_params = route.find_ok(path);
 
         assert!(route_params.is_some());
     }
@@ -1273,7 +1362,7 @@ mod tests {
 
         let path = "test/some";
 
-        let route_params = route.find(path).unwrap();
+        let route_params = route.find_ok(path).unwrap();
         let param = route_params.params.first().unwrap();
 
         assert_eq!(param.value.as_ref(), "some");
@@ -1632,7 +1721,7 @@ mod tests {
             handler.into(),
         );
 
-        assert!(route.find("/api/users/7").is_some());
+        assert!(route.find_ok("/api/users/7").is_some());
     }
 
     #[test]
@@ -1712,7 +1801,7 @@ mod tests {
         route.insert("/users/{id}", Method::GET, handler.clone().into());
         route.insert("/users/{name}", Method::POST, handler.into());
 
-        let found = route.find("/users/42").unwrap();
+        let found = route.find_ok("/users/42").unwrap();
         let handlers = found.route.handlers.as_ref().unwrap();
 
         // The tree binds the name the GET got there with, and only the POST carries one
@@ -1734,8 +1823,8 @@ mod tests {
         route.insert("/users/{id}/posts", Method::GET, handler.clone().into());
         route.insert("/users/{name}/comments", Method::GET, handler.into());
 
-        let posts = route.find("/users/42/posts").unwrap();
-        let comments = route.find("/users/42/comments").unwrap();
+        let posts = route.find_ok("/users/42/posts").unwrap();
+        let comments = route.find_ok("/users/42/comments").unwrap();
 
         assert!(posts.route.handlers.as_ref().unwrap()[0].params.is_none());
         assert_eq!(
@@ -1779,11 +1868,11 @@ mod tests {
         route.insert("/users/{id}", Method::POST, handler.clone().into());
         route.insert("/users/{id}/posts", Method::GET, handler.into());
 
-        let found = route.find("/users/42").unwrap();
+        let found = route.find_ok("/users/42").unwrap();
 
         assert_eq!(found.params.first().unwrap().name.as_ref(), "id");
         assert_eq!(found.route.allowed_methods().as_ref(), "GET,POST,HEAD");
-        assert!(route.find("/users/42/posts").is_some());
+        assert!(route.find_ok("/users/42/posts").is_some());
     }
 
     /// The type a parameter is annotated with is not part of its name, so the two spell
@@ -1796,7 +1885,7 @@ mod tests {
         route.insert("/users/{id}", Method::GET, handler.clone().into());
         route.insert("/users/{id:integer}", Method::POST, handler.into());
 
-        assert!(route.find("/users/42").is_some());
+        assert!(route.find_ok("/users/42").is_some());
     }
 
     /// A literal segment is matched before the parameter covering it, which is how a route
@@ -1809,10 +1898,10 @@ mod tests {
         route.insert("/users/{id}", Method::GET, handler.clone().into());
         route.insert("/users/me", Method::GET, handler.into());
 
-        assert!(route.find("/users/me").unwrap().params.first().is_none());
+        assert!(route.find_ok("/users/me").unwrap().params.first().is_none());
         assert_eq!(
             route
-                .find("/users/42")
+                .find_ok("/users/42")
                 .unwrap()
                 .params
                 .first()
@@ -1825,7 +1914,7 @@ mod tests {
 
     /// Collects the parameters a lookup bound, as `(name, value)` pairs.
     fn bound(route: &RouteNode, path: &str) -> Option<Vec<(String, String)>> {
-        route.find(path).map(|found| {
+        route.find_ok(path).map(|found| {
             found
                 .params
                 .iter()
@@ -1978,7 +2067,7 @@ mod tests {
     }
 
     /// The tail is the path as the request wrote it, from the first segment the catch-all
-    /// reads - the separators inside it and after it included, so a proxy can forward it
+    /// reads - the separators inside it and after it included - with its escapes decoded
     #[test]
     fn it_binds_the_tail_as_the_request_wrote_it() {
         let route = tree(&["/files/{*path}"]);
@@ -1987,9 +2076,10 @@ mod tests {
         assert_eq!(bound(&route, "/files/a//b"), args(&[("path", "a//b")]));
         assert_eq!(bound(&route, "/files//a"), args(&[("path", "a")]));
         assert_eq!(bound(&route, "//files/a"), args(&[("path", "a")]));
+        assert_eq!(bound(&route, "/files/a%2Fb/c"), args(&[("path", "a/b/c")]));
         assert_eq!(
-            bound(&route, "/files/a%2Fb/c"),
-            args(&[("path", "a%2Fb/c")])
+            bound(&route, "/files/my%20docs/100%25/"),
+            args(&[("path", "my docs/100%/")])
         );
         // Not a file system path: nothing in it is resolved on the way
         assert_eq!(
@@ -2123,7 +2213,7 @@ mod tests {
         route.insert("/files/{*path}", Method::GET, handler.clone().into());
         route.insert("/files/{*rest}", Method::POST, handler.into());
 
-        let found = route.find("/files/a/b").unwrap();
+        let found = route.find_ok("/files/a/b").unwrap();
         let handlers = found.route.handlers.as_ref().unwrap();
 
         assert_eq!(found.params.first().unwrap().name.as_ref(), "path");
@@ -2176,7 +2266,7 @@ mod tests {
     /// Whether the `GET` endpoint answering `path` is an implicit one
     #[cfg(feature = "static-files")]
     fn answered_implicitly(route: &RouteNode, path: &str) -> bool {
-        let found = route.find(path).expect("a route answers");
+        let found = route.find_ok(path).expect("a route answers");
         assert!(
             found.route.handler(&Method::GET).is_some(),
             "a GET endpoint answers"
@@ -2199,7 +2289,7 @@ mod tests {
         assert!(!answered_implicitly(&route, "/a/b"));
         assert_eq!(
             route
-                .find("/a/b")
+                .find_ok("/a/b")
                 .unwrap()
                 .route
                 .handlers
@@ -2234,7 +2324,7 @@ mod tests {
         insert_implicit(&mut route, "/{*path}");
         route.insert("/{*other}", Method::HEAD, handler.into());
 
-        let found = route.find("/a/b").unwrap();
+        let found = route.find_ok("/a/b").unwrap();
 
         assert!(answered_implicitly(&route, "/a/b"));
         assert_eq!(found.route.allowed_methods().as_ref(), "GET,POST,HEAD");
@@ -2267,18 +2357,18 @@ mod tests {
         insert_fallback(&mut route, "/api/{*rest}");
 
         for path in ["/api", "/api/", "/api/nope", "/api/models/7"] {
-            let found = route.find(path).expect(path);
+            let found = route.find_ok(path).expect(path);
 
             assert!(found.route.endpoints().is_none(), "{path}");
             assert!(found.route.fallback.is_some(), "{path}");
         }
 
         // A route answers its own position, and the fallback is not consulted there
-        let models = route.find("/api/models").unwrap();
+        let models = route.find_ok("/api/models").unwrap();
         assert!(models.route.endpoints().is_some());
         assert!(models.route.fallback.is_none());
 
-        assert!(route.find("/other").is_none());
+        assert!(route.find_ok("/other").is_none());
     }
 
     /// A fallback under a literal prefix is read before a parameter route that would read
@@ -2307,5 +2397,117 @@ mod tests {
 
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0], (Method::GET, "/api/models"));
+    }
+
+    #[test]
+    fn it_decodes_a_parameter() {
+        let route = tree(&["/users/{name}"]);
+
+        for (path, expected) in [
+            ("/users/John%20Doe", "John Doe"),
+            ("/users/100%25", "100%"),
+            ("/users/caf%C3%A9", "caf\u{e9}"),
+            ("/users/C++", "C++"),
+            ("/users/%31", "1"),
+        ] {
+            assert_eq!(bound(&route, path), args(&[("name", expected)]), "{path}");
+        }
+    }
+
+    /// A segment is cut out of the path before it is decoded, so an encoded separator is
+    /// part of the value rather than the start of another segment
+    #[test]
+    fn it_reads_an_encoded_separator_inside_its_segment() {
+        let route = tree(&["/users/{id}", "/users/{id}/posts"]);
+
+        assert_eq!(bound(&route, "/users/a%2Fb"), args(&[("id", "a/b")]));
+        assert_eq!(
+            bound(&route, "/users/a%2Fposts/posts"),
+            args(&[("id", "a/posts")])
+        );
+        assert_eq!(bound(&route, "/users%2F7"), None);
+    }
+
+    #[test]
+    fn it_matches_a_literal_against_the_text_a_segment_spells() {
+        let route = tree(&["/caf\u{e9}", "/lit/a b", "/100%/{id}"]);
+
+        assert_eq!(bound(&route, "/caf%C3%A9"), Some(vec![]));
+        assert_eq!(bound(&route, "/caf%c3%a9"), Some(vec![]));
+        assert_eq!(bound(&route, "/caf\u{e9}"), Some(vec![]));
+        assert_eq!(bound(&route, "/lit/a%20b"), Some(vec![]));
+        assert_eq!(bound(&route, "/%6Cit/a%20b"), Some(vec![]));
+        assert_eq!(bound(&route, "/100%25/7"), args(&[("id", "7")]));
+        // `+` is a literal plus sign in a path, not a space
+        assert_eq!(bound(&route, "/lit/a+b"), None);
+    }
+
+    /// An encoded separator decodes to a `/`, which no literal segment can carry
+    #[test]
+    fn it_does_not_read_an_encoded_separator_as_a_literal_path() {
+        let route = tree(&["/a/b"]);
+
+        assert_eq!(bound(&route, "/a/b"), Some(vec![]));
+        assert_eq!(bound(&route, "/a%2Fb"), None);
+    }
+
+    /// A decoded path takes the same route a plain one does: a literal first, a parameter
+    /// behind a dead end, a catch-all last
+    #[test]
+    fn it_reads_an_encoded_path_in_precedence_order() {
+        let route = tree(&[
+            "/users/me",
+            "/users/me/settings",
+            "/users/{id}",
+            "/users/{id}/files/{*path}",
+        ]);
+
+        assert_eq!(bound(&route, "/users/m%65"), Some(vec![]));
+        assert_eq!(bound(&route, "/users/m%65/settings"), Some(vec![]));
+        assert_eq!(
+            bound(&route, "/users/%6De/files/a%20b/c"),
+            args(&[("id", "me"), ("path", "a b/c")])
+        );
+        assert_eq!(bound(&route, "/users/a%20b"), args(&[("id", "a b")]));
+        assert_eq!(bound(&route, "/users/a%20b/nothing"), None);
+    }
+
+    #[test]
+    fn it_rejects_a_path_that_does_not_decode() {
+        let route = tree(&["/users/{id}", "/{*path}"]);
+
+        for path in [
+            "/users/%zz",
+            "/users/%2",
+            "/users/%FF",
+            "/nothing/%",
+            "/%C3/x",
+        ] {
+            assert!(
+                matches!(route.find(path), Err(super::MalformedPath)),
+                "expected `{path}` to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "the segment `a%20b` carries a percent-escape")]
+    fn it_rejects_a_literal_written_with_a_percent_escape() {
+        tree(&["/lit/a%20b"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Write the segment as the text it spells - `caf\u{e9}`")]
+    fn it_names_the_text_an_encoded_literal_spells() {
+        tree(&["/caf%C3%A9"]);
+    }
+
+    /// A `%` that starts no escape is a percent sign, and a literal may carry one
+    #[test]
+    fn it_accepts_a_literal_carrying_a_percent_sign() {
+        let route = tree(&["/100%", "/50%off"]);
+
+        assert_eq!(bound(&route, "/100%25"), Some(vec![]));
+        assert_eq!(bound(&route, "/50%25off"), Some(vec![]));
     }
 }

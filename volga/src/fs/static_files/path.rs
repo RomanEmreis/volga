@@ -1,8 +1,10 @@
 //! Resolving a request target to a path under the content root
 
-use crate::{error::Error, http::endpoints::route::split_path};
+use crate::{
+    error::Error,
+    http::endpoints::route::{percent_decode, split_path},
+};
 use std::{
-    borrow::Cow,
     ffi::OsStr,
     path::{Component, Path, PathBuf},
 };
@@ -20,27 +22,33 @@ pub(crate) enum Target {
 
 /// Resolves the request target `path` against the `prefix` a mount answers under.
 ///
-/// The path is read as it arrived and its segments are kept as they are, so what comes out
-/// addresses what the request asked for - there is nothing to reassemble and nothing to
-/// re-order. A target the mount does not answer is `Ok(None)`: it is outside the prefix, or
-/// it carries a segment that does not name a file in the directory before it - `.`, `..`, an
-/// encoded separator, a drive prefix. Those are refused rather than dropped, since dropping
-/// one would answer a path the request never asked for, and refusing them is what makes
-/// traversal impossible here rather than caught after the fact.
+/// The path is read the way the router reads it: split on the separators it was written
+/// with, each segment percent-decoded, and the prefix compared with the decoded segments -
+/// so a mount and a route under one prefix answer the same requests. What is left is kept
+/// in the order it arrived, so what comes out addresses what the request asked for - there
+/// is nothing to reassemble and nothing to re-order. A target the mount does not answer is
+/// `Ok(None)`: it is outside the prefix, or it carries a segment that does not name a file
+/// in the directory before it - `.`, `..`, an encoded separator, a drive prefix. Those are
+/// refused rather than dropped, since dropping one would answer a path the request never
+/// asked for, and refusing them is what makes traversal impossible here rather than caught
+/// after the fact.
 ///
 /// An `Err` is a request target that is not a valid one at all - a malformed `%XX` escape,
 /// or one that does not decode to UTF-8.
 pub(crate) fn resolve(path: &str, prefix: &str) -> Result<Option<Target>, Error> {
-    let Some(rest) = strip_mount_prefix(path, prefix) else {
-        return Ok(None);
-    };
+    let mut segments =
+        split_path(path).map(|segment| percent_decode(segment).map_err(|_| malformed_escape()));
 
-    // Split the way the router splits a route pattern, so that a mount and a route read
-    // `//assets//app.css` as the same path.
+    for expected in split_path(prefix) {
+        match segments.next().transpose()? {
+            Some(segment) if segment == expected => continue,
+            _ => return Ok(None),
+        }
+    }
+
     let mut relative = PathBuf::new();
-    for segment in split_path(rest) {
-        let segment = percent_decode(segment)?;
-        if !push_normal(&mut relative, segment.as_ref()) {
+    for segment in segments {
+        if !push_normal(&mut relative, segment?.as_ref()) {
             return Ok(None);
         }
     }
@@ -52,25 +60,6 @@ pub(crate) fn resolve(path: &str, prefix: &str) -> Result<Option<Target>, Error>
     };
 
     Ok(Some(target))
-}
-
-/// Returns what is left of `path` once the `prefix` the mount answers under is taken off it,
-/// or `None` when the target is outside that mount.
-///
-/// An empty prefix is a mount that answers the whole application, and the prefix carries no
-/// trailing slash, so `/static` addresses the mount point of `/static` itself while
-/// `/staticky` is outside it.
-#[inline]
-fn strip_mount_prefix<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
-    if prefix.is_empty() {
-        return Some(path);
-    }
-
-    let rest = path.strip_prefix(prefix)?;
-    match rest.as_bytes().first() {
-        None | Some(b'/') => Some(rest),
-        Some(_) => None,
-    }
 }
 
 /// Pushes `segment` onto `path` when it names a single ordinary component, and returns
@@ -96,44 +85,6 @@ fn push_normal(path: &mut PathBuf, segment: &str) -> bool {
     }
 }
 
-/// Decodes the `%XX` escapes of a single path segment.
-///
-/// Unlike form decoding, `+` is left as it is: in a request target it is a
-/// literal plus sign rather than a space (RFC 3986 Section 3.3).
-#[inline]
-fn percent_decode(segment: &str) -> Result<Cow<'_, str>, Error> {
-    if !segment.contains('%') {
-        return Ok(Cow::Borrowed(segment));
-    }
-
-    let bytes = segment.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'%' {
-            decoded.push(bytes[i]);
-            i += 1;
-            continue;
-        }
-
-        let escape = bytes.get(i + 1..i + 3).ok_or_else(malformed_escape)?;
-        let hi = char::from(escape[0])
-            .to_digit(16)
-            .ok_or_else(malformed_escape)?;
-
-        let lo = char::from(escape[1])
-            .to_digit(16)
-            .ok_or_else(malformed_escape)?;
-
-        decoded.push((hi * 16 + lo) as u8);
-        i += 3;
-    }
-
-    String::from_utf8(decoded)
-        .map(Cow::Owned)
-        .map_err(|_| malformed_escape())
-}
-
 #[inline]
 fn malformed_escape() -> Error {
     Error::client_error("Static files error: malformed percent-encoding in the request path")
@@ -141,7 +92,7 @@ fn malformed_escape() -> Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cow, Target, percent_decode, resolve};
+    use super::{Target, resolve};
     use std::path::PathBuf;
 
     fn resolved(path: &str) -> Option<Target> {
@@ -263,11 +214,6 @@ mod tests {
     }
 
     #[test]
-    fn it_borrows_a_segment_that_needs_no_decoding() {
-        assert!(matches!(percent_decode("app.css"), Ok(Cow::Borrowed(_))));
-    }
-
-    #[test]
     fn it_resolves_under_a_prefix() {
         assert_eq!(resolve("/static", "/static").unwrap(), Some(Target::Root));
         assert_eq!(resolve("/static/", "/static").unwrap(), Some(Target::Root));
@@ -288,6 +234,34 @@ mod tests {
                 "expected `{path}` to be declined"
             );
         }
+    }
+
+    #[test]
+    fn it_reads_the_prefix_the_way_the_router_reads_a_route() {
+        for path in ["//static/app.css", "/static//app.css", "/st%61tic/app.css"] {
+            assert_eq!(
+                resolve(path, "/static").unwrap(),
+                Some(Target::Relative(PathBuf::from("app.css"))),
+                "expected `{path}` to be resolved"
+            );
+        }
+    }
+
+    #[test]
+    fn it_matches_a_prefix_spelled_with_characters_that_are_encoded_on_the_wire() {
+        assert_eq!(
+            resolve("/caf%C3%A9/my%20file.css", "/caf\u{e9}").unwrap(),
+            Some(Target::Relative(PathBuf::from("my file.css")))
+        );
+        assert_eq!(
+            resolve("/caf%C3%A9", "/caf\u{e9}").unwrap(),
+            Some(Target::Root)
+        );
+    }
+
+    #[test]
+    fn it_does_not_read_an_encoded_separator_as_the_end_of_the_prefix() {
+        assert_eq!(resolve("/static%2Fapp.css", "/static").unwrap(), None);
     }
 
     #[test]

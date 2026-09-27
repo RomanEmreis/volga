@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-# 0.12.1
+# 0.13.0
 
 ## Added
 * `FromPathArg` is public, with `PathArg` and `PathArgs`, all in `volga::http::endpoints::args`. A type implementing it can be a path parameter: a handler argument of its own (`|id: OrderId|`), an element of a `Path<(..)>` tuple, or the `T` of `Path<T>`. `PathArg::parse` reads the value through `FromStr` and answers `400` if it does not parse, so a newtype needs one line. `PathArg::name` and `PathArg::value` read the argument as it is written, and `PathArgs::iter`, `len` and `is_empty` make `FromPathArgs` implementable for the first time. (#269)
@@ -14,9 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Fixed
 * A handler taking more positional path parameters than its route declares panicked on every request, dropping the connection, or the whole process under `panic = "abort"`; `Option<T>` around the extra one did not help. It answers `500` now, and an extra `Option<T>` reads `None`. (#269)
+* A percent-encoded path parameter was read three different ways: positional extractors got it undecoded, `NamedPath<T>` decoded it leniently (a malformed escape kept as written, invalid UTF-8 replaced with `U+FFFD`), and the static file server decoded it strictly. It is decoded once now, in the router, the same way for every extractor. See Changed. (#252)
+* A literal route segment that has to be percent-encoded on the wire, such as `/caf\u{e9}` or `/lit/a b`, could never be reached, since the router compared it with the raw path. Literals are matched against the decoded segment now: `GET /caf%C3%A9` reaches `/caf\u{e9}`. (#252)
 
 ## Changed
 * The compile error for a handler argument that is not an extractor names `FromPathArg` as the trait it lacks, and says that implementing it makes a type of your own a path parameter. The one for `Path<T>` of a struct with named fields points to `NamedPath<T>`. (#269)
+* **Breaking:** the router percent-decodes a request path one segment at a time, after splitting it on the separators the request wrote, and every extractor reads the decoded value. (#252)
+  - A positional extractor (`String`, `u32`, `Path<T>`, a `FromPathArg` type) reads `John%20Doe` as `John Doe`, `100%25` as `100%` and `%31` into a `u32` as `1`, where it used to read the escapes as written. `PathArg::value` returns the decoded value. `+` is still a plus sign, not a space.
+  - `%2F` decodes to `/` inside the value it belongs to and never starts a segment of its own: `GET /users/a%2Fb` binds `"a/b"` on `/users/{id}` and does not reach `/users/a/b`. A catch-all tail is decoded as a whole, so `GET /files/a%2Fb/c` binds `"a/b/c"`; the undecoded path is still in the request's URI.
+  - A path with a malformed escape (`%zz`, a trailing `%2`) or with escapes that are not UTF-8 (`%FF`) answers `400` before any route is looked up, through the global middleware and the error handler, as a `404` does. `NamedPath<T>` used to accept both.
+  - A literal route segment carrying a percent-escape (`/lit/a%20b`) panics where it is mapped, since it now matches only a request writing it as `a%2520b`. Write it as the text it spells: `/lit/a b`.
+  - A static file mount compares its prefix with the decoded segments of the path, the way the router compares a route's, so `//static/app.css` and `/st%61tic/app.css` are served under `/static` as well.
 
 # 0.12.0
 
