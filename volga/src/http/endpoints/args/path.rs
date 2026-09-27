@@ -22,9 +22,9 @@ use crate::http::endpoints::{
     route::{PathArg, PathArgs},
 };
 
-/// `Path<T>` extracts route parameters into a positional tuple `T`, or a single
-/// [`FromPathArg`] type read from the first parameter, without consuming the underlying
-/// path arguments.
+/// `Path<T>` extracts route parameters into a positional tuple `T`, or into a single
+/// [`FromPathArg`] type on a route declaring one parameter, without consuming the
+/// underlying path arguments.
 ///
 /// This extractor operates on a snapshot of the matched path arguments.
 /// The original path state remains available to other extractors.
@@ -357,21 +357,28 @@ impl<T: FromPathArg + Send> FromPayload for T {
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
+        // The dispatch hands out one argument per positional extractor, and runs out when
+        // the handler takes more of them than the route declares
         let Payload::Path(arg) = payload else {
-            unreachable!()
+            return ready(Err(PathError::more_extractors_than_args()));
         };
         ready(T::from_owned_path_arg(arg))
     }
 }
 
-/// A type read from one path argument is read from the first one as the `T` of `Path<T>`
+/// A type read from one path argument is the `T` of `Path<T>` on a route declaring exactly
+/// one parameter.
+///
+/// It does not pick the first of several: on `/users/{user_id}/orders/{order_id}`, a
+/// `Path<OrderId>` would read the user's id as the order's.
 impl<T: FromPathArg> FromPathArgs for T {
     #[inline]
     fn from_path_args(args: &PathArgs) -> Result<Self, Error> {
-        args.iter()
-            .next()
-            .ok_or_else(PathError::args_missing)
-            .and_then(T::from_path_arg)
+        let mut it = args.iter();
+        match (it.next(), it.len()) {
+            (Some(arg), 0) => T::from_path_arg(arg),
+            _ => Err(PathError::not_a_single_arg(args.len())),
+        }
     }
 }
 
@@ -418,6 +425,24 @@ impl PathError {
     #[inline]
     fn args_missing() -> Error {
         Error::client_error("Path parsing error: missing arguments")
+    }
+
+    /// The handler and its route disagree, which no request can fix
+    #[cold]
+    fn more_extractors_than_args() -> Error {
+        Error::server_error(
+            "Path parsing error: the handler reads more path parameters than the route declares",
+        )
+    }
+
+    /// The route and `Path<T>` disagree, which no request can fix
+    #[cold]
+    fn not_a_single_arg(declared: usize) -> Error {
+        Error::server_error(format!(
+            "Path parsing error: `Path<T>` of a single type reads one path parameter, but the \
+            route declares {declared}; read them as a tuple, `Path<(..)>`, or by name, \
+            `NamedPath<T>`"
+        ))
     }
 }
 
@@ -1069,7 +1094,7 @@ mod tests {
 
         assert_eq!(args.len(), 2);
         assert!(!args.is_empty());
-        assert!(PathArgs::default().is_empty());
+        assert!(PathArgs::new().is_empty());
 
         let names: Vec<_> = args.iter().map(PathArg::name).collect();
         assert_eq!(names, ["id", "name"]);
@@ -1077,7 +1102,11 @@ mod tests {
 
     #[test]
     fn it_reads_a_single_path_arg_type_as_path() {
-        let args = create_path_args();
+        let args: PathArgs = std::iter::once(PathArg {
+            name: "id".into(),
+            value: "123".into(),
+        })
+        .collect();
 
         let Path(id) = Path::<u32>::from_slice(&args).unwrap();
 
@@ -1086,9 +1115,42 @@ mod tests {
 
     #[test]
     fn it_fails_to_read_a_single_path_arg_type_from_no_args() {
-        let err = Path::<u32>::from_slice(&PathArgs::default()).unwrap_err();
+        let err = Path::<u32>::from_slice(&PathArgs::new()).unwrap_err();
 
-        assert_eq!(err.status, hyper::StatusCode::BAD_REQUEST);
+        assert_eq!(err.status, hyper::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn it_does_not_read_a_single_path_arg_type_from_the_first_of_several() {
+        let err = Path::<u32>::from_slice(&create_path_args()).unwrap_err();
+
+        assert_eq!(err.status, hyper::StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(err.to_string().contains("the route declares 2"));
+    }
+
+    #[tokio::test]
+    async fn it_answers_500_for_a_positional_param_the_route_does_not_declare() {
+        let err = u32::from_payload(Payload::None).await.unwrap_err();
+
+        assert_eq!(err.status, hyper::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn it_reads_none_for_an_optional_positional_param_the_route_does_not_declare() {
+        let value = Option::<u32>::from_payload(Payload::None).await.unwrap();
+
+        assert_eq!(value, None);
+    }
+
+    #[test]
+    fn it_debugs_path_args_without_their_internal_state() {
+        let args = create_path_args();
+        let _ = args.encoded();
+
+        let debug = format!("{args:?}");
+
+        assert!(debug.contains("\"id\""));
+        assert!(!debug.contains("encoded"));
     }
 
     #[test]

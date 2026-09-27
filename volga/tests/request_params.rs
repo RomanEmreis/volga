@@ -257,3 +257,55 @@ async fn it_reads_a_uuid_route_param() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn it_answers_500_when_a_handler_and_its_route_disagree_on_the_path_params() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/extra/{id}", |id: u32, extra: u32| -> HttpResult {
+            ok!("{id}:{extra}")
+        });
+        app.map_get(
+            "/optional/{id}",
+            |id: u32, extra: Option<u32>| -> HttpResult { ok!("{id}:{extra:?}") },
+        );
+        app.map_get(
+            "/users/{user_id}/orders/{order_id}",
+            |Path(id): Path<OrderId>| -> HttpResult { ok!("{}", id.0) },
+        );
+    })
+    .await;
+
+    // Twice, since a panic used to drop the connection rather than answer
+    for _ in 0..2 {
+        let response = server
+            .client()
+            .get(server.url("/extra/1"))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 500);
+    }
+
+    let response = server
+        .client()
+        .get(server.url("/optional/1"))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "1:None");
+
+    // `Path<T>` of a single type does not read the user's id as the order's
+    let response = server
+        .client()
+        .get(server.url("/users/7/orders/42"))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 500);
+
+    server.shutdown().await;
+}

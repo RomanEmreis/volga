@@ -3,6 +3,7 @@
 use super::DEFAULT_DEPTH;
 use crate::error::Error;
 use smallvec::SmallVec;
+use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -17,9 +18,8 @@ const FORM_ONLY: [char; 2] = [QUERY_SEPARATOR, FORM_SPACE];
 
 /// The path arguments a route matched, in the order its pattern declares them
 ///
-/// What [`FromPathArgs`](crate::http::endpoints::args::FromPathArgs) reads from. It is
-/// built by the router, from [`PathArg`]s only volga can create.
-#[derive(Debug)]
+/// What [`FromPathArgs`](crate::http::endpoints::args::FromPathArgs) reads from. It is built
+/// by the router and cannot be constructed outside of volga.
 pub struct PathArgs {
     args: SmallVec<[PathArg; DEFAULT_DEPTH]>,
     encoded: OnceLock<String>,
@@ -91,7 +91,7 @@ impl PathArgs {
 
     /// Returns an iterator over the args, in the order the route declares them.
     #[inline]
-    pub fn iter(&self) -> std::slice::Iter<'_, PathArg> {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = &PathArg> {
         self.args.iter()
     }
 
@@ -176,10 +176,11 @@ impl PathArgs {
     }
 }
 
-impl Default for PathArgs {
-    #[inline]
-    fn default() -> Self {
-        Self::new()
+impl fmt::Debug for PathArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PathArgs")
+            .field("args", &self.args.as_slice())
+            .finish_non_exhaustive()
     }
 }
 
@@ -197,6 +198,7 @@ impl Clone for PathArgs {
     }
 }
 
+#[cfg(test)]
 impl FromIterator<PathArg> for PathArgs {
     #[inline]
     fn from_iter<T: IntoIterator<Item = PathArg>>(iter: T) -> Self {

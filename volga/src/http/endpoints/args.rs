@@ -94,7 +94,8 @@ pub trait FromRequestParts: Sized {
 ///
 /// This is what [`Path<T>`](crate::Path) reads its `T` through. It is implemented for a tuple
 /// of up to 10 [`FromPathArg`] types, read in the order the route declares its parameters,
-/// and for a single [`FromPathArg`] type, which reads the first one.
+/// and for a single [`FromPathArg`] type, which reads a route declaring exactly one
+/// parameter and answers `500` on any other.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be read from the path arguments",
     label = "not a path",
@@ -117,6 +118,12 @@ pub trait FromPathArgs: Sized {
 /// The value is read as it is written in the path, percent-escapes included.
 /// [`PathArg::parse`] reads it through [`FromStr`](std::str::FromStr) and answers `400` if
 /// it does not parse.
+///
+/// # Security
+/// The value is not percent-decoded: `%2E%2E` and `%2F` arrive as they are, and a catch-all
+/// parameter (`{*rest}`) carries literal `/`s as well. A check made on the value, such as
+/// refusing `..` in a file name, has to be made on the form the value is used in - decode
+/// first, then check, never the other way around.
 ///
 /// # Example
 /// ```no_run
@@ -163,6 +170,7 @@ pub trait FromPathArg: Sized {
     label = "not an extractor",
     note = "a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)",
     note = "`Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`",
+    note = "`Path<T>` reads by position: `T` is one type implementing `FromPathArg`, or a tuple of them; a struct read field by field goes into `NamedPath<T>`",
     note = "`FromPayload` is internal to volga: a type of your own is read from a path parameter once it implements `FromPathArg`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds"
 )]
 pub(crate) trait FromPayload: Send + Sized {
@@ -255,8 +263,8 @@ macro_rules! define_generic_from_request {
                 let params = parts
                     .extensions
                     .get_mut::<HttpRequestScope>()
-                    .map(|s| std::mem::take(&mut s.params))
-                    .unwrap_or_default();
+                    .map(|s| std::mem::replace(&mut s.params, PathArgs::new()))
+                    .unwrap_or_else(PathArgs::new);
 
                 let (path_args, cached_query) = params.into_parts();
 

@@ -1,8 +1,10 @@
 use volga::{App, Path};
 
-struct NotAPathArg;
+struct Params {
+    id: u64,
+}
 
 fn main() {
     let mut app = App::new();
-    app.map_get("/{id}", async |_: Path<NotAPathArg>| "hi");
+    app.map_get("/{id}", async |Path(p): Path<Params>| format!("{}", p.id));
 }

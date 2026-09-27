@@ -216,12 +216,12 @@ async fn handle_impl(
         }
         FindResult::RouteNotFound => (
             Terminal::Fallback(pipeline.fallback_handler().clone()),
-            PathArgs::default(),
+            PathArgs::new(),
             CorsOverride::Inherit,
         ),
         FindResult::MethodNotFound(allowed) => (
             Terminal::MethodNotAllowed(allowed),
-            PathArgs::default(),
+            PathArgs::new(),
             CorsOverride::Inherit,
         ),
     };
@@ -238,10 +238,10 @@ async fn handle_impl(
         }
         FindResult::RouteNotFound => (
             Terminal::Fallback(pipeline.fallback_handler().clone()),
-            PathArgs::default(),
+            PathArgs::new(),
         ),
         FindResult::MethodNotFound(allowed) => {
-            (Terminal::MethodNotAllowed(allowed), PathArgs::default())
+            (Terminal::MethodNotAllowed(allowed), PathArgs::new())
         }
     };
 

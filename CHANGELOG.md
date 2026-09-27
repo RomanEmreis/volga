@@ -10,10 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Added
 * `FromPathArg` is public, with `PathArg` and `PathArgs`, all in `volga::http::endpoints::args`. A type implementing it can be a path parameter: a handler argument of its own (`|id: OrderId|`), an element of a `Path<(..)>` tuple, or the `T` of `Path<T>`. `PathArg::parse` reads the value through `FromStr` and answers `400` if it does not parse, so a newtype needs one line. `PathArg::name` and `PathArg::value` read the argument as it is written, and `PathArgs::iter`, `len` and `is_empty` make `FromPathArgs` implementable for the first time. (#269)
 * The `uuid` feature makes `uuid::Uuid` a path parameter: `|id: Uuid|`, `Path<Uuid>` and `Path<(Uuid,)>`. It is part of `full`. (#269)
-* `Path<T>` takes a single path parameter type as well as a tuple, reading the first parameter: `Path<u32>` as `Path<(u32,)>` does. (#269)
+* `Path<T>` takes a single path parameter type as well as a tuple: `Path<u32>`. Unlike `Path<(u32,)>`, it requires the route to declare exactly one parameter and answers `500` otherwise, so that `Path<OrderId>` on `/users/{user_id}/orders/{order_id}` cannot read the user's id as the order's. (#269)
+
+## Fixed
+* A handler taking more positional path parameters than its route declares panicked on every request, dropping the connection, or the whole process under `panic = "abort"`; `Option<T>` around the extra one did not help. It answers `500` now, and an extra `Option<T>` reads `None`. (#269)
 
 ## Changed
-* The compile error for a handler argument that is not an extractor names `FromPathArg` as the trait it lacks, and says that implementing it makes a type of your own a path parameter. (#269)
+* The compile error for a handler argument that is not an extractor names `FromPathArg` as the trait it lacks, and says that implementing it makes a type of your own a path parameter. The one for `Path<T>` of a struct with named fields points to `NamedPath<T>`. (#269)
 
 # 0.12.0
 
