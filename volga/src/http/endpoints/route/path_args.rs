@@ -3,6 +3,7 @@
 use super::DEFAULT_DEPTH;
 use crate::error::Error;
 use smallvec::SmallVec;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -14,22 +15,20 @@ const FORM_SPACE: char = '+';
 /// path carries as they are
 const FORM_ONLY: [char; 2] = [QUERY_SEPARATOR, FORM_SPACE];
 
-/// Route path arguments
+/// The path arguments a route matched, in the order its pattern declares them
 ///
-/// > **Note:** This type is part of Volga's public API but is primarily intended
-/// > for framework-level extractors and middleware. It should not be
-/// > constructed manually.
+/// What [`FromPathArgs`](crate::http::endpoints::args::FromPathArgs) reads from. It is
+/// built by the router, from [`PathArg`]s only volga can create.
 #[derive(Debug)]
 pub struct PathArgs {
     args: SmallVec<[PathArg; DEFAULT_DEPTH]>,
     encoded: OnceLock<String>,
 }
 
-/// A single matched path argument.
+/// A single matched path argument
 ///
-/// > **Note:** This type is part of Volga's public API but is primarily intended
-/// > for framework-level extractors and middleware. It should not be
-/// > constructed manually.
+/// What [`FromPathArg`](crate::http::endpoints::args::FromPathArg) reads from. It is built
+/// by the router and cannot be constructed outside of volga.
 #[derive(Debug, Clone)]
 pub struct PathArg {
     /// Argument name
@@ -37,6 +36,48 @@ pub struct PathArg {
 
     /// Argument value
     pub(crate) value: Box<str>,
+}
+
+impl PathArg {
+    /// Returns the name the route's pattern gives this argument.
+    #[inline]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the value as it is written in the path, percent-escapes included.
+    #[inline]
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    /// Parses the value into `T` through [`FromStr`].
+    ///
+    /// # Errors
+    /// A value that does not parse answers `400`, as a built-in path parameter does.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::error::Error;
+    /// use volga::http::endpoints::args::{FromPathArg, PathArg};
+    ///
+    /// struct OrderId(u64);
+    ///
+    /// impl FromPathArg for OrderId {
+    ///     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+    ///         arg.parse().map(OrderId)
+    ///     }
+    /// }
+    /// ```
+    #[inline]
+    pub fn parse<T: FromStr>(&self) -> Result<T, Error> {
+        self.value.parse().map_err(|_| {
+            Error::client_error(format!(
+                "Path parsing error: argument `{}` type mismatch",
+                self.name
+            ))
+        })
+    }
 }
 
 impl PathArgs {
@@ -48,12 +89,22 @@ impl PathArgs {
         }
     }
 
-    /// Returns an iterator over the args.
-    ///
-    /// The iterator yields all items from start to end.
+    /// Returns an iterator over the args, in the order the route declares them.
     #[inline]
-    pub(crate) fn iter(&self) -> std::slice::Iter<'_, PathArg> {
+    pub fn iter(&self) -> std::slice::Iter<'_, PathArg> {
         self.args.iter()
+    }
+
+    /// Returns the number of args.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.args.len()
+    }
+
+    /// Returns `true` if the route has no args.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.args.is_empty()
     }
 
     /// Returns the first arg, or `None` if it is empty.
@@ -157,6 +208,7 @@ impl FromIterator<PathArg> for PathArgs {
     }
 }
 
+#[cfg(test)]
 impl From<SmallVec<[PathArg; DEFAULT_DEPTH]>> for PathArgs {
     #[inline]
     fn from(args: SmallVec<[PathArg; DEFAULT_DEPTH]>) -> Self {
@@ -167,6 +219,7 @@ impl From<SmallVec<[PathArg; DEFAULT_DEPTH]>> for PathArgs {
     }
 }
 
+#[cfg(test)]
 impl IntoIterator for PathArgs {
     type Item = PathArg;
     type IntoIter = smallvec::IntoIter<[PathArg; DEFAULT_DEPTH]>;

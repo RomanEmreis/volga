@@ -1,7 +1,7 @@
 //! Extractors for route/path segments
 
 use crate::{HttpRequest, error::Error, http::request_scope::HttpRequestScope};
-use futures_util::future::{Ready, ok, ready};
+use futures_util::future::{Ready, ready};
 use hyper::http::{Extensions, request::Parts};
 use serde::de::DeserializeOwned;
 
@@ -22,8 +22,9 @@ use crate::http::endpoints::{
     route::{PathArg, PathArgs},
 };
 
-/// `Path<T>` extracts route parameters into a positional tuple `T`
-/// without consuming the underlying path arguments.
+/// `Path<T>` extracts route parameters into a positional tuple `T`, or a single
+/// [`FromPathArg`] type read from the first parameter, without consuming the underlying
+/// path arguments.
 ///
 /// This extractor operates on a snapshot of the matched path arguments.
 /// The original path state remains available to other extractors.
@@ -273,38 +274,15 @@ impl<T: DeserializeOwned + Send> FromPayload for NamedPath<T> {
     }
 }
 
-impl FromPayload for String {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Path;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Path(param) = payload else {
-            unreachable!()
-        };
-        ok(param.value.into_string())
-    }
-}
-
 impl FromPathArg for String {
     #[inline]
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
         Ok(arg.value.as_ref().to_owned())
     }
-}
-
-impl FromPayload for Cow<'static, str> {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Path;
 
     #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Path(param) = payload else {
-            unreachable!()
-        };
-        ok(Cow::Owned(param.value.into_string()))
+    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
+        Ok(arg.value.into_string())
     }
 }
 
@@ -313,19 +291,10 @@ impl FromPathArg for Cow<'static, str> {
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
         Ok(Cow::Owned(arg.value.as_ref().to_owned()))
     }
-}
-
-impl FromPayload for Box<str> {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Path;
 
     #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Path(param) = payload else {
-            unreachable!()
-        };
-        ok(param.value)
+    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
+        Ok(Cow::Owned(arg.value.into_string()))
     }
 }
 
@@ -334,19 +303,10 @@ impl FromPathArg for Box<str> {
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
         Ok(arg.value.clone())
     }
-}
-
-impl FromPayload for Box<[u8]> {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Path;
 
     #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Path(param) = payload else {
-            unreachable!()
-        };
-        ok(param.value.into_boxed_bytes())
+    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
+        Ok(arg.value)
     }
 }
 
@@ -355,30 +315,25 @@ impl FromPathArg for Box<[u8]> {
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
         Ok(arg.value.as_bytes().into())
     }
+
+    #[inline]
+    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
+        Ok(arg.value.into_boxed_bytes())
+    }
 }
 
-macro_rules! impl_from_payload {
+macro_rules! impl_from_path_arg {
     { $($type:ty),* $(,)? } => {
         $(impl FromPathArg for $type {
             #[inline]
             fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
-                arg.value.parse::<$type>()
-                    .map_err(|_| PathError::type_mismatch(arg.name.as_ref()))
-            }
-        })*
-        $(impl FromPayload for $type {
-            type Future = Ready<Result<Self, Error>>;
-            const SOURCE: Source = Source::Path;
-            #[inline]
-            fn from_payload(payload: Payload<'_>) -> Self::Future {
-                let Payload::Path(arg) = payload else { unreachable!() };
-                ready(<$type as FromPathArg>::from_path_arg(&arg))
+                arg.parse::<$type>()
             }
         })*
     };
 }
 
-impl_from_payload! {
+impl_from_path_arg! {
     bool,
     char,
     i8, i16, i32, i64, i128, isize,
@@ -389,6 +344,35 @@ impl_from_payload! {
     IpAddr, SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6,
     CString, OsString,
     PathBuf
+}
+
+#[cfg(feature = "uuid")]
+impl_from_path_arg! { uuid::Uuid }
+
+/// A type read from one path argument is a handler argument of its own
+impl<T: FromPathArg + Send> FromPayload for T {
+    type Future = Ready<Result<Self, Error>>;
+
+    const SOURCE: Source = Source::Path;
+
+    #[inline]
+    fn from_payload(payload: Payload<'_>) -> Self::Future {
+        let Payload::Path(arg) = payload else {
+            unreachable!()
+        };
+        ready(T::from_owned_path_arg(arg))
+    }
+}
+
+/// A type read from one path argument is read from the first one as the `T` of `Path<T>`
+impl<T: FromPathArg> FromPathArgs for T {
+    #[inline]
+    fn from_path_args(args: &PathArgs) -> Result<Self, Error> {
+        args.iter()
+            .next()
+            .ok_or_else(PathError::args_missing)
+            .and_then(T::from_path_arg)
+    }
 }
 
 macro_rules! impl_tuple_path {
@@ -429,13 +413,6 @@ impl PathError {
     #[inline]
     fn from_serde_error(err: serde::de::value::Error) -> Error {
         Error::client_error(format!("Path parsing error: {err}"))
-    }
-
-    #[inline]
-    fn type_mismatch(arg: &str) -> Error {
-        Error::client_error(format!(
-            "Path parsing error: argument `{arg}` type mismatch"
-        ))
     }
 
     #[inline]
@@ -1050,5 +1027,121 @@ mod tests {
 
         assert_eq!(path.0, 123u32);
         assert_eq!(path.1, "John")
+    }
+
+    #[test]
+    fn it_exposes_the_name_and_value_of_a_path_arg() {
+        let param = PathArg {
+            name: "id".into(),
+            value: "a%20b".into(),
+        };
+
+        assert_eq!(param.name(), "id");
+        assert_eq!(param.value(), "a%20b");
+    }
+
+    #[test]
+    fn it_parses_a_path_arg() {
+        let param = PathArg {
+            name: "id".into(),
+            value: "123".into(),
+        };
+
+        assert_eq!(param.parse::<u64>().unwrap(), 123);
+    }
+
+    #[test]
+    fn it_answers_400_for_a_path_arg_that_does_not_parse() {
+        let param = PathArg {
+            name: "id".into(),
+            value: "nope".into(),
+        };
+
+        let err = param.parse::<u64>().unwrap_err();
+
+        assert_eq!(err.status, hyper::StatusCode::BAD_REQUEST);
+        assert!(err.to_string().contains("argument `id` type mismatch"));
+    }
+
+    #[test]
+    fn it_iterates_path_args_in_order() {
+        let args = create_path_args();
+
+        assert_eq!(args.len(), 2);
+        assert!(!args.is_empty());
+        assert!(PathArgs::default().is_empty());
+
+        let names: Vec<_> = args.iter().map(PathArg::name).collect();
+        assert_eq!(names, ["id", "name"]);
+    }
+
+    #[test]
+    fn it_reads_a_single_path_arg_type_as_path() {
+        let args = create_path_args();
+
+        let Path(id) = Path::<u32>::from_slice(&args).unwrap();
+
+        assert_eq!(id, 123);
+    }
+
+    #[test]
+    fn it_fails_to_read_a_single_path_arg_type_from_no_args() {
+        let err = Path::<u32>::from_slice(&PathArgs::default()).unwrap_err();
+
+        assert_eq!(err.status, hyper::StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn it_fails_to_read_a_tuple_longer_than_the_args() {
+        let err = Path::<(u32, String, u32)>::from_slice(&create_path_args()).unwrap_err();
+
+        assert_eq!(err.status, hyper::StatusCode::BAD_REQUEST);
+    }
+
+    #[cfg(feature = "uuid")]
+    mod uuid {
+        use crate::Path;
+        use crate::http::endpoints::args::{FromPathArg, FromPayload, Payload};
+        use crate::http::endpoints::route::{PathArg, PathArgs};
+        use uuid::Uuid;
+
+        const ID: &str = "0199a0f1-1111-7000-8000-000000000001";
+
+        fn arg(value: &str) -> PathArg {
+            PathArg {
+                name: "id".into(),
+                value: value.into(),
+            }
+        }
+
+        #[tokio::test]
+        async fn it_reads_uuid_from_payload() {
+            let id = Uuid::from_payload(Payload::Path(arg(ID))).await.unwrap();
+
+            assert_eq!(id, Uuid::parse_str(ID).unwrap());
+        }
+
+        #[test]
+        fn it_reads_uuid_from_path_arg() {
+            let id = Uuid::from_path_arg(&arg(ID)).unwrap();
+
+            assert_eq!(id, Uuid::parse_str(ID).unwrap());
+        }
+
+        #[test]
+        fn it_reads_uuid_as_path() {
+            let args: PathArgs = std::iter::once(arg(ID)).collect();
+
+            let Path(id) = Path::<Uuid>::from_slice(&args).unwrap();
+
+            assert_eq!(id, Uuid::parse_str(ID).unwrap());
+        }
+
+        #[test]
+        fn it_answers_400_for_a_malformed_uuid() {
+            let err = Uuid::from_path_arg(&arg("nope")).unwrap_err();
+
+            assert_eq!(err.status, hyper::StatusCode::BAD_REQUEST);
+        }
     }
 }

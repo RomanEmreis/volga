@@ -3,14 +3,9 @@
 use hyper::http::request::Parts;
 use std::future::Future;
 
-use crate::{
-    HttpBody, HttpRequest,
-    error::Error,
-    http::{
-        endpoints::route::{PathArg, PathArgs},
-        request_scope::HttpRequestScope,
-    },
-};
+use crate::{HttpBody, HttpRequest, error::Error, http::request_scope::HttpRequestScope};
+
+pub use crate::http::endpoints::route::{PathArg, PathArgs};
 
 #[cfg(feature = "di")]
 use crate::di::{Container, FromContainer};
@@ -96,15 +91,69 @@ pub trait FromRequestParts: Sized {
 }
 
 /// Specifies extractor to read data from path arguments
+///
+/// This is what [`Path<T>`](crate::Path) reads its `T` through. It is implemented for a tuple
+/// of up to 10 [`FromPathArg`] types, read in the order the route declares its parameters,
+/// and for a single [`FromPathArg`] type, which reads the first one.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be read from the path arguments",
+    label = "not a path",
+    note = "`Path<T>` takes a type implementing `FromPathArg` or a tuple of them: `Path<u32>`, `Path<(String, u32)>`",
+    note = "to read the parameters into a struct by name, use `NamedPath<T>`"
+)]
 pub trait FromPathArgs: Sized {
     /// Extracts data from path arguments
     fn from_path_args(args: &PathArgs) -> Result<Self, Error>;
 }
 
-/// Specifies extractor to read data from a path argument
-pub(crate) trait FromPathArg: Sized {
+/// Specifies how a type is read from a single path argument
+///
+/// A type implementing it can be a handler argument of its own (`|id: OrderId|`), an
+/// element of a [`Path<T>`](crate::Path) tuple, or the `T` of a `Path<T>`. It is
+/// implemented for the primitives, the `std::net` addresses, `String`, `Box<str>`,
+/// `Cow<'static, str>`, `Box<[u8]>`, `CString`, `OsString`, `PathBuf` and, with the `uuid`
+/// feature, `uuid::Uuid`.
+///
+/// The value is read as it is written in the path, percent-escapes included.
+/// [`PathArg::parse`] reads it through [`FromStr`](std::str::FromStr) and answers `400` if
+/// it does not parse.
+///
+/// # Example
+/// ```no_run
+/// use volga::{App, HttpResult, error::Error, ok};
+/// use volga::http::endpoints::args::{FromPathArg, PathArg};
+///
+/// struct OrderId(u64);
+///
+/// impl FromPathArg for OrderId {
+///     fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+///         arg.parse().map(OrderId)
+///     }
+/// }
+///
+/// let mut app = App::new();
+/// app.map_get("/orders/{id}", |id: OrderId| ok!("{}", id.0));
+/// ```
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not an extractor and cannot be a handler argument",
+    label = "not an extractor",
+    note = "a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)",
+    note = "`Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`",
+    note = "a type of your own is read from a path parameter once it implements `FromPathArg`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds"
+)]
+pub trait FromPathArg: Sized {
     /// Extracts data from a path argument
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error>;
+
+    /// Extracts data from a path argument the caller owns.
+    ///
+    /// A handler argument owns its path argument, so a type that keeps the value, such as
+    /// `String`, takes it without a copy.
+    #[doc(hidden)]
+    #[inline]
+    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
+        Self::from_path_arg(&arg)
+    }
 }
 
 /// Specifies extractor to read data from an HTTP request
@@ -114,7 +163,7 @@ pub(crate) trait FromPathArg: Sized {
     label = "not an extractor",
     note = "a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)",
     note = "`Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`",
-    note = "`FromPayload` is internal to volga: a type of your own travels inside an extractor rather than becoming one - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `Path<T>` takes a `FromPathArgs`, `Header<T>` a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds"
+    note = "`FromPayload` is internal to volga: a type of your own is read from a path parameter once it implements `FromPathArg`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds"
 )]
 pub(crate) trait FromPayload: Send + Sized {
     type Future: Future<Output = Result<Self, Error>> + Send;

@@ -1,0 +1,26 @@
+error[E0277]: `volga::Path<NotAPathArg>` is not an extractor and cannot be a handler argument
+ --> tests/ui/extractors/not_a_path.rs:7:9
+  |
+7 |     app.map_get("/{id}", async |_: Path<NotAPathArg>| "hi");
+  |         ^^^^^^^ not an extractor
+  |
+  = help: the trait `volga::http::endpoints::args::FromPayload` is not implemented for `volga::Path<NotAPathArg>`
+  = note: a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)
+  = note: `Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`
+  = note: `FromPayload` is internal to volga: a type of your own is read from a path parameter once it implements `FromPathArg`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
+help: the trait `volga::http::endpoints::args::FromPayload` is conditionally implemented for `volga::Path<T>`
+ --> src/http/endpoints/args/path.rs
+  |
+  | impl<T: FromPathArgs + Send> FromPayload for Path<T> {
+  | ^^^^^^^^------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         |
+  |         unsatisfied requirement introduced here: `NotAPathArg: FromPathArgs`
+  = note: required for `(volga::Path<NotAPathArg>,)` to implement `FromRequest`
+note: required by a bound in `router::<impl App>::map_get`
+ --> src/app/router.rs
+  |
+  |     pub fn map_get<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
+  |            ------- required by a bound in this associated function
+...
+  |         Args: FromRequest + Send + 'static,
+  |               ^^^^^^^^^^^ required by this bound in `router::<impl App>::map_get`

@@ -87,7 +87,7 @@ use std::sync::Arc;
 use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
 pub(crate) use layer::{Layer, RoutePipeline};
-pub(crate) use path_args::{PathArg, PathArgs};
+pub use path_args::{PathArg, PathArgs};
 
 pub(crate) mod layer;
 pub(crate) mod path_args;

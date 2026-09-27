@@ -4,24 +4,25 @@ error[E0277]: `NotAnExtractor` is not an extractor and cannot be a handler argum
 7 |     app.map_get("/", async |_: NotAnExtractor| "hi");
   |         ^^^^^^^ not an extractor
   |
-help: the trait `volga::http::endpoints::args::FromPayload` is not implemented for `NotAnExtractor`
+help: the trait `FromPathArg` is not implemented for `NotAnExtractor`
  --> tests/ui/extractors/not_an_extractor.rs:3:1
   |
 3 | struct NotAnExtractor;
   | ^^^^^^^^^^^^^^^^^^^^^
   = note: a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)
   = note: `Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`
-  = note: `FromPayload` is internal to volga: a type of your own travels inside an extractor rather than becoming one - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `Path<T>` takes a `FromPathArgs`, `Header<T>` a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
-  = help: the following other types implement trait `volga::http::endpoints::args::FromPayload`:
-            Authenticated<T>
-            Basic
-            Bearer
-            BearerTokenService
+  = note: a type of your own is read from a path parameter once it implements `FromPathArg`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
+  = help: the following other types implement trait `FromPathArg`:
             Box<[u8]>
             Box<str>
-            ByteStream<http_body_util::stream::BodyDataStream<HttpBody>>
             CString
+            Cow<'static, str>
+            IpAddr
+            Ipv4Addr
+            Ipv6Addr
+            NonZero<i128>
           and $N others
+  = note: required for `NotAnExtractor` to implement `volga::http::endpoints::args::FromPayload`
   = note: required for `(NotAnExtractor,)` to implement `FromRequest`
 note: required by a bound in `router::<impl App>::map_get`
  --> src/app/router.rs

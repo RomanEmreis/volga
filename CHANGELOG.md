@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.12.1
+
+## Added
+* `FromPathArg` is public, with `PathArg` and `PathArgs`, all in `volga::http::endpoints::args`. A type implementing it can be a path parameter: a handler argument of its own (`|id: OrderId|`), an element of a `Path<(..)>` tuple, or the `T` of `Path<T>`. `PathArg::parse` reads the value through `FromStr` and answers `400` if it does not parse, so a newtype needs one line. `PathArg::name` and `PathArg::value` read the argument as it is written, and `PathArgs::iter`, `len` and `is_empty` make `FromPathArgs` implementable for the first time. (#269)
+* The `uuid` feature makes `uuid::Uuid` a path parameter: `|id: Uuid|`, `Path<Uuid>` and `Path<(Uuid,)>`. It is part of `full`. (#269)
+* `Path<T>` takes a single path parameter type as well as a tuple, reading the first parameter: `Path<u32>` as `Path<(u32,)>` does. (#269)
+
+## Changed
+* The compile error for a handler argument that is not an extractor names `FromPathArg` as the trait it lacks, and says that implementing it makes a type of your own a path parameter. (#269)
+
 # 0.12.0
 
 ## Added

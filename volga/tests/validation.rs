@@ -2,8 +2,9 @@
 #![cfg(feature = "test")]
 
 use serde::{Deserialize, Serialize};
+use volga::http::endpoints::args::{FromPathArg, PathArg};
 use volga::validation::{Valid, ValidJson, ValidQuery, Validate, ValidationError};
-use volga::{HttpResult, Json, error::Error, http::StatusCode, ok, status, test::TestServer};
+use volga::{HttpResult, Json, Path, error::Error, http::StatusCode, ok, status, test::TestServer};
 
 #[derive(Serialize, Deserialize)]
 struct KeyValue {
@@ -132,6 +133,51 @@ async fn it_validates_query_parameters() {
         response.text().await.unwrap(),
         "per_page: must be between 1 and 100"
     );
+
+    server.shutdown().await;
+}
+
+/// A path parameter of a type of your own, validated as `Valid<Path<T>>`
+struct Page(u32);
+
+impl FromPathArg for Page {
+    fn from_path_arg(arg: &PathArg) -> Result<Self, Error> {
+        arg.parse().map(Page)
+    }
+}
+
+impl Validate for Page {
+    type Error = ValidationError;
+
+    fn validate(&self) -> Result<(), Self::Error> {
+        if self.0 == 0 {
+            return Err(ValidationError::field("page", "must be at least 1"));
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn it_validates_a_path_parameter_of_a_type_of_your_own() {
+    let server = TestServer::spawn(|app| {
+        app.map_get(
+            "/pages/{page}",
+            async |Valid(Path(Page(page))): Valid<Path<Page>>| ok!("{page}"),
+        );
+    })
+    .await;
+
+    let client = server.client();
+
+    let response = client.get(server.url("/pages/3")).send().await.unwrap();
+
+    assert!(response.status().is_success());
+    assert_eq!(response.text().await.unwrap(), "3");
+
+    let response = client.get(server.url("/pages/0")).send().await.unwrap();
+
+    assert_eq!(response.status(), 400);
+    assert_eq!(response.text().await.unwrap(), "page: must be at least 1");
 
     server.shutdown().await;
 }
