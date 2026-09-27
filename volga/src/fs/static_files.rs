@@ -92,7 +92,9 @@ use crate::{
         Method, StatusCode,
         endpoints::{
             handlers::{Func, RouteHandler},
-            route::{Layer, RoutePipeline, is_dynamic_segment, join_path, split_path},
+            route::{
+                Layer, RoutePipeline, check_literal, is_dynamic_segment, join_path, split_path,
+            },
         },
     },
     middleware::{HttpContext, Middleware, MiddlewareFn, NextFn},
@@ -260,8 +262,17 @@ impl StaticMount {
     /// second mount on one prefix would answer nothing the first did not, and the middleware
     /// it carries would never run, so registering it would only cost every request a second
     /// look at the filesystem while looking like a second policy applies.
+    ///
+    /// # Panics
+    /// if a literal segment of the prefix carries a percent-escape, as a route under that
+    /// prefix would. The prefix is compared with the decoded segments of a request, so
+    /// `/docs%20v1` would only answer `/docs%2520v1`; it is written `/docs v1`.
     #[inline]
     pub(crate) fn mount(mut self, app: &mut App) {
+        split_path(&self.prefix)
+            .filter(|segment| !is_dynamic_segment(segment))
+            .for_each(|segment| check_literal(&self.prefix, segment));
+
         // A mount is matched against the request target as it is written. A route parameter
         // is matched by the router, which knows nothing about this mount, and there is one
         // content root either way - so there is nothing for `/{tenant}` to answer under.
@@ -1240,6 +1251,27 @@ mod tests {
     /// mounts registers one in these tests, so this counts them.
     fn registered(app: &mut App) -> usize {
         app.pipeline.middlewares_mut().pipeline.len()
+    }
+
+    /// A mount with nothing but files under it registers no route, so it checks its prefix
+    /// the way a route would
+    #[test]
+    #[should_panic(expected = "the segment `docs%20v1` carries a percent-escape")]
+    fn it_rejects_a_prefix_written_with_a_percent_escape() {
+        let mut app = App::new();
+        app.group("/docs%20v1", |g| {
+            g.use_static_assets();
+        });
+    }
+
+    #[test]
+    fn it_registers_a_mount_under_a_prefix_spelled_as_its_text() {
+        let mut app = App::new();
+        app.group("/docs v1", |g| {
+            g.use_static_assets();
+        });
+
+        assert_eq!(registered(&mut app), 1);
     }
 
     #[test]

@@ -420,9 +420,7 @@ impl RouteNode {
             };
 
             if !is_dynamic_segment(segment) {
-                if percent::has_escape(segment) {
-                    encoded_literal(path, segment);
-                }
+                check_literal(path, segment);
                 current = current.insert_static_node(segment);
                 continue;
             }
@@ -1135,6 +1133,17 @@ fn misplaced_catch_all(path: &str) -> ! {
          only be the last segment of a route. Move it to the end, or map what follows it as \
          a route of its own."
     );
+}
+
+/// Checks that `segment`, a literal segment of `path`, is written as the text it spells
+///
+/// # Panics
+/// if it carries a percent-escape - see [`encoded_literal`].
+#[inline(always)]
+pub(crate) fn check_literal(path: &str, segment: &str) {
+    if percent::has_escape(segment) {
+        encoded_literal(path, segment);
+    }
 }
 
 /// Reports a literal segment written with a percent-escape

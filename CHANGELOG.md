@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - A positional extractor (`String`, `u32`, `Path<T>`, a `FromPathArg` type) reads `John%20Doe` as `John Doe`, `100%25` as `100%` and `%31` into a `u32` as `1`, where it used to read the escapes as written. `PathArg::value` returns the decoded value. `+` is still a plus sign, not a space.
   - `%2F` decodes to `/` inside the value it belongs to and never starts a segment of its own: `GET /users/a%2Fb` binds `"a/b"` on `/users/{id}` and does not reach `/users/a/b`. A catch-all tail is decoded as a whole, so `GET /files/a%2Fb/c` binds `"a/b/c"`; the undecoded path is still in the request's URI.
   - A path with a malformed escape (`%zz`, a trailing `%2`) or with escapes that are not UTF-8 (`%FF`) answers `400` before any route is looked up, through the global middleware and the error handler, as a `404` does. `NamedPath<T>` used to accept both.
-  - A literal route segment carrying a percent-escape (`/lit/a%20b`) panics where it is mapped, since it now matches only a request writing it as `a%2520b`. Write it as the text it spells: `/lit/a b`.
+  - A literal route segment carrying a percent-escape (`/lit/a%20b`) panics where it is mapped, since it now matches only a request writing it as `a%2520b`. So does a static file mount under such a prefix, with or without a route beside it. Write it as the text it spells: `/lit/a b`.
   - A static file mount compares its prefix with the decoded segments of the path, the way the router compares a route's, so `//static/app.css` and `/st%61tic/app.css` are served under `/static` as well. A path that does not decode is left to the router, so its `400` reaches `map_err` and problem details too; the mount used to answer it on its own.
 
 # 0.12.0
