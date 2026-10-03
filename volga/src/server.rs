@@ -7,6 +7,8 @@ use std::net::SocketAddr;
 use std::sync::Weak;
 use tokio_util::sync::CancellationToken;
 
+pub(super) use linger::LingeringStream;
+
 #[cfg(all(feature = "http1", not(feature = "http2")))]
 pub(super) mod http1;
 #[cfg(any(
@@ -14,6 +16,7 @@ pub(super) mod http1;
     all(feature = "http2", not(feature = "http1"))
 ))]
 pub(super) mod http2;
+mod linger;
 
 pub(super) struct Server<I: Read + Write + Unpin> {
     io: I,

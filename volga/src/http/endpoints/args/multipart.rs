@@ -414,7 +414,7 @@ fn field_to_part(mut field: multer::Field<'static>) -> Part {
         while let Some(chunk) = field
             .chunk()
             .await
-            .map_err(|e| Error::client_error(format!("multipart read: {e}")))?
+            .map_err(MultipartError::chunk_error)?
         {
             yield chunk;
         }

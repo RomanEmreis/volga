@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.13.1
+
+## Added
+* `RouteGroup::with_body_limit` and `Route::with_body_limit` set the request body limit of a route group or of a single route, in place of the application's, and can raise it as well as lower it. `without_body_limit` at either level removes it, for a handler that streams the body and enforces a limit of its own. The most specific limit wins: a route's over its group's, a nested group's over the one around it, a group's over the application's. A group's limit covers its fallback as well, and `HttpRequest::body_limit` reports the limit the request got. `Limit::Default` is the framework default (5 MB), not the limit around it. (#273)
+
+## Changed
+* A request whose `Content-Length` is over the body limit is refused with `413` as soon as its body is read, before any of it is: a client that sent `Expect: 100-continue` gets the `413` instead of `100 Continue`, and never sends the body. A body of undeclared length is still refused once it has sent more than fits. A handler that reads only the start of such a body used to get the part that fit, and gets the `413` now; one that never reads the body is not affected. (#273)
+
+## Fixed
+* A request body over the limit answered `400 Bad Request`. It answers `413 Content Too Large` (RFC 9110 Section 15.5.14), whether it is read through `Json<T>`, `Form<T>`, `File`, `Multipart` or by hand, with the same message as before. (#273)
+* With the request body limit on, which is the default, a request body over a decompression limit answered `400` instead of `413`: the body limit wrapped the decompressed body and turned the error into one of its own. A body that fails to read keeps the status of the error underneath it in `Json<T>`, `Form<T>`, `File` and `Multipart` as well. (#273)
+* Over HTTP/1, a response sent before the request body was read to the end - a `413` for a body over the limit, a `401` refusing an upload - could be lost. The connection cannot be reused with part of a body unread, so it is closed after the response; closing it while the body was still arriving made the kernel answer with a TCP reset, which could reach the client ahead of the response, as "connection reset" or "broken pipe". On Linux over loopback, every such response to a 4 MB body was lost. The server now lingers on a connection it closes while the client may still be sending: it reads and throws away what still arrives until the client closes its side, for 2 seconds at most, and for 500 ms at most once nothing arrives. A graceful shutdown waits for a lingering connection as it does for one still being served, so `App::run` does not return - and drop the runtime under it - with one still open. A connection the client closes first is closed at once, as before. HTTP/2 was not affected, since it ends the stream alone and keeps the connection; an HTTP/2 connection lingers only when the server closes it as a whole, after a `GOAWAY`. (#273)
+
 # 0.13.0
 
 ## Added

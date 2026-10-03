@@ -7,6 +7,7 @@ use super::endpoints::{
         split_path,
     },
 };
+use crate::http::request::request_body_limit::RequestBodyLimit;
 use hyper::{Method, Uri};
 use std::sync::Arc;
 
@@ -53,6 +54,10 @@ pub(crate) struct Endpoint {
     /// Current request path parameters with their values
     pub(crate) params: PathArgs,
 
+    /// The request body limit bound to the route or to its route group, `None` when the
+    /// application's applies
+    pub(super) body_limit: Option<RequestBodyLimit>,
+
     #[cfg(feature = "middleware")]
     pub(super) cors: CorsOverride,
 }
@@ -63,27 +68,38 @@ impl Endpoint {
     fn new(
         pipeline: RoutePipeline,
         params: PathArgs,
+        body_limit: Option<RequestBodyLimit>,
         #[cfg(feature = "middleware")] cors: CorsOverride,
     ) -> Self {
         Self {
             pipeline,
             params,
+            body_limit,
             #[cfg(feature = "middleware")]
             cors,
         }
     }
 
-    /// Converts the endpoint into a tuple of (request handler, path parameters)
+    /// Converts the endpoint into a tuple of (request handler, path parameters, CORS policy,
+    /// body limit)
     #[inline]
     #[cfg(feature = "middleware")]
-    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs, CorsOverride) {
-        (self.pipeline, self.params, self.cors)
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        RoutePipeline,
+        PathArgs,
+        CorsOverride,
+        Option<RequestBodyLimit>,
+    ) {
+        (self.pipeline, self.params, self.cors, self.body_limit)
     }
 
+    /// Converts the endpoint into a tuple of (request handler, path parameters, body limit)
     #[inline]
     #[cfg(not(feature = "middleware"))]
-    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs) {
-        (self.pipeline, self.params)
+    pub(crate) fn into_parts(self) -> (RoutePipeline, PathArgs, Option<RequestBodyLimit>) {
+        (self.pipeline, self.params, self.body_limit)
     }
 }
 
@@ -128,6 +144,7 @@ impl Endpoints {
             return FindResult::Fallback(Endpoint::new(
                 fallback.pipeline.clone(),
                 labelled(params, fallback.params.as_deref()),
+                fallback.body_limit,
                 #[cfg(feature = "middleware")]
                 fallback.cors.clone().unwrap_or_default(),
             ));
@@ -149,7 +166,8 @@ impl Endpoints {
                     |handler| {
                         FindResult::Ok(Endpoint::new(
                             handler.pipeline.clone(),
-                            labelled(route_params.params, handler.params.as_deref()),
+                            labelled(route_params.params, handler.own_params()),
+                            handler.body_limit(),
                             #[cfg(feature = "middleware")]
                             handler.cors.clone().unwrap_or_default(),
                         ))
@@ -164,7 +182,8 @@ impl Endpoints {
             |handler| {
                 FindResult::Ok(Endpoint::new(
                     handler.pipeline.clone(),
-                    labelled(route_params.params, handler.params.as_deref()),
+                    labelled(route_params.params, handler.own_params()),
+                    handler.body_limit(),
                     #[cfg(feature = "middleware")]
                     handler.cors.clone().unwrap_or_default(),
                 ))
@@ -265,6 +284,62 @@ impl Endpoints {
         });
     }
 
+    /// Binds a request body limit to the route `method` answers at `pattern`, replacing the
+    /// one bound to it already
+    #[inline]
+    pub(crate) fn bind_body_limit(
+        &mut self,
+        method: &Method,
+        pattern: &str,
+        limit: RequestBodyLimit,
+    ) {
+        if let Some(handler) = self
+            .routes
+            .find_mut(pattern)
+            .and_then(|route| route.handler_mut(method))
+        {
+            handler.set_body_limit(limit);
+        }
+    }
+
+    /// Binds a request body limit to the route `method` answers at `pattern`, unless the
+    /// route or a route group closer to it has bound one already
+    #[inline]
+    pub(crate) fn bind_body_limit_if_unset(
+        &mut self,
+        method: &Method,
+        pattern: &str,
+        limit: RequestBodyLimit,
+    ) {
+        if let Some(handler) = self
+            .routes
+            .find_mut(pattern)
+            .and_then(|route| route.handler_mut(method))
+            .filter(|handler| handler.body_limit().is_none())
+        {
+            handler.set_body_limit(limit);
+        }
+    }
+
+    /// Binds a request body limit to the fallback under `prefix`, unless a route group closer
+    /// to it has bound one already
+    #[inline]
+    pub(crate) fn bind_fallback_body_limit_if_unset(
+        &mut self,
+        prefix: &str,
+        limit: RequestBodyLimit,
+    ) {
+        for (pattern, _) in fallback_positions(prefix) {
+            if let Some(fallback) = self
+                .routes
+                .find_mut(&pattern)
+                .and_then(|route| route.fallback_mut())
+            {
+                fallback.body_limit.get_or_insert(limit);
+            }
+        }
+    }
+
     /// Inserts a route group's middleware ahead of the layers the route already holds
     #[inline]
     #[cfg(feature = "middleware")]
@@ -360,7 +435,7 @@ fn endpoint_for<'route>(
 
 #[cfg(test)]
 mod tests {
-    use super::{Endpoints, FindResult, handlers::Func};
+    use super::{Endpoints, FindResult, RequestBodyLimit, handlers::Func};
     #[cfg(feature = "middleware")]
     use crate::headers::HeaderMap;
     use crate::ok;
@@ -648,6 +723,119 @@ mod tests {
         let found = endpoints.find(request.method(), request.uri(), true, &headers);
 
         assert!(matches!(found, FindResult::Fallback(_)));
+    }
+
+    /// The body limit an endpoint found at `path` carries
+    fn body_limit_at(
+        endpoints: &Endpoints,
+        method: Method,
+        path: &str,
+    ) -> Option<RequestBodyLimit> {
+        match find(endpoints, method, path) {
+            FindResult::Ok(endpoint) | FindResult::Fallback(endpoint) => endpoint.body_limit,
+            _ => panic!("nothing answers {path}"),
+        }
+    }
+
+    #[test]
+    fn it_carries_no_body_limit_until_one_is_bound() {
+        let mut endpoints = Endpoints::new();
+        endpoints.map_route(Method::POST, "/upload", Func::new(|| async { ok!() }));
+
+        assert_eq!(body_limit_at(&endpoints, Method::POST, "/upload"), None);
+    }
+
+    #[test]
+    fn it_binds_a_body_limit_to_the_endpoint_of_one_method() {
+        let mut endpoints = Endpoints::new();
+        endpoints.map_route(Method::POST, "/upload", Func::new(|| async { ok!() }));
+        endpoints.map_route(Method::PUT, "/upload", Func::new(|| async { ok!() }));
+
+        endpoints.bind_body_limit(&Method::POST, "/upload", RequestBodyLimit::Enabled(10));
+        endpoints.bind_body_limit(&Method::POST, "/upload", RequestBodyLimit::Enabled(20));
+
+        assert_eq!(
+            body_limit_at(&endpoints, Method::POST, "/upload"),
+            Some(RequestBodyLimit::Enabled(20))
+        );
+        assert_eq!(body_limit_at(&endpoints, Method::PUT, "/upload"), None);
+    }
+
+    #[test]
+    fn it_keeps_a_body_limit_bound_already_when_binding_one_if_unset() {
+        let mut endpoints = Endpoints::new();
+        endpoints.map_route(Method::POST, "/own", Func::new(|| async { ok!() }));
+        endpoints.map_route(Method::POST, "/inherits", Func::new(|| async { ok!() }));
+
+        endpoints.bind_body_limit(&Method::POST, "/own", RequestBodyLimit::Disabled);
+        for pattern in ["/own", "/inherits"] {
+            endpoints.bind_body_limit_if_unset(
+                &Method::POST,
+                pattern,
+                RequestBodyLimit::Enabled(10),
+            );
+        }
+
+        assert_eq!(
+            body_limit_at(&endpoints, Method::POST, "/own"),
+            Some(RequestBodyLimit::Disabled)
+        );
+        assert_eq!(
+            body_limit_at(&endpoints, Method::POST, "/inherits"),
+            Some(RequestBodyLimit::Enabled(10))
+        );
+    }
+
+    /// The endpoint keeps the parameter names it was written with next to its body limit,
+    /// and binding one leaves the other as it was
+    #[test]
+    fn it_keeps_the_parameter_names_of_an_endpoint_it_binds_a_body_limit_to() {
+        let mut endpoints = Endpoints::new();
+        endpoints.map_route(Method::GET, "/users/{id}", Func::new(|| async { ok!() }));
+        endpoints.map_route(Method::POST, "/users/{name}", Func::new(|| async { ok!() }));
+
+        endpoints.bind_body_limit(
+            &Method::POST,
+            "/users/{name}",
+            RequestBodyLimit::Enabled(10),
+        );
+
+        let FindResult::Ok(endpoint) = find(&endpoints, Method::POST, "/users/42") else {
+            panic!("the route answers");
+        };
+        assert_eq!(endpoint.body_limit, Some(RequestBodyLimit::Enabled(10)));
+        assert_eq!(endpoint.params.first().unwrap().name.as_ref(), "name");
+    }
+
+    #[test]
+    fn it_binds_a_body_limit_to_a_fallback_at_and_below_its_prefix() {
+        let mut endpoints = Endpoints::new();
+        endpoints.map_fallback("/api", Func::new(|| async { ok!() }));
+
+        endpoints.bind_fallback_body_limit_if_unset("/api", RequestBodyLimit::Enabled(10));
+        endpoints.bind_fallback_body_limit_if_unset("/api", RequestBodyLimit::Enabled(20));
+
+        for path in ["/api", "/api/nope", "/api/a/b"] {
+            assert_eq!(
+                body_limit_at(&endpoints, Method::POST, path),
+                Some(RequestBodyLimit::Enabled(10)),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
+    fn it_binds_no_body_limit_where_nothing_is_mapped() {
+        let mut endpoints = Endpoints::new();
+
+        endpoints.bind_body_limit(&Method::POST, "/nope", RequestBodyLimit::Enabled(10));
+        endpoints.bind_body_limit_if_unset(&Method::POST, "/nope", RequestBodyLimit::Enabled(10));
+        endpoints.bind_fallback_body_limit_if_unset("/nope", RequestBodyLimit::Enabled(10));
+
+        assert!(matches!(
+            find(&endpoints, Method::POST, "/nope"),
+            FindResult::RouteNotFound
+        ));
     }
 
     #[test]

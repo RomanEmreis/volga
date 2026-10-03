@@ -163,9 +163,10 @@ impl JsonError {
         Error::client_error(format!("JSON parsing error: {err}"))
     }
 
+    /// The body could not be read: a `413` for one over the body limit keeps its status
     #[inline]
     fn collect_error(err: Error) -> Error {
-        Error::client_error(format!("JSON parsing error: {err}"))
+        Error::from_parts(err.status(), None, format!("JSON parsing error: {err}"))
     }
 }
 

@@ -2,8 +2,10 @@
 
 use self::pipeline::PipelineBuilder;
 use crate::{
-    Limit, headers::cache_control::CacheControl,
-    http::request::request_body_limit::RequestBodyLimit, server::Server,
+    Limit,
+    headers::cache_control::CacheControl,
+    http::request::request_body_limit::RequestBodyLimit,
+    server::{LingeringStream, Server},
 };
 use connection::Connection;
 use hyper_util::{
@@ -498,6 +500,13 @@ impl App {
 
     /// Sets a specific HTTP request body limit (in bytes)
     ///
+    /// It applies to every route that sets no limit of its own: a route group or a route
+    /// takes another one with [`RouteGroup::with_body_limit`](crate::routing::RouteGroup::with_body_limit)
+    /// and [`Route::with_body_limit`](crate::routing::Route::with_body_limit), the most
+    /// specific limit winning. A request whose body goes over the limit is answered
+    /// `413 Content Too Large` as the handler reads it, and one whose `Content-Length`
+    /// already says it won't fit is answered before any of it is read.
+    ///
     /// # Parameters
     /// - `Limit::Default` - use the framework default (5 MB)
     /// - `Limit::Limited(n)` - enforce an explicit limit
@@ -510,6 +519,8 @@ impl App {
     }
 
     /// Disables a request body limit
+    ///
+    /// A route group or a route can still set a limit of its own.
     pub fn without_body_limit(mut self) -> Self {
         self.body_limit = RequestBodyLimit::Disabled;
         self
@@ -938,6 +949,12 @@ impl App {
             // Subscribed here rather than in the spawned task, so a connection accepted just
             // before the loop breaks is still waited for, even if its task has not run yet
             let watcher = graceful_shutdown.watcher();
+            // Hyper lets go of `watcher` once it is done with the connection, which is before
+            // the connection lingers - see `LingeringStream`. This one is never handed to hyper
+            // and is held until the task ends, so the shutdown waits for a socket that is still
+            // lingering too, rather than returning from `run` with it open: a runtime dropped
+            // right after `run` would cut it off with the body still arriving
+            let lingering = graceful_shutdown.watcher();
             #[cfg(feature = "tls")]
             let shutdown_tx = Arc::clone(&shutdown_tx);
             // Two tokens, because cancellation only flows from parent to child. `closed` is the
@@ -951,6 +968,7 @@ impl App {
 
             tokio::spawn(async move {
                 let _permit = permit;
+                let _lingering = lingering;
                 tokio::select! {
                     _ = Self::handle_connection(
                         stream,
@@ -1098,6 +1116,10 @@ impl App {
             }
         };
 
+        // A connection the server ends while the client may still be sending - a body answered
+        // without being read to the end - is not closed on the response: see `LingeringStream`
+        let (stream, linger) = LingeringStream::new(stream);
+
         #[cfg(not(feature = "tls"))]
         Server::new(TokioIo::new(stream), peer_addr)
             .serve(app_instance, watcher, cancellation_token)
@@ -1132,6 +1154,8 @@ impl App {
                 .serve(app_instance, watcher, cancellation_token)
                 .await;
         };
+
+        linger.close().await;
     }
 }
 

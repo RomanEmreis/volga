@@ -256,7 +256,9 @@ impl HttpRequestMut {
         Ok(self.inner.headers_mut().remove(name).is_some())
     }
 
-    /// Returns this [`HttpRequest`] body limit.
+    /// Returns the body limit of this request, in bytes, or `None` when it has none.
+    ///
+    /// See [`HttpRequest::body_limit`].
     pub fn body_limit(&self) -> Option<usize> {
         self.inner.body_limit()
     }

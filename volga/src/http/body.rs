@@ -12,7 +12,7 @@ use serde::Serialize;
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
 
-use http_body_util::{BodyDataStream, BodyExt, Empty, Full, Limited, StreamBody};
+use http_body_util::{BodyDataStream, BodyExt, Empty, Full, StreamBody};
 
 use std::{
     borrow::Cow,
@@ -32,6 +32,9 @@ pub type UnsyncBoxBody = http_body_util::combinators::UnsyncBoxBody<Bytes, Error
 pub type HttpBodyStream = ByteStream<BodyDataStream<HttpBody>>;
 
 mod into_body;
+mod limited;
+
+use limited::Limited;
 
 pin_project! {
     /// Represents a response/request body
@@ -88,14 +91,10 @@ impl Body for HttpBody {
             InnerBodyProj::Empty { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Full { inner } => inner.poll_frame(cx).map_err(Error::client_error),
             InnerBodyProj::Incoming { inner } => inner.poll_frame(cx).map_err(Error::client_error),
-            InnerBodyProj::Limited { inner } => inner.poll_frame(cx).map_err(Error::client_error),
-            InnerBodyProj::BoxedLimited { inner } => {
-                inner.poll_frame(cx).map_err(Error::client_error)
-            }
+            InnerBodyProj::Limited { inner } => inner.poll_frame(cx),
+            InnerBodyProj::BoxedLimited { inner } => inner.poll_frame(cx),
             InnerBodyProj::Boxed { inner } => inner.poll_frame(cx),
-            InnerBodyProj::FullLimited { inner } => {
-                inner.poll_frame(cx).map_err(Error::client_error)
-            }
+            InnerBodyProj::FullLimited { inner } => inner.poll_frame(cx),
         }
     }
 
@@ -196,9 +195,9 @@ impl HttpBody {
             InnerBody::Boxed { inner } => inner,
             InnerBody::Empty { inner } => inner.map_err(Error::client_error).boxed_unsync(),
             InnerBody::Full { inner } => inner.map_err(Error::client_error).boxed_unsync(),
-            InnerBody::FullLimited { inner } => inner.map_err(Error::client_error).boxed_unsync(),
-            InnerBody::BoxedLimited { inner } => inner.map_err(Error::client_error).boxed_unsync(),
-            InnerBody::Limited { inner } => inner.map_err(Error::client_error).boxed_unsync(),
+            InnerBody::FullLimited { inner } => inner.boxed_unsync(),
+            InnerBody::BoxedLimited { inner } => inner.boxed_unsync(),
+            InnerBody::Limited { inner } => inner.boxed_unsync(),
             InnerBody::Incoming { inner } => inner.map_err(Error::client_error).boxed_unsync(),
         }
     }

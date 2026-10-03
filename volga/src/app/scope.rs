@@ -204,52 +204,70 @@ async fn handle_impl(
     // Routing decides *what* answers the request, not *whether* the pipeline
     // runs: every outcome is carried through the same chain, so global
     // middleware and the request scope reach an unmatched path as well.
+    //
+    // The body limit of the route, or of the route group answering for it, wins over the
+    // application's - and where no route answers, the application's is all there is.
     #[cfg(feature = "middleware")]
-    let (terminal, params, cors) = match found {
+    let (terminal, params, cors, body_limit) = match found {
         FindResult::Ok(endpoint) => {
-            let (route_pipeline, params, cors) = endpoint.into_parts();
-            (Terminal::Route(route_pipeline), params, cors)
+            let (route_pipeline, params, cors, body_limit) = endpoint.into_parts();
+            (Terminal::Route(route_pipeline), params, cors, body_limit)
         }
         FindResult::Fallback(endpoint) => {
-            let (fallback_pipeline, params, cors) = endpoint.into_parts();
-            (Terminal::GroupFallback(fallback_pipeline), params, cors)
+            let (fallback_pipeline, params, cors, body_limit) = endpoint.into_parts();
+            (
+                Terminal::GroupFallback(fallback_pipeline),
+                params,
+                cors,
+                body_limit,
+            )
         }
         FindResult::RouteNotFound => (
             Terminal::Fallback(pipeline.fallback_handler().clone()),
             PathArgs::new(),
             CorsOverride::Inherit,
+            None,
         ),
         FindResult::MethodNotFound(allowed) => (
             Terminal::MethodNotAllowed(allowed),
             PathArgs::new(),
             CorsOverride::Inherit,
+            None,
         ),
         FindResult::MalformedPath => (
             Terminal::MalformedPath,
             PathArgs::new(),
             CorsOverride::Inherit,
+            None,
         ),
     };
 
     #[cfg(not(feature = "middleware"))]
-    let (terminal, params) = match found {
+    let (terminal, params, body_limit) = match found {
         FindResult::Ok(endpoint) => {
-            let (route_pipeline, params) = endpoint.into_parts();
-            (Terminal::Route(route_pipeline), params)
+            let (route_pipeline, params, body_limit) = endpoint.into_parts();
+            (Terminal::Route(route_pipeline), params, body_limit)
         }
         FindResult::Fallback(endpoint) => {
-            let (fallback_pipeline, params) = endpoint.into_parts();
-            (Terminal::GroupFallback(fallback_pipeline), params)
+            let (fallback_pipeline, params, body_limit) = endpoint.into_parts();
+            (
+                Terminal::GroupFallback(fallback_pipeline),
+                params,
+                body_limit,
+            )
         }
         FindResult::RouteNotFound => (
             Terminal::Fallback(pipeline.fallback_handler().clone()),
             PathArgs::new(),
+            None,
         ),
         FindResult::MethodNotFound(allowed) => {
-            (Terminal::MethodNotAllowed(allowed), PathArgs::new())
+            (Terminal::MethodNotAllowed(allowed), PathArgs::new(), None)
         }
-        FindResult::MalformedPath => (Terminal::MalformedPath, PathArgs::new()),
+        FindResult::MalformedPath => (Terminal::MalformedPath, PathArgs::new(), None),
     };
+
+    let body_limit = body_limit.unwrap_or(env.body_limit);
 
     let error_handler = pipeline.error_handler();
     let (mut parts, body) = request.into_parts();
@@ -258,7 +276,7 @@ async fn handle_impl(
         client_ip: ClientIp(peer_addr),
         cancellation_token,
         shutdown,
-        body_limit: env.body_limit,
+        body_limit,
         params,
         #[cfg(feature = "ws")]
         error_handler: Arc::clone(error_handler),
@@ -284,7 +302,7 @@ async fn handle_impl(
     // Pre-extract error handler args from parts before consuming them.
     let error_args = extract_error_args(error_handler, &parts);
 
-    let request = HttpRequest::new(Request::from_parts(parts, body)).into_limited(env.body_limit);
+    let request = HttpRequest::new(Request::from_parts(parts, body)).into_limited(body_limit);
 
     #[cfg(feature = "middleware")]
     let response = pipeline
