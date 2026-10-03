@@ -29,12 +29,26 @@ pin_project! {
     ///   over the limit is a `413`. An `Error` raised underneath - a decompression limit, for
     ///   one - keeps its own status instead of being wrapped in a `400`, and anything else
     ///   failing to read is the client's `400`.
+    ///
+    /// A body it refuses fails once and ends there: later polls yield `None` without polling
+    /// the body underneath. A consumer that reads on past an error is not left spinning on
+    /// the same `413` - which a body refused on its `Content-Length` would otherwise answer
+    /// every poll with at once - nor reading the rest of a body nobody wants.
     pub(crate) struct Limited<B> {
         #[pin]
         inner: B,
+        // How many more bytes the body may yield, or `REFUSED` once it has been refused
         remaining: usize,
     }
 }
+
+/// What `remaining` holds once the body has been refused.
+///
+/// A state of its own rather than a flag beside `remaining`: `Limited<Incoming>` is the
+/// largest body there is, and a flag would grow every `HttpBody` - responses included - by
+/// a word. No budget is ever this large, since [`Limited::new`] keeps a limit one byte under
+/// it, and that byte of an 18-exabyte limit is no byte anyone sends.
+const REFUSED: usize = usize::MAX;
 
 impl<B> Limited<B> {
     /// Bounds `inner` to `limit` bytes
@@ -42,8 +56,14 @@ impl<B> Limited<B> {
     pub(crate) fn new(inner: B, limit: usize) -> Self {
         Self {
             inner,
-            remaining: limit,
+            remaining: limit.min(REFUSED - 1),
         }
+    }
+
+    /// Returns `true` once the body has been refused
+    #[inline(always)]
+    fn is_refused(&self) -> bool {
+        self.remaining == REFUSED
     }
 }
 
@@ -60,11 +80,16 @@ where
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        if self.is_refused() {
+            return Poll::Ready(None);
+        }
+
         let this = self.project();
 
         // What a body still has to send shrinks with every frame it sends, as `remaining`
         // does, so this holds at every poll - and on the first one it is the declared length
         if this.inner.size_hint().lower() > *this.remaining as u64 {
+            *this.remaining = REFUSED;
             return Poll::Ready(Some(Err(too_large())));
         }
 
@@ -77,7 +102,7 @@ where
 
         let res = match frame.data_ref().map(Buf::remaining) {
             Some(len) if len > *this.remaining => {
-                *this.remaining = 0;
+                *this.remaining = REFUSED;
                 Err(too_large())
             }
             Some(len) => {
@@ -92,11 +117,15 @@ where
 
     #[inline]
     fn is_end_stream(&self) -> bool {
-        self.inner.is_end_stream()
+        self.is_refused() || self.inner.is_end_stream()
     }
 
     #[inline]
     fn size_hint(&self) -> SizeHint {
+        if self.is_refused() {
+            return SizeHint::with_exact(0);
+        }
+
         let Ok(remaining) = u64::try_from(self.remaining) else {
             return self.inner.size_hint();
         };
@@ -252,6 +281,43 @@ mod tests {
         let err = body.collect().await.unwrap_err();
 
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn it_ends_a_body_refused_up_front_after_its_413() {
+        // `Declared` panics if it is ever polled, so none of this reads the body underneath
+        let mut body = Limited::new(Declared { declared: 6 }, 5);
+
+        let first = body.frame().await.unwrap();
+        let second = body.frame().await;
+
+        assert_eq!(first.unwrap_err().status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert!(second.is_none());
+        assert!(body.is_end_stream());
+        assert_eq!(body.size_hint().exact(), Some(0));
+    }
+
+    #[tokio::test]
+    async fn it_ends_a_body_refused_part_of_the_way_after_its_413() {
+        let mut body = Limited::new(undeclared(&["abc", "def", "ghi"]), 5);
+
+        let first = body.frame().await.unwrap().unwrap();
+        let second = body.frame().await.unwrap();
+        let third = body.frame().await;
+
+        assert_eq!(first.into_data().unwrap(), "abc");
+        assert_eq!(second.unwrap_err().status(), StatusCode::PAYLOAD_TOO_LARGE);
+        // "ghi" is not read
+        assert!(third.is_none());
+        assert!(body.is_end_stream());
+    }
+
+    #[tokio::test]
+    async fn it_keeps_a_limit_of_usize_max_a_limit() {
+        let body = Limited::new(Full::new(Bytes::from_static(b"hello")), usize::MAX);
+
+        assert!(!body.is_refused());
+        assert_eq!(body.collect().await.unwrap().to_bytes(), "hello");
     }
 
     #[test]

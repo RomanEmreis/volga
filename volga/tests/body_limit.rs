@@ -358,3 +358,59 @@ async fn it_refuses_a_declared_length_over_the_limit_before_reading_the_body() {
 
     server.shutdown().await;
 }
+
+/// A handler that reads the body frame by frame, and counts a frame that fails rather than
+/// stopping at it - logging it, say - and answers with how many failed
+async fn count_errors(req: HttpRequest) -> volga::HttpResult {
+    use http_body_util::BodyExt;
+
+    let mut body = req.into_body();
+    let mut errors = 0usize;
+    while let Some(frame) = body.frame().await {
+        if frame.is_err() {
+            errors += 1;
+        }
+    }
+    ok!(errors)
+}
+
+/// A refused body fails once and ends there, so a handler that reads on past the error is
+/// not left spinning on the same `413` - nor reading a body nobody wants
+#[tokio::test(flavor = "multi_thread")]
+async fn it_ends_a_refused_body_after_its_413() {
+    let server = TestServer::builder()
+        .configure(|app| app.with_body_limit(Limit::Limited(16)))
+        .setup(|app| {
+            app.map_post("/count", count_errors);
+        })
+        .build()
+        .await;
+    let client = server
+        .client_builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    // Refused up front, on its `Content-Length`
+    let declared = client
+        .post(server.url("/count"))
+        .body(vec![b'x'; 1024])
+        .send()
+        .await
+        .expect("the handler finished reading");
+    assert_eq!(declared.text().await.unwrap(), "1");
+
+    // Refused part of the way through, having declared nothing
+    let chunks = stream::iter(
+        (0..4).map(|_| Ok::<_, std::io::Error>(bytes::Bytes::from_static(b"0123456789"))),
+    );
+    let undeclared = client
+        .post(server.url("/count"))
+        .body(reqwest::Body::wrap_stream(chunks))
+        .send()
+        .await
+        .expect("the handler finished reading");
+    assert_eq!(undeclared.text().await.unwrap(), "1");
+
+    server.shutdown().await;
+}
