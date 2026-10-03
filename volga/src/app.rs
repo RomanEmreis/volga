@@ -2,8 +2,10 @@
 
 use self::pipeline::PipelineBuilder;
 use crate::{
-    Limit, headers::cache_control::CacheControl,
-    http::request::request_body_limit::RequestBodyLimit, server::Server,
+    Limit,
+    headers::cache_control::CacheControl,
+    http::request::request_body_limit::RequestBodyLimit,
+    server::{LingeringStream, Server},
 };
 use connection::Connection;
 use hyper_util::{
@@ -1107,6 +1109,10 @@ impl App {
             }
         };
 
+        // A connection the server ends while the client may still be sending - a body answered
+        // without being read to the end - is not closed on the response: see `LingeringStream`
+        let (stream, linger) = LingeringStream::new(stream);
+
         #[cfg(not(feature = "tls"))]
         Server::new(TokioIo::new(stream), peer_addr)
             .serve(app_instance, watcher, cancellation_token)
@@ -1141,6 +1147,8 @@ impl App {
                 .serve(app_instance, watcher, cancellation_token)
                 .await;
         };
+
+        linger.close().await;
     }
 }
 
