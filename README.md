@@ -5,7 +5,7 @@ A fast, explicit web framework for Rust, built on [Tokio](https://tokio.rs/) and
 Volga makes HTTP services straightforward to write and easy to read, with predictable
 performance and minimal overhead.
 
-[![latest](https://img.shields.io/badge/latest-0.13.0-blue)](https://crates.io/crates/volga)
+[![latest](https://img.shields.io/badge/latest-0.13.1-blue)](https://crates.io/crates/volga)
 [![latest](https://img.shields.io/badge/rustc-1.90+-964B00)](https://releases.rs/docs/1.90.0/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](https://github.com/RomanEmreis/volga/blob/main/LICENSE)
 [![Build](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml/badge.svg)](https://github.com/RomanEmreis/volga/actions/workflows/rust.yml)
@@ -53,7 +53,7 @@ Each of these is a Cargo feature, so only what you enable is compiled in:
 ## Getting Started
 ```toml
 [dependencies]
-volga = "0.13.0"
+volga = "0.13.1"
 tokio = { version = "1", features = ["full"] }
 ```
 ```rust
