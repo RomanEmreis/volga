@@ -124,7 +124,11 @@ impl HttpRequest {
         self.inner.extensions_mut()
     }
 
-    /// Returns this [`HttpRequest`] body limit.
+    /// Returns the body limit of this [`HttpRequest`], in bytes, or `None` when it has none.
+    ///
+    /// It is the limit of the route the request was routed to, if it set one, or else that
+    /// of its route group, or else the application's - see
+    /// [`Route::with_body_limit`](crate::routing::Route::with_body_limit).
     pub fn body_limit(&self) -> Option<usize> {
         match self
             .inner

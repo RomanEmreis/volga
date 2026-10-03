@@ -164,9 +164,10 @@ impl FromPayload for File {
 struct FileStreamError;
 
 impl FileStreamError {
+    /// The body could not be read: a `413` for one over the body limit keeps its status
     #[inline]
     fn read_error(error: Error) -> Error {
-        Error::client_error(format!("File Stream error: {error}"))
+        Error::from_parts(error.status(), None, format!("File Stream error: {error}"))
     }
 
     #[inline]

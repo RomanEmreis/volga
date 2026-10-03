@@ -245,6 +245,50 @@ async fn it_ignores_decompress() {
     server.shutdown().await;
 }
 
+/// The request body limit wraps the decompressed body in a limit of its own, and a
+/// decompression limit tripping underneath it used to come out as that limit's `400`
+#[tokio::test]
+async fn it_keeps_the_413_of_a_decompression_limit_under_the_body_limit() {
+    let server = TestServer::builder()
+        .configure(|app| {
+            app.with_decompression_limits(|limits| limits.with_max_compressed(Limit::Limited(1)))
+        })
+        .setup(|app| {
+            app.use_decompression();
+            app.map_post("/decompress", async |req: HttpRequest| {
+                let body = req.into_body();
+                let _bytes = body.collect().await?;
+                Ok::<_, Error>(())
+            });
+        })
+        .build()
+        .await;
+
+    let data = b"{\"age\":33,\"name\":\"John\"}";
+    let mut encoder = ZstdEncoder::new(Vec::new());
+
+    encoder.write_all(data).await.unwrap();
+    encoder.shutdown().await.unwrap();
+    let body = encoder.into_inner();
+
+    let response = server
+        .client()
+        .post(server.url("/decompress"))
+        .header("content-encoding", "zstd")
+        .body(body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 413);
+    assert_eq!(
+        response.text().await.unwrap(),
+        "Decompression error: CompressedBodyTooLarge"
+    );
+
+    server.shutdown().await;
+}
+
 #[tokio::test]
 async fn it_tests_max_compressed_limit() {
     let server = TestServer::builder()

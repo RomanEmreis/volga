@@ -26,7 +26,22 @@
 //! ```
 //!
 //! Some limits may also be applied at a more granular level,
-//! such as per-route or per-protocol configuration.
+//! such as per-route or per-protocol configuration. The request body limit,
+//! for one, can be set for a route group or a single route, the most specific
+//! one winning:
+//!
+//! ```rust
+//! use volga::{App, Limit, ok};
+//!
+//! let mut app = App::new();
+//!
+//! app.group("/api", |api| {
+//!     api.with_body_limit(Limit::Limited(64 * 1024));
+//!
+//!     api.map_post("/attachments", || async { ok!() })
+//!         .with_body_limit(Limit::Limited(20 * 1024 * 1024));
+//! });
+//! ```
 //!
 //! **Warning**
 //!

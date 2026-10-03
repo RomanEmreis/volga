@@ -498,6 +498,13 @@ impl App {
 
     /// Sets a specific HTTP request body limit (in bytes)
     ///
+    /// It applies to every route that sets no limit of its own: a route group or a route
+    /// takes another one with [`RouteGroup::with_body_limit`](crate::routing::RouteGroup::with_body_limit)
+    /// and [`Route::with_body_limit`](crate::routing::Route::with_body_limit), the most
+    /// specific limit winning. A request whose body goes over the limit is answered
+    /// `413 Content Too Large` as the handler reads it, and one whose `Content-Length`
+    /// already says it won't fit is answered before any of it is read.
+    ///
     /// # Parameters
     /// - `Limit::Default` - use the framework default (5 MB)
     /// - `Limit::Limited(n)` - enforce an explicit limit
@@ -510,6 +517,8 @@ impl App {
     }
 
     /// Disables a request body limit
+    ///
+    /// A route group or a route can still set a limit of its own.
     pub fn without_body_limit(mut self) -> Self {
         self.body_limit = RequestBodyLimit::Disabled;
         self

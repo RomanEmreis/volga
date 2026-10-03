@@ -156,8 +156,8 @@ use crate::http::endpoints::{
     route::{canonical_path, is_canonical_path, join_path},
 };
 
-#[cfg(any(feature = "middleware", feature = "openapi"))]
 use crate::http::endpoints::route::same_position;
+use crate::http::request::request_body_limit::RequestBodyLimit;
 use crate::http::{FromRequestParts, IntoResponse};
 use hyper::Method;
 use std::borrow::Cow;
@@ -686,9 +686,7 @@ impl App {
 
         Route {
             app: self,
-            #[cfg(feature = "middleware")]
             method,
-            #[cfg(feature = "middleware")]
             pattern,
             #[cfg(feature = "openapi")]
             openapi_key,
@@ -699,9 +697,7 @@ impl App {
 /// Represents a route reference
 pub struct Route<'a> {
     pub(crate) app: &'a mut App,
-    #[cfg(feature = "middleware")]
     pub(crate) method: Method,
-    #[cfg(feature = "middleware")]
     pub(crate) pattern: Cow<'a, str>,
     #[cfg(feature = "openapi")]
     openapi_key: RouteKey,
@@ -709,7 +705,6 @@ pub struct Route<'a> {
 
 /// A route registered by a [`RouteGroup`], remembered until the group closure returns
 /// so that the group's configuration can be applied to it whatever the declaration order
-#[cfg(any(feature = "middleware", feature = "openapi"))]
 #[derive(Debug, Clone)]
 pub(crate) struct GroupRoute {
     method: Method,
@@ -721,13 +716,13 @@ pub struct RouteGroup<'a> {
     pub(crate) app: &'a mut App,
     pub(crate) prefix: String,
     /// Routes registered by this group and by its sub-groups
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
     pub(crate) routes: Vec<GroupRoute>,
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
     /// The prefixes this group and its sub-groups mapped a fallback under
-    #[cfg(feature = "middleware")]
     pub(crate) fallbacks: Vec<Box<str>>,
+    /// The request body limit of this group, if it set one
+    pub(crate) body_limit: Option<RequestBodyLimit>,
     /// The CORS policy of this group, if it configured one
     #[cfg(feature = "middleware")]
     pub(crate) cors: Option<CorsOverride>,
@@ -785,12 +780,7 @@ impl<'a> RouteGroup<'a> {
     /// Remembers a route registered by this group so that the group's configuration
     /// reaches it when the group closure returns.
     #[inline]
-    #[cfg_attr(
-        not(any(feature = "middleware", feature = "openapi")),
-        allow(unused_variables)
-    )]
     fn record(&mut self, method: &Method, pattern: &str) {
-        #[cfg(any(feature = "middleware", feature = "openapi"))]
         self.record_route(GroupRoute {
             method: method.clone(),
             pattern: Box::from(pattern),
@@ -808,7 +798,6 @@ impl<'a> RouteGroup<'a> {
     /// document are left with. Two *names* for one parameter on one verb are an ambiguity of
     /// their own, reported where the second one is mapped.
     #[inline]
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
     fn record_route(&mut self, route: GroupRoute) {
         let recorded = self.routes.iter_mut().find(|recorded| {
             recorded.method == route.method && same_position(&recorded.pattern, &route.pattern)
@@ -823,59 +812,67 @@ impl<'a> RouteGroup<'a> {
     /// Applies the group's configuration to every route it registered.
     ///
     /// Called once the group closure has returned, so a `wrap` / `with` / `cors_with` /
-    /// `open_api` call reaches the routes above it as well as the ones below it.
-    /// Middleware is inserted ahead of whatever the route already carries - the
+    /// `open_api` / `with_body_limit` call reaches the routes above it as well as the ones
+    /// below it. Middleware is inserted ahead of whatever the route already carries - the
     /// middleware of a route or of a nested group, which applied itself first - so an
-    /// outer scope always wraps an inner one.
+    /// outer scope always wraps an inner one. A CORS policy and a body limit are bound only
+    /// where the route or a nested group has not bound its own, so the inner scope wins.
     pub(crate) fn apply(&mut self) {
-        #[cfg(any(feature = "middleware", feature = "openapi"))]
-        {
-            // Taken out of `self` for the walk, so the routes can be read while the
-            // application state they configure is borrowed mutably, and put back for
-            // a parent group that has yet to apply its own configuration to them.
-            let routes = std::mem::take(&mut self.routes);
+        // Taken out of `self` for the walk, so the routes can be read while the
+        // application state they configure is borrowed mutably, and put back for
+        // a parent group that has yet to apply its own configuration to them.
+        let routes = std::mem::take(&mut self.routes);
 
-            for route in routes.iter() {
-                #[cfg(feature = "middleware")]
-                {
-                    let endpoints = self.app.pipeline.endpoints_mut();
+        for route in routes.iter() {
+            let endpoints = self.app.pipeline.endpoints_mut();
 
-                    if !self.middleware.is_empty() {
-                        endpoints.prepend_layers(&route.method, &route.pattern, &self.middleware);
-                    }
-                    if let Some(cors) = self.cors.clone() {
-                        endpoints.bind_cors_if_unset(&route.method, &route.pattern, cors);
-                    }
+            if let Some(limit) = self.body_limit {
+                endpoints.bind_body_limit_if_unset(&route.method, &route.pattern, limit);
+            }
+
+            #[cfg(feature = "middleware")]
+            {
+                if !self.middleware.is_empty() {
+                    endpoints.prepend_layers(&route.method, &route.pattern, &self.middleware);
                 }
-
-                #[cfg(feature = "openapi")]
-                {
-                    let key = RouteKey {
-                        method: route.method.clone(),
-                        pattern: route.pattern.as_ref().into(),
-                    };
-                    let group_config = self.openapi_config.clone();
-                    self.app
-                        .openapi
-                        .update_route_config(&key, |cfg| cfg.merge_outer(&group_config));
+                if let Some(cors) = self.cors.clone() {
+                    endpoints.bind_cors_if_unset(&route.method, &route.pattern, cors);
                 }
             }
 
-            self.routes = routes;
+            #[cfg(feature = "openapi")]
+            {
+                let key = RouteKey {
+                    method: route.method.clone(),
+                    pattern: route.pattern.as_ref().into(),
+                };
+                let group_config = self.openapi_config.clone();
+                self.app
+                    .openapi
+                    .update_route_config(&key, |cfg| cfg.merge_outer(&group_config));
+            }
         }
+
+        self.routes = routes;
 
         // A fallback is not a route, so there is nothing to describe in an OpenAPI document,
         // but it answers under this group's prefix on the group's behalf, and it takes the
-        // group's middleware and CORS policy the way a route does
-        #[cfg(feature = "middleware")]
+        // group's body limit, middleware and CORS policy the way a route does
         for prefix in self.fallbacks.iter() {
             let endpoints = self.app.pipeline.endpoints_mut();
 
-            if !self.middleware.is_empty() {
-                endpoints.prepend_fallback_layers(prefix, &self.middleware);
+            if let Some(limit) = self.body_limit {
+                endpoints.bind_fallback_body_limit_if_unset(prefix, limit);
             }
-            if let Some(cors) = self.cors.clone() {
-                endpoints.bind_fallback_cors_if_unset(prefix, cors);
+
+            #[cfg(feature = "middleware")]
+            {
+                if !self.middleware.is_empty() {
+                    endpoints.prepend_fallback_layers(prefix, &self.middleware);
+                }
+                if let Some(cors) = self.cors.clone() {
+                    endpoints.bind_fallback_cors_if_unset(prefix, cors);
+                }
             }
         }
 
@@ -955,12 +952,11 @@ impl<'a> RouteGroup<'a> {
         let mut child = RouteGroup {
             app: self.app,
             prefix: full_prefix,
-            #[cfg(any(feature = "middleware", feature = "openapi"))]
             routes: Vec::new(),
             #[cfg(feature = "middleware")]
             middleware: Vec::new(),
-            #[cfg(feature = "middleware")]
             fallbacks: Vec::new(),
+            body_limit: None,
             #[cfg(feature = "middleware")]
             cors: None,
             #[cfg(feature = "static-files")]
@@ -980,7 +976,6 @@ impl<'a> RouteGroup<'a> {
 
         // Taken out while the sub-group is still being read, for the same reason as the
         // mounts below
-        #[cfg(feature = "middleware")]
         let fallbacks = std::mem::take(&mut child.fallbacks);
 
         // A static file mount the sub-group asked for belongs to this group as well. It is
@@ -993,13 +988,11 @@ impl<'a> RouteGroup<'a> {
         // configuration wraps whatever the sub-group has just applied to them. A route
         // both of them mapped is still one route, so it arrives here through the same
         // check as one this group mapped itself.
-        #[cfg(any(feature = "middleware", feature = "openapi"))]
         for route in child.routes.drain(..) {
             self.record_route(route);
         }
 
         // ... and so do the fallbacks it mapped, by the same rule
-        #[cfg(feature = "middleware")]
         for pattern in fallbacks {
             self.record_fallback(pattern);
         }
@@ -1104,7 +1097,6 @@ impl<'a> RouteGroup<'a> {
             .endpoints_mut()
             .map_fallback(&prefix, handler);
 
-        #[cfg(feature = "middleware")]
         self.record_fallback(prefix.into());
 
         self
@@ -1119,7 +1111,6 @@ impl<'a> RouteGroup<'a> {
     /// fallbacks at one resource, and recording both spellings would put this group's
     /// middleware in front of the one fallback left there twice.
     #[inline]
-    #[cfg(feature = "middleware")]
     fn record_fallback(&mut self, prefix: Box<str>) {
         if !self
             .fallbacks
@@ -1138,12 +1129,11 @@ macro_rules! define_route_group_methods {
                 RouteGroup {
                     app,
                     prefix: prefix.to_string(),
-                    #[cfg(any(feature = "middleware", feature = "openapi"))]
                     routes: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
                     middleware: Vec::with_capacity(4),
-                    #[cfg(feature = "middleware")]
                     fallbacks: Vec::new(),
+                    body_limit: None,
                     #[cfg(feature = "middleware")]
                     cors: None,
                     #[cfg(feature = "static-files")]
@@ -1188,9 +1178,6 @@ define_route_group_methods! {
 
 #[cfg(test)]
 mod tests {
-    // Every test here is about what a group records, which is only tracked when there is
-    // something to configure with it
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
     use super::*;
 
     /// A group holds one mount for itself and one for each nested group that asked for
@@ -1230,7 +1217,6 @@ mod tests {
         assert_eq!(counts, vec![1, 1, 2, 0]);
     }
 
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]
     fn it_records_routes_mapped_in_a_group() {
         let mut app = App::new();
@@ -1258,7 +1244,6 @@ mod tests {
 
     /// A route mapped again under another spelling of its parameters is one route, recorded
     /// once under the spelling it was mapped as last - by the group itself or by a sub-group
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]
     fn it_records_a_route_once_under_the_spelling_it_was_mapped_as_last() {
         let mut app = App::new();
@@ -1292,7 +1277,6 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]
     fn it_records_routes_mapped_by_a_sub_group_in_the_parent() {
         let mut app = App::new();
@@ -1310,7 +1294,6 @@ mod tests {
 
     /// A fallback takes the configuration of every group around it, as a route does, and a
     /// fallback mapped twice at one prefix is one fallback to configure
-    #[cfg(feature = "middleware")]
     #[test]
     fn it_records_the_fallbacks_of_a_group_and_its_sub_groups() {
         let mut app = App::new();
@@ -1336,7 +1319,6 @@ mod tests {
 
     /// A parameter is matched by the position it sits at, so two sub-groups naming or typing
     /// one position differently map their fallbacks at one resource, and it is recorded once
-    #[cfg(feature = "middleware")]
     #[test]
     fn it_records_one_fallback_for_every_spelling_of_its_position() {
         let mut app = App::new();
@@ -1373,7 +1355,6 @@ mod tests {
         });
     }
 
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
     #[test]
     fn it_does_not_record_an_empty_sub_group_in_the_parent() {
         let mut app = App::new();

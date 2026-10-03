@@ -89,6 +89,7 @@
 //! performance under concurrent, read-only workloads.
 
 use crate::http::endpoints::handlers::RouteHandler;
+use crate::http::request::request_body_limit::RequestBodyLimit;
 use crate::utils::str::memchr_split_nonempty;
 use hyper::Method;
 use smallvec::SmallVec;
@@ -126,18 +127,29 @@ pub(super) type ParamNames = SmallVec<[Arc<str>; DEFAULT_DEPTH]>;
 pub(super) struct RouteEndpoint {
     pub(super) method: Method,
     pub(super) pipeline: RoutePipeline,
-    /// The parameter names this endpoint's own pattern was written with, kept only when
-    /// they differ from the ones the tree binds on the way here - which happens when
-    /// another verb reached this position first and named it something else. `None` is
-    /// the common case and costs a request nothing.
+    /// What this endpoint carries that nearly every endpoint leaves unset, `None` while it
+    /// carries none of it - the common case, which costs a request one branch.
     ///
-    /// Boxed rather than inline: this list is read once per request and written once at
-    /// startup, while the endpoint holding it is scanned by every request that reaches
-    /// this node, so the two words a `Box` costs beat the ten a `SmallVec` would
-    pub(super) params: Option<Box<[Arc<str>]>>,
+    /// Boxed rather than inline: it is read once per request and written once at startup,
+    /// while the endpoint holding it is scanned by every request that reaches this node,
+    /// and four endpoints are held inline in every [`Resource`]. One word for all of it
+    /// beats a word or two for each.
+    extras: Option<Box<EndpointExtras>>,
     /// The CORS policy bound to this route, `None` while nothing has bound one
     #[cfg(feature = "middleware")]
     pub(super) cors: Option<CorsOverride>,
+}
+
+/// The parts of a [`RouteEndpoint`] that nearly every endpoint leaves unset
+#[derive(Clone, Default)]
+struct EndpointExtras {
+    /// The parameter names this endpoint's own pattern was written with, kept only when
+    /// they differ from the ones the tree binds on the way here - which happens when
+    /// another verb reached this position first and named it something else
+    params: Option<Box<[Arc<str>]>>,
+    /// The request body limit bound to this route, or to the route group it belongs to,
+    /// `None` while it takes the application's
+    body_limit: Option<RequestBodyLimit>,
 }
 
 /// What answers every method at a resource no route is mapped at: the fallback of the route
@@ -154,6 +166,9 @@ pub(super) struct Fallback {
     /// The CORS policy bound to this fallback, `None` while nothing has bound one
     #[cfg(feature = "middleware")]
     pub(super) cors: Option<CorsOverride>,
+    /// The request body limit of the route group the fallback answers for, `None` while
+    /// it takes the application's
+    pub(super) body_limit: Option<RequestBodyLimit>,
     /// Set on the fallback a route group maps below its prefix, where the rest of the path
     /// is read by a catch-all the application never wrote. That binding is dropped before
     /// the request is labelled, so a fallback sees the parameters its prefix declares and
@@ -283,7 +298,12 @@ impl RouteEndpoint {
         Self {
             method,
             pipeline: RoutePipeline::new(),
-            params,
+            extras: params.map(|params| {
+                Box::new(EndpointExtras {
+                    params: Some(params),
+                    body_limit: None,
+                })
+            }),
             #[cfg(feature = "middleware")]
             cors: None,
         }
@@ -295,7 +315,27 @@ impl RouteEndpoint {
     /// written with unless it says otherwise.
     #[inline]
     fn params<'names>(&'names self, bound: &'names ParamNames) -> &'names [Arc<str>] {
-        self.params.as_deref().unwrap_or(bound)
+        self.own_params().unwrap_or(bound)
+    }
+
+    /// The parameter names this endpoint's pattern was written with, `None` when they are
+    /// the ones the tree binds on the way here
+    #[inline(always)]
+    pub(super) fn own_params(&self) -> Option<&[Arc<str>]> {
+        self.extras.as_deref()?.params.as_deref()
+    }
+
+    /// The request body limit bound to this endpoint, `None` while it takes the
+    /// application's
+    #[inline(always)]
+    pub(super) fn body_limit(&self) -> Option<RequestBodyLimit> {
+        self.extras.as_deref()?.body_limit
+    }
+
+    /// Binds a request body limit to this endpoint, replacing the one bound to it already
+    #[inline]
+    pub(super) fn set_body_limit(&mut self, limit: RequestBodyLimit) {
+        self.extras.get_or_insert_with(Box::default).body_limit = Some(limit);
     }
 
     /// Inserts a layer into the pipeline
@@ -329,6 +369,7 @@ impl Fallback {
             params,
             #[cfg(feature = "middleware")]
             cors: None,
+            body_limit: None,
             hides_tail,
         }
     }
@@ -641,7 +682,6 @@ impl RouteNode {
 
     /// Finds the endpoints a route pattern names, reading the pattern the way it was written
     #[inline]
-    #[cfg(feature = "middleware")]
     pub(super) fn find_mut(&mut self, pattern: &str) -> Option<&'_ mut Resource> {
         let mut current = self;
         let mut segments = split_path(pattern);
@@ -805,7 +845,6 @@ impl Resource {
 
     /// Returns a mutable reference to the handler for the given method
     #[inline]
-    #[cfg(feature = "middleware")]
     pub(super) fn handler_mut(&mut self, method: &Method) -> Option<&mut RouteEndpoint> {
         let i = self
             .handlers
@@ -818,7 +857,6 @@ impl Resource {
 
     /// Returns a mutable reference to the fallback mapped here
     #[inline]
-    #[cfg(feature = "middleware")]
     pub(super) fn fallback_mut(&mut self) -> Option<&mut Fallback> {
         self.fallback.as_deref_mut()
     }
@@ -860,7 +898,7 @@ impl Resource {
         {
             // A route is listed the way it was written, which is the name the tree binds
             // unless another verb reached one of these positions first
-            let route_path = spell_route(segments, handler.params.as_deref());
+            let route_path = spell_route(segments, handler.own_params());
             routes.push(super::meta::RouteInfo::new(
                 handler.method.clone(),
                 &route_path,
@@ -1280,7 +1318,6 @@ pub(super) fn make_allowed_str<const N: usize>(
 /// A parameter is matched by the position it sits at rather than by what it is called or
 /// what it is typed as, so `/{tenant}/{*rest}`, `/{org}/{*path}` and `/{id:integer}/{*rest}`
 /// all reach one resource - and anything keyed by a pattern has to count them as one.
-#[cfg(any(feature = "middleware", feature = "openapi"))]
 pub(crate) fn same_position(left: &str, right: &str) -> bool {
     let mut left = split_path(left);
     let mut right = split_path(right);
@@ -1297,7 +1334,6 @@ pub(crate) fn same_position(left: &str, right: &str) -> bool {
 /// Returns `true` when two segments of a pattern occupy one position: the same literal, two
 /// parameters, or two catch-alls
 #[inline]
-#[cfg(any(feature = "middleware", feature = "openapi"))]
 fn same_segment(left: &str, right: &str) -> bool {
     match (is_dynamic_segment(left), is_dynamic_segment(right)) {
         (true, true) => is_catch_all_segment(left) == is_catch_all_segment(right),
@@ -1732,7 +1768,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(any(feature = "middleware", feature = "openapi"))]
     fn it_reads_one_position_under_any_spelling_of_its_parameters() {
         use super::same_position;
 
@@ -1905,9 +1940,9 @@ mod tests {
 
         // The tree binds the name the GET got there with, and only the POST carries one
         assert_eq!(found.params.first().unwrap().name.as_ref(), "id");
-        assert!(handlers[0].params.is_none());
+        assert!(handlers[0].own_params().is_none());
         assert_eq!(
-            handlers[1].params.as_deref().unwrap(),
+            handlers[1].own_params().unwrap(),
             [Arc::<str>::from("name")]
         );
     }
@@ -1925,11 +1960,14 @@ mod tests {
         let posts = route.find_ok("/users/42/posts").unwrap();
         let comments = route.find_ok("/users/42/comments").unwrap();
 
-        assert!(posts.route.handlers.as_ref().unwrap()[0].params.is_none());
+        assert!(
+            posts.route.handlers.as_ref().unwrap()[0]
+                .own_params()
+                .is_none()
+        );
         assert_eq!(
             comments.route.handlers.as_ref().unwrap()[0]
-                .params
-                .as_deref()
+                .own_params()
                 .unwrap(),
             [Arc::<str>::from("name")]
         );
@@ -2316,9 +2354,9 @@ mod tests {
         let handlers = found.route.handlers.as_ref().unwrap();
 
         assert_eq!(found.params.first().unwrap().name.as_ref(), "path");
-        assert!(handlers[0].params.is_none());
+        assert!(handlers[0].own_params().is_none());
         assert_eq!(
-            handlers[1].params.as_deref().unwrap(),
+            handlers[1].own_params().unwrap(),
             [Arc::<str>::from("rest")]
         );
         assert_eq!(found.route.allowed_methods().as_ref(), "GET,POST,HEAD");
