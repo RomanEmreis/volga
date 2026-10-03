@@ -15,6 +15,12 @@
 //! closed first has nothing left to arrive and is closed at once, which is how nearly every
 //! connection ends.
 //!
+//! Lingering also ends once the client has sent nothing for [`LINGER_IDLE_TIMEOUT`], as
+//! nginx's `lingering_timeout` does. A client still sending a body keeps it going; one that
+//! holds an idle connection and does not watch it - closed by the server on a graceful
+//! shutdown, which waits for lingering connections as well - would otherwise hold it, and
+//! the shutdown, for all of [`LINGER_TIMEOUT`].
+//!
 //! HTTP/2 does not get there on a body left unread: a response sent early ends the stream
 //! alone, with `RST_STREAM(NO_ERROR)` (RFC 9113 Section 8.1), and the connection stays open.
 //! An HTTP/2 connection lingers only when the server closes it as a whole - once a graceful
@@ -36,12 +42,15 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf},
     net::TcpStream,
     sync::oneshot,
-    time::timeout,
+    time::{Instant, timeout},
 };
 
 /// How long a connection the server closed is read from, at most, while the client finishes
 /// sending and closes its side
 const LINGER_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How long the client may send nothing, at most, before the server stops waiting for it
+const LINGER_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// The buffer what still arrives is read into and thrown away from
 const LINGER_BUFFER_SIZE: usize = 16 * 1024;
@@ -166,10 +175,11 @@ impl Linger {
     /// it is dropped.
     #[inline]
     pub(crate) async fn close(self) {
-        self.close_within(LINGER_TIMEOUT).await
+        self.close_within(LINGER_TIMEOUT, LINGER_IDLE_TIMEOUT).await
     }
 
-    async fn close_within(mut self, linger_timeout: Duration) {
+    /// Lingers for `total` at most, and for `idle` at most since the client last sent anything
+    async fn close_within(mut self, total: Duration, idle: Duration) {
         let Ok(mut stream) = self.0.try_recv() else {
             return;
         };
@@ -178,13 +188,20 @@ impl Linger {
         // failed, say - the client is told now that nothing more is coming
         let _ = stream.shutdown().await;
 
+        let deadline = Instant::now() + total;
         let mut discard = vec![0; LINGER_BUFFER_SIZE];
-        let _ = timeout(linger_timeout, async {
-            while let Ok(read) = stream.read(&mut discard).await
-                && read > 0
-            {}
-        })
-        .await;
+
+        // A read that is ready is taken even once the time is up, so the deadline is checked
+        // here as well as waited on: a client sending without a pause would never let it pass
+        while let Some(left) = deadline.checked_duration_since(Instant::now())
+            && !left.is_zero()
+        {
+            match timeout(idle.min(left), stream.read(&mut discard)).await {
+                Ok(Ok(read)) if read > 0 => continue,
+                // The client closed, the connection failed, or nothing arrived in time
+                _ => break,
+            }
+        }
     }
 }
 
@@ -249,17 +266,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn it_stops_lingering_after_the_timeout() {
+    async fn it_stops_lingering_once_the_client_goes_quiet() {
         let (server, linger, _client) = connected().await;
 
         drop(server);
 
-        // The client neither sends nor closes, so only the timeout ends it
+        // The client neither sends nor closes, so only the idle timeout ends it
         timeout(
             Duration::from_secs(1),
-            linger.close_within(Duration::from_millis(20)),
+            linger.close_within(Duration::from_secs(10), Duration::from_millis(20)),
+        )
+        .await
+        .expect("lingering ends once the client has gone quiet");
+    }
+
+    #[tokio::test]
+    async fn it_stops_lingering_after_the_timeout_while_the_client_keeps_sending() {
+        let (server, linger, mut client) = connected().await;
+
+        drop(server);
+        let sending =
+            tokio::spawn(async move { while client.write_all(&[b'x'; 1024]).await.is_ok() {} });
+
+        // The client never pauses, so only the total timeout ends it
+        timeout(
+            Duration::from_secs(1),
+            linger.close_within(Duration::from_millis(50), Duration::from_secs(10)),
         )
         .await
         .expect("lingering ends once its time is up");
+
+        sending.abort();
+    }
+
+    #[tokio::test]
+    async fn it_keeps_lingering_while_the_client_sends_with_pauses() {
+        let (server, linger, mut client) = connected().await;
+
+        drop(server);
+        let lingering =
+            tokio::spawn(linger.close_within(Duration::from_secs(10), Duration::from_millis(200)));
+
+        // Pauses shorter than the idle timeout keep the server reading, so every write lands
+        for _ in 0..10 {
+            client.write_all(&[b'x'; 1024]).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        drop(client);
+
+        timeout(Duration::from_secs(1), lingering)
+            .await
+            .expect("lingering ends once the client closes")
+            .unwrap();
     }
 }

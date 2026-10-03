@@ -137,3 +137,80 @@ async fn it_delivers_a_413_for_a_body_over_the_limit_over_http2() {
 async fn it_delivers_a_response_sent_without_reading_the_body_over_http2() {
     assert_unread_body_response_delivered(Protocol::Http2).await;
 }
+
+/// A connection still lingering when the server shuts down holds the shutdown up as one still
+/// being served does: `run` returns once the client has closed it, so the socket is not cut
+/// off - by the runtime `run` was called on going away, say - while the body is still arriving
+#[cfg(feature = "http1")]
+#[tokio::test]
+async fn it_waits_for_a_lingering_connection_on_shutdown() {
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
+    use volga::App;
+
+    let port = TestServer::get_free_port();
+    let (app, handle) = App::with_shutdown();
+    let mut app = app
+        .bind(format!("127.0.0.1:{port}"))
+        .without_greeter()
+        .with_body_limit(Limit::Limited(16));
+    app.map_post("/upload", read_body);
+    let mut server = tokio::spawn(async move { app.run().await });
+
+    let mut stream = loop {
+        match TcpStream::connect(("127.0.0.1", port)).await {
+            Ok(stream) => break stream,
+            Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    };
+
+    // A client part of the way through a body the server refuses: it reads the `413` and the
+    // end of the stream, and has not closed its side, so the server lingers on the connection
+    stream
+        .write_all(b"POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: 1048576\r\n\r\n")
+        .await
+        .unwrap();
+    stream.write_all(&[b'x'; 64 * 1024]).await.unwrap();
+    let mut response = Vec::new();
+    timeout(Duration::from_secs(5), stream.read_to_end(&mut response))
+        .await
+        .expect("the server answered and closed its side")
+        .unwrap();
+    assert!(response.starts_with(b"HTTP/1.1 413"));
+
+    handle.shutdown();
+
+    // The client goes on sending the rest of the body, pausing well within the idle timeout,
+    // and every write lands: the server is still reading rather than resetting
+    let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
+    let sending = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = &mut stopped => break,
+                _ = tokio::time::sleep(Duration::from_millis(20)) => stream
+                    .write_all(&[b'x'; 1024])
+                    .await
+                    .expect("the server is still reading"),
+            }
+        }
+    });
+
+    assert!(
+        timeout(Duration::from_millis(300), &mut server)
+            .await
+            .is_err(),
+        "run returned while a connection was still lingering"
+    );
+
+    // Done sending: the client closes its side
+    stop.send(()).unwrap();
+    sending.await.unwrap();
+
+    timeout(Duration::from_secs(1), server)
+        .await
+        .expect("run returns once the client has closed")
+        .unwrap()
+        .unwrap();
+}

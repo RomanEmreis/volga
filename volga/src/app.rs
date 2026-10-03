@@ -949,6 +949,12 @@ impl App {
             // Subscribed here rather than in the spawned task, so a connection accepted just
             // before the loop breaks is still waited for, even if its task has not run yet
             let watcher = graceful_shutdown.watcher();
+            // Hyper lets go of `watcher` once it is done with the connection, which is before
+            // the connection lingers - see `LingeringStream`. This one is never handed to hyper
+            // and is held until the task ends, so the shutdown waits for a socket that is still
+            // lingering too, rather than returning from `run` with it open: a runtime dropped
+            // right after `run` would cut it off with the body still arriving
+            let lingering = graceful_shutdown.watcher();
             #[cfg(feature = "tls")]
             let shutdown_tx = Arc::clone(&shutdown_tx);
             // Two tokens, because cancellation only flows from parent to child. `closed` is the
@@ -962,6 +968,7 @@ impl App {
 
             tokio::spawn(async move {
                 let _permit = permit;
+                let _lingering = lingering;
                 tokio::select! {
                     _ = Self::handle_connection(
                         stream,
