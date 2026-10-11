@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.13.2
+
+## Added
+* `OAuthConfig::with_jwks_uri`, and `jwks_uri` in `[oauth.client]`: the key store fetches the issuer's JSON Web Key Set from that URL and skips discovery. This is for a server that cannot reach the URL tokens carry in `iss`, such as an issuer at `http://localhost:8787` that a container reaches as `http://host.docker.internal:8787`, or a Kubernetes service behind a public ingress host. Pointing `with_issuer` at the internal URL did not help: discovery requires the metadata's `issuer` to equal the URL it was fetched from, the metadata's `jwks_uri` names the public host, and tokens would have to carry the internal URL in `iss`. `with_issuer` is still required, and is still the `iss` tokens must carry. The rest works as with discovery: the lazy first fetch, the refresh on an unknown `kid`, `with_max_key_age`, the stale set served while the URL is unreachable and the `503` before any keys have loaded. The transport policy applies to the URL, so a plain `http` one needs `require_https(false)`. (#278)
+* `DecodingKey::from_jwk` builds a static verification key from a JSON Web Key, the form an issuer publishes its keys in, alongside the PEM constructors. It takes one key as JSON text. The algorithm still comes from `BearerAuthConfig::with_alg`, and a key loaded this way does not follow rotations. (#278)
+
 # 0.13.1
 
 ## Added

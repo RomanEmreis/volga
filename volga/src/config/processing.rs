@@ -203,6 +203,7 @@ impl App {
         #[serde(deny_unknown_fields)]
         struct OAuthClientSection {
             issuer: Option<String>,
+            jwks_uri: Option<String>,
             refresh_cooldown_secs: Option<u64>,
             max_key_age_secs: Option<u64>,
             require_https: Option<bool>,
@@ -215,6 +216,9 @@ impl App {
         let mut oauth = self.oauth_client_config.take().unwrap_or_default();
         if let Some(issuer) = s.issuer {
             oauth = oauth.with_issuer(issuer);
+        }
+        if let Some(url) = s.jwks_uri {
+            oauth = oauth.with_jwks_uri(url);
         }
         if let Some(secs) = s.refresh_cooldown_secs {
             oauth = oauth.with_refresh_cooldown(Duration::from_secs(secs));
@@ -582,6 +586,7 @@ mod tests {
         let file = write_toml(
             "[oauth.client]\n\
              issuer = \"https://auth.example.com\"\n\
+             jwks_uri = \"http://auth.internal/jwks\"\n\
              refresh_cooldown_secs = 5\n\
              max_key_age_secs = 120\n\
              require_https = false\n\
@@ -594,6 +599,7 @@ mod tests {
 
         let oauth = app.oauth_client_config.as_ref().unwrap();
         assert_eq!(oauth.issuer.as_deref(), Some("https://auth.example.com"));
+        assert_eq!(oauth.jwks_uri(), Some("http://auth.internal/jwks"));
         assert_eq!(oauth.refresh_cooldown(), Duration::from_secs(5));
         assert_eq!(oauth.max_key_age(), Duration::from_secs(120));
         assert!(!oauth.client_config().enforce_https());

@@ -227,6 +227,33 @@ async fn spawn_resource(issuer: String, cooldown: Duration) -> TestServer {
     spawn_resource_for::<Claims>(issuer, cooldown, volga::auth::DEFAULT_MAX_KEY_AGE).await
 }
 
+/// The issuer tokens name in `iss` when the server cannot reach it: nothing
+/// listens there, so any request to it fails at once.
+const UNREACHABLE_ISSUER: &str = "http://127.0.0.1:9";
+
+/// Spawns the protected resource app requiring `issuer` in `iss` and
+/// fetching the keys from `jwks_uri`, with discovery skipped.
+async fn spawn_resource_with_jwks_uri(issuer: &str, jwks_uri: String) -> TestServer {
+    let issuer = issuer.to_owned();
+    TestServer::builder()
+        .configure(move |app| {
+            app.with_oauth(|oauth| {
+                oauth
+                    .with_issuer(&issuer)
+                    .with_jwks_uri(&jwks_uri)
+                    .with_client_config(|client| client.require_https(false))
+                    .with_refresh_cooldown(Duration::ZERO)
+            })
+        })
+        .setup(|app: &mut App| {
+            app.use_oauth();
+            app.map_get("/protected", || async { volga::ok!("secret") })
+                .authorize::<Claims>(roles(["admin"]));
+        })
+        .build()
+        .await
+}
+
 #[tokio::test]
 async fn it_authorizes_with_issuer_published_keys() {
     let issuer = spawn_issuer("key-1").await;
@@ -379,6 +406,79 @@ async fn it_answers_503_while_the_issuer_is_unreachable() {
         .unwrap();
     assert_eq!(res.status(), 503);
     // an unreachable issuer is not the client's fault - no challenge
+    assert!(res.headers().get("www-authenticate").is_none());
+
+    resource.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_fetches_keys_from_an_explicit_jwks_uri() {
+    let issuer = spawn_issuer("key-1").await;
+    // the metadata endpoint fails: any attempt at discovery would answer 503
+    issuer.set_available(false);
+    let resource =
+        spawn_resource_with_jwks_uri(UNREACHABLE_ISSUER, issuer.server.url("/jwks")).await;
+
+    // a token naming the issuer the server cannot reach, signed with the
+    // key published at the URL it can, passes
+    let token = sign_token("key-1", UNREACHABLE_ISSUER, "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.text().await.unwrap(), "secret");
+    assert_eq!(issuer.jwks_hits.load(Ordering::SeqCst), 1);
+
+    // `iss` must still be the configured issuer, not the host the keys
+    // come from
+    let token = sign_token("key-1", &issuer.url(), "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 401);
+    let challenge = res.headers()["www-authenticate"].to_str().unwrap();
+    assert!(challenge.contains("invalid_token"), "was: {challenge}");
+
+    // a rotation is picked up from the same URL on an unknown kid
+    issuer.rotate_to("key-2");
+    let token = sign_token("key-2", UNREACHABLE_ISSUER, "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    assert_eq!(issuer.jwks_hits.load(Ordering::SeqCst), 2);
+
+    resource.shutdown().await;
+    issuer.server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_answers_503_while_the_jwks_uri_is_unreachable() {
+    let resource =
+        spawn_resource_with_jwks_uri(UNREACHABLE_ISSUER, format!("{UNREACHABLE_ISSUER}/jwks"))
+            .await;
+
+    let token = sign_token("key-1", UNREACHABLE_ISSUER, "admin");
+    let res = resource
+        .client()
+        .get(resource.url("/protected"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 503);
     assert!(res.headers().get("www-authenticate").is_none());
 
     resource.shutdown().await;
