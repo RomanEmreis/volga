@@ -28,6 +28,11 @@
 //! not stay trusted indefinitely. While the issuer is unreachable and no
 //! keys have been loaded yet, protected routes answer `503`.
 //!
+//! When the URL tokens carry in `iss` is not one the server can reach - the
+//! server runs in a container, or behind a public ingress host -
+//! [`with_jwks_uri`](OAuthConfig::with_jwks_uri) names the URL to fetch the
+//! keys from instead, and discovery is skipped.
+//!
 //! With the `config` feature the same knobs can be described in the
 //! `[oauth.client]` section of the configuration file (fields present in
 //! the file override builder calls; activation still requires
@@ -36,6 +41,7 @@
 //! ```toml
 //! [oauth.client]
 //! issuer = "https://auth.example.com"
+//! jwks_uri = "http://auth.internal/jwks"  # optional, skips discovery
 //! refresh_cooldown_secs = 60   # optional
 //! max_key_age_secs = 900       # optional
 //! require_https = true         # optional
@@ -77,6 +83,7 @@ pub const DEFAULT_MAX_KEY_AGE: Duration = Duration::from_secs(15 * 60);
 /// [`BearerAuthConfig`](super::BearerAuthConfig).
 pub struct OAuthConfig {
     pub(crate) issuer: Option<String>,
+    jwks_uri: Option<String>,
     client_config: ClientConfig,
     refresh_cooldown: Duration,
     max_key_age: Duration,
@@ -87,6 +94,7 @@ impl Default for OAuthConfig {
     fn default() -> Self {
         Self {
             issuer: None,
+            jwks_uri: None,
             client_config: ClientConfig::new(),
             refresh_cooldown: DEFAULT_REFRESH_COOLDOWN,
             max_key_age: DEFAULT_MAX_KEY_AGE,
@@ -98,6 +106,7 @@ impl Debug for OAuthConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OAuthConfig")
             .field("issuer", &self.issuer)
+            .field("jwks_uri", &self.jwks_uri)
             .field("client_config", &self.client_config)
             .field("refresh_cooldown", &self.refresh_cooldown)
             .field("max_key_age", &self.max_key_age)
@@ -118,8 +127,45 @@ impl OAuthConfig {
         self
     }
 
+    /// Fetches the JSON Web Key Set from `url` instead of discovering it
+    /// from the issuer's metadata
+    ///
+    /// For a deployment where the URL tokens carry in `iss` is not one this
+    /// server can reach: the issuer runs on the host as
+    /// `http://localhost:8787` while the server reaches it from a container
+    /// as `http://host.docker.internal:8787`, or a Kubernetes service sits
+    /// behind a public ingress host. Discovery is skipped, since the
+    /// metadata names the unreachable host twice: as its `issuer`, which
+    /// must equal the URL it was fetched from, and in its `jwks_uri`.
+    ///
+    /// [`with_issuer`](Self::with_issuer) is still required and keeps its
+    /// meaning: it is the `iss` tokens must carry. Only where the keys come
+    /// from changes. The lazy first fetch, the refresh on an unknown `kid`,
+    /// the [max key age](Self::with_max_key_age) and the stale set served
+    /// while `url` is unreachable work as they do with discovery. The
+    /// [transport policy](Self::with_client_config) applies to `url` as
+    /// well, so a plain `http` URL needs `require_https(false)`.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::App;
+    ///
+    /// // tokens name the issuer as `localhost`; the server, in a
+    /// // container, reaches it through the Docker host instead
+    /// let mut app = App::new().with_oauth(|oauth| oauth
+    ///     .with_issuer("http://localhost:8787")
+    ///     .with_jwks_uri("http://host.docker.internal:8787/jwks")
+    ///     .with_client_config(|client| client.require_https(false)));
+    /// app.use_oauth();
+    /// ```
+    pub fn with_jwks_uri(mut self, url: impl Into<String>) -> Self {
+        self.jwks_uri = Some(url.into());
+        self
+    }
+
     /// Adjusts the transport policy (HTTPS enforcement, timeout, redirect
-    /// limit) used for discovery and JWKS requests
+    /// limit) used for discovery and JWKS requests, including those to the
+    /// [`with_jwks_uri`](Self::with_jwks_uri) URL
     ///
     /// # Example
     /// ```no_run
@@ -160,6 +206,12 @@ impl OAuthConfig {
         self
     }
 
+    /// The configured URL the key set is fetched from, skipping discovery
+    #[cfg(all(test, feature = "config"))]
+    pub(crate) fn jwks_uri(&self) -> Option<&str> {
+        self.jwks_uri.as_deref()
+    }
+
     /// The configured minimum interval between two JWKS refresh attempts
     #[cfg(all(test, feature = "config"))]
     pub(crate) fn refresh_cooldown(&self) -> Duration {
@@ -183,6 +235,7 @@ impl OAuthConfig {
     pub(crate) fn into_store(self) -> JwksStore {
         JwksStore {
             issuer: self.issuer.expect("OAuth issuer is not configured"),
+            jwks_uri: self.jwks_uri,
             client: DiscoveryClient::with_config(self.client_config),
             refresh_cooldown: self.refresh_cooldown,
             max_key_age: self.max_key_age,
@@ -330,6 +383,8 @@ fn default_alg(params: &AlgorithmParameters) -> Option<Algorithm> {
 /// Lazily initialized, self-refreshing view of the issuer's JWKS
 pub(crate) struct JwksStore {
     issuer: String,
+    /// Where the key set is fetched from when discovery is skipped
+    jwks_uri: Option<String>,
     client: DiscoveryClient,
     refresh_cooldown: Duration,
     max_key_age: Duration,
@@ -343,6 +398,7 @@ impl Debug for JwksStore {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JwksStore")
             .field("issuer", &self.issuer)
+            .field("jwks_uri", &self.jwks_uri)
             .field("refresh_cooldown", &self.refresh_cooldown)
             .finish_non_exhaustive()
     }
@@ -353,6 +409,12 @@ impl JwksStore {
     #[cfg(test)]
     pub(crate) fn issuer(&self) -> &str {
         &self.issuer
+    }
+
+    /// The URL the key set is fetched from, when discovery is skipped
+    #[cfg(test)]
+    pub(crate) fn jwks_uri(&self) -> Option<&str> {
+        self.jwks_uri.as_deref()
     }
 
     /// Resolves the verification key for a token's `kid`, refreshing the
@@ -407,8 +469,8 @@ impl JwksStore {
         self.keys.read().expect("JWKS lock poisoned").clone()
     }
 
-    /// Refetches metadata and JWKS unless a refresh ran within the
-    /// cooldown; concurrent callers wait for the in-flight refresh and
+    /// Refetches the JWKS (and the metadata naming it, unless a `jwks_uri`
+    /// is configured) unless a refresh ran within the cooldown; concurrent callers wait for the in-flight refresh and
     /// return without issuing their own
     async fn refresh(&self) -> Result<(), Error> {
         let mut last_attempt = self.refresh.lock().await;
@@ -431,8 +493,27 @@ impl JwksStore {
         result
     }
 
-    /// Fetches the issuer metadata and JWKS and swaps in the new key set
+    /// Fetches the JWKS, from the configured `jwks_uri` or from the one
+    /// the issuer metadata names, and swaps in the new key set
     async fn fetch_latest(&self) -> Result<(), Error> {
+        let document = match &self.jwks_uri {
+            Some(url) => self
+                .client
+                .fetch_jwks_from_url(url)
+                .await
+                .map_err(jwks_error)?,
+            None => self.discover_jwks().await?,
+        };
+        let set: JwkSet = serde_json::from_value(document).map_err(|err| {
+            Error::server_error(format!("OAuth issuer served an invalid JWKS: {err}"))
+        })?;
+
+        *self.keys.write().expect("JWKS lock poisoned") = Some(Arc::new(Keys::from_set(&set)));
+        Ok(())
+    }
+
+    /// Discovers the issuer metadata and fetches the JWKS it names
+    async fn discover_jwks(&self) -> Result<serde_json::Value, Error> {
         // re-discover metadata every time: a rotation may come along with
         // a jwks_uri move
         let metadata = match self.client.fetch_server_metadata(&self.issuer).await {
@@ -443,17 +524,10 @@ impl JwksStore {
         }
         .map_err(discovery_error)?;
 
-        let document = self
-            .client
+        self.client
             .fetch_jwks(&metadata)
             .await
-            .map_err(discovery_error)?;
-        let set: JwkSet = serde_json::from_value(document).map_err(|err| {
-            Error::server_error(format!("OAuth issuer served an invalid JWKS: {err}"))
-        })?;
-
-        *self.keys.write().expect("JWKS lock poisoned") = Some(Arc::new(Keys::from_set(&set)));
-        Ok(())
+            .map_err(discovery_error)
     }
 }
 
@@ -461,6 +535,12 @@ impl JwksStore {
 /// problem (503-class), never the client's token.
 fn discovery_error(err: ClientError) -> Error {
     Error::server_error(format!("OAuth issuer discovery failed: {err}"))
+}
+
+/// The same for a key set fetched from the configured `jwks_uri`, where no
+/// discovery took place.
+fn jwks_error(err: ClientError) -> Error {
+    Error::server_error(format!("OAuth JWKS fetch failed: {err}"))
 }
 
 impl crate::error::IntoError for ClientError {
@@ -539,7 +619,27 @@ mod tests {
 
         let store = config.into_store();
         assert_eq!(store.issuer(), "https://auth.example.com");
+        // discovery unless a key set URL is configured
+        assert_eq!(store.jwks_uri(), None);
         assert!(format!("{store:?}").contains("auth.example.com"));
+    }
+
+    #[test]
+    fn it_keeps_the_issuer_alongside_an_explicit_jwks_uri() {
+        let config = OAuthConfig::default()
+            .with_issuer("http://localhost:8787")
+            .with_jwks_uri("http://host.docker.internal:8787/jwks");
+        assert!(format!("{config:?}").contains("host.docker.internal"));
+
+        let store = config.into_store();
+        // the issuer is still the `iss` tokens must carry; only the keys
+        // come from elsewhere
+        assert_eq!(store.issuer(), "http://localhost:8787");
+        assert_eq!(
+            store.jwks_uri(),
+            Some("http://host.docker.internal:8787/jwks")
+        );
+        assert!(format!("{store:?}").contains("host.docker.internal"));
     }
 
     #[test]

@@ -12,13 +12,13 @@ help: the trait `FromRequestRef` is not implemented for `NotAnExtractor`
   = note: `with`, `filter` and `map_err` read the request without consuming it, so they take the extractors that borrow: `Query<T>`, `Path<T>`, `ClientIp`, `Dc<T>` (feature `di`) and the header types, but not `Json<T>` or any other body extractor
   = help: the following other types implement trait `FromRequestRef`:
             ()
+            (T1,)
             (T1, T2)
             (T1, T2, T3)
             (T1, T2, T3, T4)
             (T1, T2, T3, T4, T5)
             (T1, T2, T3, T4, T5, T6)
             (T1, T2, T3, T4, T5, T6, T7)
-            (T1, T2, T3, T4, T5, T6, T7, T8)
           and $N others
   = note: required for `(NotAnExtractor,)` to implement `FromRequestRef`
 note: required by a bound in `middleware::<impl App>::with`

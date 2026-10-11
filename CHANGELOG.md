@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.13.2
+
+## Added
+* `OAuthConfig::with_jwks_uri`, and `jwks_uri` in `[oauth.client]`: the key store fetches the issuer's JSON Web Key Set from that URL and skips discovery. This is for a server that cannot reach the URL tokens carry in `iss`, such as an issuer at `http://localhost:8787` that a container reaches as `http://host.docker.internal:8787`, or a Kubernetes service behind a public ingress host. Pointing `with_issuer` at the internal URL did not help: discovery requires the metadata's `issuer` to equal the URL it was fetched from, the metadata's `jwks_uri` names the public host, and tokens would have to carry the internal URL in `iss`. `with_issuer` is still required, and is still the `iss` tokens must carry. The rest works as with discovery: the lazy first fetch, the refresh on an unknown `kid`, `with_max_key_age`, the stale set served while the URL is unreachable and the `503` before any keys have loaded. The transport policy applies to the URL, so a plain `http` one needs `require_https(false)`. (#278)
+* `DecodingKey::from_jwk` builds a static verification key from a JSON Web Key, the form an issuer publishes its keys in, alongside the PEM constructors. It takes one key as JSON text. The algorithm still comes from `BearerAuthConfig::with_alg`, and a key loaded this way does not follow rotations. (#278)
+
 # 0.13.1
 
 ## Added
@@ -12,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Changed
 * A request whose `Content-Length` is over the body limit is refused with `413` as soon as its body is read, before any of it is: a client that sent `Expect: 100-continue` gets the `413` instead of `100 Continue`, and never sends the body. A body of undeclared length is still refused once it has sent more than fits. A handler that reads only the start of such a body used to get the part that fit, and gets the `413` now; one that never reads the body is not affected. (#273)
+* A request body refused part of the way through yields one `413` and ends: later reads return the end of the body without reading any more of it. 0.13.0 went on reading the rest and failed every frame after, so a handler that reads on past an error read the whole body nobody wanted. (#273)
 
 ## Fixed
 * A request body over the limit answered `400 Bad Request`. It answers `413 Content Too Large` (RFC 9110 Section 15.5.14), whether it is read through `Json<T>`, `Form<T>`, `File`, `Multipart` or by hand, with the same message as before. (#273)
