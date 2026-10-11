@@ -5,7 +5,7 @@ exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.13.1"
+version = "0.13.2"
 license = "MIT"
 edition = "2024"
 rust-version = "1.90.0"
@@ -21,13 +21,13 @@ categories = [
 ]
 
 [workspace.dependencies]
-volga-dev-cert    = { path = "volga-dev-cert",    version = "0.13.1" }
-volga-di          = { path = "volga-di",          version = "0.13.1" }
-volga-macros      = { path = "volga-macros",      version = "0.13.1" }
-volga-oauth-client = { path = "volga-oauth-client", version = "0.13.1", default-features = false }
-volga-oauth-core  = { path = "volga-oauth-core",  version = "0.13.1" }
-volga-open-api    = { path = "volga-open-api",    version = "0.13.1" }
-volga-rate-limiter = { path = "volga-rate-limiter", version = "0.13.1" }
+volga-dev-cert    = { path = "volga-dev-cert",    version = "0.13.2" }
+volga-di          = { path = "volga-di",          version = "0.13.2" }
+volga-macros      = { path = "volga-macros",      version = "0.13.2" }
+volga-oauth-client = { path = "volga-oauth-client", version = "0.13.2", default-features = false }
+volga-oauth-core  = { path = "volga-oauth-core",  version = "0.13.2" }
+volga-open-api    = { path = "volga-open-api",    version = "0.13.2" }
+volga-rate-limiter = { path = "volga-rate-limiter", version = "0.13.2" }
 
 # External dependencies shared by more than one crate in the workspace.
 # Versions only: features stay with each member, so inheriting one of these
@@ -36,21 +36,21 @@ base64             = "0.23.1"
 bytes              = "1.12.1"
 http               = "1.5.0"
 http-body-util     = "0.1.5"
-hyper              = "1.11.1"
+hyper              = "1.12.0"
 hyper-util         = "0.1.21"
 jsonwebtoken       = "11.1.0"
 mime               = "0.3.17"
 reqwest            = "0.13.5"
 serde              = "1.0.229"
-serde_json         = "1.0.151"
+serde_json         = "1.0.152"
 serde_urlencoded   = "0.7.1"
 tempfile           = "3.27.0"
-tokio              = "1.53.1"
+tokio              = "1.53.2"
 # volga wants the macros and the `Value` impls left out; an example that needs
 # them asks for them itself
 tracing            = { version = "0.1.44", default-features = false }
 tracing-subscriber = "0.3.23"
-uuid               = "1.27.0"
+uuid               = "1.28.0"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

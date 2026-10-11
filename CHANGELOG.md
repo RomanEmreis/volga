@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Changed
 * A request whose `Content-Length` is over the body limit is refused with `413` as soon as its body is read, before any of it is: a client that sent `Expect: 100-continue` gets the `413` instead of `100 Continue`, and never sends the body. A body of undeclared length is still refused once it has sent more than fits. A handler that reads only the start of such a body used to get the part that fit, and gets the `413` now; one that never reads the body is not affected. (#273)
+* A request body refused part of the way through yields one `413` and ends: later reads return the end of the body without reading any more of it. 0.13.0 went on reading the rest and failed every frame after, so a handler that reads on past an error read the whole body nobody wanted. (#273)
 
 ## Fixed
 * A request body over the limit answered `400 Bad Request`. It answers `413 Content Too Large` (RFC 9110 Section 15.5.14), whether it is read through `Json<T>`, `Form<T>`, `File`, `Multipart` or by hand, with the same message as before. (#273)
