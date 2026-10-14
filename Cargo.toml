@@ -5,7 +5,7 @@ exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]
-version = "0.13.2"
+version = "0.13.3"
 license = "MIT"
 edition = "2024"
 rust-version = "1.90.0"
@@ -21,13 +21,13 @@ categories = [
 ]
 
 [workspace.dependencies]
-volga-dev-cert    = { path = "volga-dev-cert",    version = "0.13.2" }
-volga-di          = { path = "volga-di",          version = "0.13.2" }
-volga-macros      = { path = "volga-macros",      version = "0.13.2" }
-volga-oauth-client = { path = "volga-oauth-client", version = "0.13.2", default-features = false }
-volga-oauth-core  = { path = "volga-oauth-core",  version = "0.13.2" }
-volga-open-api    = { path = "volga-open-api",    version = "0.13.2" }
-volga-rate-limiter = { path = "volga-rate-limiter", version = "0.13.2" }
+volga-dev-cert    = { path = "volga-dev-cert",    version = "0.13.3" }
+volga-di          = { path = "volga-di",          version = "0.13.3" }
+volga-macros      = { path = "volga-macros",      version = "0.13.3" }
+volga-oauth-client = { path = "volga-oauth-client", version = "0.13.3", default-features = false }
+volga-oauth-core  = { path = "volga-oauth-core",  version = "0.13.3" }
+volga-open-api    = { path = "volga-open-api",    version = "0.13.3" }
+volga-rate-limiter = { path = "volga-rate-limiter", version = "0.13.3" }
 
 # External dependencies shared by more than one crate in the workspace.
 # Versions only: features stay with each member, so inheriting one of these
@@ -42,10 +42,10 @@ jsonwebtoken       = "11.1.0"
 mime               = "0.3.17"
 reqwest            = "0.13.5"
 serde              = "1.0.229"
-serde_json         = "1.0.152"
+serde_json         = "1.0.154"
 serde_urlencoded   = "0.7.1"
 tempfile           = "3.27.0"
-tokio              = "1.53.2"
+tokio              = "1.53.3"
 # volga wants the macros and the `Value` impls left out; an example that needs
 # them asks for them itself
 tracing            = { version = "0.1.44", default-features = false }

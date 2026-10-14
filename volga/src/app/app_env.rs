@@ -200,19 +200,24 @@ impl TryFrom<App> for AppEnv {
                 _ => None,
             };
 
-            auth_config.map(|cfg| {
-                let service = crate::auth::BearerTokenService::from_config(
-                    cfg,
-                    tls_enabled,
-                    derived_metadata_url,
-                );
-                #[cfg(feature = "oauth-client")]
-                let service = match oauth_store {
-                    Some(store) => service.with_jwks_store(store),
-                    None => service,
-                };
-                service
-            })
+            auth_config
+                .map(|cfg| {
+                    // a static key that cannot serve the configured algorithms
+                    // would refuse every token - stop here instead
+                    cfg.check_keys().map_err(Error::other)?;
+                    let service = crate::auth::BearerTokenService::from_config(
+                        cfg,
+                        tls_enabled,
+                        derived_metadata_url,
+                    );
+                    #[cfg(feature = "oauth-client")]
+                    let service = match oauth_store {
+                        Some(store) => service.with_jwks_store(store),
+                        None => service,
+                    };
+                    Ok::<_, Error>(service)
+                })
+                .transpose()?
         };
 
         let default_cache_control = app.cache_control.map(|c| c.try_into()).transpose()?;
@@ -275,5 +280,41 @@ mod tests {
 
         assert_eq!(app_instance.max_header_count, Limit::Default);
         assert_eq!(app_instance.max_header_size, Limit::Default);
+    }
+
+    #[cfg(feature = "jwt-auth")]
+    #[test]
+    fn it_refuses_a_decoding_key_that_cannot_verify_the_configured_algs() {
+        use crate::auth::{Algorithm, DecodingKey};
+
+        // an HMAC secret cannot verify RS256 tokens
+        let app = App::default().with_bearer_auth(|auth| {
+            auth.set_decoding_key(DecodingKey::from_secret(b"secret"))
+                .with_alg(Algorithm::RS256)
+        });
+
+        let Err(err) = AppEnv::try_from(app) else {
+            panic!("a mismatched decoding key must stop the app");
+        };
+        assert_eq!(
+            err.to_string(),
+            "Bearer auth: the decoding key is an HMAC secret, which cannot verify RS256 tokens; \
+             `with_alg` must name only HS256, HS384 or HS512"
+        );
+    }
+
+    #[cfg(feature = "jwt-auth")]
+    #[test]
+    fn it_accepts_keys_that_suit_the_configured_algs() {
+        use crate::auth::{Algorithm, DecodingKey, EncodingKey};
+
+        let app = App::default().with_bearer_auth(|auth| {
+            auth.set_encoding_key(EncodingKey::from_secret(b"secret"))
+                .set_decoding_key(DecodingKey::from_secret(b"secret"))
+                .with_alg(Algorithm::HS512)
+        });
+
+        let app_instance: AppEnv = app.try_into().unwrap();
+        assert!(app_instance.bearer_token_service.is_some());
     }
 }
