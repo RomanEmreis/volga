@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.13.3
+
+## Changed
+* A static bearer key that cannot serve the configured algorithms stops the app at startup: `App::run` returns an error that names the key and the algorithms. A decoding key must be of the family of every algorithm `with_alg` configures, an encoding key of the family of the first: `HS*` takes an HMAC secret, `RS*` and `PS*` an RSA key, `ES*` an EC key, `EdDSA` an Ed25519 key. Such a key refused every token, or failed every `encode`, and nothing said why until a request came in. An RSA public key set without `with_alg`, which keeps the default `HS256`, is one of them. (#280)
+
+## Fixed
+* `BearerAuthConfig::with_alg` replaces the default `HS256` on its first call instead of adding to it; later calls add to the list, so `with_alg(Algorithm::RS256).with_alg(Algorithm::PS256)` accepts `RS256` and `PS256` tokens. With `HS256` left in the list, a static RSA, EC or Ed25519 decoding key validated no token at all: jsonwebtoken verifies only when every accepted algorithm is of the key's family. With an HMAC secret, `with_alg(Algorithm::HS512)` accepted `HS256` tokens as well, and does not any more; an application that wants both names both, `with_alg(Algorithm::HS256).with_alg(Algorithm::HS512)`. A config without `with_alg` keeps `HS256`. The OAuth issuer path was not affected, since it pins the algorithm to the key from the issuer's JWKS. (#280)
+* `BearerTokenService::encode` signs with the first algorithm `with_alg` names, `HS256` by default. It always signed `HS256`, so it failed on every call with an RSA, EC or Ed25519 encoding key, and with the fix above `with_alg(Algorithm::HS512)` would have refused the tokens it issued. (#280)
+* `BearerAuthConfig::with_iss` makes the `iss` claim required, as `with_aud` does for `aud`. A token signed with the configured key that carried no `iss` passed the issuer check, since jsonwebtoken compares `iss` only when the token has one - so a key that signs more than one kind of token, such as an HMAC secret several services share, got past it with any of its tokens without an `iss`. An application that sets `with_iss` and receives tokens without `iss` now refuses them with `401`; one that accepts them leaves `with_iss` out. An empty set is a no-op, as with `with_aud`; it used to refuse every token that carried an `iss`. (#281)
+
 # 0.13.2
 
 ## Added

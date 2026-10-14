@@ -13,7 +13,7 @@ use crate::{
 };
 use futures_util::future::{Ready, ready};
 use hyper::http::request::Parts;
-use jsonwebtoken::{Header as JwtHeader, Validation};
+use jsonwebtoken::{AlgorithmFamily, Header as JwtHeader, Validation};
 use serde::{Serialize, de::DeserializeOwned};
 #[cfg(feature = "oauth-client")]
 use std::{collections::HashMap, sync::RwLock};
@@ -28,6 +28,9 @@ const SCHEME: &str = "Bearer ";
 /// Bearer Token Authentication configuration
 pub struct BearerAuthConfig {
     validation: Validation,
+    /// Whether `with_alg` has been called: the first call replaces the
+    /// default `HS256` instead of adding to it
+    alg_configured: bool,
     encoding: Option<EncodingKey>,
     decoding: Option<DecodingKey>,
     strip_token_from_request: bool,
@@ -41,6 +44,7 @@ impl Default for BearerAuthConfig {
     fn default() -> Self {
         Self {
             validation: Validation::default(),
+            alg_configured: false,
             encoding: None,
             decoding: None,
             strip_token_from_request: true,
@@ -99,16 +103,27 @@ impl BearerAuthConfig {
         self
     }
 
-    /// Specifies the algorithm supported for signing/verifying JWTs
+    /// Specifies an algorithm JWTs are signed with
+    ///
+    /// The first call replaces the default [`Algorithm::HS256`] and later
+    /// calls add to it: `.with_alg(Algorithm::RS256).with_alg(Algorithm::PS256)`
+    /// accepts `RS256` and `PS256` tokens, and no `HS256` ones. Tokens issued
+    /// by [`BearerTokenService::encode`] are signed with the first.
+    ///
+    /// Every algorithm must suit the decoding key, and the first one the
+    /// encoding key: `HS*` an HMAC secret, `RS*` and `PS*` an RSA key, `ES*`
+    /// an EC key, `EdDSA` an Ed25519 key. Otherwise the application fails to
+    /// start, since such a key could not verify or sign a single token.
     ///
     /// Default: [`Algorithm::HS256`]
     ///
     /// # Example
     /// ```no_run
-    /// use volga::{App, auth::Algorithm};
+    /// use volga::{App, auth::{Algorithm, DecodingKey}};
     ///
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth
+    ///         .set_decoding_key(DecodingKey::from_pem_file("/etc/volga/rs256.pub.pem"))
     ///         .with_alg(Algorithm::RS256));
     /// ```
     ///
@@ -121,6 +136,10 @@ impl BearerAuthConfig {
     /// nobody asked for.
     pub fn with_alg(mut self, alg: Algorithm) -> Self {
         let jwt_alg: jsonwebtoken::Algorithm = crate::auth::algorithm::to_jwt(alg);
+        if !self.alg_configured {
+            self.validation.algorithms.clear();
+            self.alg_configured = true;
+        }
         if !self.validation.algorithms.contains(&jwt_alg) {
             self.validation.algorithms.push(jwt_alg);
         }
@@ -158,6 +177,10 @@ impl BearerAuthConfig {
 
     /// Sets one or more acceptable issuers
     ///
+    /// The `iss` claim becomes required: a token without one is refused,
+    /// as is one whose `iss` is not in the set. An empty input is a no-op,
+    /// as with [`with_aud`](Self::with_aud).
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
@@ -171,7 +194,16 @@ impl BearerAuthConfig {
         T: ToString,
         I: AsRef<[T]>,
     {
-        self.validation.set_issuer(iss.as_ref());
+        let iss = iss.as_ref();
+        if iss.is_empty() {
+            return self;
+        }
+        self.validation.set_issuer(iss);
+        // jsonwebtoken only compares `iss` when the claim is present - a
+        // token that omits it must not bypass the issuer constraint
+        self.validation
+            .required_spec_claims
+            .insert("iss".to_owned());
         self
     }
 
@@ -362,6 +394,50 @@ impl BearerAuthConfig {
             .insert("iss".to_owned());
     }
 
+    /// Checks that the static keys can serve the configured algorithms.
+    ///
+    /// jsonwebtoken refuses to verify with a key unless every accepted
+    /// algorithm is of the key's family, and to sign under an algorithm of
+    /// another family - so a mismatched key refuses every token, which is
+    /// better found at startup than as a `401` on every request.
+    pub(crate) fn check_keys(&self) -> Result<(), KeyMismatch> {
+        let defaulted = !self.alg_configured;
+        if let Some(key) = &self.decoding {
+            let family = key.0.family();
+            let refused: Vec<_> = self
+                .validation
+                .algorithms
+                .iter()
+                .copied()
+                .filter(|alg| alg.family() != family)
+                .collect();
+
+            if !refused.is_empty() {
+                return Err(KeyMismatch {
+                    key: KeyRole::Decoding,
+                    family,
+                    algs: refused,
+                    defaulted,
+                });
+            }
+        }
+
+        if let Some(key) = &self.encoding {
+            let family = key.0.family();
+            let alg = signing_alg(&self.validation);
+            if alg.family() != family {
+                return Err(KeyMismatch {
+                    key: KeyRole::Encoding,
+                    family,
+                    algs: vec![alg],
+                    defaulted,
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Synchronizes the `aud` entry in `required_spec_claims` with the
     /// configured audience set and the user's `strict_aud` preference.
     ///
@@ -382,6 +458,90 @@ impl BearerAuthConfig {
             self.validation.required_spec_claims.remove("aud");
         }
     }
+}
+
+/// The algorithm [`BearerTokenService::encode`] signs with: the first one
+/// configured, `HS256` unless [`BearerAuthConfig::with_alg`] was called.
+#[inline]
+fn signing_alg(validation: &Validation) -> jsonwebtoken::Algorithm {
+    validation.algorithms.first().copied().unwrap_or_default()
+}
+
+/// A static key that cannot serve the algorithms the bearer config names,
+/// returned by [`BearerAuthConfig::check_keys`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KeyMismatch {
+    /// Which of the two keys it is.
+    key: KeyRole,
+    /// The key's family.
+    family: AlgorithmFamily,
+    /// The configured algorithms the key cannot serve: the accepted ones
+    /// outside its family for the decoding key, the signing one for the
+    /// encoding key.
+    algs: Vec<jsonwebtoken::Algorithm>,
+    /// Whether the algorithms are the default, `with_alg` never called.
+    defaulted: bool,
+}
+
+/// The half of the key material a [`KeyMismatch`] is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeyRole {
+    /// The key that verifies tokens.
+    Decoding,
+    /// The key that signs tokens.
+    Encoding,
+}
+
+impl Display for KeyMismatch {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let (key, op, fix) = match self.key {
+            KeyRole::Decoding => ("decoding", "verify", "`with_alg` must name only"),
+            KeyRole::Encoding => ("encoding", "sign", "the first `with_alg` must name"),
+        };
+
+        write!(
+            f,
+            "Bearer auth: the {key} key is {}, which cannot {op} ",
+            family_name(self.family)
+        )?;
+
+        write_algs(f, &self.algs)?;
+        f.write_str(" tokens")?;
+
+        if self.defaulted {
+            f.write_str(" (the default without `with_alg`)")?;
+        }
+
+        write!(f, "; {fix} ")?;
+        write_algs(f, self.family.algorithms())
+    }
+}
+
+impl std::error::Error for KeyMismatch {}
+
+/// Names the kind of key a family's algorithms take
+#[inline]
+fn family_name(family: AlgorithmFamily) -> &'static str {
+    match family {
+        AlgorithmFamily::Hmac => "an HMAC secret",
+        AlgorithmFamily::Rsa => "an RSA key",
+        AlgorithmFamily::Ec => "an EC key",
+        AlgorithmFamily::Ed => "an Ed25519 key",
+    }
+}
+
+/// Writes `algs` as an English list: `A`, `A or B`, `A, B or C`
+fn write_algs(f: &mut Formatter<'_>, algs: &[jsonwebtoken::Algorithm]) -> std::fmt::Result {
+    let last = algs.len().saturating_sub(1);
+    for (i, alg) in algs.iter().enumerate() {
+        match i {
+            0 => {}
+            i if i == last => f.write_str(" or ")?,
+            _ => f.write_str(", ")?,
+        }
+        write!(f, "{alg:?}")?;
+    }
+    Ok(())
 }
 
 /// Service that handles bearer token generation and validation
@@ -481,13 +641,16 @@ impl BearerTokenService {
         self.encoding.clone()
     }
 
-    /// Encode the header and claims given and sign the payload using the algorithm from the header and the key.
-    /// If the algorithm given is RSA or EC, the key needs to be in the PEM format.
+    /// Encodes the claims given and signs the token with the encoding key
+    ///
+    /// The token is signed with the first algorithm configured with
+    /// [`BearerAuthConfig::with_alg`], `HS256` by default.
     pub fn encode<C: Serialize>(&self, claims: &C) -> Result<Bearer, Error> {
         let Some(encoding_key) = &self.encoding else {
             return Err(Error::server_error("Missing security key"));
         };
-        jsonwebtoken::encode(&JwtHeader::default(), claims, &encoding_key.0)
+        let header = JwtHeader::new(signing_alg(&self.validation));
+        jsonwebtoken::encode(&header, claims, &encoding_key.0)
             .map_err(Error::from_jwt_error)
             .map(|s| Bearer(s.into()))
     }
@@ -727,6 +890,37 @@ mod tests {
 
     const SECRET: &[u8] = b"test_secret_key";
 
+    // Throwaway P-256 key pair (PKCS#8 / SPKI), generated for these tests only.
+    const EC_PRIVATE_PEM: &[u8] = b"-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg1QxaXRQPmUuVq/u1
+seZ9cjdOS3f490cqeHSCI5Vlb2GhRANCAATCfUjhNwEnoQ6VzPfSgklYIXUVegrw
+k5Er3UVWsSIF788K5vG1kj1Wl6oDZONP9O3Cb5ZPmJezhATLIa0nP229
+-----END PRIVATE KEY-----
+";
+    const EC_PUBLIC_PEM: &[u8] = b"-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwn1I4TcBJ6EOlcz30oJJWCF1FXoK
+8JORK91FVrEiBe/PCubxtZI9VpeqA2TjT/Ttwm+WT5iXs4QEyyGtJz9tvQ==
+-----END PUBLIC KEY-----
+";
+
+    /// Claims that pass the default validation and carry no `iss`
+    fn claims_without_iss() -> serde_json::Value {
+        let exp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            + 3600;
+        serde_json::json!({ "sub": "alice", "exp": exp })
+    }
+
+    /// A key of the RSA family; the material is never used, only the family
+    fn rsa_decoding_key() -> DecodingKey {
+        DecodingKey(jsonwebtoken::DecodingKey::from_rsa_raw_components(
+            &[1],
+            &[1],
+        ))
+    }
+
     #[test]
     fn it_parses_a_bearer_header() {
         let header = HeaderValue::from_static("Bearer abc.def.ghi");
@@ -747,11 +941,9 @@ mod tests {
     async fn it_tests_bearer_auth_config_default() {
         let config = BearerAuthConfig::default();
 
-        assert!(
-            config
-                .validation
-                .algorithms
-                .contains(&jsonwebtoken::Algorithm::HS256)
+        assert_eq!(
+            config.validation.algorithms,
+            vec![jsonwebtoken::Algorithm::HS256]
         );
         assert!(config.encoding.is_none());
         assert!(config.decoding.is_none());
@@ -776,28 +968,197 @@ mod tests {
 
     #[tokio::test]
     async fn it_tests_bearer_auth_config_with_alg() {
+        // the first call replaces the default, later ones add to it
         let config = BearerAuthConfig::default()
-            .with_alg(Algorithm::HS512)
-            .with_alg(Algorithm::RS256);
+            .with_alg(Algorithm::RS256)
+            .with_alg(Algorithm::PS256);
 
-        assert!(
-            config
-                .validation
-                .algorithms
-                .contains(&jsonwebtoken::Algorithm::HS256)
+        assert_eq!(
+            config.validation.algorithms,
+            vec![
+                jsonwebtoken::Algorithm::RS256,
+                jsonwebtoken::Algorithm::PS256
+            ]
         );
-        assert!(
-            config
-                .validation
-                .algorithms
-                .contains(&jsonwebtoken::Algorithm::HS512)
+    }
+
+    #[test]
+    fn it_replaces_the_default_alg_with_the_first_with_alg() {
+        let config = BearerAuthConfig::default().with_alg(Algorithm::HS512);
+        assert_eq!(
+            config.validation.algorithms,
+            vec![jsonwebtoken::Algorithm::HS512]
         );
-        assert!(
-            config
-                .validation
-                .algorithms
-                .contains(&jsonwebtoken::Algorithm::RS256)
+
+        // naming the default explicitly keeps it next to the others
+        let config = BearerAuthConfig::default()
+            .with_alg(Algorithm::HS256)
+            .with_alg(Algorithm::HS512);
+        assert_eq!(
+            config.validation.algorithms,
+            vec![
+                jsonwebtoken::Algorithm::HS256,
+                jsonwebtoken::Algorithm::HS512
+            ]
         );
+
+        // a repeated algorithm is listed once
+        let config = BearerAuthConfig::default()
+            .with_alg(Algorithm::ES256)
+            .with_alg(Algorithm::ES256);
+        assert_eq!(
+            config.validation.algorithms,
+            vec![jsonwebtoken::Algorithm::ES256]
+        );
+    }
+
+    #[test]
+    fn it_signs_with_the_first_alg_and_verifies_its_own_tokens() {
+        let service: BearerTokenService = BearerAuthConfig::default()
+            .set_encoding_key(EncodingKey::from_secret(SECRET))
+            .set_decoding_key(DecodingKey::from_secret(SECRET))
+            .with_alg(Algorithm::HS512)
+            .with_alg(Algorithm::HS384)
+            .into();
+
+        let bearer = service.encode(&claims_without_iss()).unwrap();
+        let header = jsonwebtoken::decode_header(bearer.to_string()).unwrap();
+        assert_eq!(header.alg, jsonwebtoken::Algorithm::HS512);
+        assert!(service.decode::<serde_json::Value>(bearer).is_ok());
+
+        // an HS256 token is no longer accepted once `with_alg` names others
+        let hs256 = jsonwebtoken::encode(
+            &JwtHeader::default(),
+            &claims_without_iss(),
+            &jsonwebtoken::EncodingKey::from_secret(SECRET),
+        )
+        .unwrap();
+        let refused = service.decode::<serde_json::Value>(Bearer(hs256.into()));
+        assert!(refused.is_err());
+    }
+
+    #[test]
+    fn it_signs_with_hs256_by_default() {
+        let service: BearerTokenService = BearerAuthConfig::default()
+            .set_encoding_key(EncodingKey::from_secret(SECRET))
+            .into();
+
+        let bearer = service.encode(&claims_without_iss()).unwrap();
+        let header = jsonwebtoken::decode_header(bearer.to_string()).unwrap();
+        assert_eq!(header.alg, jsonwebtoken::Algorithm::HS256);
+    }
+
+    #[test]
+    fn it_verifies_es256_tokens_with_a_static_ec_key() {
+        let service: BearerTokenService = BearerAuthConfig::default()
+            .set_encoding_key(EncodingKey::from_ec_pem(EC_PRIVATE_PEM).unwrap())
+            .set_decoding_key(DecodingKey::from_ec_pem(EC_PUBLIC_PEM).unwrap())
+            .with_alg(Algorithm::ES256)
+            .into();
+
+        // signed by the service itself
+        let bearer = service.encode(&claims_without_iss()).unwrap();
+        assert!(service.decode::<serde_json::Value>(bearer).is_ok());
+
+        // and by the private key directly, as an issuer would
+        let token = jsonwebtoken::encode(
+            &JwtHeader::new(jsonwebtoken::Algorithm::ES256),
+            &claims_without_iss(),
+            &jsonwebtoken::EncodingKey::from_ec_pem(EC_PRIVATE_PEM).unwrap(),
+        )
+        .unwrap();
+        let header = HeaderValue::from_str(&format!("Bearer {token}")).unwrap();
+        let bearer = Bearer::try_from(&header).unwrap();
+        assert!(service.decode::<serde_json::Value>(bearer).is_ok());
+    }
+
+    #[test]
+    fn it_accepts_keys_that_suit_the_configured_algs() {
+        // no keys: nothing to check
+        assert_eq!(BearerAuthConfig::default().check_keys(), Ok(()));
+
+        // an HMAC secret with the default
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(EncodingKey::from_secret(SECRET))
+            .set_decoding_key(DecodingKey::from_secret(SECRET));
+        assert_eq!(config.check_keys(), Ok(()));
+
+        // an RSA key with every RSA algorithm
+        let config = BearerAuthConfig::default()
+            .set_decoding_key(rsa_decoding_key())
+            .with_alg(Algorithm::RS256)
+            .with_alg(Algorithm::PS512);
+        assert_eq!(config.check_keys(), Ok(()));
+
+        let config = BearerAuthConfig::default()
+            .set_decoding_key(DecodingKey(jsonwebtoken::DecodingKey::from_ed_der(&[])))
+            .with_alg(Algorithm::EdDSA);
+        assert_eq!(config.check_keys(), Ok(()));
+    }
+
+    #[test]
+    fn it_refuses_a_decoding_key_of_another_family() {
+        // an EC key under the default HS256
+        let config = BearerAuthConfig::default()
+            .set_decoding_key(DecodingKey::from_ec_pem(EC_PUBLIC_PEM).unwrap());
+        let err = config.check_keys().unwrap_err();
+        assert_eq!(
+            err,
+            KeyMismatch {
+                key: KeyRole::Decoding,
+                family: AlgorithmFamily::Ec,
+                algs: vec![jsonwebtoken::Algorithm::HS256],
+                defaulted: true,
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "Bearer auth: the decoding key is an EC key, which cannot verify HS256 tokens \
+             (the default without `with_alg`); `with_alg` must name only ES256 or ES384"
+        );
+
+        // an RSA key with one algorithm of its family and two of others:
+        // only the others are named
+        let config = BearerAuthConfig::default()
+            .set_decoding_key(rsa_decoding_key())
+            .with_alg(Algorithm::RS256)
+            .with_alg(Algorithm::ES256)
+            .with_alg(Algorithm::HS512);
+        assert_eq!(
+            config.check_keys().unwrap_err().to_string(),
+            "Bearer auth: the decoding key is an RSA key, which cannot verify ES256 or HS512 \
+             tokens; `with_alg` must name only RS256, RS384, RS512, PS256, PS384 or PS512"
+        );
+    }
+
+    #[test]
+    fn it_refuses_an_encoding_key_of_another_family() {
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(EncodingKey::from_secret(SECRET))
+            .with_alg(Algorithm::EdDSA);
+        let err = config.check_keys().unwrap_err();
+        assert_eq!(
+            err,
+            KeyMismatch {
+                key: KeyRole::Encoding,
+                family: AlgorithmFamily::Hmac,
+                algs: vec![jsonwebtoken::Algorithm::EdDSA],
+                defaulted: false,
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "Bearer auth: the encoding key is an HMAC secret, which cannot sign EdDSA tokens; \
+             the first `with_alg` must name HS256, HS384 or HS512"
+        );
+
+        // only the first algorithm signs, so a later one of another family
+        // does not matter to the encoding key
+        let config = BearerAuthConfig::default()
+            .set_encoding_key(EncodingKey::from_secret(SECRET))
+            .with_alg(Algorithm::HS384)
+            .with_alg(Algorithm::EdDSA);
+        assert_eq!(config.check_keys(), Ok(()));
     }
 
     #[tokio::test]
@@ -815,9 +1176,76 @@ mod tests {
         let issuers = vec!["test-issuer", "another-issuer"];
         let config = BearerAuthConfig::default().with_iss(&issuers);
 
+        assert!(config.validation.required_spec_claims.contains("iss"));
         assert!(config.validation.iss.is_some());
         let expected_iss: HashSet<String> = issuers.iter().map(|s| s.to_string()).collect();
         assert_eq!(config.validation.iss.unwrap(), expected_iss);
+    }
+
+    #[test]
+    fn it_does_not_require_iss_by_default() {
+        let config = BearerAuthConfig::default();
+        assert!(!config.validation.required_spec_claims.contains("iss"));
+    }
+
+    #[test]
+    fn it_treats_empty_with_iss_as_noop() {
+        let config = BearerAuthConfig::default().with_iss(Vec::<String>::new());
+        assert!(config.validation.iss.is_none());
+        assert!(!config.validation.required_spec_claims.contains("iss"));
+
+        // nor does it undo an earlier one
+        let config = BearerAuthConfig::default()
+            .with_iss(["https://auth.example.com"])
+            .with_iss(Vec::<String>::new());
+        assert!(
+            config
+                .validation
+                .iss
+                .as_ref()
+                .unwrap()
+                .contains("https://auth.example.com")
+        );
+        assert!(config.validation.required_spec_claims.contains("iss"));
+    }
+
+    #[test]
+    fn it_refuses_a_token_without_iss_when_with_iss_is_set() {
+        let service: BearerTokenService = BearerAuthConfig::default()
+            .set_encoding_key(EncodingKey::from_secret(SECRET))
+            .set_decoding_key(DecodingKey::from_secret(SECRET))
+            .with_iss(["https://auth.example.com"])
+            .into();
+
+        let token = service.encode(&claims_without_iss()).unwrap();
+        let err = service.decode::<serde_json::Value>(token).unwrap_err();
+        assert!(
+            err.to_string().contains("Missing required claim: iss"),
+            "{err}"
+        );
+
+        let mut claims = claims_without_iss();
+        claims["iss"] = "https://other.example.com".into();
+        let token = service.encode(&claims).unwrap();
+        assert!(service.decode::<serde_json::Value>(token).is_err());
+
+        claims["iss"] = "https://auth.example.com".into();
+        let token = service.encode(&claims).unwrap();
+        assert!(service.decode::<serde_json::Value>(token).is_ok());
+    }
+
+    #[cfg(feature = "oauth-client")]
+    #[test]
+    fn it_defaults_the_issuer_after_an_empty_with_iss() {
+        // an empty `with_iss` leaves no constraint behind, so the OAuth
+        // issuer still applies instead of an empty set no token satisfies
+        let mut config = BearerAuthConfig::default().with_iss(Vec::<String>::new());
+        config.set_default_issuer("https://auth.example.com");
+
+        let iss = config.validation.iss.as_ref().unwrap();
+        assert_eq!(iss.len(), 1);
+        assert!(iss.contains("https://auth.example.com"));
+        assert!(config.validation.required_spec_claims.contains("iss"));
     }
 
     #[tokio::test]
