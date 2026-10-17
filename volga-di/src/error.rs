@@ -1,6 +1,9 @@
 //! Describes dependency injection errors
 
-use std::fmt::{Display, Formatter};
+use std::{
+    borrow::Cow,
+    fmt::{Display, Formatter},
+};
 
 /// Describes dependency injection error
 #[non_exhaustive]
@@ -57,6 +60,15 @@ pub enum Issue {
         /// The type it depends on
         dependency: &'static str,
     },
+
+    /// Something outside the container resolves a type nothing registered, as declared to
+    /// [`ContainerBuilder::require`](crate::ContainerBuilder::require)
+    Unregistered {
+        /// The type nothing registered
+        dependency: &'static str,
+        /// Everything that resolves it, in the order declared
+        consumers: Vec<Cow<'static, str>>,
+    },
 }
 
 impl ValidationError {
@@ -65,7 +77,9 @@ impl ValidationError {
         Self { issues }
     }
 
-    /// Every problem found: cycles first, then missing dependencies, each in a stable order
+    /// Every problem found: cycles first, then the missing dependencies of services, then
+    /// the types resolved from outside the container that nothing registered, each in a
+    /// stable order
     #[inline]
     pub fn issues(&self) -> &[Issue] {
         &self.issues
@@ -82,6 +96,14 @@ impl Display for Issue {
             } => write!(
                 f,
                 "`{service}` depends on `{dependency}`, which is not registered"
+            ),
+            Issue::Unregistered {
+                dependency,
+                consumers,
+            } => write!(
+                f,
+                "`{dependency}` is not registered, and is resolved by {}",
+                consumers.join(", ")
             ),
         }
     }
@@ -125,6 +147,18 @@ mod tests {
         assert_eq!(
             issue.to_string(),
             "`A` depends on `B`, which is not registered"
+        );
+    }
+
+    #[test]
+    fn it_displays_an_unregistered_dependency_with_everything_that_resolves_it() {
+        let issue = Issue::Unregistered {
+            dependency: "A",
+            consumers: vec!["`GET /a`".into(), "nightly report".into()],
+        };
+        assert_eq!(
+            issue.to_string(),
+            "`A` is not registered, and is resolved by `GET /a`, nightly report"
         );
     }
 

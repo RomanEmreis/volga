@@ -35,6 +35,11 @@ use std::{ops::Deref, sync::Arc};
 /// A handler that wants a copy of its own to change takes [`Dc::cloned`]. The registered
 /// instance stays as it was.
 ///
+/// # Registration
+/// [`App::run`](crate::App::run) does not start while a handler or a middleware takes
+/// `Dc<T>` of a `T` nobody registered: such a route would answer `500` on every request. A
+/// service that may not be registered is taken as `Option<Dc<T>>`, which is `None` then.
+///
 /// # Example
 /// ```no_run
 /// use volga::{App, di::Dc, ok, not_found};
@@ -119,6 +124,11 @@ impl<T: Send + Sync + 'static> FromRequestRef for Dc<T> {
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         req.extensions().try_into()
     }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
+    }
 }
 
 impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
@@ -127,12 +137,22 @@ impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
         let ext = &parts.extensions;
         ext.try_into()
     }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
+    }
 }
 
 impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
     #[inline]
     fn from_container(container: &Container) -> Result<Self, Error> {
         container.resolve_shared::<T>().map_err(Into::into).map(Dc)
+    }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
     }
 }
 
@@ -147,6 +167,11 @@ impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
             unreachable!()
         };
         ready(Self::from_parts(parts))
+    }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
     }
 }
 

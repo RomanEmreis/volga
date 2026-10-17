@@ -2,7 +2,7 @@
 
 use crate::{
     HttpRequest,
-    di::Container,
+    di::{Container, Dependencies},
     error::Error,
     headers::HeaderMap,
     http::{
@@ -180,12 +180,22 @@ impl FromRequestRef for SignedCookies {
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         Self::try_from((req.extensions(), req.headers()))
     }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<SignedKey>();
+    }
 }
 
 impl FromRequestParts for SignedCookies {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         parts.try_into()
+    }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<SignedKey>();
     }
 }
 
@@ -200,6 +210,11 @@ impl FromPayload for SignedCookies {
             unreachable!()
         };
         ready(Self::from_parts(parts))
+    }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<SignedKey>();
     }
 }
 

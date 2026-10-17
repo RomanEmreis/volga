@@ -133,6 +133,11 @@ impl App {
         F: WebSocketHandler<Args, Output = ()>,
         Args: FromRequest + Send + 'static,
     {
+        // The route below takes the request alone, so what the handler takes is declared here
+        #[cfg(feature = "di")]
+        self.container
+            .require(format!("`map_ws` at `{pattern}`"), Args::dependencies);
+
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
             async move {
@@ -186,6 +191,11 @@ impl App {
         R::Error: Into<Error>,
         M: 'static,
     {
+        // The route below takes the request alone, so what the handler takes is declared here
+        #[cfg(feature = "di")]
+        self.container
+            .require(format!("`map_msg` at `{pattern}`"), Args::dependencies);
+
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
             async move {
