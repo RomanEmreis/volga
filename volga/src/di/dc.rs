@@ -75,8 +75,17 @@ use std::{ops::Deref, sync::Arc};
 ///# app.run().await
 ///# }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Dc<T: Send + Sync>(Arc<T>);
+
+// Not derived: `derive` would ask for `T: Clone`, while a clone of a `Dc` is another handle
+// on the same instance and never clones `T`
+impl<T: Send + Sync> Clone for Dc<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
 
 impl<T: Send + Sync> Deref for Dc<T> {
     type Target = T;
@@ -376,6 +385,21 @@ mod tests {
 
         assert_eq!(point.0.0, 1);
         assert_eq!(point.1.0, 2);
+    }
+
+    #[test]
+    fn it_clones_a_handle_on_the_same_instance_of_a_service_that_is_not_clone() {
+        struct NotClone;
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(NotClone);
+
+        let container = container.build();
+
+        let dc = Dc::<NotClone>::inject(&container).unwrap();
+        let copy = dc.clone();
+
+        assert!(Arc::ptr_eq(&dc.into_inner(), &copy.into_inner()));
     }
 
     #[test]

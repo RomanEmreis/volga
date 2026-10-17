@@ -9,8 +9,6 @@ use volga::{App, di::Dc};
 
 struct A;
 struct B;
-// `Clone` for `map_msg`, which clones what its handler takes for every message
-#[derive(Clone)]
 struct Unregistered;
 
 /// Runs the app and returns the error it refused to start with. An app that starts anyway
