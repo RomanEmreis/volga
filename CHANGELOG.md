@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.14.0
+
+## Changed
+* **Breaking:** `Dc<T>` no longer implements `DerefMut`. It went through `Arc::make_mut`, which clones the value on the first write whenever anything else holds it - and the container always holds a singleton, and a scoped service for the rest of its request. So `*cache = ..` or a `&mut self` method called through a `Dc<T>` changed a private copy that the next request, and the next argument of the same request, never saw, while it read as changing the service. Through a transient it changed an instance nobody else had. A service whose state changes keeps that state behind interior mutability - a `Mutex` or `RwLock` around the data, or an atomic - and changes it through `&self`, as the `dependency_injection` example does. A handler that wants a copy of its own to change takes `Dc::cloned`, which says so. The docs of `Dc<T>`, `App::add_singleton` and the `di` module now say how each lifetime is shared and how to change a shared service.
+
 # 0.13.3
 
 ## Changed

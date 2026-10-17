@@ -9,27 +9,44 @@ use crate::{
 use futures_util::future::{Ready, ready};
 use hyper::http::{Extensions, request::Parts};
 
-use std::{
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::{ops::Deref, sync::Arc};
 
 /// `Dc` stands for Dependency Container.
 ///
-/// This struct wraps an injectable type `T` that is **shared** between all handlers
-/// through an [`Arc`].  
+/// This struct wraps an injectable type `T` that is **shared** through an [`Arc`]: a
+/// singleton with every request the app serves, a scoped service with everything that
+/// resolves it during one request. So `Dc<T>` gives `&T` and never `&mut T`.
+///
+/// # Changing a dependency
+/// State that handlers change lives inside `T`, behind interior mutability, and `T`'s
+/// methods change it through `&self`:
+///
+/// - a [`Mutex`](std::sync::Mutex) or an [`RwLock`](std::sync::RwLock) around the data,
+///   an `RwLock` where reads outnumber writes;
+/// - an atomic, such as [`AtomicU64`](std::sync::atomic::AtomicU64), for a counter or a flag;
+/// - a [`tokio::sync::Mutex`] only where the guard is held across an `.await`. A
+///   `std::sync` guard is dropped before one.
+///
+/// `T` needs no [`Arc`] of its own around that state, since the container already shares
+/// the instance. It does when `T` is [`Clone`] and is also resolved by value - by
+/// [`Container::resolve`], [`Dc::cloned`] or into a field of another service - so that every
+/// clone reaches the same state.
+///
+/// A handler that wants a copy of its own to change takes [`Dc::cloned`]. The registered
+/// instance stays as it was.
 ///
 /// # Example
 /// ```no_run
 /// use volga::{App, di::Dc, ok, not_found};
 /// use std::{
 ///     collections::HashMap,
-///     sync::{Arc, Mutex}
+///     sync::{RwLock, atomic::{AtomicU64, Ordering}}
 /// };
 ///
 /// #[derive(Default)]
 /// struct InMemoryCache {
-///     inner: Arc<Mutex<HashMap<String, String>>>
+///     users: RwLock<HashMap<String, String>>,
+///     hits: AtomicU64,
 /// }
 ///
 ///# #[tokio::main]
@@ -39,12 +56,16 @@ use std::{
 /// app.add_singleton(InMemoryCache::default());
 ///
 /// app.map_get("/user/{id}", |id: String, cache: Dc<InMemoryCache>| async move {
-///     let cache_guard = cache.inner.lock().unwrap();
-///     let user = cache_guard.get(&id);
-///     match user {
+///     cache.hits.fetch_add(1, Ordering::Relaxed);
+///     let users = cache.users.read().unwrap();
+///     match users.get(&id) {
 ///         Some(user) => ok!(user),
 ///         None => not_found!()
 ///     }
+/// });
+///
+/// app.map_put("/user/{id}/{name}", |id: String, name: String, cache: Dc<InMemoryCache>| async move {
+///     cache.users.write().unwrap().insert(id, name);
 /// });
 ///# app.run().await
 ///# }
@@ -61,13 +82,6 @@ impl<T: Send + Sync> Deref for Dc<T> {
     }
 }
 
-impl<T: Clone + Send + Sync> DerefMut for Dc<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut T {
-        Arc::make_mut(&mut self.0)
-    }
-}
-
 impl<T: Send + Sync> Dc<T> {
     /// Unwraps the inner [`Arc`]
     #[inline]
@@ -79,7 +93,9 @@ impl<T: Send + Sync> Dc<T> {
 impl<T: Send + Sync + Clone> Dc<T> {
     /// Clones and returns the inner `T`.
     ///
-    /// Equivalent to calling [`Clone::clone`] on the inner `T`.
+    /// Equivalent to calling [`Clone::clone`] on the inner `T`. The copy is the caller's
+    /// own: changing it leaves the registered instance as it was, apart from whatever
+    /// state `T` shares between its clones, such as an [`Arc`] field.
     #[inline]
     pub fn cloned(&self) -> T {
         self.0.as_ref().clone()
