@@ -8,7 +8,7 @@ use crate::{HttpBody, HttpRequest, error::Error, http::request_scope::HttpReques
 pub use crate::http::endpoints::route::{PathArg, PathArgs};
 
 #[cfg(feature = "di")]
-use crate::di::{Container, FromContainer};
+use crate::di::{Container, Dependencies, FromContainer};
 
 pub mod byte_stream;
 pub mod cancellation_token;
@@ -71,6 +71,13 @@ pub trait FromRequest: Sized {
     ) -> crate::openapi::OpenApiRouteConfig {
         config
     }
+
+    /// Declares the services these extractors resolve from the DI container, for
+    /// [`App::run`](crate::App::run) to check that each of them is registered
+    #[inline]
+    #[doc(hidden)]
+    #[cfg(feature = "di")]
+    fn dependencies(_deps: &mut Dependencies) {}
 }
 
 /// Specifies extractors to read data from a borrowed HTTP request
@@ -82,12 +89,32 @@ pub trait FromRequest: Sized {
 pub trait FromRequestRef: Sized {
     /// Extracts data from HTTP request reference
     fn from_request(req: &HttpRequest) -> Result<Self, Error>;
+
+    /// Declares the services this extractor resolves from the DI container.
+    ///
+    /// [`App::run`](crate::App::run) checks that each of them is registered before it
+    /// starts, so that whatever takes this extractor does not answer `500` on every request
+    /// instead. The default declares nothing. An extractor of your own that resolves a
+    /// service from the container declares it here.
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(_deps: &mut Dependencies) {}
 }
 
 /// Specifies extractors to read data from HTTP request parts
 pub trait FromRequestParts: Sized {
     /// Extracts data from HTTP request parts
     fn from_parts(parts: &Parts) -> Result<Self, Error>;
+
+    /// Declares the services this extractor resolves from the DI container.
+    ///
+    /// [`App::run`](crate::App::run) checks that each of them is registered before it
+    /// starts, so that whatever takes this extractor does not answer `500` on every request
+    /// instead. The default declares nothing. An extractor of your own that resolves a
+    /// service from the container declares it here.
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(_deps: &mut Dependencies) {}
 }
 
 /// Specifies extractor to read data from path arguments
@@ -191,6 +218,11 @@ pub(crate) trait FromPayload: Send + Sized {
     ) -> crate::openapi::OpenApiRouteConfig {
         config
     }
+
+    /// Declares the services this extractor resolves from the DI container
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(_deps: &mut Dependencies) {}
 }
 
 impl FromRequest for () {
@@ -226,6 +258,12 @@ macro_rules! define_generic_from_request {
                 );
                 Ok(tuple)
             }
+
+            #[inline]
+            #[cfg(feature = "di")]
+            fn dependencies(deps: &mut Dependencies) {
+                $( $T::dependencies(deps); )*
+            }
         }
         impl<$($T: FromRequestParts),+> FromRequestParts for ($($T,)+) {
             #[inline]
@@ -236,6 +274,12 @@ macro_rules! define_generic_from_request {
                     )*
                 );
                 Ok(tuple)
+            }
+
+            #[inline]
+            #[cfg(feature = "di")]
+            fn dependencies(deps: &mut Dependencies) {
+                $( $T::dependencies(deps); )*
             }
         }
         #[cfg(feature = "di")]
@@ -248,6 +292,11 @@ macro_rules! define_generic_from_request {
                     )*
                 );
                 Ok(tuple)
+            }
+
+            #[inline]
+            fn dependencies(deps: &mut Dependencies) {
+                $( $T::dependencies(deps); )*
             }
         }
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
@@ -305,6 +354,12 @@ macro_rules! define_generic_from_request {
                     config = $T::describe_openapi(config);
                 )*
                 config
+            }
+
+            #[inline]
+            #[cfg(feature = "di")]
+            fn dependencies(deps: &mut Dependencies) {
+                $( $T::dependencies(deps); )*
             }
         }
     }

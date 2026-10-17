@@ -46,6 +46,12 @@ impl<T: FromRequestRef> FromRequestRef for Result<T, Error> {
             Err(err) => Ok(Err(err)),
         }
     }
+
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(deps: &mut crate::di::Dependencies) {
+        T::dependencies(deps);
+    }
 }
 
 impl<T: FromRequestParts> FromRequestParts for Result<T, Error> {
@@ -55,6 +61,12 @@ impl<T: FromRequestParts> FromRequestParts for Result<T, Error> {
             Ok(value) => Ok(Ok(value)),
             Err(err) => Ok(Err(err)),
         }
+    }
+
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(deps: &mut crate::di::Dependencies) {
+        T::dependencies(deps);
     }
 }
 
@@ -68,6 +80,12 @@ impl<T: FromPayload> FromPayload for Result<T, Error> {
         ResultFromPayloadFuture {
             inner: T::from_payload(payload),
         }
+    }
+
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(deps: &mut crate::di::Dependencies) {
+        T::dependencies(deps);
     }
 }
 #[cfg(test)]

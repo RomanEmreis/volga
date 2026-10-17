@@ -422,6 +422,9 @@ impl App {
         Args: FromRequestParts + Send + 'static,
         M: 'static,
     {
+        #[cfg(feature = "di")]
+        self.container.require("`map_err`", Args::dependencies);
+
         self.pipeline
             .set_error_handler(ErrorFunc::new(handler).into());
         self
@@ -490,6 +493,9 @@ impl App {
         R: IntoResponse,
         M: 'static,
     {
+        #[cfg(feature = "di")]
+        self.container.require("`map_fallback`", Args::dependencies);
+
         self.pipeline
             .set_fallback_handler(FallbackFunc::new(handler).into());
         self

@@ -670,6 +670,12 @@ impl App {
             .endpoints_mut()
             .map_route(method.clone(), path, handler.clone());
 
+        // A service the handler takes is checked for a registration when the app starts,
+        // rather than answering `500` on every request that reaches the route
+        #[cfg(feature = "di")]
+        self.container
+            .require(format!("`{method} {path}`"), Args::dependencies);
+
         #[cfg(feature = "openapi")]
         let openapi_key = {
             let key = RouteKey {
@@ -1089,6 +1095,12 @@ impl<'a> RouteGroup<'a> {
         R: IntoResponse + 'static,
         M: 'static,
     {
+        #[cfg(feature = "di")]
+        self.app.container.require(
+            format!("`map_fallback` on group `{}`", self.prefix),
+            Args::dependencies,
+        );
+
         let handler: RouteHandler = Arc::new(FallbackFunc::new(handler));
         let prefix = join_path(&self.prefix, "");
 

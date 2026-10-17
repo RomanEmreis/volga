@@ -201,6 +201,12 @@ where
             config.with_constraints(target, &constraints)
         }
     }
+
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(deps: &mut crate::di::Dependencies) {
+        E::dependencies(deps);
+    }
 }
 
 impl<E, T> FromRequestRef for Valid<E>
@@ -212,6 +218,12 @@ where
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         E::from_request(req).and_then(validate)
     }
+
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(deps: &mut crate::di::Dependencies) {
+        E::dependencies(deps);
+    }
 }
 
 impl<E, T> FromRequestParts for Valid<E>
@@ -222,6 +234,12 @@ where
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         E::from_parts(parts).and_then(validate)
+    }
+
+    #[inline]
+    #[cfg(feature = "di")]
+    fn dependencies(deps: &mut crate::di::Dependencies) {
+        E::dependencies(deps);
     }
 }
 

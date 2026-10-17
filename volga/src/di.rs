@@ -1,4 +1,26 @@
 //! Tools for Dependency Injection
+//!
+//! A service's lifetime decides who shares an instance of it:
+//!
+//! - a **singleton** ([`App::add_singleton`]) - one instance for the whole app, shared by
+//!   every request at once;
+//! - a **scoped** service ([`App::add_scoped`] and the other `add_scoped_*` methods) - one
+//!   instance per request, shared by every handler argument and middleware that resolves it
+//!   during that request;
+//! - a **transient** service ([`App::add_transient`] and the other `add_transient_*`
+//!   methods) - a new instance every time it is resolved.
+//!
+//! [`Dc<T>`] gives a handler `&T`. A singleton or a scoped service whose state changes while
+//! the app runs keeps that state behind interior mutability - a [`Mutex`](std::sync::Mutex),
+//! an [`RwLock`](std::sync::RwLock), an atomic - and changes it through `&self`. See [`Dc`]
+//! for an example.
+//!
+//! [`App::run`] checks the registrations before it starts. It refuses to start on a
+//! dependency cycle, on a service depending on one nobody registered, and on a handler or a
+//! middleware taking [`Dc<T>`] of a `T` nobody registered - which would otherwise answer
+//! `500` on every request that reached it. `Option<Dc<T>>` takes a service that may not be
+//! registered. A service resolved while a request runs - through `HttpContext::resolve` or
+//! the [`Container`] itself - cannot be seen at startup.
 
 use super::{App, error::Error};
 pub use {
@@ -10,13 +32,22 @@ pub mod dc;
 
 /// Dependency injection errors
 pub mod error {
-    pub use volga_di::error::Error;
+    pub use volga_di::error::{Error, Issue, ValidationError};
 }
 
 /// Specifies extractors to read data from a borrowed DI container
 pub trait FromContainer: Sized {
     /// Extracts data from DI container
     fn from_container(container: &Container) -> Result<Self, Error>;
+
+    /// Declares the services this extractor resolves from the container.
+    ///
+    /// [`App::run`] checks that each of them is registered before it starts, so that
+    /// whatever takes this extractor does not answer `500` on every request instead. The
+    /// default declares nothing. An extractor of your own declares here what
+    /// [`from_container`](Self::from_container) resolves.
+    #[inline]
+    fn dependencies(_deps: &mut Dependencies) {}
 }
 
 impl FromContainer for () {
@@ -36,6 +67,10 @@ impl crate::error::IntoError for error::Error {
 /// DI specific impl for [`App`]
 impl App {
     /// Registers singleton service
+    ///
+    /// > **Note:** every request shares this one instance, and [`Dc<T>`] gives it as `&T`.
+    /// > State that changes after registration goes behind interior mutability inside `T`:
+    /// > a [`Mutex`](std::sync::Mutex), an [`RwLock`](std::sync::RwLock) or an atomic.
     ///
     /// # Example
     /// ```no_run

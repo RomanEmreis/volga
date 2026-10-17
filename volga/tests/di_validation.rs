@@ -105,3 +105,156 @@ async fn it_starts_with_a_graph_that_resolves() {
 
     server.shutdown().await;
 }
+
+#[tokio::test]
+async fn it_refuses_to_start_on_a_handler_taking_a_service_nobody_registered() {
+    let mut app = App::new().without_greeter();
+    app.map_get("/unreg", |_: Dc<Unregistered>| async { "ok" });
+
+    let message = startup_error(app).await.to_string();
+    assert!(
+        message.contains(&format!(
+            "`{}` is not registered, and is resolved by `GET /unreg`",
+            std::any::type_name::<Unregistered>()
+        )),
+        "{message}"
+    );
+    // The report says what to do about it
+    assert!(message.contains("`add_singleton`"), "{message}");
+    assert!(message.contains("`Option<Dc<T>>`"), "{message}");
+}
+
+#[tokio::test]
+async fn it_names_every_handler_taking_a_service_nobody_registered_in_one_issue() {
+    let mut app = App::new().without_greeter();
+    app.map_get("/a", |_: Dc<Unregistered>| async { "a" });
+    app.group("/api", |api| {
+        api.map_post("/b", |_: Dc<Unregistered>, _: Dc<B>| async { "b" });
+    });
+    app.add_singleton(B);
+
+    let message = startup_error(app).await.to_string();
+    assert!(
+        message.contains(&format!(
+            "`{}` is not registered, and is resolved by `GET /a`, `POST /api/b`",
+            std::any::type_name::<Unregistered>()
+        )),
+        "{message}"
+    );
+    assert!(
+        !message.contains(std::any::type_name::<B>()),
+        "a registered service is reported: {message}"
+    );
+}
+
+#[tokio::test]
+async fn it_refuses_to_start_on_a_service_a_handler_takes_through_a_result() {
+    let mut app = App::new().without_greeter();
+    // A `Result` hands the handler the error, but the service is still expected to be there
+    app.map_get(
+        "/",
+        |_: Result<Dc<Unregistered>, volga::error::Error>| async { "ok" },
+    );
+
+    let message = startup_error(app).await.to_string();
+    assert!(message.contains("resolved by `GET /`"), "{message}");
+}
+
+#[tokio::test]
+async fn it_refuses_to_start_on_an_error_handler_or_fallback_taking_a_service_nobody_registered() {
+    let mut app = App::new().without_greeter();
+    app.map_err(|err: volga::error::Error, _: Dc<Unregistered>| async move { err });
+    app.map_fallback(|_: Dc<Unregistered>| async { "fallback" });
+
+    let message = startup_error(app).await.to_string();
+    assert!(
+        message.contains("resolved by `map_err`, `map_fallback`"),
+        "{message}"
+    );
+}
+
+#[cfg(feature = "middleware")]
+#[tokio::test]
+async fn it_refuses_to_start_on_middleware_taking_a_service_nobody_registered() {
+    use volga::{HttpRequestMut, HttpResponse, middleware::Next};
+
+    let mut app = App::new().without_greeter();
+    app.with(|_: Dc<Unregistered>, next: Next| next);
+    app.tap_req(|req: HttpRequestMut, _: Dc<Unregistered>| async move { req });
+    app.map_get("/", || async { "ok" })
+        .filter(|_: Dc<Unregistered>| async { true })
+        .map_ok(|resp: HttpResponse, _: Dc<Unregistered>| async move { resp });
+    app.group("/api", |api| {
+        api.map_err(|err: volga::error::Error, _: Dc<Unregistered>| async move { err });
+        api.map_fallback(|_: Dc<Unregistered>| async { "fallback" });
+        api.map_get("/", || async { "ok" });
+    });
+
+    let message = startup_error(app).await.to_string();
+    assert!(
+        message.contains(&format!(
+            "`{}` is not registered, and is resolved by global `with`, global `tap_req`, \
+             `filter` on `GET /`, `map_ok` on `GET /`, `map_err` on group `/api`, \
+             `map_fallback` on group `/api`",
+            std::any::type_name::<Unregistered>()
+        )),
+        "{message}"
+    );
+}
+
+#[cfg(feature = "ws")]
+#[tokio::test]
+async fn it_refuses_to_start_on_a_websocket_handler_taking_a_service_nobody_registered() {
+    use volga::ws::WebSocket;
+
+    let mut app = App::new().without_greeter();
+    app.map_ws("/ws", |_: WebSocket, _: Dc<Unregistered>| async {});
+    app.map_msg("/msg", |msg: String, _: Dc<Unregistered>| msg);
+
+    let message = startup_error(app).await.to_string();
+    assert!(
+        message.contains("resolved by `map_ws` at `/ws`, `map_msg` at `/msg`"),
+        "{message}"
+    );
+}
+
+#[cfg(feature = "signed-cookie")]
+#[tokio::test]
+async fn it_refuses_to_start_on_signed_cookies_without_a_key() {
+    use volga::http::{SignedCookies, SignedKey};
+
+    let mut app = App::new().without_greeter();
+    app.map_get("/", |_: SignedCookies| async { "ok" });
+
+    let message = startup_error(app).await.to_string();
+    assert!(
+        message.contains(&format!(
+            "`{}` is not registered, and is resolved by `GET /`",
+            std::any::type_name::<SignedKey>()
+        )),
+        "{message}"
+    );
+}
+
+#[cfg(feature = "test")]
+#[tokio::test]
+async fn it_starts_when_a_handler_takes_a_service_nobody_registered_as_optional() {
+    use volga::test::TestServer;
+
+    let server = TestServer::spawn(|app| {
+        app.map_get("/", |service: Option<Dc<Unregistered>>| async move {
+            if service.is_some() { "some" } else { "none" }
+        });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .get(server.url("/"))
+        .send()
+        .await
+        .expect("the request failed");
+    assert_eq!(response.text().await.expect("no body"), "none");
+
+    server.shutdown().await;
+}
