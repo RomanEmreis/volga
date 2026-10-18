@@ -1095,13 +1095,16 @@ impl<'a> RouteGroup<'a> {
         R: IntoResponse + 'static,
         M: 'static,
     {
+        let handler: RouteHandler = Arc::new(FallbackFunc::new(handler));
+
+        // A later fallback under the same prefix replaces this one, and what it resolves
+        // cannot fail a request after that
         #[cfg(feature = "di")]
-        self.app.container.require(
+        self.app.require_while_held(
+            &handler,
             format!("`map_fallback` on group `{}`", self.prefix),
             Args::dependencies,
         );
-
-        let handler: RouteHandler = Arc::new(FallbackFunc::new(handler));
         let prefix = join_path(&self.prefix, "");
 
         self.app

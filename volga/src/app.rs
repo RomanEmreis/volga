@@ -122,10 +122,10 @@ pub struct App {
     #[cfg(feature = "di")]
     pub(super) container: ContainerBuilder,
 
-    /// What the middleware of route groups resolves from the container, declared when the
-    /// app starts for the middleware that is attached somewhere
-    #[cfg(all(feature = "di", feature = "middleware"))]
-    pub(super) group_requirements: Vec<crate::middleware::GroupRequirement>,
+    /// What the parts of the app that can still be replaced or left out resolve from the
+    /// container, declared when the app starts for the parts it still holds
+    #[cfg(feature = "di")]
+    pub(super) held_requirements: Vec<crate::di::HeldRequirement>,
 
     /// TLS configuration options
     #[cfg(feature = "tls")]
@@ -286,8 +286,8 @@ impl App {
         Self {
             #[cfg(feature = "di")]
             container: ContainerBuilder::new(),
-            #[cfg(all(feature = "di", feature = "middleware"))]
-            group_requirements: Vec::new(),
+            #[cfg(feature = "di")]
+            held_requirements: Vec::new(),
             #[cfg(feature = "tls")]
             tls_config: None,
             #[cfg(feature = "tracing")]

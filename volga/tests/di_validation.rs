@@ -191,13 +191,12 @@ async fn it_refuses_to_start_on_middleware_taking_a_service_nobody_registered() 
     });
 
     let message = startup_error(app).await.to_string();
-    // A group's middleware is declared once the group closure returns, after the fallback
-    // it mapped on the way
+    // What a group maps is declared when the app starts, after what is always attached
     assert!(
         message.contains(&format!(
             "`{}` is not registered, and is resolved by global `with`, global `tap_req`, \
-             `filter` on `GET /`, `map_ok` on `GET /`, `map_fallback` on group `/api`, \
-             `map_err` on group `/api`",
+             `filter` on `GET /`, `map_ok` on `GET /`, `map_err` on group `/api`, \
+             `map_fallback` on group `/api`",
             std::any::type_name::<Unregistered>()
         )),
         "{message}"
@@ -354,6 +353,66 @@ async fn it_starts_when_group_middleware_reaches_only_mounts_that_are_turned_dow
         })
         .build()
         .await;
+
+    let response = server
+        .client()
+        .get(server.url("/"))
+        .send()
+        .await
+        .expect("the request failed");
+    assert_eq!(response.text().await.expect("no body"), "ok");
+
+    server.shutdown().await;
+}
+
+#[cfg(feature = "test")]
+#[tokio::test]
+async fn it_starts_when_the_handlers_taking_a_service_nobody_registered_are_replaced() {
+    use volga::{error::Error, test::TestServer};
+
+    // Each slot holds one handler, so the first one in each pair never runs
+    let server = TestServer::spawn(|app| {
+        app.map_err(|err: Error, _: Dc<Unregistered>| async move { err });
+        app.map_err(|err: Error| async move { err });
+
+        app.map_fallback(|_: Dc<Unregistered>| async { "first" });
+        app.map_fallback(|| async { "fallback" });
+
+        app.group("/api", |api| {
+            api.map_fallback(|_: Dc<Unregistered>| async { "first" });
+            api.map_fallback(|| async { "api" });
+        });
+    })
+    .await;
+
+    let client = server.client();
+    for (path, expected) in [("/nope", "fallback"), ("/api/nope", "api")] {
+        let body = client
+            .get(server.url(path))
+            .send()
+            .await
+            .expect("the request failed")
+            .text()
+            .await
+            .expect("no body");
+        assert_eq!(body, expected, "{path}");
+    }
+
+    server.shutdown().await;
+}
+
+#[cfg(all(feature = "problem-details", feature = "test"))]
+#[tokio::test]
+async fn it_starts_when_problem_details_replace_an_error_handler_taking_a_service_nobody_registered()
+ {
+    use volga::{error::Error, test::TestServer};
+
+    let server = TestServer::spawn(|app| {
+        app.map_err(|err: Error, _: Dc<Unregistered>| async move { err });
+        app.use_problem_details();
+        app.map_get("/", || async { "ok" });
+    })
+    .await;
 
     let response = server
         .client()

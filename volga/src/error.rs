@@ -21,6 +21,8 @@ pub use self::{
     into_error::IntoError,
 };
 
+use self::{fallback::PipelineFallbackHandler, handler::PipelineErrorHandler};
+
 #[cfg(feature = "problem-details")]
 pub use self::problem::{Problem, ProblemDetails};
 
@@ -422,11 +424,14 @@ impl App {
         Args: FromRequestParts + Send + 'static,
         M: 'static,
     {
-        #[cfg(feature = "di")]
-        self.container.require("`map_err`", Args::dependencies);
+        let handler: PipelineErrorHandler = ErrorFunc::new(handler).into();
 
-        self.pipeline
-            .set_error_handler(ErrorFunc::new(handler).into());
+        // A later `map_err`, or `use_problem_details`, replaces this handler, and what it
+        // resolves cannot fail a request after that
+        #[cfg(feature = "di")]
+        self.require_while_held(&handler, "`map_err`", Args::dependencies);
+
+        self.pipeline.set_error_handler(handler);
         self
     }
 
@@ -493,11 +498,14 @@ impl App {
         R: IntoResponse,
         M: 'static,
     {
-        #[cfg(feature = "di")]
-        self.container.require("`map_fallback`", Args::dependencies);
+        let handler: PipelineFallbackHandler = FallbackFunc::new(handler).into();
 
-        self.pipeline
-            .set_fallback_handler(FallbackFunc::new(handler).into());
+        // A later `map_fallback` replaces this handler, and what it resolves cannot fail a
+        // request after that
+        #[cfg(feature = "di")]
+        self.require_while_held(&handler, "`map_fallback`", Args::dependencies);
+
+        self.pipeline.set_fallback_handler(handler);
         self
     }
 }

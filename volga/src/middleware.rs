@@ -24,10 +24,7 @@ use make_fn::*;
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
-use {
-    crate::di::{Dependencies, FromContainer},
-    std::sync::Weak,
-};
+use crate::di::{Dependencies, FromContainer};
 
 pub use handler::{Filter, MapOk, Middleware, Next, TapReq, With};
 pub use http_context::HttpContext;
@@ -56,42 +53,9 @@ const DEFAULT_MW_CAPACITY: usize = 8;
 /// Points to the next middleware or request handler
 pub type NextFn = Arc<dyn Fn(HttpContext) -> BoxFuture<'static, HttpResult> + Send + Sync>;
 
-/// A middleware function, as the pipeline calls it
-type MiddlewareFnTarget =
-    dyn Fn(HttpContext, NextFn) -> BoxFuture<'static, HttpResult> + Send + Sync;
-
 /// Point to a middleware function
-pub(super) type MiddlewareFn = Arc<MiddlewareFnTarget>;
-
-/// What a route group's middleware resolves from the DI container, kept until the app
-/// starts together with a weak handle on the middleware.
-///
-/// A group gives its middleware to its routes, fallbacks and static mounts as it closes,
-/// and keeps none of it. So middleware that nothing holds by the time the app starts was
-/// attached to nothing - a group with no route, fallback or mount, a mount that was turned
-/// down - and can never run, and what it resolves is not checked.
-#[cfg(feature = "di")]
-#[derive(Debug)]
-pub(crate) struct GroupRequirement {
-    middleware: Weak<MiddlewareFnTarget>,
-    consumer: String,
-    declare: fn(&mut Dependencies),
-}
-
-#[cfg(feature = "di")]
-impl App {
-    /// Declares to the container what the middleware of route groups resolves, for the
-    /// middleware a route, a fallback or a static mount holds
-    pub(crate) fn declare_group_requirements(mut self) -> Self {
-        for requirement in std::mem::take(&mut self.group_requirements) {
-            if requirement.middleware.strong_count() > 0 {
-                self.container
-                    .require(requirement.consumer, requirement.declare);
-            }
-        }
-        self
-    }
-}
+pub(super) type MiddlewareFn =
+    Arc<dyn Fn(HttpContext, NextFn) -> BoxFuture<'static, HttpResult> + Send + Sync>;
 
 /// Middleware pipeline
 #[derive(Clone)]
@@ -916,16 +880,15 @@ impl<'a> Route<'a> {
 }
 
 impl<'a> RouteGroup<'a> {
-    /// Records what a middleware of this group resolves from the DI container, for
-    /// [`App::run`] to check if the middleware ends up anywhere it can run
+    /// Declares what a middleware of this group resolves from the DI container, for
+    /// [`App::run`] to check if the middleware ends up anywhere it can run. The group hands
+    /// it to its routes, fallbacks and static mounts as it closes and keeps none of it, so
+    /// middleware attached to nothing is not held when the app starts.
     #[inline]
     #[cfg(feature = "di")]
     fn require_services(&mut self, mw: &MiddlewareFn, name: &str, declare: fn(&mut Dependencies)) {
-        self.app.group_requirements.push(GroupRequirement {
-            middleware: Arc::downgrade(mw),
-            consumer: format!("`{name}` on group `{}`", self.prefix),
-            declare,
-        });
+        let consumer = format!("`{name}` on group `{}`", self.prefix);
+        self.app.require_while_held(mw, consumer, declare);
     }
 
     /// Adds a middleware handler to this group of routes

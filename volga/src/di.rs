@@ -23,6 +23,7 @@
 //! the [`Container`] itself - cannot be seen at startup.
 
 use super::{App, error::Error};
+use std::{borrow::Cow, sync::Arc};
 pub use {
     self::dc::Dc,
     volga_di::{Container, ContainerBuilder, Dependencies, GenericFactory, Inject},
@@ -61,6 +62,57 @@ impl crate::error::IntoError for error::Error {
     #[inline]
     fn into_error(self) -> Error {
         Error::server_error(self.to_string())
+    }
+}
+
+/// What a part of the app resolves from the container, kept until the app starts together
+/// with a weak handle on that part.
+///
+/// Some parts can still be replaced or left out after they are registered: a `map_err` or a
+/// fallback mapped again, a route group's middleware attached to nothing. A part the app no
+/// longer holds when it starts can never run, so what it resolves is not checked.
+pub(crate) struct HeldRequirement {
+    held: Box<dyn Fn() -> bool + Send + Sync>,
+    consumer: Cow<'static, str>,
+    declare: fn(&mut Dependencies),
+}
+
+impl std::fmt::Debug for HeldRequirement {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeldRequirement")
+            .field("consumer", &self.consumer)
+            .finish_non_exhaustive()
+    }
+}
+
+impl App {
+    /// Declares what `part` resolves from the container, for [`App::run`] to check if the
+    /// app still holds `part` when it starts
+    pub(crate) fn require_while_held<T>(
+        &mut self,
+        part: &Arc<T>,
+        consumer: impl Into<Cow<'static, str>>,
+        declare: fn(&mut Dependencies),
+    ) where
+        T: ?Sized + Send + Sync + 'static,
+    {
+        let part = Arc::downgrade(part);
+        self.held_requirements.push(HeldRequirement {
+            held: Box::new(move || part.strong_count() > 0),
+            consumer: consumer.into(),
+            declare,
+        });
+    }
+
+    /// Declares to the container what the parts the app still holds resolve
+    pub(crate) fn declare_held_requirements(mut self) -> Self {
+        for requirement in std::mem::take(&mut self.held_requirements) {
+            if (requirement.held)() {
+                self.container
+                    .require(requirement.consumer, requirement.declare);
+            }
+        }
+        self
     }
 }
 
