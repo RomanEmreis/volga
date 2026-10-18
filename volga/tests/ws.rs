@@ -106,3 +106,25 @@ async fn it_allows_ws_sink_stream_into_inner() {
 
     server.shutdown().await;
 }
+
+#[test]
+#[should_panic(
+    expected = "`map_ws` at `/ws`: the handler reads 1 path parameter, but the route declares 0"
+)]
+fn it_panics_where_a_ws_handler_reads_a_path_param_its_route_does_not_declare() {
+    let mut app = volga::App::new();
+
+    app.map_ws("/ws", |_ws: volga::ws::WebSocket, _room: String| async {});
+}
+
+#[test]
+#[should_panic(
+    expected = "`map_msg` at `/ws`: the handler reads 1 path parameter, but the route declares 0"
+)]
+fn it_panics_where_a_msg_handler_reads_a_path_param_its_route_does_not_declare() {
+    let mut app = volga::App::new();
+
+    app.map_msg("/ws", |msg: String, room: String| async move {
+        format!("{room}: {msg}")
+    });
+}

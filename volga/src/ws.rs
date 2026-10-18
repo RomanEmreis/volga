@@ -4,6 +4,7 @@ use crate::http::IntoResponse;
 use crate::http::endpoints::{
     args::{FromPayload, FromRequest, Payload},
     handlers::GenericHandler,
+    route::{check_path_arity, param_count},
 };
 use crate::{App, HttpRequest, error::Error};
 use std::sync::Arc;
@@ -134,8 +135,16 @@ impl App {
         F: WebSocketHandler<Args, Output = ()>,
         Args: FromRequest + Send + 'static,
     {
-        // The route below takes the request alone, so what the handler takes is declared here,
-        // held by the route through the handler's `Arc`: a later route mapped here replaces it
+        // The route below takes the request alone, so what the handler takes is checked here,
+        // and declared here, held by the route through the handler's `Arc`: a later route
+        // mapped here replaces it
+        check_path_arity(
+            format_args!("`map_ws` at `{pattern}`"),
+            "the route",
+            param_count(pattern),
+            Args::PATH_ARITY,
+        );
+
         let handler = Arc::new(handler);
         #[cfg(feature = "di")]
         self.require_while_held(
@@ -198,8 +207,16 @@ impl App {
         R::Error: Into<Error>,
         M: 'static,
     {
-        // The route below takes the request alone, so what the handler takes is declared here,
-        // held by the route through the handler's `Arc`: a later route mapped here replaces it
+        // The route below takes the request alone, so what the handler takes is checked here,
+        // and declared here, held by the route through the handler's `Arc`: a later route
+        // mapped here replaces it
+        check_path_arity(
+            format_args!("`map_msg` at `{pattern}`"),
+            "the route",
+            param_count(pattern),
+            Args::PATH_ARITY,
+        );
+
         let handler = Arc::new(handler);
         #[cfg(feature = "di")]
         self.require_while_held(

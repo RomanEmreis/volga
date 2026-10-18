@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Added
 * `ContainerBuilder::require` in `volga-di` declares something outside the container that resolves services from it, such as a request handler, so that `validate` reports the types it names and nobody registered: one `Issue::Unregistered` per type, listing everything that resolves it. `volga::di::error` exports `Issue` and `ValidationError` alongside `Error`. (#284)
 * `FromRequestRef::dependencies`, `FromRequestParts::dependencies` and `FromContainer::dependencies` declare what an extractor resolves from the DI container, for the startup check below. They declare nothing by default. (#284)
+* `FromPathArgs::ARITY` gives the numbers of path parameters a type can be read from, for the check below to hold a route against when a handler takes `Path<T>` of it. The default takes any number. (#283)
 
 ## Changed
 * **Breaking:** `Dc<T>` no longer implements `DerefMut`. It used `Arc::make_mut`, which clones the value on the first write while another handle exists, and the container holds one for every singleton, and for a scoped service until its request ends. A write through `Dc<T>` changed a private copy that nothing else saw. A service with changing state keeps it behind interior mutability - a `Mutex`, an `RwLock`, an atomic - and changes it through `&self`; `Dc::cloned` gives a copy of your own. The docs of `Dc<T>`, `App::add_singleton` and the `di` module now say how each lifetime is shared. (#285)
@@ -18,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Only what can still run is checked: not a route, `map_err` or fallback that a later call or `use_problem_details` replaced, and not a group's middleware attached to nothing, including a static mount turned down at startup.
   - `Option<Dc<T>>` opts out, since it says the service is optional; `Result<Dc<T>, Error>` does not.
   - Services resolved at run time - through `HttpContext::resolve`, a `Middleware` passed to `attach`, or the `Container` itself - are not seen and still fail the request.
+* **Breaking:** Mapping a handler that reads more path parameters than its route declares panics where it is mapped, naming the route: "`GET /sum`: the handler reads 2 path parameters, but the route declares 0". Such a handler compiled and answered `500` on every request - `app.map_get("/sum", |x: i32, y: i32| ...)` among them, the way 19 examples in the docs were written; they declare `/sum/{x}/{y}` now. (#283)
+  - Counted: positional parameters (`|id: u32|`, a `FromPathArg` type of your own), each taking the next one, and `Path<T>`: a tuple of `N` needs at least `N`, a single type exactly one, so `Path<OrderId>` on `/users/{user_id}/orders/{order_id}` panics too.
+  - Checked: `map_*` of the app and of a group, where a group's prefix declares parameters as a route does, `map_ws`, `map_msg`, `map_fallback`, and a group's fallback against the parameters its prefix declares.
+  - `Option<T>` and `Result<T, Error>` opt out, since they read `None` or an `Err` instead, so `|page: Option<u32>|` still serves both `/posts` and `/posts/{page}`. A handler may still read fewer parameters than its route declares, and a tuple the first of several.
+  - Not checked: `NamedPath<T>`, which reads by name, and middleware.
 
 ## Fixed
 * `Dc<T>` is `Clone` for every `T`. The derived impl required `T: Clone`, though a clone only copies the `Arc`, so a `map_msg` handler, whose arguments are cloned for every message, could not take `Dc<T>` of a service that is not `Clone`.

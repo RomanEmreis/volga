@@ -11,7 +11,7 @@ use std::{
     fmt::{self, Display, Formatter},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     num::NonZero,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, RangeInclusive},
     path::PathBuf,
 };
 
@@ -28,6 +28,10 @@ use crate::http::endpoints::{
 ///
 /// A value is percent-decoded: `%20` is read as a space and `%2F` as a `/`, while a `+`
 /// is read as it is written.
+///
+/// A handler taking it on a route declaring fewer parameters than `T` reads - or, for a
+/// single type, any number but one - panics where it is mapped. See
+/// [Path parameters](crate::app::router#path-parameters).
 ///
 /// This extractor operates on a snapshot of the matched path arguments.
 /// The original path state remains available to other extractors.
@@ -215,6 +219,8 @@ impl<T: FromPathArgs + Send> FromRequestParts for Path<T> {
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
         parts.try_into()
     }
+
+    const PATH_ARITY: RangeInclusive<usize> = T::ARITY;
 }
 
 impl<T: DeserializeOwned + Send> FromRequestParts for NamedPath<T> {
@@ -244,6 +250,8 @@ impl<T: FromPathArgs + Send> FromPayload for Path<T> {
     type Future = Ready<Result<Self, Error>>;
 
     const SOURCE: Source = Source::PathArgs;
+
+    const PATH_ARITY: RangeInclusive<usize> = T::ARITY;
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
@@ -358,6 +366,9 @@ impl<T: FromPathArg + Send> FromPayload for T {
 
     const SOURCE: Source = Source::Path;
 
+    // Its own parameter, and whatever else is left for the ones after it
+    const PATH_ARITY: RangeInclusive<usize> = 1..=usize::MAX;
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         // The dispatch hands out one argument per positional extractor, and runs out when
@@ -375,6 +386,8 @@ impl<T: FromPathArg + Send> FromPayload for T {
 /// It does not pick the first of several: on `/users/{user_id}/orders/{order_id}`, a
 /// `Path<OrderId>` would read the user's id as the order's.
 impl<T: FromPathArg> FromPathArgs for T {
+    const ARITY: RangeInclusive<usize> = 1..=1;
+
     #[inline]
     fn from_path_args(args: &PathArgs) -> Result<Self, Error> {
         let mut it = args.iter();
@@ -391,6 +404,9 @@ macro_rules! impl_tuple_path {
         where
             $($T: FromPathArg),+
         {
+            // The first of them, however many the route declares
+            const ARITY: RangeInclusive<usize> = [$(stringify!($T)),+].len()..=usize::MAX;
+
             #[inline]
             #[allow(non_snake_case)]
             fn from_path_args(args: &PathArgs) -> Result<Self, Error> {

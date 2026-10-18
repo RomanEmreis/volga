@@ -12,7 +12,10 @@ use std::{
 
 use super::{
     App, HttpResponse,
-    http::{FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode},
+    http::{
+        FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode,
+        endpoints::route::check_path_arity,
+    },
 };
 
 pub use self::{
@@ -498,6 +501,14 @@ impl App {
         R: IntoResponse,
         M: 'static,
     {
+        // Nothing matched, so there is no route to bind a path parameter
+        check_path_arity(
+            format_args!("`map_fallback`"),
+            "the application's fallback",
+            0,
+            Args::PATH_ARITY,
+        );
+
         let handler: PipelineFallbackHandler = FallbackFunc::new(handler).into();
 
         // A later `map_fallback` replaces this handler, and what it resolves cannot fail a

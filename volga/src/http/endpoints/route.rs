@@ -94,6 +94,8 @@ use crate::utils::str::memchr_split_nonempty;
 use hyper::Method;
 use smallvec::SmallVec;
 use std::borrow::Cow;
+use std::fmt;
+use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 #[cfg(feature = "middleware")]
@@ -1201,6 +1203,75 @@ fn encoded_literal(path: &str, segment: &str) -> ! {
     );
 }
 
+/// Checks that a handler whose extractors can be read from `arity` path parameters is mapped
+/// where `declared` of them are bound
+///
+/// # Panics
+/// if it is not - see [`path_arity_mismatch`].
+#[inline]
+pub(crate) fn check_path_arity(
+    consumer: fmt::Arguments<'_>,
+    declared_by: &str,
+    declared: usize,
+    arity: RangeInclusive<usize>,
+) {
+    if !arity.contains(&declared) {
+        path_arity_mismatch(consumer, declared_by, declared, arity);
+    }
+}
+
+/// Reports a handler mapped where it cannot read the path parameters it takes
+///
+/// A request cannot supply a parameter the route does not declare, and `Path<T>` of a single
+/// type does not pick one out of several, so such a handler fails every request that
+/// reaches it before it runs. Both sides are known where it is mapped, so it is reported
+/// there rather than by a `500` on every request (#283).
+#[cold]
+#[inline(never)]
+fn path_arity_mismatch(
+    consumer: fmt::Arguments<'_>,
+    declared_by: &str,
+    declared: usize,
+    arity: RangeInclusive<usize>,
+) -> ! {
+    let (min, max) = arity.into_inner();
+
+    if declared < min {
+        panic!(
+            "{consumer}: the handler reads {}, but {declared_by} declares {declared}, so it \
+             would fail every request that reaches it. A request cannot supply a path \
+             parameter that is not declared: declare it, read the value from somewhere else - \
+             the query string, through `Query<T>` - or take one that may be missing as \
+             `Option<T>`.",
+            path_params(min)
+        );
+    }
+
+    panic!(
+        "{consumer}: the handler reads {} through `Path<T>`, but {declared_by} declares \
+         {declared}. `Path<T>` reads them by position, and does not pick the ones it means \
+         out of more: read all of them as a tuple, `Path<(..)>`, or by name, `NamedPath<T>`.",
+        path_params(max)
+    );
+}
+
+/// Spells a number of path parameters
+#[inline]
+fn path_params(count: usize) -> String {
+    match count {
+        1 => "1 path parameter".to_owned(),
+        count => format!("{count} path parameters"),
+    }
+}
+
+/// Counts the parameters `path` declares, a catch-all among them
+#[inline]
+pub(crate) fn param_count(path: &str) -> usize {
+    split_path(path)
+        .filter(|segment| is_dynamic_segment(segment))
+        .count()
+}
+
 /// A segment of a route as the tree holds it, on the way to an endpoint
 enum PathSegment<'tree> {
     /// A literal segment
@@ -1453,7 +1524,8 @@ mod tests {
     use super::RouteEndpoint;
     use crate::http::endpoints::handlers::{Func, RouteHandler};
     use crate::http::endpoints::route::{
-        DEFAULT_DEPTH, RouteNode, join_path, make_allowed_str, method_order, split_path,
+        DEFAULT_DEPTH, RouteNode, check_path_arity, join_path, make_allowed_str, method_order,
+        param_count, split_path,
     };
     use crate::ok;
     use hyper::Method;
@@ -1723,6 +1795,44 @@ mod tests {
         for i in 0..methods.len() - 1 {
             assert!(method_order(&methods[i]) < method_order(&methods[i + 1]));
         }
+    }
+
+    #[test]
+    fn it_counts_the_params_a_pattern_declares() {
+        assert_eq!(param_count("/"), 0);
+        assert_eq!(param_count("/users"), 0);
+        assert_eq!(param_count("/users/{id}"), 1);
+        assert_eq!(param_count("//users/{id:integer}/"), 1);
+        assert_eq!(param_count("/{tenant}/files/{*path}"), 2);
+    }
+
+    #[test]
+    fn it_accepts_a_handler_mapped_where_its_path_params_are_declared() {
+        check_path_arity(format_args!("`GET /a/{{x}}`"), "the route", 1, 1..=1);
+        check_path_arity(
+            format_args!("`GET /a/{{x}}/{{y}}`"),
+            "the route",
+            2,
+            1..=usize::MAX,
+        );
+        check_path_arity(format_args!("`GET /`"), "the route", 0, 0..=usize::MAX);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "`GET /a`: the handler reads 1 path parameter, but the route declares 0"
+    )]
+    fn it_rejects_a_handler_reading_more_path_params_than_are_declared() {
+        check_path_arity(format_args!("`GET /a`"), "the route", 0, 1..=usize::MAX);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "the handler reads 1 path parameter through `Path<T>`, but the \
+                               route declares 2"
+    )]
+    fn it_rejects_a_handler_reading_fewer_path_params_than_its_path_needs() {
+        check_path_arity(format_args!("`GET /a/{{x}}/{{y}}`"), "the route", 2, 1..=1);
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use volga::error::Error;
 use volga::http::endpoints::args::{FromPathArg, PathArg};
 use volga::test::TestServer;
-use volga::{HttpResult, NamedPath, Path, Query, ok};
+use volga::{App, HttpResult, NamedPath, Path, Query, ok};
 
 #[derive(Deserialize)]
 struct User {
@@ -258,54 +258,174 @@ async fn it_reads_a_uuid_route_param() {
     server.shutdown().await;
 }
 
-#[tokio::test]
-async fn it_answers_500_when_a_handler_and_its_route_disagree_on_the_path_params() {
-    let server = TestServer::spawn(|app| {
-        app.map_get("/extra/{id}", |id: u32, extra: u32| -> HttpResult {
-            ok!("{id}:{extra}")
+// A handler that reads more path parameters than its route declares would fail every
+// request that reaches it, so it is refused where it is mapped (#283)
+
+#[test]
+#[should_panic(
+    expected = "`GET /sum`: the handler reads 2 path parameters, but the route declares 0"
+)]
+fn it_panics_where_a_handler_reads_path_params_its_route_does_not_declare() {
+    let mut app = App::new();
+
+    app.map_get("/sum", |x: i32, y: i32| x + y);
+}
+
+#[test]
+#[should_panic(
+    expected = "`GET /extra/{id}`: the handler reads 2 path parameters, but the route declares 1"
+)]
+fn it_panics_where_a_handler_reads_one_path_param_more_than_its_route_declares() {
+    let mut app = App::new();
+
+    app.map_get("/extra/{id}", |id: u32, extra: u32| -> HttpResult {
+        ok!("{id}:{extra}")
+    });
+}
+
+#[test]
+#[should_panic(
+    expected = "`GET /pages/{page}`: the handler reads 2 path parameters, but the route declares 1"
+)]
+fn it_panics_where_a_path_param_after_an_optional_one_is_not_declared() {
+    let mut app = App::new();
+
+    // The optional one still reads the first parameter, which leaves none for the second
+    app.map_get(
+        "/pages/{page}",
+        |page: Option<u32>, size: u32| -> HttpResult { ok!("{page:?}:{size}") },
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "`GET /{tenant}/items`: the handler reads 2 path parameters, but the route declares 1"
+)]
+fn it_counts_the_path_params_a_group_prefix_declares() {
+    let mut app = App::new();
+
+    app.group("/{tenant}", |tenant| {
+        tenant.map_get("/items", |tenant: String, id: u32| -> HttpResult {
+            ok!("{tenant}:{id}")
         });
-        app.map_get(
-            "/optional/{id}",
-            |id: u32, extra: Option<u32>| -> HttpResult { ok!("{id}:{extra:?}") },
-        );
+    });
+}
+
+#[test]
+#[should_panic(
+    expected = "`POST /pairs/{id}`: the handler reads 2 path parameters, but the route declares 1"
+)]
+fn it_panics_where_a_path_tuple_is_longer_than_the_params_its_route_declares() {
+    let mut app = App::new();
+
+    app.map_post(
+        "/pairs/{id}",
+        |Path((a, b)): Path<(u32, u32)>| -> HttpResult { ok!("{a}:{b}") },
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "`GET /users/{user_id}/orders/{order_id}`: the handler reads 1 path parameter \
+                through `Path<T>`, but the route declares 2"
+)]
+fn it_panics_where_a_single_type_path_is_mapped_on_several_params() {
+    let mut app = App::new();
+
+    // `Path<T>` of a single type does not read the user's id as the order's
+    app.map_get(
+        "/users/{user_id}/orders/{order_id}",
+        |Path(id): Path<OrderId>| -> HttpResult { ok!("{}", id.0) },
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "`GET /orders`: the handler reads 1 path parameter, but the route declares 0"
+)]
+fn it_panics_where_a_single_type_path_is_mapped_on_no_params() {
+    let mut app = App::new();
+
+    app.map_get("/orders", |Path(id): Path<OrderId>| -> HttpResult {
+        ok!("{}", id.0)
+    });
+}
+
+#[test]
+#[should_panic(
+    expected = "`map_fallback` on group `/api`: the handler reads 1 path parameter, but the \
+                group's prefix declares 0"
+)]
+fn it_panics_where_a_group_fallback_reads_path_params_its_prefix_does_not_declare() {
+    let mut app = App::new();
+
+    app.group("/api", |api| {
+        api.map_fallback(|Path((id,)): Path<(u32,)>| -> HttpResult { ok!("{id}") });
+    });
+}
+
+#[test]
+#[should_panic(
+    expected = "`map_fallback`: the handler reads 1 path parameter, but the application's \
+                fallback declares 0"
+)]
+fn it_panics_where_the_app_fallback_reads_a_path_param() {
+    let mut app = App::new();
+
+    app.map_fallback(|Path(id): Path<OrderId>| -> HttpResult { ok!("{}", id.0) });
+}
+
+#[tokio::test]
+async fn it_maps_a_handler_reading_path_params_its_route_may_leave_out() {
+    let server = TestServer::spawn(|app| {
+        // `None` where the route has none, so one handler serves both
+        let page = |page: Option<u32>| -> HttpResult { ok!("page:{page:?}") };
+        app.map_get("/posts", page);
+        app.map_get("/posts/{page}", page);
+
+        // The handler is handed the `Err`
+        app.map_get("/result", |id: Result<u32, Error>| -> HttpResult {
+            ok!("result:{}", id.is_ok())
+        });
+
+        // `None`, since `Path<T>` of a single type does not pick one of several
         app.map_get(
             "/users/{user_id}/orders/{order_id}",
-            |Path(id): Path<OrderId>| -> HttpResult { ok!("{}", id.0) },
+            |id: Option<Path<OrderId>>| -> HttpResult { ok!("order:{}", id.is_some()) },
         );
+
+        // A handler may read fewer than the route declares, by position or as a tuple
+        app.map_get("/first/{a}/{b}", |a: u32| -> HttpResult {
+            ok!("first:{a}")
+        });
+        app.map_get(
+            "/prefix/{a}/{b}",
+            |Path((a,)): Path<(u32,)>| -> HttpResult { ok!("prefix:{a}") },
+        );
+
+        app.group("/t/{tenant}", |tenant| {
+            tenant.map_fallback(|Path(tenant): Path<String>| -> HttpResult {
+                ok!("fallback:{tenant}")
+            });
+        });
     })
     .await;
 
-    // Twice, since a panic used to drop the connection rather than answer
-    for _ in 0..2 {
-        let response = server
-            .client()
-            .get(server.url("/extra/1"))
-            .send()
-            .await
-            .unwrap();
+    for (path, expected) in [
+        ("/posts", "page:None"),
+        ("/posts/3", "page:Some(3)"),
+        ("/result", "result:false"),
+        ("/users/7/orders/42", "order:false"),
+        ("/first/1/2", "first:1"),
+        ("/prefix/1/2", "prefix:1"),
+        ("/t/acme", "fallback:acme"),
+        ("/t/acme/nope", "fallback:acme"),
+    ] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
 
-        assert_eq!(response.status(), 500);
+        assert!(response.status().is_success(), "{path}");
+        assert_eq!(response.text().await.unwrap(), expected, "{path}");
     }
-
-    let response = server
-        .client()
-        .get(server.url("/optional/1"))
-        .send()
-        .await
-        .unwrap();
-
-    assert!(response.status().is_success());
-    assert_eq!(response.text().await.unwrap(), "1:None");
-
-    // `Path<T>` of a single type does not read the user's id as the order's
-    let response = server
-        .client()
-        .get(server.url("/users/7/orders/42"))
-        .send()
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), 500);
 
     server.shutdown().await;
 }

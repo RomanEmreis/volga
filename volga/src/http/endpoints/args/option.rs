@@ -4,11 +4,14 @@ use crate::{
     HttpRequest,
     error::Error,
     http::Parts,
-    http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+    http::endpoints::args::{
+        ANY_PATH_ARITY, FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
+    },
 };
 use pin_project_lite::pin_project;
 use std::{
     future::Future,
+    ops::RangeInclusive,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -56,12 +59,19 @@ impl<T: FromRequestParts> FromRequestParts for Option<T> {
             Err(_) => Ok(None),
         }
     }
+
+    // `None` where the parameters do not fit
+    const PATH_ARITY: RangeInclusive<usize> = ANY_PATH_ARITY;
 }
 
 impl<T: FromPayload> FromPayload for Option<T> {
     type Future = OptionFromPayloadFuture<T::Future>;
 
     const SOURCE: Source = T::SOURCE;
+
+    // `None` where the parameters do not fit, which lets a handler be mapped both with and
+    // without an optional segment: `/posts` and `/posts/{page}`
+    const PATH_ARITY: RangeInclusive<usize> = ANY_PATH_ARITY;
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {

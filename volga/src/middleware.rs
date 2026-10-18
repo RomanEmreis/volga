@@ -259,7 +259,7 @@ impl App {
     ///     headers.get_raw("x-api-key").is_some()
     /// });
     ///
-    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    /// app.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y });
     ///# app.run().await
     ///# }
     /// ```
@@ -274,7 +274,7 @@ impl App {
     ///
     /// app.filter(|headers: HttpHeaders| headers.get_raw("x-api-key").is_some());
     ///
-    /// app.map_get("/sum", |x: i32, y: i32| x + y);
+    /// app.map_get("/sum/{x}/{y}", |x: i32, y: i32| x + y);
     ///# app.run().await
     ///# }
     /// ```
@@ -293,7 +293,7 @@ impl App {
     ///     None => Err((StatusCode::UNAUTHORIZED, "missing API key")),
     /// });
     ///
-    /// app.map_get("/sum", |x: i32, y: i32| x + y);
+    /// app.map_get("/sum/{x}/{y}", |x: i32, y: i32| x + y);
     ///# app.run().await
     ///# }
     /// ```
@@ -331,7 +331,7 @@ impl App {
     ///     resp
     /// });
     ///
-    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    /// app.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y });
     ///
     ///# app.run().await
     ///# }
@@ -380,7 +380,7 @@ impl App {
     ///     req
     /// });
     ///
-    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    /// app.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y });
     ///
     ///# app.run().await
     ///# }
@@ -437,7 +437,7 @@ impl App {
     ///     req
     /// });
     ///
-    /// app.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    /// app.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y });
     ///
     ///# app.run().await
     ///# }
@@ -620,7 +620,7 @@ impl<'a> Route<'a> {
     /// let mut app = App::new();
     ///
     /// app
-    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y })
     ///     .filter(|Path((x, y)): Path<(i32, i32)>| async move { x > 0 && y > 0 });
     ///
     ///# app.run().await
@@ -656,7 +656,7 @@ impl<'a> Route<'a> {
     /// let mut app = App::new();
     ///
     /// app
-    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y })
     ///     .map_ok(|mut resp: HttpResponse| async move {
     ///         resp.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         resp
@@ -692,7 +692,7 @@ impl<'a> Route<'a> {
     /// let mut app = App::new();
     ///
     /// app
-    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y })
     ///     .map_err(|err: Error| async move {
     ///         println!("{err:?}");
     ///         err
@@ -741,7 +741,7 @@ impl<'a> Route<'a> {
     /// let mut app = App::new();
     ///
     /// app
-    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y })
     ///     .tap_req(|mut req: HttpRequestMut| async move {
     ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         req
@@ -798,7 +798,7 @@ impl<'a> Route<'a> {
     /// let mut app = App::new();
     ///
     /// app
-    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y })
     ///     .tap_req(|mut req: HttpRequestMut| async move {
     ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         req
@@ -1025,8 +1025,8 @@ impl<'a> RouteGroup<'a> {
     ///         headers.get_raw("x-api-key").is_some()
     ///     });
     ///
-    ///     api.map_get("/sum", |x: i32, y: i32| async move { x + y });
-    ///     api.map_get("/mul", |x: i32, y: i32| async move { x * y });
+    ///     api.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y });
+    ///     api.map_get("/mul/{x}/{y}", |x: i32, y: i32| async move { x * y });
     /// });
     ///# app.run().await
     ///# }
@@ -1065,7 +1065,7 @@ impl<'a> RouteGroup<'a> {
     ///         resp.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         resp
     ///     });
-    ///     api.map_get("/sum", |x: i32, y: i32| async move {
+    ///     api.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move {
     ///         x + y
     ///     });
     /// });
@@ -1103,7 +1103,7 @@ impl<'a> RouteGroup<'a> {
     ///         println!("{err:?}");
     ///         err
     ///     });
-    ///     api.map_get("/sum", |x: i32, y: i32| async move {
+    ///     api.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move {
     ///         x + y
     ///     });
     /// });
@@ -1154,7 +1154,7 @@ impl<'a> RouteGroup<'a> {
     ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         req
     ///     });
-    ///     api.map_get("/sum", |x: i32, y: i32| async move {
+    ///     api.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move {
     ///         x + y
     ///     });
     /// });
@@ -1213,7 +1213,7 @@ impl<'a> RouteGroup<'a> {
     ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
     ///         req
     ///     });
-    ///     api.map_get("/sum", |x: i32, y: i32| async move {
+    ///     api.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move {
     ///         x + y
     ///     });
     /// });

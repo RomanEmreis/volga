@@ -1,7 +1,7 @@
 //! Extractors for HTTP request parts and body
 
 use hyper::http::request::Parts;
-use std::future::Future;
+use std::{future::Future, ops::RangeInclusive};
 
 use crate::{HttpBody, HttpRequest, error::Error, http::request_scope::HttpRequestScope};
 
@@ -52,6 +52,46 @@ pub(crate) enum Source {
     PathArgs,
 }
 
+/// Any number of path parameters
+pub(crate) const ANY_PATH_ARITY: RangeInclusive<usize> = 0..=usize::MAX;
+
+/// The numbers of path parameters a route can declare for `extractors`, in the order a
+/// handler takes them, to be read from it.
+///
+/// Each one narrows what the ones before it allow. A positional extractor is handed the
+/// parameter after those read ahead of it, so the second of `|x: i32, y: i32|` needs a route
+/// declaring at least 2. One read as `None` where there are too few needs none, though it
+/// still takes its turn: the `y` of `|x: Option<i32>, y: i32|` is the second as well.
+pub(crate) const fn path_arity(
+    extractors: &[(Source, RangeInclusive<usize>)],
+) -> RangeInclusive<usize> {
+    let (mut min, mut max) = (0, usize::MAX);
+    let mut position = 0;
+    let mut i = 0;
+
+    while i < extractors.len() {
+        let (source, arity) = &extractors[i];
+        let read_ahead = if matches!(source, Source::Path) {
+            position += 1;
+            position - 1
+        } else {
+            0
+        };
+
+        let (start, end) = (*arity.start(), *arity.end());
+        if start > 0 && start.saturating_add(read_ahead) > min {
+            min = start.saturating_add(read_ahead);
+        }
+        if end.saturating_add(read_ahead) < max {
+            max = end.saturating_add(read_ahead);
+        }
+
+        i += 1;
+    }
+
+    min..=max
+}
+
 /// Specifies extractors to read data from HTTP request
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be extracted from a request",
@@ -78,6 +118,11 @@ pub trait FromRequest: Sized {
     #[doc(hidden)]
     #[cfg(feature = "di")]
     fn dependencies(_deps: &mut Dependencies) {}
+
+    /// The numbers of path parameters a route can declare for these extractors to be read
+    /// from it, which the route a handler taking them is mapped on is checked against
+    #[doc(hidden)]
+    const PATH_ARITY: RangeInclusive<usize> = ANY_PATH_ARITY;
 }
 
 /// Specifies extractors to read data from a borrowed HTTP request
@@ -115,14 +160,21 @@ pub trait FromRequestParts: Sized {
     #[inline]
     #[cfg(feature = "di")]
     fn dependencies(_deps: &mut Dependencies) {}
+
+    /// The numbers of path parameters a fallback can be handed for this extractor to be
+    /// read from them, which the prefix a fallback taking it is mapped under is checked
+    /// against
+    #[doc(hidden)]
+    const PATH_ARITY: RangeInclusive<usize> = ANY_PATH_ARITY;
 }
 
 /// Specifies extractor to read data from path arguments
 ///
 /// This is what [`Path<T>`](crate::Path) reads its `T` through. It is implemented for a tuple
-/// of up to 10 [`FromPathArg`] types, read in the order the route declares its parameters,
-/// and for a single [`FromPathArg`] type, which reads a route declaring exactly one
-/// parameter and answers `500` on any other.
+/// of up to 10 [`FromPathArg`] types, read in the order the route declares its parameters
+/// and from a route declaring at least as many, and for a single [`FromPathArg`] type, which
+/// reads a route declaring exactly one parameter. A handler taking `Path<T>` on a route
+/// declaring any other number panics where it is mapped - see [`ARITY`](Self::ARITY).
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be read from the path arguments",
     label = "not a path",
@@ -130,6 +182,42 @@ pub trait FromRequestParts: Sized {
     note = "to read the parameters into a struct by name, use `NamedPath<T>`"
 )]
 pub trait FromPathArgs: Sized {
+    /// The numbers of path parameters this type can be read from.
+    ///
+    /// A handler taking [`Path<Self>`](crate::Path) is mapped only on a route declaring one
+    /// of these numbers: on any other, mapping it panics, rather than leaving a route that
+    /// fails every request it receives. A tuple of `N` reads the first `N` of the parameters,
+    /// so it takes `N..=usize::MAX`, and a single [`FromPathArg`] type takes `1..=1`. The
+    /// default takes any number, which checks nothing.
+    ///
+    /// # Example
+    /// ```
+    /// use std::ops::RangeInclusive;
+    /// use volga::{App, Path, error::Error, ok};
+    /// use volga::http::endpoints::args::{FromPathArgs, PathArgs};
+    ///
+    /// struct Span {
+    ///     from: u32,
+    ///     to: u32,
+    /// }
+    ///
+    /// impl FromPathArgs for Span {
+    ///     const ARITY: RangeInclusive<usize> = 2..=2;
+    ///
+    ///     fn from_path_args(args: &PathArgs) -> Result<Self, Error> {
+    ///         let mut args = args.iter();
+    ///         match (args.next(), args.next()) {
+    ///             (Some(from), Some(to)) => Ok(Span { from: from.parse()?, to: to.parse()? }),
+    ///             _ => Err(Error::server_error("a span reads two path parameters")),
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// let mut app = App::new();
+    /// app.map_get("/days/{from}/{to}", |Path(span): Path<Span>| ok!("{}", span.to - span.from));
+    /// ```
+    const ARITY: RangeInclusive<usize> = 0..=usize::MAX;
+
     /// Extracts data from path arguments
     fn from_path_args(args: &PathArgs) -> Result<Self, Error>;
 }
@@ -208,6 +296,14 @@ pub(crate) trait FromPayload: Send + Sized {
     /// Represents a [`Source`] where the payload should be extracted from
     const SOURCE: Source = Source::None;
 
+    /// The numbers of path parameters this extractor can be read from.
+    ///
+    /// A positional one ([`Source::Path`]) counts the parameters left once the positional
+    /// extractors ahead of it have read theirs, and any other one counts all the route
+    /// declares. An extractor that reads none, or that is read as `None` or an `Err` where
+    /// there are too few, takes any number.
+    const PATH_ARITY: RangeInclusive<usize> = ANY_PATH_ARITY;
+
     /// Extracts data from give [`Payload`]
     fn from_payload(payload: Payload<'_>) -> Self::Future;
 
@@ -281,6 +377,10 @@ macro_rules! define_generic_from_request {
             fn dependencies(deps: &mut Dependencies) {
                 $( $T::dependencies(deps); )*
             }
+
+            // Each of them is handed all the parameters, none by position
+            const PATH_ARITY: RangeInclusive<usize> =
+                path_arity(&[$((Source::Parts, $T::PATH_ARITY)),+]);
         }
         #[cfg(feature = "di")]
         impl<$($T: FromContainer),+> FromContainer for ($($T,)+) {
@@ -361,6 +461,9 @@ macro_rules! define_generic_from_request {
             fn dependencies(deps: &mut Dependencies) {
                 $( $T::dependencies(deps); )*
             }
+
+            const PATH_ARITY: RangeInclusive<usize> =
+                path_arity(&[$(($T::SOURCE, $T::PATH_ARITY)),+]);
         }
     }
 }
@@ -441,9 +544,14 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
 
 #[cfg(test)]
 mod tests {
-    use super::{FromPayload, Payload, Source};
+    use super::{ANY_PATH_ARITY, FromPayload, FromRequest, FromRequestParts, Payload, Source};
     use crate::error::Error;
+    use crate::http::Uri;
+    use crate::{Json, NamedPath, Path, Query};
     use futures_util::future::{Ready, ok};
+    use std::collections::HashMap;
+
+    type Map = HashMap<String, String>;
 
     struct TestNone;
 
@@ -460,5 +568,84 @@ mod tests {
         let extraction = TestNone::from_payload(Payload::None).await;
         assert!(extraction.is_ok());
         assert_eq!(TestNone::SOURCE, Source::None);
+    }
+
+    #[test]
+    fn it_takes_any_number_of_path_params_for_a_handler_reading_none() {
+        assert_eq!(<() as FromRequest>::PATH_ARITY, ANY_PATH_ARITY);
+        assert_eq!(
+            <(Query<Map>, Json<Map>) as FromRequest>::PATH_ARITY,
+            ANY_PATH_ARITY
+        );
+        assert_eq!(
+            <(NamedPath<Map>,) as FromRequest>::PATH_ARITY,
+            ANY_PATH_ARITY
+        );
+    }
+
+    #[test]
+    fn it_counts_the_positional_path_params_a_handler_reads() {
+        assert_eq!(<(u32,) as FromRequest>::PATH_ARITY, 1..=usize::MAX);
+        assert_eq!(
+            <(Query<Map>, u32, Json<Map>, String) as FromRequest>::PATH_ARITY,
+            2..=usize::MAX
+        );
+    }
+
+    #[test]
+    fn it_counts_an_optional_path_param_by_its_position_alone() {
+        assert_eq!(<(Option<u32>,) as FromRequest>::PATH_ARITY, ANY_PATH_ARITY);
+        assert_eq!(
+            <(Result<u32, Error>,) as FromRequest>::PATH_ARITY,
+            ANY_PATH_ARITY
+        );
+        assert_eq!(
+            <(u32, Option<u32>) as FromRequest>::PATH_ARITY,
+            1..=usize::MAX
+        );
+        assert_eq!(
+            <(Option<u32>, u32) as FromRequest>::PATH_ARITY,
+            2..=usize::MAX
+        );
+    }
+
+    #[test]
+    fn it_reads_the_arity_of_a_path() {
+        assert_eq!(<(Path<u32>,) as FromRequest>::PATH_ARITY, 1..=1);
+        assert_eq!(
+            <(Path<(u32, String)>,) as FromRequest>::PATH_ARITY,
+            2..=usize::MAX
+        );
+        assert_eq!(
+            <(Option<Path<u32>>,) as FromRequest>::PATH_ARITY,
+            ANY_PATH_ARITY
+        );
+        assert_eq!(
+            <(Path<u32>, Path<(u32,)>) as FromRequest>::PATH_ARITY,
+            1..=1
+        );
+    }
+
+    #[test]
+    fn it_finds_no_arity_for_paths_that_disagree() {
+        assert!(<(Path<u32>, Path<(u32, u32)>) as FromRequest>::PATH_ARITY.is_empty());
+    }
+
+    #[test]
+    fn it_reads_the_arity_of_a_path_a_fallback_takes() {
+        assert_eq!(<(Uri,) as FromRequestParts>::PATH_ARITY, ANY_PATH_ARITY);
+        assert_eq!(<(Path<u32>, Uri) as FromRequestParts>::PATH_ARITY, 1..=1);
+        assert_eq!(
+            <(Uri, Path<(u32, u32)>) as FromRequestParts>::PATH_ARITY,
+            2..=usize::MAX
+        );
+        assert_eq!(
+            <(Option<Path<u32>>,) as FromRequestParts>::PATH_ARITY,
+            ANY_PATH_ARITY
+        );
+        assert_eq!(
+            <(Result<Path<u32>, Error>,) as FromRequestParts>::PATH_ARITY,
+            ANY_PATH_ARITY
+        );
     }
 }
