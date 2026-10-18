@@ -170,8 +170,16 @@ use crate::openapi::{OpenApiRouteConfig, RouteKey};
 #[cfg(feature = "middleware")]
 use {crate::http::cors::CorsOverride, crate::middleware::MiddlewareFn};
 
+#[cfg(all(feature = "middleware", feature = "di"))]
+use crate::di::Dependencies;
+
 #[cfg(feature = "static-files")]
 use crate::fs::static_files::StaticMount;
+
+/// What a group's middleware resolves from the DI container, with the name the startup
+/// check reports it under
+#[cfg(all(feature = "middleware", feature = "di"))]
+pub(crate) type Requirement = (String, fn(&mut Dependencies));
 
 const QUERY: &[u8] = b"QUERY";
 
@@ -732,6 +740,11 @@ pub struct RouteGroup<'a> {
     /// The CORS policy of this group, if it configured one
     #[cfg(feature = "middleware")]
     pub(crate) cors: Option<CorsOverride>,
+    /// What this group's middleware resolves from the DI container, each with the name the
+    /// startup check reports it under. Declared to the container in `apply`, and only if
+    /// the group has something to attach its middleware to
+    #[cfg(all(feature = "middleware", feature = "di"))]
+    pub(crate) requirements: Vec<Requirement>,
     /// Static file mounts this group asked for, registered once its closure returns
     #[cfg(feature = "static-files")]
     pub(crate) mounts: Vec<StaticMount>,
@@ -890,6 +903,23 @@ impl<'a> RouteGroup<'a> {
         for mount in self.mounts.iter_mut() {
             mount.prepend(&self.middleware);
         }
+
+        // Middleware attached to nothing never runs, so what it resolves cannot fail a
+        // request: it is required only where the group has a route, a fallback or a mount,
+        // its own or a sub-group's
+        #[cfg(all(feature = "middleware", feature = "di"))]
+        {
+            let attached = !self.routes.is_empty() || !self.fallbacks.is_empty();
+            #[cfg(feature = "static-files")]
+            let attached = attached || !self.mounts.is_empty();
+
+            let requirements = std::mem::take(&mut self.requirements);
+            if attached {
+                for (consumer, declare) in requirements {
+                    self.app.container.require(consumer, declare);
+                }
+            }
+        }
     }
 
     /// Registers the static file mounts this group asked for in the application's
@@ -965,6 +995,8 @@ impl<'a> RouteGroup<'a> {
             body_limit: None,
             #[cfg(feature = "middleware")]
             cors: None,
+            #[cfg(all(feature = "middleware", feature = "di"))]
+            requirements: Vec::new(),
             #[cfg(feature = "static-files")]
             mounts: Vec::new(),
             #[cfg(feature = "openapi")]
@@ -1148,6 +1180,8 @@ macro_rules! define_route_group_methods {
                     body_limit: None,
                     #[cfg(feature = "middleware")]
                     cors: None,
+                    #[cfg(all(feature = "middleware", feature = "di"))]
+                    requirements: Vec::new(),
                     #[cfg(feature = "static-files")]
                     mounts: Vec::new(),
                     #[cfg(feature = "openapi")]

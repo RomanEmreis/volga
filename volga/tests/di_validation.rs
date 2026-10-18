@@ -191,15 +191,65 @@ async fn it_refuses_to_start_on_middleware_taking_a_service_nobody_registered() 
     });
 
     let message = startup_error(app).await.to_string();
+    // A group's middleware is declared once the group closure returns, after the fallback
+    // it mapped on the way
     assert!(
         message.contains(&format!(
             "`{}` is not registered, and is resolved by global `with`, global `tap_req`, \
-             `filter` on `GET /`, `map_ok` on `GET /`, `map_err` on group `/api`, \
-             `map_fallback` on group `/api`",
+             `filter` on `GET /`, `map_ok` on `GET /`, `map_fallback` on group `/api`, \
+             `map_err` on group `/api`",
             std::any::type_name::<Unregistered>()
         )),
         "{message}"
     );
+}
+
+#[cfg(feature = "middleware")]
+#[tokio::test]
+async fn it_checks_group_middleware_reaching_only_the_routes_of_a_sub_group() {
+    use volga::middleware::Next;
+
+    let mut app = App::new().without_greeter();
+    app.group("/api", |api| {
+        api.with(|_: Dc<Unregistered>, next: Next| next);
+        api.group("/v1", |v1| {
+            v1.map_get("/x", || async { "x" });
+        });
+    });
+
+    let message = startup_error(app).await.to_string();
+    assert!(
+        message.contains("resolved by `with` on group `/api`"),
+        "{message}"
+    );
+}
+
+#[cfg(all(feature = "middleware", feature = "test"))]
+#[tokio::test]
+async fn it_starts_when_group_middleware_has_nothing_to_run_on() {
+    use volga::{middleware::Next, test::TestServer};
+
+    // The group maps no route, fallback or mount, so its middleware never runs and what it
+    // resolves cannot fail a request
+    let server = TestServer::spawn(|app| {
+        app.group("/api", |api| {
+            api.with(|_: Dc<Unregistered>, next: Next| next);
+            api.filter(|_: Dc<Unregistered>| true);
+            api.group("/v1", |_| {});
+        });
+        app.map_get("/", || async { "ok" });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .get(server.url("/"))
+        .send()
+        .await
+        .expect("the request failed");
+    assert_eq!(response.text().await.expect("no body"), "ok");
+
+    server.shutdown().await;
 }
 
 #[cfg(feature = "ws")]

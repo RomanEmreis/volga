@@ -24,7 +24,7 @@ use make_fn::*;
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
-use crate::di::FromContainer;
+use crate::di::{Dependencies, FromContainer};
 
 pub use handler::{Filter, MapOk, Middleware, Next, TapReq, With};
 pub use http_context::HttpContext;
@@ -880,12 +880,15 @@ impl<'a> Route<'a> {
 }
 
 impl<'a> RouteGroup<'a> {
-    /// Names a middleware of this group in what [`App::run`] reports when a service it
-    /// resolves from the DI container is not registered
+    /// Records what a middleware of this group resolves from the DI container, for
+    /// [`App::run`] to check that each of them is registered. The group declares it once
+    /// its closure returns, if it has a route, a fallback or a mount to attach the
+    /// middleware to
     #[inline]
     #[cfg(feature = "di")]
-    fn consumer(&self, middleware: &str) -> String {
-        format!("`{middleware}` on group `{}`", self.prefix)
+    fn require_services(&mut self, middleware: &str, declare: fn(&mut Dependencies)) {
+        let consumer = format!("`{middleware}` on group `{}`", self.prefix);
+        self.requirements.push((consumer, declare));
     }
 
     /// Adds a middleware handler to this group of routes
@@ -1032,9 +1035,7 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         #[cfg(feature = "di")]
-        self.app
-            .container
-            .require(self.consumer("filter"), Args::dependencies);
+        self.require_services("filter", Args::dependencies);
 
         let filter_fn = make_filter_fn(filter);
         self.middleware.push(filter_fn);
@@ -1075,9 +1076,7 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         #[cfg(feature = "di")]
-        self.app
-            .container
-            .require(self.consumer("map_ok"), Args::dependencies);
+        self.require_services("map_ok", Args::dependencies);
 
         let map_ok_fn = make_map_ok_fn(map);
         self.middleware.push(map_ok_fn);
@@ -1114,9 +1113,7 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         #[cfg(feature = "di")]
-        self.app
-            .container
-            .require(self.consumer("map_err"), Args::dependencies);
+        self.require_services("map_err", Args::dependencies);
 
         let map_err_fn = make_map_err_fn(map);
         self.middleware.push(map_err_fn);
@@ -1174,9 +1171,7 @@ impl<'a> RouteGroup<'a> {
         Args: FromContainer + Send + 'static,
         M: 'static,
     {
-        self.app
-            .container
-            .require(self.consumer("tap_req"), Args::dependencies);
+        self.require_services("tap_req", Args::dependencies);
 
         let tap_req_fn = make_tap_req_fn(map);
         self.middleware.push(tap_req_fn);
@@ -1271,9 +1266,7 @@ impl<'a> RouteGroup<'a> {
         Args: FromRequestRef + Send + 'static,
     {
         #[cfg(feature = "di")]
-        self.app
-            .container
-            .require(self.consumer("with"), Args::dependencies);
+        self.require_services("with", Args::dependencies);
 
         let with_fn = make_with_fn(middleware);
         self.middleware.push(with_fn);
