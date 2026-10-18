@@ -303,11 +303,12 @@ impl App {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
-        #[cfg(feature = "di")]
-        self.container
-            .require("global `filter`", Args::dependencies);
+        let filter_fn = make_filter_fn(filter);
 
-        self.pipeline.middlewares_mut().add(make_filter_fn(filter));
+        #[cfg(feature = "di")]
+        self.require_while_held(&filter_fn, "global `filter`", Args::dependencies);
+
+        self.pipeline.middlewares_mut().add(filter_fn);
         self
     }
 
@@ -342,11 +343,12 @@ impl App {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
-        #[cfg(feature = "di")]
-        self.container
-            .require("global `map_ok`", Args::dependencies);
+        let map_ok_fn = make_map_ok_fn(map);
 
-        self.pipeline.middlewares_mut().add(make_map_ok_fn(map));
+        #[cfg(feature = "di")]
+        self.require_while_held(&map_ok_fn, "global `map_ok`", Args::dependencies);
+
+        self.pipeline.middlewares_mut().add(map_ok_fn);
         self
     }
 
@@ -399,10 +401,11 @@ impl App {
         Args: FromContainer + Send + 'static,
         M: 'static,
     {
-        self.container
-            .require("global `tap_req`", Args::dependencies);
+        let tap_req_fn = make_tap_req_fn(map);
 
-        self.pipeline.middlewares_mut().add(make_tap_req_fn(map));
+        self.require_while_held(&tap_req_fn, "global `tap_req`", Args::dependencies);
+
+        self.pipeline.middlewares_mut().add(tap_req_fn);
         self
     }
 
@@ -486,12 +489,12 @@ impl App {
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
-        #[cfg(feature = "di")]
-        self.container.require("global `with`", Args::dependencies);
+        let with_fn = make_with_fn(middleware);
 
-        self.pipeline
-            .middlewares_mut()
-            .add(make_with_fn(middleware));
+        #[cfg(feature = "di")]
+        self.require_while_held(&with_fn, "global `with`", Args::dependencies);
+
+        self.pipeline.middlewares_mut().add(with_fn);
         self
     }
 }
@@ -629,12 +632,12 @@ impl<'a> Route<'a> {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
+        let filter_fn = make_filter_fn(filter);
+
         #[cfg(feature = "di")]
         self.app
-            .container
-            .require(self.consumer("filter"), Args::dependencies);
+            .require_while_held(&filter_fn, self.consumer("filter"), Args::dependencies);
 
-        let filter_fn = make_filter_fn(filter);
         self.map_middleware(filter_fn)
     }
 
@@ -669,12 +672,12 @@ impl<'a> Route<'a> {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
+        let map_ok_fn = make_map_ok_fn(map);
+
         #[cfg(feature = "di")]
         self.app
-            .container
-            .require(self.consumer("map_ok"), Args::dependencies);
+            .require_while_held(&map_ok_fn, self.consumer("map_ok"), Args::dependencies);
 
-        let map_ok_fn = make_map_ok_fn(map);
         self.map_middleware(map_ok_fn)
     }
 
@@ -705,12 +708,12 @@ impl<'a> Route<'a> {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
+        let map_err_fn = make_map_err_fn(map);
+
         #[cfg(feature = "di")]
         self.app
-            .container
-            .require(self.consumer("map_err"), Args::dependencies);
+            .require_while_held(&map_err_fn, self.consumer("map_err"), Args::dependencies);
 
-        let map_err_fn = make_map_err_fn(map);
         self.map_middleware(map_err_fn)
     }
 
@@ -763,11 +766,11 @@ impl<'a> Route<'a> {
         Args: FromContainer + Send + 'static,
         M: 'static,
     {
-        self.app
-            .container
-            .require(self.consumer("tap_req"), Args::dependencies);
-
         let map_err_fn = make_tap_req_fn(map);
+
+        self.app
+            .require_while_held(&map_err_fn, self.consumer("tap_req"), Args::dependencies);
+
         self.map_middleware(map_err_fn)
     }
 
@@ -851,12 +854,12 @@ impl<'a> Route<'a> {
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
+        let with_fn = make_with_fn(middleware);
+
         #[cfg(feature = "di")]
         self.app
-            .container
-            .require(self.consumer("with"), Args::dependencies);
+            .require_while_held(&with_fn, self.consumer("with"), Args::dependencies);
 
-        let with_fn = make_with_fn(middleware);
         self.map_middleware(with_fn)
     }
 

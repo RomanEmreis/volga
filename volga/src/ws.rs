@@ -6,6 +6,7 @@ use crate::http::endpoints::{
     handlers::GenericHandler,
 };
 use crate::{App, HttpRequest, error::Error};
+use std::sync::Arc;
 
 pub use self::{
     args::{Message, MessageHandler, WebSocketHandler},
@@ -133,10 +134,15 @@ impl App {
         F: WebSocketHandler<Args, Output = ()>,
         Args: FromRequest + Send + 'static,
     {
-        // The route below takes the request alone, so what the handler takes is declared here
+        // The route below takes the request alone, so what the handler takes is declared here,
+        // held by the route through the handler's `Arc`: a later route mapped here replaces it
+        let handler = Arc::new(handler);
         #[cfg(feature = "di")]
-        self.container
-            .require(format!("`map_ws` at `{pattern}`"), Args::dependencies);
+        self.require_while_held(
+            &handler,
+            format!("`map_ws` at `{pattern}`"),
+            Args::dependencies,
+        );
 
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
@@ -192,10 +198,15 @@ impl App {
         R::Error: Into<Error>,
         M: 'static,
     {
-        // The route below takes the request alone, so what the handler takes is declared here
+        // The route below takes the request alone, so what the handler takes is declared here,
+        // held by the route through the handler's `Arc`: a later route mapped here replaces it
+        let handler = Arc::new(handler);
         #[cfg(feature = "di")]
-        self.container
-            .require(format!("`map_msg` at `{pattern}`"), Args::dependencies);
+        self.require_while_held(
+            &handler,
+            format!("`map_msg` at `{pattern}`"),
+            Args::dependencies,
+        );
 
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();

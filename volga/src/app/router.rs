@@ -671,10 +671,10 @@ impl App {
             .map_route(method.clone(), path, handler.clone());
 
         // A service the handler takes is checked for a registration when the app starts,
-        // rather than answering `500` on every request that reaches the route
+        // rather than answering `500` on every request that reaches the route - unless a
+        // later handler mapped here has replaced this one by then
         #[cfg(feature = "di")]
-        self.container
-            .require(format!("`{method} {path}`"), Args::dependencies);
+        self.require_while_held(&handler, format!("`{method} {path}`"), Args::dependencies);
 
         #[cfg(feature = "openapi")]
         let openapi_key = {

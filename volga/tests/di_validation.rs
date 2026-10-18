@@ -191,7 +191,6 @@ async fn it_refuses_to_start_on_middleware_taking_a_service_nobody_registered() 
     });
 
     let message = startup_error(app).await.to_string();
-    // What a group maps is declared when the app starts, after what is always attached
     assert!(
         message.contains(&format!(
             "`{}` is not registered, and is resolved by global `with`, global `tap_req`, \
@@ -411,6 +410,43 @@ async fn it_starts_when_problem_details_replace_an_error_handler_taking_a_servic
         app.map_err(|err: Error, _: Dc<Unregistered>| async move { err });
         app.use_problem_details();
         app.map_get("/", || async { "ok" });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .get(server.url("/"))
+        .send()
+        .await
+        .expect("the request failed");
+    assert_eq!(response.text().await.expect("no body"), "ok");
+
+    server.shutdown().await;
+}
+
+#[cfg(feature = "test")]
+#[tokio::test]
+async fn it_starts_when_the_route_taking_a_service_nobody_registered_is_mapped_again() {
+    use volga::test::TestServer;
+
+    // Mapping a handler where one is mapped replaces the route, with the middleware bound to it
+    let server = TestServer::spawn(|app| {
+        #[cfg(feature = "middleware")]
+        app.map_get("/", |_: Dc<Unregistered>| async { "first" })
+            .filter(|_: Dc<Unregistered>| true);
+        #[cfg(not(feature = "middleware"))]
+        app.map_get("/", |_: Dc<Unregistered>| async { "first" });
+        app.map_get("/", || async { "ok" });
+
+        #[cfg(feature = "ws")]
+        {
+            use volga::ws::WebSocket;
+
+            app.map_ws("/ws", |_: WebSocket, _: Dc<Unregistered>| async {});
+            app.map_ws("/ws", |_: WebSocket| async {});
+            app.map_msg("/msg", |msg: String, _: Dc<Unregistered>| msg);
+            app.map_msg("/msg", |msg: String| msg);
+        }
     })
     .await;
 

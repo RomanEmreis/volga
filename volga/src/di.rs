@@ -65,11 +65,12 @@ impl crate::error::IntoError for error::Error {
     }
 }
 
-/// What a part of the app resolves from the container, kept until the app starts together
-/// with a weak handle on that part.
+/// What a handler or a middleware resolves from the container, kept until the app starts
+/// together with a weak handle on it.
 ///
-/// Some parts can still be replaced or left out after they are registered: a `map_err` or a
-/// fallback mapped again, a route group's middleware attached to nothing. A part the app no
+/// The app can still let go of a part after it is registered: a route, a `map_err` or a
+/// fallback mapped again replaces the handler and the middleware bound to it, and a route
+/// group's middleware attached to nothing goes when the group closes. A part the app no
 /// longer holds when it starts can never run, so what it resolves is not checked.
 pub(crate) struct HeldRequirement {
     held: Box<dyn Fn() -> bool + Send + Sync>,

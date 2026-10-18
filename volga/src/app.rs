@@ -122,8 +122,8 @@ pub struct App {
     #[cfg(feature = "di")]
     pub(super) container: ContainerBuilder,
 
-    /// What the parts of the app that can still be replaced or left out resolve from the
-    /// container, declared when the app starts for the parts it still holds
+    /// What the handlers and middleware of the app resolve from the container, declared when
+    /// the app starts for the ones it still holds
     #[cfg(feature = "di")]
     pub(super) held_requirements: Vec<crate::di::HeldRequirement>,
 
