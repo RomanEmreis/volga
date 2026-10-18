@@ -6,7 +6,7 @@ use pin_project_lite::pin_project;
 use std::{
     fmt::{self, Display, Formatter},
     future::Future,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, RangeInclusive},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -172,6 +172,8 @@ where
 
     const SOURCE: Source = E::SOURCE;
 
+    const PATH_ARITY: RangeInclusive<usize> = E::PATH_ARITY;
+
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
         ValidFromPayloadFuture {
@@ -241,6 +243,8 @@ where
     fn dependencies(deps: &mut crate::di::Dependencies) {
         E::dependencies(deps);
     }
+
+    const PATH_ARITY: RangeInclusive<usize> = E::PATH_ARITY;
 }
 
 #[cfg(test)]

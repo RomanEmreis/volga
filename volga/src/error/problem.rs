@@ -223,7 +223,7 @@ impl<'a> Route<'a> {
     /// let mut app = App::new();
     ///
     /// app
-    ///     .map_get("/sum", |x: i32, y: i32| async move { x + y })
+    ///     .map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y })
     ///     .map_problem();
     ///
     ///# app.run().await
@@ -250,7 +250,7 @@ impl<'a> RouteGroup<'a> {
     ///
     /// app.group("/positive", |api| {
     ///     api.map_problem();
-    ///     api.map_get("/sum", |x: i32, y: i32| async move { x + y });
+    ///     api.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y });
     /// });
     ///# app.run().await
     ///# }

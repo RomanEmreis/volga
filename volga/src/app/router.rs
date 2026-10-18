@@ -147,13 +147,56 @@
 //! position the same way one written on a route does. Two routes on one verb are told apart
 //! by a literal segment - `/users/me` beside `/users/{id}`, matched first because it is
 //! literal - rather than by giving one position two names.
+//!
+//! # Path parameters
+//!
+//! A handler reads the parameters its route declares by position: a positional argument -
+//! `|id: u32|`, or a [`FromPathArg`](crate::http::endpoints::args::FromPathArg) type of your
+//! own - takes the next one, and [`Path<T>`](crate::Path) takes them all, in order. A
+//! handler reading more than its route declares could not run for any request, so mapping
+//! it panics, naming the route:
+//!
+//! ```should_panic
+//!# use volga::App;
+//! let mut app = App::new();
+//!
+//! // `GET /sum`: the handler reads 2 path parameters, but the route declares 0
+//! app.map_get("/sum", |x: i32, y: i32| x + y);
+//! ```
+//!
+//! - **It may read fewer.** `|id: u32|` on `/users/{id}/{*rest}` reads `id`, and
+//!   `Path<(T,)>` reads the first of any number.
+//! - **`Option<T>` reads `None` where there is no parameter left**, and `Result<T, Error>`
+//!   an `Err`, so one handler can be mapped with and without a trailing segment. The
+//!   parameter is still counted by position: the `size` of
+//!   `|page: Option<u32>, size: u32|` is the second one, whatever `page` reads.
+//!
+//! ```
+//!# use volga::App;
+//! let mut app = App::new();
+//!
+//! let posts = |page: Option<u32>| format!("page {page:?}");
+//! app.map_get("/posts", posts);
+//! app.map_get("/posts/{page}", posts);
+//! ```
+//!
+//! - **`Path<T>` of a single type reads exactly one.** On
+//!   `/users/{user_id}/orders/{order_id}` it would read the user's id as the order's, so it
+//!   panics there too. A tuple, `Path<(..)>`, reads several by position, and
+//!   [`NamedPath<T>`](crate::NamedPath) by name.
+//! - **A group prefix declares parameters as a route does**, and a group's fallback is
+//!   checked against the ones its prefix declares.
+//!
+//! [`NamedPath<T>`](crate::NamedPath), which reads by name, is not checked, and neither is
+//! middleware: a `with` or a `filter` reading `Path<T>` answers with an error at run time
+//! where its route does not declare what it reads.
 
 use crate::App;
 use crate::error::FallbackFunc;
 use crate::http::endpoints::{
     args::FromRequest,
     handlers::{Func, GenericHandler, RouteHandler},
-    route::{canonical_path, is_canonical_path, join_path},
+    route::{canonical_path, check_path_arity, is_canonical_path, join_path, param_count},
 };
 
 use crate::http::endpoints::route::same_position;
@@ -248,8 +291,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_get<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -280,8 +325,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_post<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -311,8 +358,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_put<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -342,8 +391,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_patch<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -373,8 +424,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_delete<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -404,8 +457,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_head<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -435,8 +490,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_options<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -457,7 +514,7 @@ impl App {
     ///# async fn main() -> std::io::Result<()> {
     /// let mut app = App::new();
     ///
-    /// app.map_trace("/", |id: i32| async move {
+    /// app.map_trace("/", || async {
     ///    ok!([("content-type", "message/http")])
     /// });
     ///# app.run().await
@@ -466,8 +523,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_trace<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -497,8 +556,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_connect<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -539,8 +600,10 @@ impl App {
     ///
     /// # Panics
     /// if `pattern` is a second name for a route already mapped for this verb, or for the
-    /// `GET` that a `HEAD` answers. See
-    /// [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// `GET` that a `HEAD` answers - see
+    /// [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the handler reads path
+    /// parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map_query<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
     where
         F: GenericHandler<Args, M, Output = R>,
@@ -584,7 +647,9 @@ impl App {
     /// # Panics
     /// if `method` cannot be converted into a valid [`Method`], or if `pattern` is a second
     /// name for a route already mapped for `method`, or for the `GET` that a `HEAD`
-    /// answers. See [Ambiguous routes](crate::app::router#ambiguous-routes).
+    /// answers - see [Ambiguous routes](crate::app::router#ambiguous-routes) - or if the
+    /// handler reads path parameters `pattern` does not declare - see
+    /// [Path parameters](crate::app::router#path-parameters).
     pub fn map<'a, V, P, F, R, Args, M>(
         &'a mut self,
         method: V,
@@ -662,6 +727,15 @@ impl App {
 
         // use &str view only for registration
         let path: &str = pattern.as_ref();
+
+        // A handler reading more path parameters than the route declares fails every request
+        // that reaches it, and both are known by now
+        check_path_arity(
+            format_args!("`{method} {path}`"),
+            "the route",
+            param_count(path),
+            Args::PATH_ARITY,
+        );
 
         // A GET route answers HEAD requests as well, and is not mapped a second time for
         // it: routing hands a HEAD request with no route of its own to the GET route, so
@@ -1095,6 +1169,16 @@ impl<'a> RouteGroup<'a> {
         R: IntoResponse + 'static,
         M: 'static,
     {
+        let prefix = join_path(&self.prefix, "");
+
+        // It is handed the parameters its prefix declares, at the prefix and below it alike
+        check_path_arity(
+            format_args!("`map_fallback` on group `{}`", self.prefix),
+            "the group's prefix",
+            param_count(&prefix),
+            Args::PATH_ARITY,
+        );
+
         let handler: RouteHandler = Arc::new(FallbackFunc::new(handler));
 
         // A later fallback under the same prefix replaces this one, and what it resolves
@@ -1105,7 +1189,6 @@ impl<'a> RouteGroup<'a> {
             format!("`map_fallback` on group `{}`", self.prefix),
             Args::dependencies,
         );
-        let prefix = join_path(&self.prefix, "");
 
         self.app
             .pipeline
