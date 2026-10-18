@@ -670,6 +670,12 @@ impl App {
             .endpoints_mut()
             .map_route(method.clone(), path, handler.clone());
 
+        // A service the handler takes is checked for a registration when the app starts,
+        // rather than answering `500` on every request that reaches the route - unless a
+        // later handler mapped here has replaced this one by then
+        #[cfg(feature = "di")]
+        self.require_while_held(&handler, format!("`{method} {path}`"), Args::dependencies);
+
         #[cfg(feature = "openapi")]
         let openapi_key = {
             let key = RouteKey {
@@ -1090,6 +1096,15 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         let handler: RouteHandler = Arc::new(FallbackFunc::new(handler));
+
+        // A later fallback under the same prefix replaces this one, and what it resolves
+        // cannot fail a request after that
+        #[cfg(feature = "di")]
+        self.app.require_while_held(
+            &handler,
+            format!("`map_fallback` on group `{}`", self.prefix),
+            Args::dependencies,
+        );
         let prefix = join_path(&self.prefix, "");
 
         self.app

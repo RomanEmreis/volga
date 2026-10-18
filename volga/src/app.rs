@@ -122,6 +122,11 @@ pub struct App {
     #[cfg(feature = "di")]
     pub(super) container: ContainerBuilder,
 
+    /// What the handlers and middleware of the app resolve from the container, declared when
+    /// the app starts for the ones it still holds
+    #[cfg(feature = "di")]
+    pub(super) held_requirements: Vec<crate::di::HeldRequirement>,
+
     /// TLS configuration options
     #[cfg(feature = "tls")]
     pub(super) tls_config: Option<TlsConfig>,
@@ -281,6 +286,8 @@ impl App {
         Self {
             #[cfg(feature = "di")]
             container: ContainerBuilder::new(),
+            #[cfg(feature = "di")]
+            held_requirements: Vec::new(),
             #[cfg(feature = "tls")]
             tls_config: None,
             #[cfg(feature = "tracing")]

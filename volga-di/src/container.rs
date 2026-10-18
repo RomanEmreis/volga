@@ -8,6 +8,7 @@ use crate::{
 use http::{Extensions, request::Parts};
 use std::{
     any::{Any, TypeId},
+    borrow::Cow,
     cell::RefCell,
     collections::HashMap,
     fmt::Debug,
@@ -177,6 +178,14 @@ struct Declared {
     dependencies: Vec<Dependency>,
 }
 
+/// Something outside the container that resolves services from it, and what it resolves,
+/// as declared to [`ContainerBuilder::require`]
+#[derive(Debug)]
+struct Required {
+    consumer: Cow<'static, str>,
+    dependencies: Vec<Dependency>,
+}
+
 /// Where a service stands in the walk over the declared graph
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Visit {
@@ -218,6 +227,10 @@ pub struct ContainerBuilder {
     /// What each registration declares it resolves. Kept by the builder alone: only
     /// [`ContainerBuilder::validate`] reads it, and a built container has no use for it
     declared: HashMap<TypeId, Declared, BuildHasherDefault<TypeIdHasher>>,
+
+    /// What resolves services from outside the container, in the order it was declared.
+    /// Kept by the builder alone, as `declared` is
+    required: Vec<Required>,
 }
 
 impl Default for ContainerBuilder {
@@ -234,6 +247,48 @@ impl ContainerBuilder {
         Self {
             services: ServiceMap::default(),
             declared: HashMap::default(),
+            required: Vec::new(),
+        }
+    }
+
+    /// Declares that `consumer` - something outside the container that resolves services
+    /// from it, such as a request handler - resolves what `declare` adds, so that
+    /// [`validate`](Self::validate) reports any of them that nothing registered.
+    ///
+    /// `consumer` names it in that report. A declaration that adds nothing is not kept, and
+    /// declaring a consumer again adds to what it declared before.
+    ///
+    /// # Example
+    /// ```
+    /// use volga_di::ContainerBuilder;
+    ///
+    /// #[derive(Default, Clone)]
+    /// struct Clock;
+    ///
+    /// struct Mailer;
+    ///
+    /// let mut builder = ContainerBuilder::new();
+    /// builder.register_singleton(Clock);
+    ///
+    /// builder.require("nightly report", |deps| {
+    ///     deps.add::<Clock>();
+    ///     deps.add::<Mailer>();
+    /// });
+    ///
+    /// // `Mailer` is resolved but not registered
+    /// assert!(builder.validate().is_err());
+    /// ```
+    pub fn require(
+        &mut self,
+        consumer: impl Into<Cow<'static, str>>,
+        declare: impl FnOnce(&mut Dependencies),
+    ) {
+        let dependencies = Dependencies::collect(declare);
+        if !dependencies.is_empty() {
+            self.required.push(Required {
+                consumer: consumer.into(),
+                dependencies,
+            });
         }
     }
 
@@ -242,7 +297,9 @@ impl ContainerBuilder {
     /// Reports every service that takes part in a cycle and every declared dependency that
     /// nothing registered. What a registration declares is what its factory's arguments
     /// or its [`Inject::dependencies`] say it resolves; a type that declares nothing is not
-    /// checked here, and a cycle through it is stopped when it is resolved instead.
+    /// checked here, and a cycle through it is stopped when it is resolved instead. What
+    /// [`require`](Self::require) declares is checked the same way: a type it names that
+    /// nothing registered is reported, once, with everything that resolves it.
     ///
     /// # Errors
     /// Returns a [`ValidationError`] listing every problem found.
@@ -291,6 +348,37 @@ impl ContainerBuilder {
                 }
             }
         }
+
+        // One issue per type nobody registered, naming everything that resolves it: a
+        // forgotten registration is usually resolved in more than one place
+        let mut unregistered = Vec::<(Dependency, Vec<Cow<'static, str>>)>::new();
+        for required in &self.required {
+            for dependency in &required.dependencies {
+                if self.declared.contains_key(&dependency.id) {
+                    continue;
+                }
+
+                let index = unregistered
+                    .iter()
+                    .position(|(missing, _)| missing.id == dependency.id)
+                    .unwrap_or_else(|| {
+                        unregistered.push((*dependency, Vec::new()));
+                        unregistered.len() - 1
+                    });
+
+                let consumers = &mut unregistered[index].1;
+                if !consumers.contains(&required.consumer) {
+                    consumers.push(required.consumer.clone());
+                }
+            }
+        }
+
+        issues.extend(unregistered.into_iter().map(|(dependency, consumers)| {
+            Issue::Unregistered {
+                dependency: dependency.name,
+                consumers,
+            }
+        }));
 
         if issues.is_empty() {
             Ok(())
@@ -1279,6 +1367,71 @@ mod tests {
                 u = type_name::<Unregistered>()
             )
         );
+    }
+
+    #[test]
+    fn it_validates_what_a_consumer_requires_when_it_is_registered() {
+        let mut builder = ContainerBuilder::new();
+        builder.register_singleton(InMemoryCache::default());
+        builder.require("`GET /`", |deps| deps.add::<InMemoryCache>());
+
+        assert_eq!(builder.validate(), Ok(()));
+    }
+
+    #[test]
+    fn it_reports_a_type_a_consumer_requires_once_with_everything_that_resolves_it() {
+        let mut builder = ContainerBuilder::new();
+        builder.register_singleton(InMemoryCache::default());
+        builder.require("`GET /a`", |deps| {
+            deps.add::<InMemoryCache>();
+            deps.add::<Unregistered>();
+            deps.add::<Unregistered>();
+        });
+        builder.require("`GET /b`", |deps| deps.add::<Unregistered>());
+        builder.require(String::from("nightly report"), |deps| {
+            deps.add::<Left>();
+        });
+
+        let err = builder.validate().unwrap_err();
+        assert_eq!(
+            err.issues(),
+            [
+                Issue::Unregistered {
+                    dependency: type_name::<Unregistered>(),
+                    consumers: vec!["`GET /a`".into(), "`GET /b`".into()],
+                },
+                Issue::Unregistered {
+                    dependency: type_name::<Left>(),
+                    consumers: vec!["nightly report".into()],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn it_reports_what_consumers_require_after_what_services_depend_on() {
+        let mut builder = ContainerBuilder::new();
+        builder.require("`GET /`", |deps| deps.add::<Unregistered>());
+        builder.register_scoped_factory(|_: Shared<Unregistered>| Ok(Left));
+
+        let err = builder.validate().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "dependency injection: `{l}` depends on `{u}`, which is not registered; `{u}` is not registered, and is resolved by `GET /`",
+                l = type_name::<Left>(),
+                u = type_name::<Unregistered>()
+            )
+        );
+    }
+
+    #[test]
+    fn it_keeps_no_consumer_that_requires_nothing() {
+        let mut builder = ContainerBuilder::new();
+        builder.require("`GET /`", |_| {});
+
+        assert!(builder.required.is_empty());
+        assert_eq!(builder.validate(), Ok(()));
     }
 
     #[test]

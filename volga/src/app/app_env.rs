@@ -20,7 +20,10 @@ use std::sync::Arc;
 use crate::config::ConfigStore;
 
 #[cfg(feature = "di")]
-use crate::di::Container;
+use crate::di::{
+    Container,
+    error::{Issue, ValidationError},
+};
 
 #[cfg(feature = "tls")]
 use {crate::tls::HstsHeader, tokio_rustls::TlsAcceptor};
@@ -137,13 +140,13 @@ impl TryFrom<App> for AppEnv {
     type Error = Error;
 
     fn try_from(app: App) -> Result<Self, Self::Error> {
-        // A dependency graph that cannot be resolved - a cycle, or a service depending on
-        // one nobody registered - stops the app here, before a connection is accepted,
-        // rather than the first request that reaches it
+        // A dependency graph that cannot be resolved - a cycle, or a service, handler or
+        // middleware depending on one nobody registered - stops the app here, before a
+        // connection is accepted, rather than the first request that reaches it
         #[cfg(feature = "di")]
-        app.container
-            .validate()
-            .map_err(|err| Error::other(err.to_string()))?;
+        let app = app.declare_held_requirements();
+        #[cfg(feature = "di")]
+        app.container.validate().map_err(startup_error)?;
 
         #[cfg(feature = "tls")]
         let hsts = app
@@ -260,6 +263,26 @@ impl TryFrom<App> for AppEnv {
             config: app.config_store,
         };
         Ok(app_instance)
+    }
+}
+
+/// What `App::run` fails with when the dependency graph does not resolve, with what to do
+/// about a service that handlers or middleware take and nobody registered
+#[cfg(feature = "di")]
+fn startup_error(err: ValidationError) -> Error {
+    let unregistered = err
+        .issues()
+        .iter()
+        .any(|issue| matches!(issue, Issue::Unregistered { .. }));
+
+    if unregistered {
+        Error::other(format!(
+            "{err}. Register a service with `add_singleton`, `add_scoped` or `add_transient` \
+             (or their `_factory` and `_default` forms), or take `Option<Dc<T>>` where it is \
+             optional"
+        ))
+    } else {
+        Error::other(err.to_string())
     }
 }
 

@@ -24,7 +24,7 @@ use make_fn::*;
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
-use crate::di::FromContainer;
+use crate::di::{Dependencies, FromContainer};
 
 pub use handler::{Filter, MapOk, Middleware, Next, TapReq, With};
 pub use http_context::HttpContext;
@@ -303,7 +303,12 @@ impl App {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
-        self.pipeline.middlewares_mut().add(make_filter_fn(filter));
+        let filter_fn = make_filter_fn(filter);
+
+        #[cfg(feature = "di")]
+        self.require_while_held(&filter_fn, "global `filter`", Args::dependencies);
+
+        self.pipeline.middlewares_mut().add(filter_fn);
         self
     }
 
@@ -338,7 +343,12 @@ impl App {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
-        self.pipeline.middlewares_mut().add(make_map_ok_fn(map));
+        let map_ok_fn = make_map_ok_fn(map);
+
+        #[cfg(feature = "di")]
+        self.require_while_held(&map_ok_fn, "global `map_ok`", Args::dependencies);
+
+        self.pipeline.middlewares_mut().add(map_ok_fn);
         self
     }
 
@@ -391,7 +401,11 @@ impl App {
         Args: FromContainer + Send + 'static,
         M: 'static,
     {
-        self.pipeline.middlewares_mut().add(make_tap_req_fn(map));
+        let tap_req_fn = make_tap_req_fn(map);
+
+        self.require_while_held(&tap_req_fn, "global `tap_req`", Args::dependencies);
+
+        self.pipeline.middlewares_mut().add(tap_req_fn);
         self
     }
 
@@ -475,9 +489,12 @@ impl App {
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
-        self.pipeline
-            .middlewares_mut()
-            .add(make_with_fn(middleware));
+        let with_fn = make_with_fn(middleware);
+
+        #[cfg(feature = "di")]
+        self.require_while_held(&with_fn, "global `with`", Args::dependencies);
+
+        self.pipeline.middlewares_mut().add(with_fn);
         self
     }
 }
@@ -616,6 +633,11 @@ impl<'a> Route<'a> {
         M: 'static,
     {
         let filter_fn = make_filter_fn(filter);
+
+        #[cfg(feature = "di")]
+        self.app
+            .require_while_held(&filter_fn, self.consumer("filter"), Args::dependencies);
+
         self.map_middleware(filter_fn)
     }
 
@@ -651,6 +673,11 @@ impl<'a> Route<'a> {
         M: 'static,
     {
         let map_ok_fn = make_map_ok_fn(map);
+
+        #[cfg(feature = "di")]
+        self.app
+            .require_while_held(&map_ok_fn, self.consumer("map_ok"), Args::dependencies);
+
         self.map_middleware(map_ok_fn)
     }
 
@@ -682,6 +709,11 @@ impl<'a> Route<'a> {
         M: 'static,
     {
         let map_err_fn = make_map_err_fn(map);
+
+        #[cfg(feature = "di")]
+        self.app
+            .require_while_held(&map_err_fn, self.consumer("map_err"), Args::dependencies);
+
         self.map_middleware(map_err_fn)
     }
 
@@ -735,6 +767,10 @@ impl<'a> Route<'a> {
         M: 'static,
     {
         let map_err_fn = make_tap_req_fn(map);
+
+        self.app
+            .require_while_held(&map_err_fn, self.consumer("tap_req"), Args::dependencies);
+
         self.map_middleware(map_err_fn)
     }
 
@@ -819,7 +855,20 @@ impl<'a> Route<'a> {
         Args: FromRequestRef + Send + 'static,
     {
         let with_fn = make_with_fn(middleware);
+
+        #[cfg(feature = "di")]
+        self.app
+            .require_while_held(&with_fn, self.consumer("with"), Args::dependencies);
+
         self.map_middleware(with_fn)
+    }
+
+    /// Names a middleware of this route in what [`App::run`] reports when a service it
+    /// resolves from the DI container is not registered
+    #[inline]
+    #[cfg(feature = "di")]
+    fn consumer(&self, middleware: &str) -> String {
+        format!("`{middleware}` on `{} {}`", self.method, self.pattern)
     }
 
     #[inline]
@@ -834,6 +883,17 @@ impl<'a> Route<'a> {
 }
 
 impl<'a> RouteGroup<'a> {
+    /// Declares what a middleware of this group resolves from the DI container, for
+    /// [`App::run`] to check if the middleware ends up anywhere it can run. The group hands
+    /// it to its routes, fallbacks and static mounts as it closes and keeps none of it, so
+    /// middleware attached to nothing is not held when the app starts.
+    #[inline]
+    #[cfg(feature = "di")]
+    fn require_services(&mut self, mw: &MiddlewareFn, name: &str, declare: fn(&mut Dependencies)) {
+        let consumer = format!("`{name}` on group `{}`", self.prefix);
+        self.app.require_while_held(mw, consumer, declare);
+    }
+
     /// Adds a middleware handler to this group of routes
     ///
     /// # Examples
@@ -978,6 +1038,10 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         let filter_fn = make_filter_fn(filter);
+
+        #[cfg(feature = "di")]
+        self.require_services(&filter_fn, "filter", Args::dependencies);
+
         self.middleware.push(filter_fn);
         self
     }
@@ -1016,6 +1080,10 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         let map_ok_fn = make_map_ok_fn(map);
+
+        #[cfg(feature = "di")]
+        self.require_services(&map_ok_fn, "map_ok", Args::dependencies);
+
         self.middleware.push(map_ok_fn);
         self
     }
@@ -1050,6 +1118,10 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         let map_err_fn = make_map_err_fn(map);
+
+        #[cfg(feature = "di")]
+        self.require_services(&map_err_fn, "map_err", Args::dependencies);
+
         self.middleware.push(map_err_fn);
         self
     }
@@ -1106,6 +1178,9 @@ impl<'a> RouteGroup<'a> {
         M: 'static,
     {
         let tap_req_fn = make_tap_req_fn(map);
+
+        self.require_services(&tap_req_fn, "tap_req", Args::dependencies);
+
         self.middleware.push(tap_req_fn);
         self
     }
@@ -1198,6 +1273,10 @@ impl<'a> RouteGroup<'a> {
         Args: FromRequestRef + Send + 'static,
     {
         let with_fn = make_with_fn(middleware);
+
+        #[cfg(feature = "di")]
+        self.require_services(&with_fn, "with", Args::dependencies);
+
         self.middleware.push(with_fn);
         self
     }

@@ -6,6 +6,7 @@ use crate::http::endpoints::{
     handlers::GenericHandler,
 };
 use crate::{App, HttpRequest, error::Error};
+use std::sync::Arc;
 
 pub use self::{
     args::{Message, MessageHandler, WebSocketHandler},
@@ -133,6 +134,16 @@ impl App {
         F: WebSocketHandler<Args, Output = ()>,
         Args: FromRequest + Send + 'static,
     {
+        // The route below takes the request alone, so what the handler takes is declared here,
+        // held by the route through the handler's `Arc`: a later route mapped here replaces it
+        let handler = Arc::new(handler);
+        #[cfg(feature = "di")]
+        self.require_while_held(
+            &handler,
+            format!("`map_ws` at `{pattern}`"),
+            Args::dependencies,
+        );
+
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
             async move {
@@ -147,7 +158,8 @@ impl App {
     /// Adds a `handler` that has to be called when a message received
     /// from a client over WebSocket protocol
     ///
-    /// Note: In case of a need to extract something, e.g., from DI, it must implement `Clone`.
+    /// Note: what the handler takes besides the message is cloned for every message, so it
+    /// must implement `Clone`. `Dc<T>` does for any `T`.
     ///
     /// # Example
     /// ```no_run
@@ -186,6 +198,16 @@ impl App {
         R::Error: Into<Error>,
         M: 'static,
     {
+        // The route below takes the request alone, so what the handler takes is declared here,
+        // held by the route through the handler's `Arc`: a later route mapped here replaces it
+        let handler = Arc::new(handler);
+        #[cfg(feature = "di")]
+        self.require_while_held(
+            &handler,
+            format!("`map_msg` at `{pattern}`"),
+            Args::dependencies,
+        );
+
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
             async move {

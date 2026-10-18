@@ -9,27 +9,49 @@ use crate::{
 use futures_util::future::{Ready, ready};
 use hyper::http::{Extensions, request::Parts};
 
-use std::{
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::{ops::Deref, sync::Arc};
 
 /// `Dc` stands for Dependency Container.
 ///
-/// This struct wraps an injectable type `T` that is **shared** between all handlers
-/// through an [`Arc`].  
+/// This struct wraps an injectable type `T` that is **shared** through an [`Arc`]: a
+/// singleton with every request the app serves, a scoped service with everything that
+/// resolves it during one request. So `Dc<T>` gives `&T` and never `&mut T`.
+///
+/// # Changing a dependency
+/// State that handlers change lives inside `T`, behind interior mutability, and `T`'s
+/// methods change it through `&self`:
+///
+/// - a [`Mutex`](std::sync::Mutex) or an [`RwLock`](std::sync::RwLock) around the data,
+///   an `RwLock` where reads outnumber writes;
+/// - an atomic, such as [`AtomicU64`](std::sync::atomic::AtomicU64), for a counter or a flag;
+/// - a [`tokio::sync::Mutex`] only where the guard is held across an `.await`. A
+///   `std::sync` guard is dropped before one.
+///
+/// `T` needs no [`Arc`] of its own around that state, since the container already shares
+/// the instance. It does when `T` is [`Clone`] and is also resolved by value - by
+/// [`Container::resolve`], [`Dc::cloned`] or into a field of another service - so that every
+/// clone reaches the same state.
+///
+/// A handler that wants a copy of its own to change takes [`Dc::cloned`]. The registered
+/// instance stays as it was.
+///
+/// # Registration
+/// [`App::run`](crate::App::run) does not start while a handler or a middleware takes
+/// `Dc<T>` of a `T` nobody registered: such a route would answer `500` on every request. A
+/// service that may not be registered is taken as `Option<Dc<T>>`, which is `None` then.
 ///
 /// # Example
 /// ```no_run
 /// use volga::{App, di::Dc, ok, not_found};
 /// use std::{
 ///     collections::HashMap,
-///     sync::{Arc, Mutex}
+///     sync::{RwLock, atomic::{AtomicU64, Ordering}}
 /// };
 ///
 /// #[derive(Default)]
 /// struct InMemoryCache {
-///     inner: Arc<Mutex<HashMap<String, String>>>
+///     users: RwLock<HashMap<String, String>>,
+///     hits: AtomicU64,
 /// }
 ///
 ///# #[tokio::main]
@@ -39,18 +61,31 @@ use std::{
 /// app.add_singleton(InMemoryCache::default());
 ///
 /// app.map_get("/user/{id}", |id: String, cache: Dc<InMemoryCache>| async move {
-///     let cache_guard = cache.inner.lock().unwrap();
-///     let user = cache_guard.get(&id);
-///     match user {
+///     cache.hits.fetch_add(1, Ordering::Relaxed);
+///     let users = cache.users.read().unwrap();
+///     match users.get(&id) {
 ///         Some(user) => ok!(user),
 ///         None => not_found!()
 ///     }
 /// });
+///
+/// app.map_put("/user/{id}/{name}", |id: String, name: String, cache: Dc<InMemoryCache>| async move {
+///     cache.users.write().unwrap().insert(id, name);
+/// });
 ///# app.run().await
 ///# }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Dc<T: Send + Sync>(Arc<T>);
+
+// Not derived: `derive` would ask for `T: Clone`, while a clone of a `Dc` is another handle
+// on the same instance and never clones `T`
+impl<T: Send + Sync> Clone for Dc<T> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
 
 impl<T: Send + Sync> Deref for Dc<T> {
     type Target = T;
@@ -58,13 +93,6 @@ impl<T: Send + Sync> Deref for Dc<T> {
     #[inline]
     fn deref(&self) -> &T {
         &self.0
-    }
-}
-
-impl<T: Clone + Send + Sync> DerefMut for Dc<T> {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut T {
-        Arc::make_mut(&mut self.0)
     }
 }
 
@@ -79,7 +107,9 @@ impl<T: Send + Sync> Dc<T> {
 impl<T: Send + Sync + Clone> Dc<T> {
     /// Clones and returns the inner `T`.
     ///
-    /// Equivalent to calling [`Clone::clone`] on the inner `T`.
+    /// Equivalent to calling [`Clone::clone`] on the inner `T`. The copy is the caller's
+    /// own: changing it leaves the registered instance as it was, apart from whatever
+    /// state `T` shares between its clones, such as an [`Arc`] field.
     #[inline]
     pub fn cloned(&self) -> T {
         self.0.as_ref().clone()
@@ -103,6 +133,11 @@ impl<T: Send + Sync + 'static> FromRequestRef for Dc<T> {
     fn from_request(req: &HttpRequest) -> Result<Self, Error> {
         req.extensions().try_into()
     }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
+    }
 }
 
 impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
@@ -111,12 +146,22 @@ impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
         let ext = &parts.extensions;
         ext.try_into()
     }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
+    }
 }
 
 impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
     #[inline]
     fn from_container(container: &Container) -> Result<Self, Error> {
         container.resolve_shared::<T>().map_err(Into::into).map(Dc)
+    }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
     }
 }
 
@@ -131,6 +176,11 @@ impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
             unreachable!()
         };
         ready(Self::from_parts(parts))
+    }
+
+    #[inline]
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<T>();
     }
 }
 
@@ -335,6 +385,21 @@ mod tests {
 
         assert_eq!(point.0.0, 1);
         assert_eq!(point.1.0, 2);
+    }
+
+    #[test]
+    fn it_clones_a_handle_on_the_same_instance_of_a_service_that_is_not_clone() {
+        struct NotClone;
+
+        let mut container = ContainerBuilder::new();
+        container.register_singleton(NotClone);
+
+        let container = container.build();
+
+        let dc = Dc::<NotClone>::inject(&container).unwrap();
+        let copy = dc.clone();
+
+        assert!(Arc::ptr_eq(&dc.into_inner(), &copy.into_inner()));
     }
 
     #[test]

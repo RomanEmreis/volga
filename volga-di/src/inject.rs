@@ -117,8 +117,14 @@ impl Dependencies {
     /// Collects what `T` declares
     #[inline]
     pub(crate) fn of<T: Inject>() -> Vec<Dependency> {
+        Self::collect(T::dependencies)
+    }
+
+    /// Collects what `declare` adds
+    #[inline]
+    pub(crate) fn collect(declare: impl FnOnce(&mut Self)) -> Vec<Dependency> {
         let mut deps = Self { list: Vec::new() };
-        T::dependencies(&mut deps);
+        declare(&mut deps);
         deps.list
     }
 }
