@@ -143,6 +143,8 @@ impl TryFrom<App> for AppEnv {
         // A dependency graph that cannot be resolved - a cycle, or a service, handler or
         // middleware depending on one nobody registered - stops the app here, before a
         // connection is accepted, rather than the first request that reaches it
+        #[cfg(all(feature = "di", feature = "middleware"))]
+        let app = app.declare_group_requirements();
         #[cfg(feature = "di")]
         app.container.validate().map_err(startup_error)?;
 

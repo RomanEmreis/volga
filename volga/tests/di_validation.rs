@@ -308,3 +308,60 @@ async fn it_starts_when_a_handler_takes_a_service_nobody_registered_as_optional(
 
     server.shutdown().await;
 }
+
+#[cfg(all(feature = "middleware", feature = "static-files"))]
+#[tokio::test]
+async fn it_checks_group_middleware_reaching_only_a_static_mount() {
+    use volga::middleware::Next;
+
+    let mut app = App::new()
+        .without_greeter()
+        .with_host_env(|env| env.with_content_root("tests/static"));
+    app.group("/assets", |assets| {
+        assets.with(|_: Dc<Unregistered>, next: Next| next);
+        assets.use_static_assets();
+    });
+
+    let message = startup_error(app).await.to_string();
+    assert!(
+        message.contains("resolved by `with` on group `/assets`"),
+        "{message}"
+    );
+}
+
+#[cfg(all(feature = "middleware", feature = "static-files", feature = "test"))]
+#[tokio::test]
+async fn it_starts_when_group_middleware_reaches_only_mounts_that_are_turned_down() {
+    use volga::{middleware::Next, test::TestServer};
+
+    let server = TestServer::builder()
+        .configure(|app| app.with_host_env(|env| env.with_content_root("tests/static")))
+        .setup(|app| {
+            // A mount under a route parameter is turned down when it is registered
+            app.group("/{tenant}", |tenant| {
+                tenant.with(|_: Dc<Unregistered>, next: Next| next);
+                tenant.use_static_assets();
+            });
+            // So is a second mount on a prefix another mount answers
+            app.group("/static", |first| {
+                first.use_static_assets();
+            });
+            app.group("/static", |second| {
+                second.filter(|_: Dc<Unregistered>| true);
+                second.use_static_assets();
+            });
+            app.map_get("/", || async { "ok" });
+        })
+        .build()
+        .await;
+
+    let response = server
+        .client()
+        .get(server.url("/"))
+        .send()
+        .await
+        .expect("the request failed");
+    assert_eq!(response.text().await.expect("no body"), "ok");
+
+    server.shutdown().await;
+}

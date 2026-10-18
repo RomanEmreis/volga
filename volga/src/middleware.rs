@@ -24,7 +24,10 @@ use make_fn::*;
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
-use crate::di::{Dependencies, FromContainer};
+use {
+    crate::di::{Dependencies, FromContainer},
+    std::sync::Weak,
+};
 
 pub use handler::{Filter, MapOk, Middleware, Next, TapReq, With};
 pub use http_context::HttpContext;
@@ -53,9 +56,42 @@ const DEFAULT_MW_CAPACITY: usize = 8;
 /// Points to the next middleware or request handler
 pub type NextFn = Arc<dyn Fn(HttpContext) -> BoxFuture<'static, HttpResult> + Send + Sync>;
 
+/// A middleware function, as the pipeline calls it
+type MiddlewareFnTarget =
+    dyn Fn(HttpContext, NextFn) -> BoxFuture<'static, HttpResult> + Send + Sync;
+
 /// Point to a middleware function
-pub(super) type MiddlewareFn =
-    Arc<dyn Fn(HttpContext, NextFn) -> BoxFuture<'static, HttpResult> + Send + Sync>;
+pub(super) type MiddlewareFn = Arc<MiddlewareFnTarget>;
+
+/// What a route group's middleware resolves from the DI container, kept until the app
+/// starts together with a weak handle on the middleware.
+///
+/// A group gives its middleware to its routes, fallbacks and static mounts as it closes,
+/// and keeps none of it. So middleware that nothing holds by the time the app starts was
+/// attached to nothing - a group with no route, fallback or mount, a mount that was turned
+/// down - and can never run, and what it resolves is not checked.
+#[cfg(feature = "di")]
+#[derive(Debug)]
+pub(crate) struct GroupRequirement {
+    middleware: Weak<MiddlewareFnTarget>,
+    consumer: String,
+    declare: fn(&mut Dependencies),
+}
+
+#[cfg(feature = "di")]
+impl App {
+    /// Declares to the container what the middleware of route groups resolves, for the
+    /// middleware a route, a fallback or a static mount holds
+    pub(crate) fn declare_group_requirements(mut self) -> Self {
+        for requirement in std::mem::take(&mut self.group_requirements) {
+            if requirement.middleware.strong_count() > 0 {
+                self.container
+                    .require(requirement.consumer, requirement.declare);
+            }
+        }
+        self
+    }
+}
 
 /// Middleware pipeline
 #[derive(Clone)]
@@ -881,14 +917,15 @@ impl<'a> Route<'a> {
 
 impl<'a> RouteGroup<'a> {
     /// Records what a middleware of this group resolves from the DI container, for
-    /// [`App::run`] to check that each of them is registered. The group declares it once
-    /// its closure returns, if it has a route, a fallback or a mount to attach the
-    /// middleware to
+    /// [`App::run`] to check if the middleware ends up anywhere it can run
     #[inline]
     #[cfg(feature = "di")]
-    fn require_services(&mut self, middleware: &str, declare: fn(&mut Dependencies)) {
-        let consumer = format!("`{middleware}` on group `{}`", self.prefix);
-        self.requirements.push((consumer, declare));
+    fn require_services(&mut self, mw: &MiddlewareFn, name: &str, declare: fn(&mut Dependencies)) {
+        self.app.group_requirements.push(GroupRequirement {
+            middleware: Arc::downgrade(mw),
+            consumer: format!("`{name}` on group `{}`", self.prefix),
+            declare,
+        });
     }
 
     /// Adds a middleware handler to this group of routes
@@ -1034,10 +1071,11 @@ impl<'a> RouteGroup<'a> {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
-        #[cfg(feature = "di")]
-        self.require_services("filter", Args::dependencies);
-
         let filter_fn = make_filter_fn(filter);
+
+        #[cfg(feature = "di")]
+        self.require_services(&filter_fn, "filter", Args::dependencies);
+
         self.middleware.push(filter_fn);
         self
     }
@@ -1075,10 +1113,11 @@ impl<'a> RouteGroup<'a> {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
-        #[cfg(feature = "di")]
-        self.require_services("map_ok", Args::dependencies);
-
         let map_ok_fn = make_map_ok_fn(map);
+
+        #[cfg(feature = "di")]
+        self.require_services(&map_ok_fn, "map_ok", Args::dependencies);
+
         self.middleware.push(map_ok_fn);
         self
     }
@@ -1112,10 +1151,11 @@ impl<'a> RouteGroup<'a> {
         Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
-        #[cfg(feature = "di")]
-        self.require_services("map_err", Args::dependencies);
-
         let map_err_fn = make_map_err_fn(map);
+
+        #[cfg(feature = "di")]
+        self.require_services(&map_err_fn, "map_err", Args::dependencies);
+
         self.middleware.push(map_err_fn);
         self
     }
@@ -1171,9 +1211,10 @@ impl<'a> RouteGroup<'a> {
         Args: FromContainer + Send + 'static,
         M: 'static,
     {
-        self.require_services("tap_req", Args::dependencies);
-
         let tap_req_fn = make_tap_req_fn(map);
+
+        self.require_services(&tap_req_fn, "tap_req", Args::dependencies);
+
         self.middleware.push(tap_req_fn);
         self
     }
@@ -1265,10 +1306,11 @@ impl<'a> RouteGroup<'a> {
         R: IntoResponse + 'static,
         Args: FromRequestRef + Send + 'static,
     {
-        #[cfg(feature = "di")]
-        self.require_services("with", Args::dependencies);
-
         let with_fn = make_with_fn(middleware);
+
+        #[cfg(feature = "di")]
+        self.require_services(&with_fn, "with", Args::dependencies);
+
         self.middleware.push(with_fn);
         self
     }
