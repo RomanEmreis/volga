@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use volga::error::Error;
 use volga::http::endpoints::args::{FromPathArg, PathArg};
 use volga::test::TestServer;
-use volga::{App, HttpResult, NamedPath, Path, Query, ok};
+use volga::{App, HttpRequest, HttpResult, NamedPath, Path, Query, ok};
 
 #[derive(Deserialize)]
 struct User {
@@ -253,6 +253,38 @@ async fn it_reads_a_uuid_route_param() {
             .unwrap();
 
         assert_eq!(response.status(), 400, "{prefix}");
+    }
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_reads_the_route_params_of_a_request_taken_whole() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/args/{tenant}/{id}", |req: HttpRequest| {
+            let args: Vec<_> = req.path_args().map(|(k, v)| format!("{k}={v}")).collect();
+            args.join("&")
+        });
+        app.map_get("/path/{id}", |req: HttpRequest| -> HttpResult {
+            let Path(id): Path<u32> = req.extract()?;
+            ok!("path:{id}")
+        });
+        app.map_get("/named/{tenant}/{id}", |req: HttpRequest| -> HttpResult {
+            let NamedPath(repo): NamedPath<Repo> = req.extract()?;
+            ok!("named:{}:{}", repo.tenant, repo.id)
+        });
+    })
+    .await;
+
+    for (path, expected) in [
+        ("/args/acme/42", "tenant=acme&id=42"),
+        ("/path/42", "path:42"),
+        ("/named/acme/42", "named:acme:42"),
+    ] {
+        let response = server.client().get(server.url(path)).send().await.unwrap();
+
+        assert!(response.status().is_success(), "{path}");
+        assert_eq!(response.text().await.unwrap(), expected, "{path}");
     }
 
     server.shutdown().await;

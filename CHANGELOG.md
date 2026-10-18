@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Not checked: `NamedPath<T>`, which reads by name, and middleware.
 
 ## Fixed
+* A handler taking `HttpRequest` reads the path parameters of its route: `HttpRequest::path_args` returned none, and `extract` failed for `Path<T>` and `NamedPath<T>`. The parameters were taken out of the request for the extractors that read them by position or by name, even where the handler took none of those. For the same reason `map_ws` and `map_msg`, which run their handler on such a request, handed it no path parameters: `map_msg("/ws/{room}", |msg: String, room: String| ...)` answered `500` to every handshake. A handler taking a path parameter besides `HttpRequest` still reads it alone.
 * `Dc<T>` is `Clone` for every `T`. The derived impl required `T: Clone`, though a clone only copies the `Arc`, so a `map_msg` handler, whose arguments are cloned for every message, could not take `Dc<T>` of a service that is not `Clone`.
 
 # 0.13.3

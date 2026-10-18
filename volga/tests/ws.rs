@@ -128,3 +128,40 @@ fn it_panics_where_a_msg_handler_reads_a_path_param_its_route_does_not_declare()
         format!("{room}: {msg}")
     });
 }
+
+#[tokio::test]
+async fn it_reads_a_path_param_in_a_ws_handler() {
+    use volga::ws::WebSocket;
+
+    let server = TestServer::spawn(|app| {
+        app.map_ws("/ws/{room}", |mut ws: WebSocket, room: String| async move {
+            ws.send(format!("welcome to {room}")).await.unwrap();
+        });
+    })
+    .await;
+
+    let mut ws = server.ws("/ws/lobby").await;
+
+    assert_eq!(ws.recv_text().await, "welcome to lobby");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_reads_a_path_param_in_a_msg_handler() {
+    let server = TestServer::spawn(|app| {
+        app.map_msg("/ws/{room}", |msg: String, room: String| async move {
+            format!("{room}: {msg}")
+        });
+    })
+    .await;
+
+    let mut ws = server.ws("/ws/lobby").await;
+
+    ws.send_text("hi").await;
+    let response = ws.recv_text().await;
+
+    assert_eq!(response, "lobby: hi");
+
+    server.shutdown().await;
+}

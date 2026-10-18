@@ -411,11 +411,18 @@ macro_rules! define_generic_from_request {
 
                 let (mut parts, body) = req.into_parts();
 
-                let params = parts
-                    .extensions
-                    .get_mut::<HttpRequestScope>()
-                    .map(|s| std::mem::replace(&mut s.params, PathArgs::new()))
-                    .unwrap_or_else(PathArgs::new);
+                // Taken out of the request only for an extractor that reads them: an
+                // `HttpRequest` taken instead carries them on, for `path_args` and `extract`
+                // to read, and for the handler `map_ws` and `map_msg` wrap
+                let params = if uses_path || uses_pathargs {
+                    parts
+                        .extensions
+                        .get_mut::<HttpRequestScope>()
+                        .map(|s| std::mem::replace(&mut s.params, PathArgs::new()))
+                        .unwrap_or_else(PathArgs::new)
+                } else {
+                    PathArgs::new()
+                };
 
                 let (path_args, cached_query) = params.into_parts();
 
