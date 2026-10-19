@@ -88,7 +88,9 @@ impl<T: DeserializeOwned + Send> Future for ExtractFormPayloadFut<T> {
     #[inline]
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let result = ready!(this.fut.poll(cx)).map_err(FormError::collect_error)?;
+        // A body that fails to read is no parsing error: a `413` for one over the body limit
+        // goes on with its own status and message
+        let result = ready!(this.fut.poll(cx))?;
         let body = result.to_bytes();
         let form = serde_urlencoded::from_bytes(&body)
             .map(Form::<T>)
@@ -130,16 +132,6 @@ impl FormError {
     fn from_serde_error(err: serde::de::value::Error) -> Error {
         Error::client_error(format!("Form Data parsing error: {err}"))
     }
-
-    /// The body could not be read: a `413` for one over the body limit keeps its status
-    #[inline]
-    fn collect_error(err: Error) -> Error {
-        Error::from_parts(
-            err.status(),
-            None,
-            format!("Form Data parsing error: {err}"),
-        )
-    }
 }
 
 #[cfg(test)]
@@ -176,6 +168,36 @@ mod tests {
 
         assert_eq!(user.age, 33);
         assert_eq!(user.name, "John");
+    }
+
+    #[tokio::test]
+    async fn it_passes_on_a_body_over_the_limit_as_no_parsing_error() {
+        let user = User {
+            age: 33,
+            name: "John".into(),
+        };
+        let body = HttpBody::limited(HttpBody::form(user).unwrap(), 5);
+
+        let err = Form::<User>::from_payload(Payload::Body(body))
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), crate::http::StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(err.to_string(), "request body is larger than the limit");
+    }
+
+    #[tokio::test]
+    async fn it_answers_a_body_that_does_not_deserialize_with_a_parsing_error() {
+        let body = HttpBody::boxed(HttpBody::full("age=old"));
+
+        let err = Form::<User>::from_payload(Payload::Body(body))
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), crate::http::StatusCode::BAD_REQUEST);
+        assert!(err.to_string().starts_with("Form Data parsing error: "));
     }
 
     #[tokio::test]

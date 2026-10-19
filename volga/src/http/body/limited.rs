@@ -144,15 +144,20 @@ where
 
 /// A request body over the body limit
 ///
-/// [`http_body_util::LengthLimitError`] cannot be built outside its crate, so this one stands
-/// in for it, and reads the same.
+/// It stands in for [`http_body_util::LengthLimitError`], which cannot be built outside its
+/// crate, and says what went over: "length limit exceeded" names neither the body nor the
+/// limit. The limit itself is left out: [`Limited`] would need a word more to keep it, and
+/// so would every [`HttpBody`](crate::HttpBody). A request reports its own limit in
+/// [`HttpRequest::body_limit`].
+///
+/// [`HttpRequest::body_limit`]: crate::HttpRequest::body_limit
 #[derive(Debug)]
 struct LengthLimitError;
 
 impl fmt::Display for LengthLimitError {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("length limit exceeded")
+        f.write_str("request body is larger than the limit")
     }
 }
 
@@ -233,7 +238,7 @@ mod tests {
         let err = body.collect().await.unwrap_err();
 
         assert_eq!(err.status(), StatusCode::PAYLOAD_TOO_LARGE);
-        assert_eq!(err.to_string(), "length limit exceeded");
+        assert_eq!(err.to_string(), "request body is larger than the limit");
     }
 
     #[tokio::test]

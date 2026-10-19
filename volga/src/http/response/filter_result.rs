@@ -5,10 +5,14 @@ use crate::error::{Error, IntoError};
 use crate::http::IntoResponse;
 use std::ops::{Deref, DerefMut};
 
+/// The message a filter returning `false` answers with
+const REJECTED: &str = "Request rejected by filter";
+
 /// Result of filter or validation middleware.
 ///
 /// A failed result answers with the status of its error:
-/// - [`FilterResult::err`], or `false`: `400 Bad Request` with a generic message
+/// - [`FilterResult::err`], or `false`: `400 Bad Request` with the message
+///   "Request rejected by filter"
 /// - an [`Error`]: its own status, instance and attached response, as it would from a handler
 /// - any other type implementing [`IntoError`]: the status it converts with, as it would from
 ///   a handler - `StatusCode`, `(StatusCode, E)`, a [`std::io::Error`] by its kind, a
@@ -86,12 +90,12 @@ impl FilterResult {
 
     /// Creates a new, invalid [`FilterResult`].
     ///
-    /// It answers `400 Bad Request` with a generic message.
+    /// It answers `400 Bad Request` with the message "Request rejected by filter". A filter
+    /// refuses a request for any reason - a missing API key as often as a bad parameter - so
+    /// the message names none.
     #[inline]
     pub fn err() -> Self {
-        Self(Err(Error::client_error(
-            "Validation: One or more request parameters are incorrect",
-        )))
+        Self(Err(Error::client_error(REJECTED)))
     }
 
     /// Unwraps the inner result.
@@ -155,10 +159,7 @@ mod tests {
         assert!(result.is_err());
         if let Err(e) = result.0 {
             assert_eq!(e.status(), StatusCode::BAD_REQUEST);
-            assert_eq!(
-                e.to_string(),
-                "Validation: One or more request parameters are incorrect"
-            );
+            assert_eq!(e.to_string(), "Request rejected by filter");
         }
     }
 

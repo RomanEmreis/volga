@@ -232,7 +232,7 @@ impl App {
     /// The `Err` takes what a handler's does: an [`Error`](crate::error::Error), or any type
     /// implementing [`IntoError`](crate::error::IntoError). A request the filter stops goes to
     /// the error handler, answering with the status of what the filter returned:
-    /// - `false`: `400 Bad Request` with a generic message
+    /// - `false`: `400 Bad Request` with the message "Request rejected by filter"
     /// - `Err` of an [`Error`](crate::error::Error) or of an [`IntoError`](crate::error::IntoError)
     ///   type: the status the error converts with, as it would from a handler - a `StatusCode`,
     ///   a [`std::io::Error`] by its kind, an `OAuthError` by its code, an error's instance and
@@ -602,7 +602,7 @@ impl<'a> Route<'a> {
     /// The `Err` takes what a handler's does: an [`Error`](crate::error::Error), or any type
     /// implementing [`IntoError`](crate::error::IntoError). A request the filter stops goes to
     /// the error handler, answering with the status of what the filter returned:
-    /// - `false`: `400 Bad Request` with a generic message
+    /// - `false`: `400 Bad Request` with the message "Request rejected by filter"
     /// - `Err` of an [`Error`](crate::error::Error) or of an [`IntoError`](crate::error::IntoError)
     ///   type: the status the error converts with, as it would from a handler - a `StatusCode`,
     ///   a [`std::io::Error`] by its kind, an `OAuthError` by its code, an error's instance and
@@ -997,7 +997,7 @@ impl<'a> RouteGroup<'a> {
     /// The `Err` takes what a handler's does: an [`Error`](crate::error::Error), or any type
     /// implementing [`IntoError`](crate::error::IntoError). A request the filter stops goes to
     /// the error handler, answering with the status of what the filter returned:
-    /// - `false`: `400 Bad Request` with a generic message
+    /// - `false`: `400 Bad Request` with the message "Request rejected by filter"
     /// - `Err` of an [`Error`](crate::error::Error) or of an [`IntoError`](crate::error::IntoError)
     ///   type: the status the error converts with, as it would from a handler - a `StatusCode`,
     ///   a [`std::io::Error`] by its kind, an `OAuthError` by its code, an error's instance and

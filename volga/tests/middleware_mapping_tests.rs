@@ -286,10 +286,7 @@ async fn it_adds_invalid_filter_middleware_for_route() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(
-        response.text().await.unwrap(),
-        "Validation: One or more request parameters are incorrect"
-    );
+    assert_eq!(response.text().await.unwrap(), "Request rejected by filter");
 
     server.shutdown().await;
 }
@@ -332,10 +329,7 @@ async fn it_adds_invalid_filter_middleware_for_group() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(
-        response.text().await.unwrap(),
-        "Validation: One or more request parameters are incorrect"
-    );
+    assert_eq!(response.text().await.unwrap(), "Request rejected by filter");
 
     server.shutdown().await;
 }
@@ -418,11 +412,7 @@ async fn it_answers_a_filter_err_with_the_status_of_its_error() {
         ("/string-with-error", 400, "nope"),
         ("/boxed", 400, "boxed"),
         ("/parse", 400, "invalid digit found in string"),
-        (
-            "/false",
-            400,
-            "Validation: One or more request parameters are incorrect",
-        ),
+        ("/false", 400, "Request rejected by filter"),
         ("/group/test", 401, "no key"),
     ];
 

@@ -709,6 +709,22 @@ impl CorsRegistry {
         self.named.get(name)
     }
 
+    /// Returns the CORS policy a route or a group names
+    ///
+    /// # Panics
+    /// If no policy goes by that name. The panic names the policy and points at the call
+    /// to `cors_with` that asked for it.
+    #[track_caller]
+    pub(crate) fn expect_named(&self, name: &str) -> Arc<CorsHeaders> {
+        match self.get_named(name) {
+            Some(policy) => policy.clone(),
+            None => panic!(
+                "CORS policy {name:?} is not configured; add it with \
+                `App::with_cors(|cors| cors.with_name({name:?}) ...)`"
+            ),
+        }
+    }
+
     /// Returns default CORS policy
     #[inline]
     pub(crate) fn get_default(&self) -> Option<&Arc<CorsHeaders>> {
@@ -772,8 +788,12 @@ impl<'a> Route<'a> {
     }
 
     /// Sets the named CORS policy for this route
+    ///
+    /// # Panics
+    /// If no policy is configured with that name, by [`CorsConfig::with_name`].
+    #[track_caller]
     pub fn cors_with(self, name: &str) -> Self {
-        let policy = self.cors.get_named(name).expect("cors policy").clone();
+        let policy = self.cors.expect_named(name);
 
         self.cors_override(CorsOverride::Named(policy))
     }
@@ -811,8 +831,12 @@ impl<'a> RouteGroup<'a> {
     ///
     /// Applies to the routes mapped before this call as well as after it, and a route
     /// or a nested group that set a policy of its own keeps it.
+    ///
+    /// # Panics
+    /// If no policy is configured with that name, by [`CorsConfig::with_name`].
+    #[track_caller]
     pub fn cors_with(&mut self, name: &str) -> &mut Self {
-        let policy = self.app.cors.get_named(name).expect("cors policy").clone();
+        let policy = self.app.cors.expect_named(name);
 
         self.cors = Some(CorsOverride::Named(policy));
         self
@@ -1350,5 +1374,27 @@ mod tests {
             .with_expose_any_header()
             .with_credentials();
         config.validate();
+    }
+
+    #[test]
+    #[should_panic(expected = "CORS policy \"admin\" is not configured; add it with \
+        `App::with_cors(|cors| cors.with_name(\"admin\") ...)`")]
+    fn it_panics_naming_an_unknown_policy_of_a_route() {
+        let mut app =
+            App::new().with_cors(|cors| cors.with_name("api").with_origins(["http://localhost"]));
+
+        app.map_get("/", || async {}).cors_with("admin");
+    }
+
+    #[test]
+    #[should_panic(expected = "CORS policy \"admin\" is not configured; add it with \
+        `App::with_cors(|cors| cors.with_name(\"admin\") ...)`")]
+    fn it_panics_naming_an_unknown_policy_of_a_group() {
+        let mut app =
+            App::new().with_cors(|cors| cors.with_name("api").with_origins(["http://localhost"]));
+
+        app.group("/api", |api| {
+            api.cors_with("admin");
+        });
     }
 }
