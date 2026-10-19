@@ -93,17 +93,13 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
         let mut writer = BufWriter::new(file);
         let mut stream = self.stream;
 
-        while let Some(next) = stream.frame().await {
-            match next {
-                Ok(frame) => {
-                    if let Some(chunk) = frame.data_ref() {
-                        writer.write_all(chunk).await?
-                    } else {
-                        break;
-                    }
-                }
-                Err(err) => return Err(FileStreamError::read_error(err)),
+        // A body that fails to read - a `413` for one over the body limit - fails with its
+        // own status and message
+        while let Some(frame) = stream.frame().await {
+            let Ok(chunk) = frame?.into_data() else {
+                break;
             };
+            writer.write_all(&chunk).await?
         }
         writer.flush().map_err(FileStreamError::flush_error).await
     }
@@ -164,12 +160,6 @@ impl FromPayload for File {
 struct FileStreamError;
 
 impl FileStreamError {
-    /// The body could not be read: a `413` for one over the body limit keeps its status
-    #[inline]
-    fn read_error(error: Error) -> Error {
-        Error::from_parts(error.status(), None, format!("File Stream error: {error}"))
-    }
-
     #[inline]
     fn flush_error(error: std::io::Error) -> Error {
         Error::client_error(format!("File Stream error: {error}"))

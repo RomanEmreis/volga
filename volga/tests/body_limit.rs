@@ -22,6 +22,9 @@ async fn report_limit(req: HttpRequest) -> volga::HttpResult {
     ok!(req.body_limit())
 }
 
+/// What a body over the limit is answered with, however it is read
+const TOO_LARGE: &str = "request body is larger than the limit";
+
 /// The status and the body `path` answers a `POST` of `len` bytes with
 async fn post(server: &TestServer, path: &str, len: usize) -> (u16, String) {
     let response = server
@@ -59,10 +62,7 @@ async fn it_answers_413_for_a_body_over_the_application_limit() {
         .await;
 
     assert_eq!(post(&server, "/upload", 16).await, (200, "16".into()));
-    assert_eq!(
-        post(&server, "/upload", 17).await,
-        (413, "length limit exceeded".into())
-    );
+    assert_eq!(post(&server, "/upload", 17).await, (413, TOO_LARGE.into()));
 
     server.shutdown().await;
 }
@@ -88,6 +88,85 @@ async fn it_answers_413_to_a_json_body_over_the_limit() {
         .unwrap();
 
     assert_eq!(response.status(), 413);
+
+    server.shutdown().await;
+}
+
+/// An extractor that reads the body passes a body over the limit on as it is: it was never
+/// parsed, so no "JSON parsing error" or "Form Data parsing error" in front of it (#277)
+#[tokio::test]
+async fn it_answers_413_with_the_same_message_whichever_extractor_reads_the_body() {
+    use std::collections::HashMap;
+    use volga::{File, Form, test::TempFile};
+
+    let saved = TempFile::empty();
+    let path = saved.path.clone();
+
+    let server = TestServer::builder()
+        .configure(|app| app.with_body_limit(Limit::Limited(16)))
+        .setup(move |app| {
+            app.map_post("/raw", read_body);
+            app.map_post("/json", |Json(value): Json<serde_json::Value>| async move {
+                ok!(value)
+            });
+            app.map_post(
+                "/form",
+                |Form(value): Form<HashMap<String, String>>| async move { ok!(value) },
+            );
+            app.map_post("/file", move |file: File| {
+                let path = path.clone();
+                async move {
+                    file.save_as(path).await?;
+                    ok!()
+                }
+            });
+            #[cfg(feature = "multipart")]
+            app.map_post("/multipart", |mut multipart: volga::Multipart| async move {
+                while let Some(field) = multipart.next_field().await? {
+                    field.text().await?;
+                }
+                ok!()
+            });
+        })
+        .build()
+        .await;
+
+    let client = server.client();
+    let too_long = "a value too long to fit";
+    let requests = [
+        ("raw", client.post(server.url("/raw")).body(too_long)),
+        (
+            "json",
+            client
+                .post(server.url("/json"))
+                .json(&serde_json::json!({ "name": too_long })),
+        ),
+        (
+            "form",
+            client
+                .post(server.url("/form"))
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body("name=a+value+too+long+to+fit"),
+        ),
+        ("file", client.post(server.url("/file")).body(too_long)),
+    ];
+    #[cfg(feature = "multipart")]
+    let requests = requests.into_iter().chain([(
+        "multipart",
+        client
+            .post(server.url("/multipart"))
+            .multipart(reqwest::multipart::Form::new().text("name", too_long)),
+    )]);
+
+    for (name, request) in requests {
+        let response = request.send().await.unwrap();
+
+        assert_eq!(
+            (response.status().as_u16(), response.text().await.unwrap()),
+            (413, TOO_LARGE.into()),
+            "{name}"
+        );
+    }
 
     server.shutdown().await;
 }
