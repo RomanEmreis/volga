@@ -147,11 +147,30 @@ impl App {
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth);
     /// ```
-    pub fn with_bearer_auth<F>(mut self, config: F) -> Self
+    pub fn with_bearer_auth<F>(self, config: F) -> Self
     where
         F: FnOnce(BearerAuthConfig) -> BearerAuthConfig,
     {
-        self.auth_config = Some(config(Default::default()));
+        self.set_bearer_auth(config(Default::default()))
+    }
+
+    /// Configures a web server with the specified Bearer Token Authentication & Authorization
+    /// configuration
+    ///
+    /// The value form of [`with_bearer_auth`](App::with_bearer_auth), for a configuration
+    /// built elsewhere.
+    ///
+    /// Default: `None`
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, auth::BearerAuthConfig};
+    ///
+    /// let auth = BearerAuthConfig::default();
+    /// let app = App::new().set_bearer_auth(auth);
+    /// ```
+    pub fn set_bearer_auth(mut self, config: BearerAuthConfig) -> Self {
+        self.auth_config = Some(config);
         self
     }
 
@@ -178,11 +197,31 @@ impl App {
     /// app.use_oauth();
     /// ```
     #[cfg(feature = "oauth-client")]
-    pub fn with_oauth<F>(mut self, config: F) -> Self
+    pub fn with_oauth<F>(self, config: F) -> Self
     where
         F: FnOnce(OAuthConfig) -> OAuthConfig,
     {
-        self.oauth_client_config = Some(config(Default::default()));
+        self.set_oauth(config(Default::default()))
+    }
+
+    /// Describes the OAuth 2.1/OIDC issuer whose keys validate bearer
+    /// tokens - activate it explicitly with [`use_oauth`](App::use_oauth)
+    ///
+    /// The value form of [`with_oauth`](App::with_oauth), for a configuration
+    /// built elsewhere.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, auth::OAuthConfig};
+    ///
+    /// let oauth = OAuthConfig::default().with_issuer("https://auth.example.com");
+    /// let mut app = App::new().set_oauth(oauth);
+    ///
+    /// app.use_oauth();
+    /// ```
+    #[cfg(feature = "oauth-client")]
+    pub fn set_oauth(mut self, config: OAuthConfig) -> Self {
+        self.oauth_client_config = Some(config);
         self
     }
 
@@ -839,5 +878,24 @@ mod tests {
 
         assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(error.instance().is_none());
+    }
+
+    #[test]
+    fn it_sets_bearer_auth() {
+        let app = App::new().set_bearer_auth(BearerAuthConfig::default());
+
+        assert!(app.auth_config.is_some());
+    }
+
+    #[test]
+    #[cfg(feature = "oauth-client")]
+    fn it_sets_oauth() {
+        let app =
+            App::new().set_oauth(OAuthConfig::default().with_issuer("https://auth.example.com"));
+
+        assert_eq!(
+            app.oauth_client_config.and_then(|oauth| oauth.issuer),
+            Some("https://auth.example.com".to_owned())
+        );
     }
 }

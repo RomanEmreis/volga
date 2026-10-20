@@ -508,11 +508,28 @@ impl App {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn with_cache_control<F>(mut self, config: F) -> Self
+    pub fn with_cache_control<F>(self, config: F) -> Self
     where
-        F: Fn(CacheControl) -> CacheControl,
+        F: FnOnce(CacheControl) -> CacheControl,
     {
-        self.cache_control = Some(config(CacheControl::default()));
+        self.set_cache_control(config(CacheControl::default()))
+    }
+
+    /// Configures a `cache-control` header that will be added for all responses from this server
+    /// if they are not explicitly configured for the route or route group.
+    ///
+    /// The value form of [`with_cache_control`](App::with_cache_control), for a policy built
+    /// elsewhere.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, headers::CacheControl};
+    ///
+    /// let app = App::new()
+    ///     .set_cache_control(CacheControl::default().with_no_cache());
+    /// ```
+    pub fn set_cache_control(mut self, cache_control: CacheControl) -> Self {
+        self.cache_control = Some(cache_control);
         self
     }
 }
@@ -530,7 +547,7 @@ impl<'a> Route<'a> {
     /// let mut app = App::new();
     ///
     /// app.map_get("/hello", || async move { "Hello, World!" })
-    ///     .cache_control(|cache_control| cache_control
+    ///     .with_cache_control(|cache_control| cache_control
     ///         .with_max_age(60)
     ///         .with_immutable()
     ///         .with_public());
@@ -538,9 +555,9 @@ impl<'a> Route<'a> {
     ///# app.run().await
     ///# }
     /// ```
-    pub fn cache_control<F>(self, config: F) -> Self
+    pub fn with_cache_control<F>(self, config: F) -> Self
     where
-        F: Fn(CacheControl) -> CacheControl,
+        F: FnOnce(CacheControl) -> CacheControl,
     {
         let hv: HeaderValue = config(CacheControl::default())
             .try_into()
@@ -549,6 +566,15 @@ impl<'a> Route<'a> {
         self.map_ok(move |resp: HttpResponse| {
             make_cache_control_fn(resp, hv.clone(), HeaderInsertMode::Override)
         })
+    }
+
+    /// Adds middleware that includes a configured `cache-control` header for all responses from this route.
+    #[deprecated(since = "0.14.1", note = "renamed to `with_cache_control`")]
+    pub fn cache_control<F>(self, config: F) -> Self
+    where
+        F: Fn(CacheControl) -> CacheControl,
+    {
+        self.with_cache_control(config)
     }
 }
 
@@ -565,19 +591,19 @@ impl<'a> RouteGroup<'a> {
     /// let mut app = App::new();
     ///
     /// app.group("/greeting", |api| {
-    ///     api.cache_control(|cache_control| cache_control
+    ///     api.with_cache_control(|cache_control| cache_control
     ///         .with_max_age(60)
     ///         .with_immutable()
     ///         .with_public());
     ///
-    ///     api.map_get("/hello", || async move { "Hello, World!" });    
+    ///     api.map_get("/hello", || async move { "Hello, World!" });
     /// });
     ///# app.run().await
     ///# }
     /// ```
-    pub fn cache_control<F>(&mut self, config: F) -> &mut Self
+    pub fn with_cache_control<F>(&mut self, config: F) -> &mut Self
     where
-        F: Fn(CacheControl) -> CacheControl,
+        F: FnOnce(CacheControl) -> CacheControl,
     {
         let hv: HeaderValue = config(CacheControl::default())
             .try_into()
@@ -586,6 +612,15 @@ impl<'a> RouteGroup<'a> {
         self.map_ok(move |resp: HttpResponse| {
             make_cache_control_fn(resp, hv.clone(), HeaderInsertMode::IfAbsent)
         })
+    }
+
+    /// Adds middleware that includes a configured `cache-control` header for all responses from this group of routes.
+    #[deprecated(since = "0.14.1", note = "renamed to `with_cache_control`")]
+    pub fn cache_control<F>(&mut self, config: F) -> &mut Self
+    where
+        F: Fn(CacheControl) -> CacheControl,
+    {
+        self.with_cache_control(config)
     }
 }
 

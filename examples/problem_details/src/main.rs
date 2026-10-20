@@ -19,7 +19,7 @@ async fn main() -> std::io::Result<()> {
 
     // Enabling global error handler that produces
     // error responses in Problem details format
-    app.use_problem_details();
+    app.map_problem();
 
     app.map_get("/error", || async {
         tracing::trace!("producing error");

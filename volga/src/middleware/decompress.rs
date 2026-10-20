@@ -104,11 +104,30 @@ impl_decompressor!(zstd, ZstdDecoder, false);
 
 impl App {
     /// Configures limits for the decompression middleware.
-    pub fn with_decompression_limits<F>(mut self, configure: F) -> Self
+    pub fn with_decompression_limits<F>(self, configure: F) -> Self
     where
         F: FnOnce(DecompressionLimits) -> DecompressionLimits,
     {
-        self.decompression_limits = configure(self.decompression_limits);
+        let limits = configure(self.decompression_limits);
+        self.set_decompression_limits(limits)
+    }
+
+    /// Replaces the limits of the decompression middleware.
+    ///
+    /// The value form of [`with_decompression_limits`](App::with_decompression_limits), for
+    /// limits built elsewhere. Unlike the closure, which starts from the limits already set,
+    /// it replaces them all.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, Limit, middleware::decompress::DecompressionLimits};
+    ///
+    /// let limits = DecompressionLimits::default()
+    ///     .with_max_decompressed(Limit::Limited(8 * 1024 * 1024));
+    /// let app = App::new().set_decompression_limits(limits);
+    /// ```
+    pub fn set_decompression_limits(mut self, limits: DecompressionLimits) -> Self {
+        self.decompression_limits = limits;
         self
     }
 
@@ -464,6 +483,42 @@ mod tests {
         assert_eq!(
             app.decompression_limits.max_expansion_ratio,
             Some(ExpansionRatio::new(100, 1024 * 1024))
+        );
+    }
+
+    #[test]
+    fn it_replaces_decompression_limits() {
+        let app = App::new()
+            .with_decompression_limits(|limits| limits.with_max_compressed(Limit::Limited(1024)))
+            .set_decompression_limits(
+                DecompressionLimits::default().with_max_decompressed(Limit::Limited(2048)),
+            );
+
+        assert_eq!(
+            app.decompression_limits.max_compressed_bytes,
+            Limit::Limited(5 * 1024 * 1024)
+        );
+        assert_eq!(
+            app.decompression_limits.max_decompressed_bytes,
+            Limit::Limited(2048)
+        );
+    }
+
+    #[test]
+    fn it_configures_decompression_limits_over_the_ones_set() {
+        let app = App::new()
+            .set_decompression_limits(
+                DecompressionLimits::default().with_max_decompressed(Limit::Limited(2048)),
+            )
+            .with_decompression_limits(|limits| limits.with_max_compressed(Limit::Limited(1024)));
+
+        assert_eq!(
+            app.decompression_limits.max_compressed_bytes,
+            Limit::Limited(1024)
+        );
+        assert_eq!(
+            app.decompression_limits.max_decompressed_bytes,
+            Limit::Limited(2048)
         );
     }
 }

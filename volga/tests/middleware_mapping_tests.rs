@@ -487,7 +487,7 @@ async fn it_answers_a_filter_err_with_the_response_its_error_carries() {
 #[tokio::test]
 async fn it_answers_a_filter_err_under_problem_details() {
     let server = TestServer::spawn(|app| {
-        app.use_problem_details();
+        app.map_problem();
         app.map_get("/status", || "ok")
             .filter(|| Err::<(), _>(Error::from_parts(StatusCode::UNAUTHORIZED, None, "no key")));
         app.map_get("/carried", || "ok")

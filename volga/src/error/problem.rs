@@ -191,6 +191,9 @@ impl App {
     /// Adds a global error handler that produces error responses
     /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
     ///
+    /// This is [`map_err`](App::map_err) with a handler of volga's own, so the two replace
+    /// each other: whichever is called last handles the errors.
+    ///
     /// # Example
     /// ```no_run
     ///  use volga::App;
@@ -198,14 +201,22 @@ impl App {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     ///  let mut app = App::new();
-    ///  
-    ///  app.use_problem_details();
+    ///
+    ///  app.map_problem();
     /// # app.run().await
     /// # }
     /// ```
     #[inline]
-    pub fn use_problem_details(&mut self) -> &mut Self {
+    pub fn map_problem(&mut self) -> &mut Self {
         self.map_err(make_problem_details)
+    }
+
+    /// Adds a global error handler that produces error responses
+    /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
+    #[deprecated(since = "0.14.1", note = "renamed to `map_problem`")]
+    #[inline]
+    pub fn use_problem_details(&mut self) -> &mut Self {
+        self.map_problem()
     }
 }
 
@@ -237,7 +248,7 @@ impl<'a> Route<'a> {
 
 #[cfg(feature = "middleware")]
 impl<'a> RouteGroup<'a> {
-    /// Adds an error handler for this route group that produces error ressponses
+    /// Adds an error handler for this route group that produces error responses
     /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
     ///
     /// # Example

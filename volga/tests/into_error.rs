@@ -199,7 +199,7 @@ mod problem_details {
     #[tokio::test]
     async fn it_describes_a_status_code_err_as_a_problem() {
         let server = TestServer::spawn(|app| {
-            app.use_problem_details();
+            app.map_problem();
             app.map_get("/missing", || Err::<&'static str, _>(StatusCode::NOT_FOUND));
         })
         .await;
@@ -243,7 +243,7 @@ mod problem_details {
     #[tokio::test]
     async fn it_keeps_the_response_an_error_carries_under_problem_details() {
         let server = TestServer::spawn(|app| {
-            app.use_problem_details();
+            app.map_problem();
             app.map_get("/problem", || {
                 Err::<&'static str, _>(Problem::new(422).with_extensions(Invalid { field: "name" }))
             });
@@ -267,6 +267,57 @@ mod problem_details {
                 r#"{"code":"not_found"}"#.into()
             )
         );
+
+        server.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn it_replaces_the_error_handler_mapped_before_it() {
+        let server = TestServer::spawn(|app| {
+            app.map_err(|e: Error| async move { volga::status!(e.status().as_u16(), "handled") });
+            app.map_problem();
+            app.map_get("/missing", || Err::<&'static str, _>(StatusCode::NOT_FOUND));
+        })
+        .await;
+
+        let (status, content_type, _) = get(&server, "/missing").await;
+
+        assert_eq!(status, 404);
+        assert_eq!(content_type, "application/problem+json");
+
+        server.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn it_is_replaced_by_the_error_handler_mapped_after_it() {
+        let server = TestServer::spawn(|app| {
+            app.map_problem();
+            app.map_err(|e: Error| async move { volga::status!(e.status().as_u16(), "handled") });
+            app.map_get("/missing", || Err::<&'static str, _>(StatusCode::NOT_FOUND));
+        })
+        .await;
+
+        assert_eq!(
+            get(&server, "/missing").await,
+            (404, "text/plain; charset=utf-8".into(), "handled".into())
+        );
+
+        server.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[allow(deprecated)]
+    async fn it_describes_errors_as_problems_under_the_old_name() {
+        let server = TestServer::spawn(|app| {
+            app.use_problem_details();
+            app.map_get("/missing", || Err::<&'static str, _>(StatusCode::NOT_FOUND));
+        })
+        .await;
+
+        let (status, content_type, _) = get(&server, "/missing").await;
+
+        assert_eq!(status, 404);
+        assert_eq!(content_type, "application/problem+json");
 
         server.shutdown().await;
     }

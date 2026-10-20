@@ -315,7 +315,7 @@ async fn it_reports_a_custom_status() {
 #[tokio::test]
 async fn it_renders_problem_details() {
     let server = TestServer::spawn(|app| {
-        app.use_problem_details();
+        app.map_problem();
         app.map_post("/put", async |_: ValidJson<KeyValue>| -> HttpResult {
             unreachable!("the handler must not be called for an invalid payload")
         });

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.14.1
+
+## Added
+* `App::set_bearer_auth`, `App::set_oauth`, `App::set_cache_control`, `App::set_http2_limits` and `App::set_decompression_limits` install a config built elsewhere, as `set_cors` and `set_tls` do. Every `with_X(closure)` on `App` that builds a config object now has a `set_X(config)` peer. `set_X` replaces the config whole, where `with_http2_limits` and `with_decompression_limits` hand the closure the limits already set. (#291)
+
+## Changed
+* `docs/api-design.md` writes down one naming rule per level. On `App` the prefix encodes the phase: `with_*`, `set_*` and `without_*` take `self` and build the server or define policies, `use_*` and `map_*` take `&mut self` and change the pipeline or the routes. On `Route` and `RouteGroup` the name says where the policy comes from: `with_X` defines it in the call, `X()` / `X_with(name)` / `disable_X()` select one defined on `App`. When the question is the same, the name is the same on every level. (#291)
+* `Route::cache_control` and `RouteGroup::cache_control` are renamed to `with_cache_control`, the name `App` already used: the policy is defined in the call and means the same on all three levels, like `with_body_limit`. The closure is `FnOnce` on all three, `App`'s included. The old names stay as deprecated aliases. (#291)
+* `App::use_problem_details` is renamed to `App::map_problem`, the name `Route` and `RouteGroup` already used. It is `map_err` with a handler of volga's own, so `app.map_err(h); app.map_problem();` replaces `h`, and the other way round. The old name stays as a deprecated alias. (#291)
+
 # 0.14.0
 
 ## Added

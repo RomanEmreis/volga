@@ -408,7 +408,7 @@ async fn it_starts_when_problem_details_replace_an_error_handler_taking_a_servic
 
     let server = TestServer::spawn(|app| {
         app.map_err(|err: Error, _: Dc<Unregistered>| async move { err });
-        app.use_problem_details();
+        app.map_problem();
         app.map_get("/", || async { "ok" });
     })
     .await;
