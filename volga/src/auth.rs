@@ -226,19 +226,24 @@ impl App {
     }
 
     /// Explicitly enables validation of bearer tokens against the OAuth
-    /// issuer configured with [`with_oauth`](App::with_oauth)
+    /// issuer configured with [`with_oauth`](App::with_oauth) or
+    /// [`set_oauth`](App::set_oauth)
     ///
     /// # Panics
-    /// Panics when [`with_oauth`](App::with_oauth) was not called or did
-    /// not configure an issuer.
+    /// Panics when no OAuth configuration is set (via
+    /// [`with_oauth`](App::with_oauth), [`set_oauth`](App::set_oauth) or the
+    /// `[oauth.client]` config file section), or when it names no issuer.
     #[cfg(feature = "oauth-client")]
     pub fn use_oauth(&mut self) -> &mut Self {
         match &self.oauth_client_config {
             Some(config) if config.issuer.is_some() => self.oauth_client_enabled = true,
             Some(_) => panic!(
-                "OAuth issuer is not configured; call `with_oauth(|oauth| oauth.with_issuer(..))` first"
+                "OAuth issuer is not configured; call `with_oauth(|oauth| oauth.with_issuer(..))` \
+                or `set_oauth(..)` with an issuer first"
             ),
-            None => panic!("OAuth is not configured; call `with_oauth(..)` first"),
+            None => {
+                panic!("OAuth is not configured; call `with_oauth(..)` or `set_oauth(..)` first")
+            }
         }
         self
     }
@@ -897,5 +902,26 @@ mod tests {
             app.oauth_client_config.and_then(|oauth| oauth.issuer),
             Some("https://auth.example.com".to_owned())
         );
+    }
+
+    #[test]
+    #[cfg(feature = "oauth-client")]
+    #[should_panic(
+        expected = "OAuth is not configured; call `with_oauth(..)` or `set_oauth(..)` first"
+    )]
+    fn it_names_both_setters_when_use_oauth_finds_no_config() {
+        let mut app = App::new();
+        app.use_oauth();
+    }
+
+    #[test]
+    #[cfg(feature = "oauth-client")]
+    #[should_panic(
+        expected = "OAuth issuer is not configured; call `with_oauth(|oauth| oauth.with_issuer(..))` \
+        or `set_oauth(..)` with an issuer first"
+    )]
+    fn it_names_both_setters_when_use_oauth_finds_no_issuer() {
+        let mut app = App::new().set_oauth(OAuthConfig::default());
+        app.use_oauth();
     }
 }

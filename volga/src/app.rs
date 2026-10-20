@@ -162,7 +162,7 @@ pub struct App {
     #[cfg(feature = "oauth")]
     pub(super) oauth_server_metadata: Option<crate::auth::oauth::AuthorizationServerMetadata>,
 
-    /// OAuth 2.1/OIDC issuer configuration set by [`App::with_oauth`]
+    /// OAuth 2.1/OIDC issuer configuration set by [`App::with_oauth`] or [`App::set_oauth`]
     #[cfg(feature = "oauth-client")]
     pub(super) oauth_client_config: Option<crate::auth::OAuthConfig>,
 
