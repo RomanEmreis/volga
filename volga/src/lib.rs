@@ -96,7 +96,9 @@ pub use http::HttpRequestMut;
 
 pub use limits::Limit;
 
-pub use validation::{Valid, ValidForm, ValidJson, ValidPath, ValidQuery};
+#[allow(deprecated)]
+pub use validation::ValidPath;
+pub use validation::{Valid, ValidForm, ValidJson, ValidNamedPath, ValidQuery};
 
 #[cfg(feature = "multipart")]
 pub use {
