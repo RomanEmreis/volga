@@ -183,11 +183,30 @@ impl App {
     ///         .with_max_frame_size(Limit::Unlimited)
     ///     );
     /// ```
-    pub fn with_http2_limits<F>(mut self, config: F) -> Self
+    pub fn with_http2_limits<F>(self, config: F) -> Self
     where
         F: FnOnce(Http2Limits) -> Http2Limits,
     {
-        self.http2_limits = config(self.http2_limits);
+        let limits = config(self.http2_limits);
+        self.set_http2_limits(limits)
+    }
+
+    /// Replaces the HTTP/2-specific limits of the server.
+    ///
+    /// The value form of [`with_http2_limits`](App::with_http2_limits), for limits built
+    /// elsewhere. Unlike the closure, which starts from the limits already set, it replaces
+    /// them all.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use volga::{App, Limit, limits::Http2Limits};
+    ///
+    /// let limits = Http2Limits::new().with_max_concurrent_streams(Limit::Limited(200));
+    /// let app = App::new().set_http2_limits(limits);
+    /// ```
+    pub fn set_http2_limits(mut self, limits: Http2Limits) -> Self {
+        self.http2_limits = limits;
         self
     }
 }
@@ -216,6 +235,26 @@ mod tests {
             app.http2_limits.max_local_error_reset_streams,
             Limit::Unlimited
         );
+    }
+
+    #[test]
+    fn it_replaces_http2_limits() {
+        let app = App::new()
+            .with_http2_limits(|limits| limits.with_max_frame_size(Limit::Unlimited))
+            .set_http2_limits(Http2Limits::new().with_max_concurrent_streams(Limit::Limited(100)));
+
+        assert_eq!(app.http2_limits.max_concurrent_streams, Limit::Limited(100));
+        assert_eq!(app.http2_limits.max_frame_size, Limit::Default);
+    }
+
+    #[test]
+    fn it_configures_http2_limits_over_the_ones_set() {
+        let app = App::new()
+            .set_http2_limits(Http2Limits::new().with_max_concurrent_streams(Limit::Limited(100)))
+            .with_http2_limits(|limits| limits.with_max_frame_size(Limit::Unlimited));
+
+        assert_eq!(app.http2_limits.max_concurrent_streams, Limit::Limited(100));
+        assert_eq!(app.http2_limits.max_frame_size, Limit::Unlimited);
     }
 
     #[test]

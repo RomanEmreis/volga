@@ -53,7 +53,7 @@ async fn main() -> std::io::Result<()> {
     let mut app = App::new();
 
     // Renders the validation failures as RFC 9457 problem details
-    app.use_problem_details();
+    app.map_problem();
 
     app.map_post("/put", async |val: ValidJson<KeyValue>| {
         ok!("{}={}", val.key, val.value)

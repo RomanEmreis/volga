@@ -286,11 +286,11 @@ impl Error {
     /// The default error handler and
     #[cfg_attr(
         feature = "problem-details",
-        doc = "[`use_problem_details`](App::use_problem_details) answer with the response unchanged."
+        doc = "[`map_problem`](App::map_problem) answer with the response unchanged."
     )]
     #[cfg_attr(
         not(feature = "problem-details"),
-        doc = "`use_problem_details` (feature `problem-details`) answer with the response unchanged."
+        doc = "`map_problem` (feature `problem-details`) answer with the response unchanged."
     )]
     ///
     /// The response takes the error's status, whatever status it was built with, so a body
@@ -429,7 +429,7 @@ impl App {
     {
         let handler: PipelineErrorHandler = ErrorFunc::new(handler).into();
 
-        // A later `map_err`, or `use_problem_details`, replaces this handler, and what it
+        // A later `map_err`, or `map_problem`, replaces this handler, and what it
         // resolves cannot fail a request after that
         #[cfg(feature = "di")]
         self.require_while_held(&handler, "`map_err`", Args::dependencies);

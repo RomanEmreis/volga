@@ -147,11 +147,30 @@ impl App {
     /// let app = App::new()
     ///     .with_bearer_auth(|auth| auth);
     /// ```
-    pub fn with_bearer_auth<F>(mut self, config: F) -> Self
+    pub fn with_bearer_auth<F>(self, config: F) -> Self
     where
         F: FnOnce(BearerAuthConfig) -> BearerAuthConfig,
     {
-        self.auth_config = Some(config(Default::default()));
+        self.set_bearer_auth(config(Default::default()))
+    }
+
+    /// Configures a web server with the specified Bearer Token Authentication & Authorization
+    /// configuration
+    ///
+    /// The value form of [`with_bearer_auth`](App::with_bearer_auth), for a configuration
+    /// built elsewhere.
+    ///
+    /// Default: `None`
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, auth::BearerAuthConfig};
+    ///
+    /// let auth = BearerAuthConfig::default();
+    /// let app = App::new().set_bearer_auth(auth);
+    /// ```
+    pub fn set_bearer_auth(mut self, config: BearerAuthConfig) -> Self {
+        self.auth_config = Some(config);
         self
     }
 
@@ -178,28 +197,53 @@ impl App {
     /// app.use_oauth();
     /// ```
     #[cfg(feature = "oauth-client")]
-    pub fn with_oauth<F>(mut self, config: F) -> Self
+    pub fn with_oauth<F>(self, config: F) -> Self
     where
         F: FnOnce(OAuthConfig) -> OAuthConfig,
     {
-        self.oauth_client_config = Some(config(Default::default()));
+        self.set_oauth(config(Default::default()))
+    }
+
+    /// Describes the OAuth 2.1/OIDC issuer whose keys validate bearer
+    /// tokens - activate it explicitly with [`use_oauth`](App::use_oauth)
+    ///
+    /// The value form of [`with_oauth`](App::with_oauth), for a configuration
+    /// built elsewhere.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, auth::OAuthConfig};
+    ///
+    /// let oauth = OAuthConfig::default().with_issuer("https://auth.example.com");
+    /// let mut app = App::new().set_oauth(oauth);
+    ///
+    /// app.use_oauth();
+    /// ```
+    #[cfg(feature = "oauth-client")]
+    pub fn set_oauth(mut self, config: OAuthConfig) -> Self {
+        self.oauth_client_config = Some(config);
         self
     }
 
     /// Explicitly enables validation of bearer tokens against the OAuth
-    /// issuer configured with [`with_oauth`](App::with_oauth)
+    /// issuer configured with [`with_oauth`](App::with_oauth) or
+    /// [`set_oauth`](App::set_oauth)
     ///
     /// # Panics
-    /// Panics when [`with_oauth`](App::with_oauth) was not called or did
-    /// not configure an issuer.
+    /// Panics when no OAuth configuration is set (via
+    /// [`with_oauth`](App::with_oauth), [`set_oauth`](App::set_oauth) or the
+    /// `[oauth.client]` config file section), or when it names no issuer.
     #[cfg(feature = "oauth-client")]
     pub fn use_oauth(&mut self) -> &mut Self {
         match &self.oauth_client_config {
             Some(config) if config.issuer.is_some() => self.oauth_client_enabled = true,
             Some(_) => panic!(
-                "OAuth issuer is not configured; call `with_oauth(|oauth| oauth.with_issuer(..))` first"
+                "OAuth issuer is not configured; call `with_oauth(|oauth| oauth.with_issuer(..))` \
+                or `set_oauth(..)` with an issuer first"
             ),
-            None => panic!("OAuth is not configured; call `with_oauth(..)` first"),
+            None => {
+                panic!("OAuth is not configured; call `with_oauth(..)` or `set_oauth(..)` first")
+            }
         }
         self
     }
@@ -839,5 +883,45 @@ mod tests {
 
         assert_eq!(error.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(error.instance().is_none());
+    }
+
+    #[test]
+    fn it_sets_bearer_auth() {
+        let app = App::new().set_bearer_auth(BearerAuthConfig::default());
+
+        assert!(app.auth_config.is_some());
+    }
+
+    #[test]
+    #[cfg(feature = "oauth-client")]
+    fn it_sets_oauth() {
+        let app =
+            App::new().set_oauth(OAuthConfig::default().with_issuer("https://auth.example.com"));
+
+        assert_eq!(
+            app.oauth_client_config.and_then(|oauth| oauth.issuer),
+            Some("https://auth.example.com".to_owned())
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "oauth-client")]
+    #[should_panic(
+        expected = "OAuth is not configured; call `with_oauth(..)` or `set_oauth(..)` first"
+    )]
+    fn it_names_both_setters_when_use_oauth_finds_no_config() {
+        let mut app = App::new();
+        app.use_oauth();
+    }
+
+    #[test]
+    #[cfg(feature = "oauth-client")]
+    #[should_panic(
+        expected = "OAuth issuer is not configured; call `with_oauth(|oauth| oauth.with_issuer(..))` \
+        or `set_oauth(..)` with an issuer first"
+    )]
+    fn it_names_both_setters_when_use_oauth_finds_no_issuer() {
+        let mut app = App::new().set_oauth(OAuthConfig::default());
+        app.use_oauth();
     }
 }

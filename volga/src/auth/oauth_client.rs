@@ -8,7 +8,8 @@
 //! JWTs, keyed by the `kid` of each token.
 //!
 //! Enable it explicitly with [`App::use_oauth`](crate::App::use_oauth)
-//! after describing the issuer with [`App::with_oauth`](crate::App::with_oauth):
+//! after describing the issuer with [`App::with_oauth`](crate::App::with_oauth)
+//! or [`App::set_oauth`](crate::App::set_oauth):
 //!
 //! ```no_run
 //! use volga::App;
@@ -76,7 +77,8 @@ pub const DEFAULT_MAX_KEY_AGE: Duration = Duration::from_secs(15 * 60);
 /// Configuration of the OAuth 2.1/OIDC issuer whose keys validate bearer
 /// tokens
 ///
-/// Configured with [`App::with_oauth`](crate::App::with_oauth) and activated
+/// Configured with [`App::with_oauth`](crate::App::with_oauth) or
+/// [`App::set_oauth`](crate::App::set_oauth) and activated
 /// explicitly with [`App::use_oauth`](crate::App::use_oauth). The issuer is
 /// mandatory; everything else has production-safe defaults. Audience,
 /// required claims and the other token checks stay on

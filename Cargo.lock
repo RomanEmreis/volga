@@ -3243,7 +3243,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "volga"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "arc-swap",
  "async-compression",
@@ -3294,7 +3294,7 @@ dependencies = [
 
 [[package]]
 name = "volga-dev-cert"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "rcgen",
  "serial_test",
@@ -3302,14 +3302,14 @@ dependencies = [
 
 [[package]]
 name = "volga-di"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "http",
 ]
 
 [[package]]
 name = "volga-macros"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3318,7 +3318,7 @@ dependencies = [
 
 [[package]]
 name = "volga-oauth-client"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "aws-lc-rs",
  "base64 0.23.1",
@@ -3339,7 +3339,7 @@ dependencies = [
 
 [[package]]
 name = "volga-oauth-core"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "http",
  "serde",
@@ -3348,7 +3348,7 @@ dependencies = [
 
 [[package]]
 name = "volga-open-api"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "http",
  "mime",
@@ -3359,7 +3359,7 @@ dependencies = [
 
 [[package]]
 name = "volga-rate-limiter"
-version = "0.14.0"
+version = "0.14.1"
 dependencies = [
  "dashmap",
 ]
