@@ -196,6 +196,21 @@ app.map_err(|err: Error| async move { status!(500, "{err}") });
 app.map_problem(); // replaces the handler above
 ```
 
+## Type aliases over a wrapper
+
+An alias over a wrapper type is named after the wrapper followed by the name of the inner type,
+so that it reads as the type it stands for:
+
+```rust
+pub type ValidJson<T> = Valid<Json<T>>;
+pub type ValidNamedPath<T> = Valid<NamedPath<T>>;
+```
+
+An alias whose name points at a different type fails the same call-site test as a method with
+the wrong prefix: `ValidPath<T>` promised a validated `Path<T>` and delivered a `NamedPath<T>`.
+Where the wrapper cannot go around an inner type, there is no alias for it, rather than an alias
+named after it.
+
 ## Deprecating a name
 
 A rename keeps the old name as an alias that forwards to the new method:
@@ -213,6 +228,10 @@ where
 
 The alias keeps its one-line doc and drops the example. Tests, examples and docs move to the new
 name; one test per alias, under `#[allow(deprecated)]`, keeps the old name working.
+
+A renamed type alias keeps the old name the same way, as a `#[deprecated]` alias of the new one.
+Re-exporting it warns, so its `pub use` goes on a line of its own under `#[allow(deprecated)]`,
+apart from the names that are not deprecated.
 
 ## Adding a New Config Subsystem
 

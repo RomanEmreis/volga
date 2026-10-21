@@ -653,14 +653,15 @@ mod spec {
 
     #[tokio::test]
     async fn it_validates_a_named_path() {
-        use volga::ValidPath;
+        use volga::ValidNamedPath;
 
         let server = TestServer::builder()
             .configure(|app| app.with_open_api(|config| config.with_title("Validation")))
             .setup(|app| {
-                app.map_get("/items/{id}/{slug}", async |params: ValidPath<Params>| {
-                    ok!("{}:{}", params.id, params.slug)
-                });
+                app.map_get(
+                    "/items/{id}/{slug}",
+                    async |params: ValidNamedPath<Params>| ok!("{}:{}", params.id, params.slug),
+                );
                 app.use_open_api();
             })
             .build()
@@ -703,6 +704,37 @@ mod spec {
         assert_eq!(params["id"]["in"], "path");
         assert_eq!(params["id"]["schema"]["minimum"], 1);
         assert_eq!(params["slug"]["schema"]["maxLength"], 16);
+
+        server.shutdown().await;
+    }
+
+    #[tokio::test]
+    #[allow(deprecated)]
+    async fn it_validates_a_named_path_under_the_old_name() {
+        use volga::ValidPath;
+
+        let server = TestServer::spawn(|app| {
+            app.map_get("/items/{id}/{slug}", async |params: ValidPath<Params>| {
+                ok!("{}:{}", params.id, params.slug)
+            });
+        })
+        .await;
+
+        let client = server.client();
+
+        let response = client
+            .get(server.url("/items/7/widget"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.text().await.unwrap(), "7:widget");
+
+        let response = client
+            .get(server.url("/items/0/widget"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400);
 
         server.shutdown().await;
     }

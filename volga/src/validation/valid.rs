@@ -27,9 +27,9 @@ use crate::{
 /// Wraps an extractor `E` and runs [`Validate::validate`] on the payload it produced,
 /// before the handler is called.
 ///
-/// Since `Json`, `Query`, `Form` and `Path` all deref to their payload,
+/// Since `Json`, `Query`, `Form` and `NamedPath` all deref to their payload,
 /// `Valid` composes with each of them - see [`ValidJson`], [`ValidQuery`],
-/// [`ValidForm`] and [`ValidPath`] for the shorthand.
+/// [`ValidForm`] and [`ValidNamedPath`] for the shorthand.
 ///
 /// # Example
 /// ```no_run
@@ -70,13 +70,20 @@ pub type ValidForm<T> = Valid<Form<T>>;
 
 /// A [`NamedPath<T>`] payload that has been validated.
 ///
-/// Named rather than positional: a `Path<T>` of several parameters reads them into a tuple,
-/// and a tuple is not a type a downstream crate can implement [`Validate`] for.
-/// `NamedPath<T>` deserializes the parameters into a struct, which is what a derived
+/// There is no alias over the positional `Path<T>`: a `Path<T>` of several parameters reads
+/// them into a tuple, and a tuple is not a type a downstream crate can implement [`Validate`]
+/// for. `NamedPath<T>` deserializes the parameters into a struct, which is what a derived
 /// `Validate` is written against. A single parameter of a type of your own, implementing
 /// [`FromPathArg`](crate::http::endpoints::args::FromPathArg), can be validated as
 /// `Valid<Path<T>>`.
-pub type ValidPath<T> = Valid<NamedPath<T>>;
+pub type ValidNamedPath<T> = Valid<NamedPath<T>>;
+
+/// A [`NamedPath<T>`] payload that has been validated
+#[deprecated(
+    since = "0.14.1",
+    note = "renamed to `ValidNamedPath`: the alias is `Valid<NamedPath<T>>`, not `Valid<Path<T>>`"
+)]
+pub type ValidPath<T> = ValidNamedPath<T>;
 
 impl<E> Valid<E> {
     /// Unwraps the inner extractor

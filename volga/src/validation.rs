@@ -8,7 +8,9 @@ use std::{
 
 use crate::{error::Error, http::StatusCode};
 
-pub use self::valid::{Valid, ValidForm, ValidJson, ValidPath, ValidQuery};
+#[allow(deprecated)]
+pub use self::valid::ValidPath;
+pub use self::valid::{Valid, ValidForm, ValidJson, ValidNamedPath, ValidQuery};
 
 /// Derives the [`Validate`] implementation from the field attributes
 #[cfg(feature = "validation-derive")]
