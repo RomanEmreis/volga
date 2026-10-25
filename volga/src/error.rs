@@ -66,9 +66,9 @@ pub(crate) struct ErrorExtras {
 
     /// Headers added to whatever response the error answers with, by [`Error::with_header`]
     ///
-    /// Boxed apart for the reason the response is: every error the error handler sees has
-    /// an instance, and only a few carry headers.
-    headers: Option<Box<HeaderMap>>,
+    /// Held inline: an empty map allocates nothing, and the ones that are not empty - every
+    /// error under CORS, a `401`, a `405` - are spared an allocation for the map itself.
+    headers: HeaderMap,
 }
 
 impl ErrorExtras {
@@ -79,7 +79,7 @@ impl ErrorExtras {
             Box::new(Self {
                 instance: Some(instance),
                 response: None,
-                headers: None,
+                headers: HeaderMap::new(),
             })
         })
     }
@@ -437,28 +437,22 @@ impl Error {
     /// adds none; see [`with_header`](Self::with_header)
     #[inline]
     pub fn headers(&self) -> Option<&HeaderMap> {
-        self.extras
-            .as_ref()?
-            .headers
-            .as_deref()
-            .filter(|headers| !headers.is_empty())
+        Some(&self.extras.as_ref()?.headers).filter(|headers| !headers.is_empty())
     }
 
     /// Returns the headers the error adds to the response it answers with, for middleware the
     /// error passes through to add to them
     #[inline]
     pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
-        self.extras
-            .get_or_insert_with(Box::default)
-            .headers
-            .get_or_insert_with(Box::default)
+        &mut self.extras.get_or_insert_with(Box::default).headers
     }
 
     /// Takes the headers the error adds to the response it answers with, leaving the error
     /// without them
     #[inline]
     pub(crate) fn take_headers(&mut self) -> Option<HeaderMap> {
-        self.extras.as_mut()?.headers.take().map(|headers| *headers)
+        let headers = std::mem::take(&mut self.extras.as_mut()?.headers);
+        (!headers.is_empty()).then_some(headers)
     }
 
     /// Check if the status is within 500-599.
@@ -977,11 +971,12 @@ mod tests {
     }
 
     #[test]
-    fn it_allocates_no_headers_without_any() {
-        let err = Error::new("/x", "boom");
+    fn it_takes_no_headers_without_any() {
+        let mut err = Error::new("/x", "boom");
 
         assert!(err.headers().is_none());
-        assert!(err.extras.as_ref().unwrap().headers.is_none());
+        assert!(err.extras.as_ref().unwrap().headers.is_empty());
+        assert!(err.take_headers().is_none());
     }
 
     #[test]
