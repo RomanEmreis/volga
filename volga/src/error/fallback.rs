@@ -6,8 +6,10 @@ use std::{marker::PhantomData, sync::Arc};
 use crate::{
     HttpRequest, HttpResult,
     error::Error,
-    http::{FromRequestParts, GenericHandler, IntoResponse, endpoints::handlers::Handler, marker},
-    status,
+    http::{
+        FromRequestParts, GenericHandler, IntoResponse, StatusCode, endpoints::handlers::Handler,
+        marker,
+    },
 };
 
 #[cfg(feature = "middleware")]
@@ -105,10 +107,13 @@ where
 /// Holds a reference to global error handler
 pub(crate) type PipelineFallbackHandler = Arc<dyn FallbackHandler + Send + Sync>;
 
-/// Default fallback handler that creates a 404 [`HttpResult`]
+/// Default fallback handler: refuses the request with a `404` [`Error`], which the error
+/// handler answers
+///
+/// A fallback set with `map_fallback` answers with whatever it returns, as a route does.
 #[inline]
 pub(crate) async fn default_fallback_handler() -> HttpResult {
-    status!(404)
+    Err(StatusCode::NOT_FOUND.into())
 }
 
 #[cfg(test)]
@@ -117,12 +122,11 @@ mod tests {
     use crate::status;
 
     #[tokio::test]
-    async fn default_fallback_handler_returns_404() {
-        let response = default_fallback_handler().await;
-        assert!(response.is_ok());
+    async fn default_fallback_handler_refuses_with_404() {
+        let err = default_fallback_handler().await.unwrap_err();
 
-        let response = response.unwrap();
-        assert_eq!(response.status(), 404);
+        assert_eq!(err.status(), 404);
+        assert_eq!(err.to_string(), "Not Found");
     }
 
     #[tokio::test]

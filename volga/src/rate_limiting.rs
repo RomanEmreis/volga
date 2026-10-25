@@ -2,15 +2,14 @@
 
 use crate::{
     App, ClientIp, HttpRequest, HttpResult,
-    error::Error,
+    error::{Error, IntoError},
     headers::{FORWARDED, X_FORWARDED_FOR},
     http::{StatusCode, request_scope::HttpRequestScope},
     middleware::{HttpContext, Middleware, NextFn},
     routing::{Route, RouteGroup},
-    status,
 };
 use smallvec::SmallVec;
-use std::fmt::Debug;
+use std::fmt::{self, Debug};
 use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
@@ -555,7 +554,8 @@ impl App {
     ///   after it is applied.
     /// - Multiple rate-limiting middlewares may be installed, each with
     ///   its own partition key and policy.
-    /// - Rate limiting failures result in an HTTP `429 Too Many Requests` response.
+    /// - A request over the limit is refused with a `429 Too Many Requests` error, which the
+    ///   error handler answers - see [`App::map_err`].
     ///
     /// ## See also
     ///
@@ -632,7 +632,8 @@ impl App {
     ///   after it is applied.
     /// - Multiple rate-limiting middlewares may be installed, each with
     ///   its own partition key and policy.
-    /// - Rate limiting failures result in an HTTP `429 Too Many Requests` response.
+    /// - A request over the limit is refused with a `429 Too Many Requests` error, which the
+    ///   error handler answers - see [`App::map_err`].
     ///
     /// ## See also
     ///
@@ -709,7 +710,8 @@ impl App {
     ///   after it is applied.
     /// - Multiple rate-limiting middlewares may be installed, each with
     ///   its own partition key and policy.
-    /// - Rate limiting failures result in an HTTP `429 Too Many Requests` response.
+    /// - A request over the limit is refused with a `429 Too Many Requests` error, which the
+    ///   error handler answers - see [`App::map_err`].
     ///
     /// ## See also
     ///
@@ -786,7 +788,8 @@ impl App {
     ///   after it is applied.
     /// - Multiple rate-limiting middlewares may be installed, each with
     ///   its own partition key and policy.
-    /// - Rate limiting failures result in an HTTP `429 Too Many Requests` response.
+    /// - A request over the limit is refused with a `429 Too Many Requests` error, which the
+    ///   error handler answers - see [`App::map_err`].
     ///
     /// ## See also
     ///
@@ -838,7 +841,8 @@ impl<'a> Route<'a> {
     /// ## Notes
     ///
     /// - Multiple rate-limiting middlewares may be attached to the same route.
-    /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
+    /// - A request over the limit is refused with a `429 Too Many Requests` error, which the
+    ///   error handler of the route, of a group around it or of the application answers.
     pub fn fixed_window<K: RateLimitKeyExt>(self, source: K) -> Self {
         self.attach(RateLimiting::<FixedWindow>::new(source))
     }
@@ -882,7 +886,8 @@ impl<'a> Route<'a> {
     /// ## Notes
     ///
     /// - Multiple rate-limiting middlewares may be attached to the same route.
-    /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
+    /// - A request over the limit is refused with a `429 Too Many Requests` error, which the
+    ///   error handler of the route, of a group around it or of the application answers.
     pub fn sliding_window<K: RateLimitKeyExt>(self, source: K) -> Self {
         self.attach(RateLimiting::<SlidingWindow>::new(source))
     }
@@ -926,7 +931,8 @@ impl<'a> Route<'a> {
     /// ## Notes
     ///
     /// - Multiple rate-limiting middlewares may be attached to the same route.
-    /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
+    /// - A request over the limit is refused with a `429 Too Many Requests` error, which the
+    ///   error handler of the route, of a group around it or of the application answers.
     pub fn token_bucket<K: RateLimitKeyExt>(self, source: K) -> Self {
         self.attach(RateLimiting::<TokenBucket>::new(source))
     }
@@ -970,7 +976,8 @@ impl<'a> Route<'a> {
     /// ## Notes
     ///
     /// - Multiple rate-limiting middlewares may be attached to the same route.
-    /// - A rate limit violation results in an HTTP `429 Too Many Requests` response.
+    /// - A request over the limit is refused with a `429 Too Many Requests` error, which the
+    ///   error handler of the route, of a group around it or of the application answers.
     pub fn gcra<K: RateLimitKeyExt>(self, source: K) -> Self {
         self.attach(RateLimiting::<Gcra>::new(source))
     }
@@ -1185,6 +1192,29 @@ impl Middleware for RateLimiting<Gcra> {
     }
 }
 
+/// The error a request over its rate limit is refused with: `429`, through the error handler
+///
+/// It carries nothing, so the error it becomes allocates nothing for it - refusing a request
+/// is as hot a path under load as answering one.
+#[derive(Debug)]
+struct RateLimitExceeded;
+
+impl fmt::Display for RateLimitExceeded {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(RATE_LIMIT_ERROR_MSG)
+    }
+}
+
+impl std::error::Error for RateLimitExceeded {}
+
+impl IntoError for RateLimitExceeded {
+    #[inline]
+    fn into_error(self) -> Error {
+        Error::from_parts(StatusCode::TOO_MANY_REQUESTS, None, self)
+    }
+}
+
 #[inline]
 async fn check_fixed_window(
     ctx: HttpContext,
@@ -1194,10 +1224,7 @@ async fn check_fixed_window(
     if let Some(limiter) = ctx.fixed_window_rate_limiter(binding.policy.as_deref()) {
         let key = binding.key.extract(ctx.request())?;
         if !limiter.check(key) {
-            status!(
-                StatusCode::TOO_MANY_REQUESTS.as_u16(),
-                text: RATE_LIMIT_ERROR_MSG
-            )
+            Err(RateLimitExceeded.into())
         } else {
             next(ctx).await
         }
@@ -1215,10 +1242,7 @@ async fn check_sliding_window(
     if let Some(limiter) = ctx.sliding_window_rate_limiter(binding.policy.as_deref()) {
         let key = binding.key.extract(ctx.request())?;
         if !limiter.check(key) {
-            status!(
-                StatusCode::TOO_MANY_REQUESTS.as_u16(),
-                text: RATE_LIMIT_ERROR_MSG
-            )
+            Err(RateLimitExceeded.into())
         } else {
             next(ctx).await
         }
@@ -1236,10 +1260,7 @@ async fn check_token_bucket(
     if let Some(limiter) = ctx.token_bucket_rate_limiter(binding.policy.as_deref()) {
         let key = binding.key.extract(ctx.request())?;
         if !limiter.check(key) {
-            status!(
-                StatusCode::TOO_MANY_REQUESTS.as_u16(),
-                text: RATE_LIMIT_ERROR_MSG
-            )
+            Err(RateLimitExceeded.into())
         } else {
             next(ctx).await
         }
@@ -1253,10 +1274,7 @@ async fn check_gcra(ctx: HttpContext, binding: RateLimitBinding, next: NextFn) -
     if let Some(limiter) = ctx.gcra_rate_limiter(binding.policy.as_deref()) {
         let key = binding.key.extract(ctx.request())?;
         if !limiter.check(key) {
-            status!(
-                StatusCode::TOO_MANY_REQUESTS.as_u16(),
-                text: RATE_LIMIT_ERROR_MSG
-            )
+            Err(RateLimitExceeded.into())
         } else {
             next(ctx).await
         }

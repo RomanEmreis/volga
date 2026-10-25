@@ -12,6 +12,7 @@ use std::{
 
 use super::{
     App, HttpResponse,
+    headers::{HeaderMap, TryIntoHeaderPair},
     http::{
         FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode,
         endpoints::route::check_path_arity,
@@ -45,11 +46,12 @@ pub struct Error {
     /// Inner error object
     pub(crate) inner: BoxError,
 
-    /// The instance and the attached response, allocated only once either is set
+    /// The instance, the attached response and the error headers, allocated only once any
+    /// of them is set
     ///
-    /// Most errors carry neither until the error handler names the instance, so keeping them
-    /// out of line holds an `Error` - and with it every `Result<T, Error>`, an extractor's
-    /// included - at a status code and three words.
+    /// Most errors carry none of them until the error handler names the instance, so keeping
+    /// them out of line holds an `Error` - and with it every `Result<T, Error>`, an
+    /// extractor's included - at a status code and three words.
     pub(crate) extras: Option<Box<ErrorExtras>>,
 }
 
@@ -61,6 +63,12 @@ pub(crate) struct ErrorExtras {
 
     /// A response the error answers with, attached by [`Error::with_response`]
     response: Option<AttachedResponse>,
+
+    /// Headers added to whatever response the error answers with, by [`Error::with_header`]
+    ///
+    /// Held inline: an empty map allocates nothing, and the ones that are not empty - every
+    /// error under CORS, a `401`, a `405` - are spared an allocation for the map itself.
+    headers: HeaderMap,
 }
 
 impl ErrorExtras {
@@ -71,6 +79,7 @@ impl ErrorExtras {
             Box::new(Self {
                 instance: Some(instance),
                 response: None,
+                headers: HeaderMap::new(),
             })
         })
     }
@@ -118,6 +127,7 @@ impl fmt::Debug for Error {
             .field("instance", &self.instance())
             .field("inner", &self.inner)
             .field("response", &response)
+            .field("headers", &self.headers())
             .finish()
     }
 }
@@ -265,14 +275,16 @@ impl Error {
 
     /// Unwraps the inner error
     ///
-    /// A response attached with [`with_response`](Self::with_response) is dropped.
+    /// A response attached with [`with_response`](Self::with_response) and the headers added
+    /// with [`with_header`](Self::with_header) are dropped.
     pub fn into_inner(self) -> BoxError {
         self.inner
     }
 
     /// Unwraps the error into a tuple of status code, instance value and underlying error
     ///
-    /// A response attached with [`with_response`](Self::with_response) is dropped.
+    /// A response attached with [`with_response`](Self::with_response) and the headers added
+    /// with [`with_header`](Self::with_header) are dropped.
     pub fn into_parts(self) -> (StatusCode, Option<String>, BoxError) {
         let instance = self.extras.and_then(|extras| extras.instance);
         (self.status, instance, self.inner)
@@ -297,6 +309,9 @@ impl Error {
     /// can be passed alone, such as a [`Json`](crate::Json) value. The status, the instance
     /// and the message stay what they were, for whatever reads the error. If `response`
     /// fails to build, the error is returned without it and answers as it would have.
+    ///
+    /// Headers added with [`with_header`](Self::with_header) are added to this response as
+    /// to any other the error answers with, unless it sets them itself.
     ///
     /// # Example
     /// ```no_run
@@ -365,6 +380,81 @@ impl Error {
             .map(AttachedResponse::into_inner)
     }
 
+    /// Adds a header to whatever response the error answers with
+    ///
+    /// The headers are part of the error rather than of one way to render it: the framework
+    /// adds them to the response the error handler answers with - the default one,
+    #[cfg_attr(feature = "problem-details", doc = "[`map_problem`](App::map_problem)")]
+    #[cfg_attr(
+        not(feature = "problem-details"),
+        doc = "`map_problem` (feature `problem-details`)"
+    )]
+    /// or a handler of your own set with [`map_err`](App::map_err), such as
+    /// `|e: Error| status!(500, ..)` - and to a response attached with
+    /// [`with_response`](Self::with_response). That is how a protocol header, a
+    /// `WWW-Authenticate` challenge on a `401` or the `Allow` of a `405`, reaches the client
+    /// whatever the error is rendered as.
+    ///
+    /// A header the response sets itself wins: a name the response already carries is left
+    /// as the response has it. Adding a name twice keeps both values, as a header sent twice
+    /// does. A handler that answers with an error rather than a response hands the next error
+    /// handler that error, with the headers it carries.
+    ///
+    /// If `header` is not a valid header, the error is returned without it.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use volga::{App, error::Error, headers::WWW_AUTHENTICATE, http::StatusCode};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> std::io::Result<()> {
+    /// let mut app = App::new();
+    ///
+    /// // 401 with `WWW-Authenticate: Basic realm="admin"`, whatever `map_err` answers with
+    /// app.map_get("/admin", || {
+    ///     Err::<(), _>(
+    ///         Error::from(StatusCode::UNAUTHORIZED)
+    ///             .with_header((WWW_AUTHENTICATE, r#"Basic realm="admin""#)),
+    ///     )
+    /// });
+    /// # app.run().await
+    /// # }
+    /// ```
+    pub fn with_header(mut self, header: impl TryIntoHeaderPair) -> Self {
+        match header.try_into_pair() {
+            Ok((name, value)) => {
+                self.headers_mut().append(name, value);
+            }
+            Err(_err) => {
+                #[cfg(feature = "tracing")]
+                tracing::warn!("a header added to an error is not a valid header: {_err}");
+            }
+        }
+        self
+    }
+
+    /// Returns the headers the error adds to the response it answers with, `None` when it
+    /// adds none; see [`with_header`](Self::with_header)
+    #[inline]
+    pub fn headers(&self) -> Option<&HeaderMap> {
+        Some(&self.extras.as_ref()?.headers).filter(|headers| !headers.is_empty())
+    }
+
+    /// Returns the headers the error adds to the response it answers with, for middleware the
+    /// error passes through to add to them
+    #[inline]
+    pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
+        &mut self.extras.get_or_insert_with(Box::default).headers
+    }
+
+    /// Takes the headers the error adds to the response it answers with, leaving the error
+    /// without them
+    #[inline]
+    pub(crate) fn take_headers(&mut self) -> Option<HeaderMap> {
+        let headers = std::mem::take(&mut self.extras.as_mut()?.headers);
+        (!headers.is_empty()).then_some(headers)
+    }
+
     /// Check if the status is within 500-599.
     #[inline]
     pub fn is_server_error(&self) -> bool {
@@ -404,7 +494,32 @@ impl Error {
 }
 
 impl App {
-    /// Adds a global error handler
+    /// Sets the application's error handler, called when a request ends in an [`Err`] that
+    /// no error handler closer to it has answered
+    ///
+    /// # What arrives here
+    /// Every error a request can end in: a handler's or an extractor's, a request body over
+    /// its limit (`413`), a `filter` saying no, and the rejections volga produces itself - a
+    /// `401` or a `403` of `authorize`, a `429` of rate limiting, a `404` for a path nothing
+    /// answers and a `405` for a method its path does not have. Answer with the error's own
+    /// status, [`Error::status`], rather than a fixed one: a handler answering `500` to
+    /// everything answers `500` to every `404` as well.
+    ///
+    /// The headers such an error carries - the `WWW-Authenticate` challenge of a `401`, the
+    /// `Allow` of a `405`, the CORS headers - are added to whatever the handler answers with;
+    /// see [`Error::with_header`]. An explicit response is not an error and does not come
+    /// here: `status!(401)` returned by a handler, or what a fallback set with
+    /// [`map_fallback`](Self::map_fallback) answers.
+    ///
+    /// # Scope
+    /// This is the outermost error handler. One set with `map_err` on a
+    /// [`Route`](crate::routing::Route) or a [`RouteGroup`](crate::routing::RouteGroup)
+    /// answers the errors of its own scope first, and what it passes on - by answering with
+    /// the error rather than a response - arrives here. The errors of the global middleware
+    /// and of the application fallback arrive here alone.
+    ///
+    /// The application has one error handler: a second `map_err`, or `map_problem`, replaces
+    /// the first. One that answers with an error itself is answered by the default handler.
     ///
     /// # Example
     /// ```no_run
@@ -413,9 +528,9 @@ impl App {
     /// # #[tokio::main]
     /// # async fn main() -> std::io::Result<()> {
     ///  let mut app = App::new();
-    ///  
+    ///
     ///  app.map_err(|error: Error| async move {
-    ///     status!(500, { "error_message:": error.to_string() })
+    ///     status!(error.status().as_u16(), { "error": error.to_string() })
     ///  });
     /// # app.run().await
     /// # }
@@ -822,19 +937,64 @@ mod tests {
     }
 
     #[test]
+    fn it_carries_the_headers_it_is_given() {
+        use crate::headers::{HeaderValue, WWW_AUTHENTICATE};
+
+        let mut err = Error::from(StatusCode::UNAUTHORIZED)
+            .with_header((WWW_AUTHENTICATE, HeaderValue::from_static("Bearer")))
+            .with_header(("x-reason", "one"))
+            .with_header(("x-reason", "two"));
+
+        let headers = err.headers().unwrap();
+        assert_eq!(headers[WWW_AUTHENTICATE], "Bearer");
+        let values: Vec<_> = headers.get_all("x-reason").iter().collect();
+        assert_eq!(values, ["one", "two"]);
+
+        assert!(err.take_headers().is_some());
+        assert!(err.headers().is_none());
+        assert_eq!(err.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn it_drops_a_header_that_is_not_valid() {
+        let err = Error::server_error("boom").with_header(("bad name", "value"));
+
+        assert!(err.headers().is_none());
+    }
+
+    #[test]
+    fn it_reports_no_headers_for_an_empty_map() {
+        let mut err = Error::server_error("boom");
+        err.headers_mut();
+
+        assert!(err.headers().is_none());
+    }
+
+    #[test]
+    fn it_takes_no_headers_without_any() {
+        let mut err = Error::new("/x", "boom");
+
+        assert!(err.headers().is_none());
+        assert!(err.extras.as_ref().unwrap().headers.is_empty());
+        assert!(err.take_headers().is_none());
+    }
+
+    #[test]
     fn it_debugs_as_a_flat_struct() {
         let err = Error::new("/x", "boom");
 
         assert_eq!(
             format!("{err:?}"),
-            r#"Error { status: 500, instance: Some("/x"), inner: "boom", response: None }"#
+            r#"Error { status: 500, instance: Some("/x"), inner: "boom", response: None, headers: None }"#
         );
 
-        let err = Error::client_error("bad").with_response("body");
+        let err = Error::client_error("bad")
+            .with_response("body")
+            .with_header(("x-reason", "bad"));
 
         assert_eq!(
             format!("{err:?}"),
-            r#"Error { status: 400, instance: None, inner: "bad", response: Some(AttachedResponse { .. }) }"#
+            r#"Error { status: 400, instance: None, inner: "bad", response: Some(AttachedResponse { .. }), headers: Some({"x-reason": "bad"}) }"#
         );
     }
 }

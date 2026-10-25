@@ -1,12 +1,16 @@
+use hyper::header::ALLOW;
 use std::sync::Arc;
 
 use crate::{
     error::{
-        FallbackFunc,
+        Error, FallbackFunc,
         fallback::{PipelineFallbackHandler, default_fallback_handler},
         handler::{DefaultErrorHandler, PipelineErrorHandler},
     },
-    http::endpoints::{Endpoints, route::RoutePipeline},
+    http::{
+        StatusCode,
+        endpoints::{Endpoints, route::RoutePipeline},
+    },
 };
 
 #[cfg(feature = "middleware")]
@@ -49,6 +53,18 @@ pub(crate) enum Terminal {
     /// is serving an endpoint.
     #[cfg(feature = "middleware")]
     RouteTaken,
+}
+
+/// The error a request is refused with when no route answers its method: `405`, through the
+/// error handler, with the methods there are - `allowed` - as the `Allow` header of whatever
+/// response the handler answers with (RFC 9110 Section 15.5.6)
+#[inline]
+pub(crate) fn method_not_allowed(allowed: Option<&str>) -> Error {
+    let err = Error::from(StatusCode::METHOD_NOT_ALLOWED);
+    match allowed {
+        Some(allowed) => err.with_header((ALLOW, allowed)),
+        None => err,
+    }
 }
 
 pub(crate) struct PipelineBuilder {

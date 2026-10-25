@@ -188,13 +188,90 @@ Registers an endpoint (`map_get`, `map_ws`, `map_fallback`) or a handler for an 
 for an error, `map_ok` for a successful response). `map_problem` is `map_err` with a handler of
 volga's own, which renders errors as RFC 9457 problem details. On `App` it takes `&mut self`.
 
-On `App`, `map_err` and `map_problem` set the one error handler, so whichever is called last
-handles the errors:
+On every level, `map_err` and `map_problem` set the one error handler of that scope, so whichever
+is called last handles the errors - see [Error handling](#error-handling):
 
 ```rust
-app.map_err(|err: Error| async move { status!(500, "{err}") });
+app.map_err(|err: Error| async move { status!(err.status().as_u16(), "{err}") });
 app.map_problem(); // replaces the handler above
 ```
+
+## Error handling
+
+`map_ok` and `map_err` divide what a request can end in between them, and they mean the same on
+`App`, `RouteGroup` and `Route`:
+
+- **`map_ok` sees the success path and explicit responses.** A response that a handler or a
+  middleware returns is a response, whatever its status: `status!(401)` returned by a handler
+  goes through `map_ok` and never reaches `map_err`. So does whatever a `map_fallback` of the
+  application's own answers, and what a scoped `map_err` answers an error with, once it is
+  outside that scope.
+- **`map_err` sees the rejections**: an `Err` from a handler, an extractor or a middleware, and
+  every rejection volga produces itself.
+
+### A scope's handler covers the whole scope
+
+`map_err` on a `Route` or a `RouteGroup` is the outermost layer of its scope, whatever order it
+was registered in. It wraps the route's or the group's handler and every middleware of the
+scope, the ones registered after it included, so the natural order works:
+
+```rust
+app.map_get("/admin", handler)
+    .authorize::<Claims>(roles(["admin"]))
+    .map_problem(); // answers the `401` of the `authorize` above it
+```
+
+- **One handler per scope.** A second `map_err`, or `map_problem`, on the same route or group
+  replaces the first, as on `App`.
+- **Returning the error passes it on**, like a rethrow from a nested `catch`: from the route to
+  the groups around it, innermost first, and then to `App::map_err`. `impl IntoResponse for
+  Error` is `Err(self)`, so `|err: Error| err` is a handler that passes everything on.
+- **A scope sees its own errors only.** The middleware of a group around a route is outside the
+  route's scope, so the route's handler does not see its errors. The errors of the global
+  middleware and of the application fallback reach `App::map_err` alone.
+
+Internally a scope's handler is kept apart from its middleware until the scope is closed - a
+route's when a group around it applies its layers, or when the pipeline is composed; a group's
+when its closure returns - and is then put in front of everything the scope holds.
+
+### Framework rejections are `Err`
+
+A rejection the framework produces itself is an `Err(Error)`, and what user code returns
+explicitly goes out as it is:
+
+| Rejection | Status | Error headers |
+|---|---|---|
+| `authorize` | `400`, `401`, `403`, `503` | `WWW-Authenticate`, `Cache-Control: no-store` |
+| Rate limiting | `429` | - |
+| Router, no route for the path (the default fallback) | `404` | - |
+| Router, no route for the method | `405` | `Allow` |
+| Request body over its limit | `413` | - |
+| `filter` saying no | `400`, or the status of its `Err` | - |
+| Extractors | the extractor's | - |
+| Static files, denied or with no fallback file | `403`, `404` | - |
+| Compression, no acceptable encoding | `406` | `Vary`, `Accept-Encoding` |
+
+Responses that are not rejections stay `Ok`: a CORS preflight's `204`, a static file's `304`,
+the HTTPS redirect and the answer to an implicit `HEAD`.
+
+**Do not** answer a rejection with `Ok(status!(..))` in new code inside volga: `map_err` would
+not see it, and `map_ok` would take it for a success.
+
+### Error headers are applied over any handler
+
+A protocol header belongs to the error rather than to one way of rendering it, so it is carried
+by the error: `Error::with_header`. The framework adds the error's headers to whatever response
+its error handler answers with - the default one, `map_problem` or one of the application's own,
+such as `|e: Error| status!(500, ..)` - and a header the handler set itself wins. A handler that
+answers with an error passes that error on, headers and all, so they are added once, where the
+error is answered in the end.
+
+Middleware that adds headers to every response adds them to an error the same way: CORS puts
+its headers on an `Err` passing through it as error headers, so that a browser can read a `401`
+or a `404` rather than report a blocked origin.
+
+`Error::with_response` is a separate thing: it means "answer exactly this, unformatted". The
+error's headers are added to that response too.
 
 ## Type aliases over a wrapper
 

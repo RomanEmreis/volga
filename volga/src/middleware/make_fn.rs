@@ -4,6 +4,7 @@ use super::{
     HttpContext, MiddlewareFn, NextFn,
     handler::{Filter, MapOk, Middleware, Next, TapReq, With},
 };
+use crate::error::handler::answer_with;
 use crate::http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult};
 use std::sync::Arc;
 
@@ -81,7 +82,12 @@ where
             match Args::from_request(ctx.request()) {
                 Err(err) => err.into_response(),
                 Ok(args) => match next(ctx).await {
-                    Err(err) => map.map_err(err, args).await.into_response(),
+                    Err(err) => {
+                        answer_with(err, |err| async move {
+                            map.map_err(err, args).await.into_response()
+                        })
+                        .await
+                    }
                     Ok(resp) => Ok(resp),
                 },
             }

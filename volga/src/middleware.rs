@@ -16,7 +16,7 @@
 
 use crate::{
     App, HttpResult,
-    http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult},
+    http::{FromRequestRef, IntoResponse, MapErr, endpoints::route::Layer, request::IntoTapResult},
     routing::{Route, RouteGroup},
 };
 use futures_util::future::BoxFuture;
@@ -681,7 +681,28 @@ impl<'a> Route<'a> {
         self.map_middleware(map_ok_fn)
     }
 
-    /// Adds a middleware that called for this route when [`HttpResult`] is [`Err`]
+    /// Sets the error handler of this route, called when the route answers with an [`Err`]
+    ///
+    /// # Scope
+    /// The handler covers the whole route, whatever order it was registered in: it wraps the
+    /// route's handler and every middleware of the route, including what is registered after
+    /// it, so `.authorize(..).map_problem()` answers the `401` of `authorize` as problem
+    /// details. A route has one error handler: a second `map_err`, or `map_problem`, replaces
+    /// the first.
+    ///
+    /// It sees every rejection on the way: an extractor's error, a request body over its
+    /// limit (`413`), a `filter` saying no, a `401` or `403` of `authorize` and a `429` of rate
+    /// limiting. The headers such an error carries - a `WWW-Authenticate` challenge, say -
+    /// are added to whatever the handler answers with; see
+    /// [`Error::with_header`](crate::error::Error::with_header). An explicit response a
+    /// handler or a middleware returns, `status!(401)` included, is a response and does not
+    /// come here.
+    ///
+    /// Returning the error rather than a response passes it on, the way a nested `catch`
+    /// rethrows: to the error handler of the route group around the route, if it has one, and
+    /// then to the application's, set with [`App::map_err`]. The middleware of a group around
+    /// the route and the global middleware are outside of the route's scope, and their errors
+    /// are not seen here.
     ///
     /// # Example
     /// ```no_run
@@ -710,11 +731,13 @@ impl<'a> Route<'a> {
     {
         let map_err_fn = make_map_err_fn(map);
 
+        // A later `map_err` on this route replaces this one, and what it resolves cannot
+        // fail a request after that
         #[cfg(feature = "di")]
         self.app
             .require_while_held(&map_err_fn, self.consumer("map_err"), Args::dependencies);
 
-        self.map_middleware(map_err_fn)
+        self.map_layer(Layer::ErrorHandler(map_err_fn))
     }
 
     /// Registers request-tapping middleware.
@@ -873,10 +896,15 @@ impl<'a> Route<'a> {
 
     #[inline]
     pub(crate) fn map_middleware(self, mw: MiddlewareFn) -> Self {
+        self.map_layer(mw.into())
+    }
+
+    #[inline]
+    fn map_layer(self, layer: Layer) -> Self {
         self.app.pipeline.endpoints_mut().map_layer(
             self.method.clone(),
             self.pattern.as_ref(),
-            mw.into(),
+            layer,
         );
         self
     }
@@ -1088,7 +1116,29 @@ impl<'a> RouteGroup<'a> {
         self
     }
 
-    /// Adds a middleware that called for this group of routes when [`HttpResult`] is [`Err`]
+    /// Sets the error handler of this group of routes, called when a route of the group
+    /// answers with an [`Err`]
+    ///
+    /// # Scope
+    /// The handler covers the whole group, whatever order it was registered in: it wraps every
+    /// middleware of the group, including what is registered after it, and everything inside
+    /// the group - its routes, its sub-groups, its fallback and its static files. A group has
+    /// one error handler: a second `map_err`, or `map_problem`, replaces the first.
+    ///
+    /// It sees every rejection on the way: an extractor's error, a request body over its
+    /// limit (`413`), a `filter` saying no, a `401` or `403` of `authorize` and a `429` of rate
+    /// limiting. The headers such an error carries - a `WWW-Authenticate` challenge, say -
+    /// are added to whatever the handler answers with; see
+    /// [`Error::with_header`](crate::error::Error::with_header). An explicit response a
+    /// handler or a middleware returns, `status!(401)` included, is a response and does not
+    /// come here.
+    ///
+    /// An error handler of a route or a sub-group answers first, and this one sees what it
+    /// passes on. Returning the error rather than a response passes it on in turn, the way a
+    /// nested `catch` rethrows: to the error handler of the group around this one, if it has
+    /// one, and then to the application's, set with [`App::map_err`]. The middleware of a
+    /// group around this one and the global middleware are outside of the group's scope, and
+    /// their errors are not seen here.
     ///
     /// # Example
     /// ```no_run
@@ -1119,10 +1169,12 @@ impl<'a> RouteGroup<'a> {
     {
         let map_err_fn = make_map_err_fn(map);
 
+        // A later `map_err` on this group replaces this one, which is then attached to
+        // nothing, and nothing it resolves can fail a request
         #[cfg(feature = "di")]
         self.require_services(&map_err_fn, "map_err", Args::dependencies);
 
-        self.middleware.push(map_err_fn);
+        self.error_handler = Some(map_err_fn);
         self
     }
 

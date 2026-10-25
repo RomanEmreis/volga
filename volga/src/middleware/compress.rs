@@ -27,9 +27,9 @@ use crate::{
         ACCEPT_ENCODING, ACCEPT_RANGES, AcceptEncoding, CONTENT_ENCODING, CONTENT_LENGTH, Encoding,
         Header, Quality, VARY,
     },
+    http::StatusCode,
     middleware::{HttpContext, NextFn},
     routing::{Route, RouteGroup},
-    status,
 };
 
 static SUPPORTED_ENCODINGS: &[Encoding] = &[
@@ -151,10 +151,11 @@ fn negotiate(accept_encoding: Header<AcceptEncoding>, http_result: HttpResult) -
         }
     }
 
-    status!(406; [
-        (VARY, ACCEPT_ENCODING),
-        (ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))
-    ])
+    // None of the encodings the client accepts is one the server can produce: a refusal,
+    // answered by the error handler with the encodings there are
+    Err(Error::from(StatusCode::NOT_ACCEPTABLE)
+        .with_header((VARY, ACCEPT_ENCODING))
+        .with_header((ACCEPT_ENCODING, Encoding::stringify(SUPPORTED_ENCODINGS))))
 }
 
 fn compress(encoding: Encoding, http_result: HttpResult) -> HttpResult {

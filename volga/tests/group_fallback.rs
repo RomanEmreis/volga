@@ -81,9 +81,9 @@ async fn it_answers_every_method_under_the_prefix() {
     let (status, body, _) = send(&server, Method::HEAD, "/api/nope").await;
     assert_eq!((status, body.as_str()), (404, ""));
 
-    // Outside the prefix the application answers as it did before
-    assert_eq!(get(&server, "/elsewhere").await, (404, String::new()));
-    assert_eq!(get(&server, "/apis/nope").await, (404, String::new()));
+    // Outside the prefix the application answers as it did before, through its error handler
+    assert_eq!(get(&server, "/elsewhere").await, (404, "Not Found".into()));
+    assert_eq!(get(&server, "/apis/nope").await, (404, "Not Found".into()));
 
     server.shutdown().await;
 }
@@ -311,7 +311,7 @@ async fn it_answers_below_a_prefix_ending_in_a_catch_all() {
         (404, "no file a/b".into())
     );
     // The catch-all reads at least one segment, so `/files` is outside the prefix
-    assert_eq!(get(&server, "/files").await, (404, String::new()));
+    assert_eq!(get(&server, "/files").await, (404, "Not Found".into()));
 
     // A route at the catch-all takes the position over, as anywhere else
     assert_eq!(get(&server, "/docs/a/b").await, (200, "doc a/b".into()));

@@ -25,9 +25,9 @@ async fn main() -> std::io::Result<()> {
         .with_tracing(|tracing| tracing.with_header().with_header_name("x-span-id"));
 
     // Global error handler will be in the request span scope
-    app.map_err(|err| async move {
+    app.map_err(|err: Error| async move {
         error!("{err}");
-        status!(500)
+        status!(err.status().as_u16())
     });
 
     // Middleware will be in the request span scope

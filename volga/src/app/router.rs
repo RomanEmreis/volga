@@ -228,7 +228,10 @@ impl App {
     /// may be registered before or after the `map_*` calls they apply to.
     ///
     /// Middleware still runs in the order it was registered on the group, and a group's
-    /// middleware runs before the middleware of a route or a sub-group inside it.
+    /// middleware runs before the middleware of a route or a sub-group inside it. The
+    /// group's error handler, set with `map_err` (feature `middleware`), is the exception:
+    /// it is the outermost layer of the group, wherever it was registered, so it sees the
+    /// errors of all of the group's middleware.
     ///
     /// # Examples
     /// ```no_run
@@ -799,6 +802,10 @@ pub struct RouteGroup<'a> {
     pub(crate) routes: Vec<GroupRoute>,
     #[cfg(feature = "middleware")]
     pub(crate) middleware: Vec<MiddlewareFn>,
+    /// The error handler of this group, if it set one: the outermost of its layers, ahead of
+    /// its middleware whatever order the two were registered in
+    #[cfg(feature = "middleware")]
+    pub(crate) error_handler: Option<MiddlewareFn>,
     /// The prefixes this group and its sub-groups mapped a fallback under
     pub(crate) fallbacks: Vec<Box<str>>,
     /// The request body limit of this group, if it set one
@@ -895,9 +902,16 @@ impl<'a> RouteGroup<'a> {
     /// `open_api` / `with_body_limit` call reaches the routes above it as well as the ones
     /// below it. Middleware is inserted ahead of whatever the route already carries - the
     /// middleware of a route or of a nested group, which applied itself first - so an
-    /// outer scope always wraps an inner one. A CORS policy and a body limit are bound only
-    /// where the route or a nested group has not bound its own, so the inner scope wins.
+    /// outer scope always wraps an inner one. The group's error handler goes in front of
+    /// its middleware, so it covers all of the group's scope. A CORS policy and a body limit
+    /// are bound only where the route or a nested group has not bound its own, so the inner
+    /// scope wins.
     pub(crate) fn apply(&mut self) {
+        #[cfg(feature = "middleware")]
+        if let Some(error_handler) = self.error_handler.take() {
+            self.middleware.insert(0, error_handler);
+        }
+
         // Taken out of `self` for the walk, so the routes can be read while the
         // application state they configure is borrowed mutably, and put back for
         // a parent group that has yet to apply its own configuration to them.
@@ -1035,6 +1049,8 @@ impl<'a> RouteGroup<'a> {
             routes: Vec::new(),
             #[cfg(feature = "middleware")]
             middleware: Vec::new(),
+            #[cfg(feature = "middleware")]
+            error_handler: None,
             fallbacks: Vec::new(),
             body_limit: None,
             #[cfg(feature = "middleware")]
@@ -1230,6 +1246,8 @@ macro_rules! define_route_group_methods {
                     routes: Vec::with_capacity(4),
                     #[cfg(feature = "middleware")]
                     middleware: Vec::with_capacity(4),
+                    #[cfg(feature = "middleware")]
+                    error_handler: None,
                     fallbacks: Vec::new(),
                     body_limit: None,
                     #[cfg(feature = "middleware")]

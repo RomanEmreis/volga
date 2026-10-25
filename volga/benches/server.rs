@@ -27,7 +27,9 @@ fn benchmark(c: &mut Criterion) {
         app.map_put("/put", || async { BODY });
         app.map_get("/empty", || async {});
         app.map_get("/err", || async { Error::other("error") });
-        app.map_err(|err: volga::error::Error| async move { status!(500, err.to_string()) });
+        app.map_err(|err: volga::error::Error| async move {
+            status!(err.status().as_u16(), err.to_string())
+        });
         app.map_fallback(|| async { status!(404) });
     });
 
