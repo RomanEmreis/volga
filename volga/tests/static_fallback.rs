@@ -141,7 +141,11 @@ async fn it_serves_the_fallback_file_of_a_group_under_its_prefix_alone() {
     assert_eq!(get(&server, "/api/models").await, (200, "models".into()));
 
     for path in ["/api/nope", "/totally/elsewhere", "/staticky/deep"] {
-        assert_eq!(get(&server, path).await, (404, String::new()), "{path}");
+        assert_eq!(
+            get(&server, path).await,
+            (404, "Not Found".into()),
+            "{path}"
+        );
     }
 
     server.shutdown().await;

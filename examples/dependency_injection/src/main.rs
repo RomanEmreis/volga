@@ -64,7 +64,8 @@ async fn set_value<T: Cache>(Json(item): Json<Item>, cache: Dc<T>) {
 
 async fn error_handler(error: Error, log: Dc<RequestLog>) -> HttpResult {
     log.append(&format!("An Error occurred: {error:#}"));
-    status!(500, "Internal Server Error"; [
+    // Every error comes here, a `404` or a `401` included, so answer with its own status
+    status!(error.status().as_u16(), "{error}"; [
         ("x-req-id", &log.request_id)
     ])
 }

@@ -3,15 +3,13 @@
 use crate::http::endpoints::args::FromRequestRef;
 use crate::{
     HttpRequest, HttpRequestMut, HttpResult,
-    app::pipeline::Terminal,
+    app::pipeline::{Terminal, method_not_allowed},
     error::Error,
     http::cors::{CorsHeaders, CorsOverride},
     http::endpoints::route::MalformedPath,
-    status,
 };
 
 use futures_util::future::BoxFuture;
-use hyper::header::ALLOW;
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
@@ -268,11 +266,9 @@ impl HttpContext {
                     .await
             }
             Some(Terminal::Fallback(fallback)) => fallback.call(request.freeze()).await,
-            Some(Terminal::MethodNotAllowed(allowed)) => status!(405; [
-                (ALLOW, allowed.as_ref())
-            ]),
+            Some(Terminal::MethodNotAllowed(allowed)) => Err(method_not_allowed(Some(&allowed))),
             Some(Terminal::MalformedPath) => Err(Error::from(MalformedPath)),
-            Some(Terminal::RouteTaken) | None => status!(405),
+            Some(Terminal::RouteTaken) | None => Err(method_not_allowed(None)),
         }
     }
 

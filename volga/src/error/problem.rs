@@ -225,6 +225,10 @@ impl<'a> Route<'a> {
     /// Adds an error handler for this route that produces error responses
     /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
     ///
+    /// This is [`map_err`](Route::map_err) with a handler of volga's own, so it covers the
+    /// whole route whatever order it was registered in - the `401` of an `authorize` on the
+    /// route included - and it replaces a `map_err` of the route, or is replaced by one.
+    ///
     /// # Example
     /// ```no_run
     /// use volga::App;
@@ -250,6 +254,10 @@ impl<'a> Route<'a> {
 impl<'a> RouteGroup<'a> {
     /// Adds an error handler for this route group that produces error responses
     /// in the [Problem Details](https://datatracker.ietf.org/doc/html/rfc7807) format
+    ///
+    /// This is [`map_err`](RouteGroup::map_err) with a handler of volga's own, so it covers
+    /// the whole group whatever order it was registered in, and it replaces a `map_err` of
+    /// the group, or is replaced by one.
     ///
     /// # Example
     /// ```no_run

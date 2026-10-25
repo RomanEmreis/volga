@@ -59,10 +59,20 @@ impl Middleware for Cors {
             }
 
             let origin = request.headers().get(&ORIGIN).cloned();
-            let mut response = next(ctx).await?;
-            cors.apply_normal_response(response.headers_mut(), origin);
-
-            Ok(response)
+            match next(ctx).await {
+                Ok(mut response) => {
+                    cors.apply_normal_response(response.headers_mut(), origin);
+                    Ok(response)
+                }
+                // An error is answered by an error handler further out, so the CORS headers
+                // travel with it and are added to whatever that handler answers with: a
+                // browser has to be let read a `401` or a `404` to tell it from a blocked
+                // origin
+                Err(mut err) => {
+                    cors.apply_normal_response(err.headers_mut(), origin);
+                    Err(err)
+                }
+            }
         }
     }
 }

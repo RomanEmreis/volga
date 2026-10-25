@@ -9,7 +9,6 @@ use {
         error::Error,
         http::StatusCode,
         routing::{Route, RouteGroup},
-        status,
     },
     std::{future::Future, sync::Arc},
 };
@@ -101,12 +100,13 @@ fn map_jwt_error_to_status(err: &ErrorKind) -> StatusCode {
     }
 }
 
+/// The `error` code and the description a token that failed to decode is challenged with
 #[cfg(feature = "jwt-auth")]
-fn build_www_authenticate(err: &ErrorKind, resource_metadata_url: Option<&str>) -> String {
+fn describe_jwt_error(err: &ErrorKind) -> (oauth::OAuthErrorCode, &'static str) {
     use crate::auth::oauth::OAuthErrorCode::{InvalidToken as InvalidTokenCode, ServerError};
     use ErrorKind::*;
 
-    let (code, description) = match err {
+    match err {
         ExpiredSignature => (InvalidTokenCode, "Token has expired"),
         InvalidSignature => (InvalidTokenCode, "Invalid signature"),
         InvalidToken => (InvalidTokenCode, "Token is malformed or invalid"),
@@ -121,7 +121,12 @@ fn build_www_authenticate(err: &ErrorKind, resource_metadata_url: Option<&str>) 
         Utf8(_) => (InvalidTokenCode, "Token contains invalid UTF-8 characters"),
         InvalidKeyFormat => (ServerError, "Invalid key format"),
         _ => (ServerError, "Internal token processing error"),
-    };
+    }
+}
+
+#[cfg(feature = "jwt-auth")]
+fn build_www_authenticate(err: &ErrorKind, resource_metadata_url: Option<&str>) -> String {
+    let (code, description) = describe_jwt_error(err);
 
     let mut challenge = oauth::BearerChallenge::new()
         .with_error(code)
@@ -250,6 +255,14 @@ impl App {
 
     /// Adds authorization middleware for all routes
     ///
+    /// A request it refuses is an error, answered by the error handler: `401` without a
+    /// bearer token or with one that does not hold up, `400` for an `Authorization` header
+    /// that is not a bearer credential or for plain HTTP where HTTPS is required, `403` for
+    /// a token without the authority asked for and `503` when the token cannot be validated
+    /// right now. Its `WWW-Authenticate` challenge and `Cache-Control: no-store` are added to
+    /// whatever the error handler answers with, so `map_problem` renders it as problem
+    /// details with the challenge in place - see [`Error::with_header`].
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, auth::{AuthClaims, roles}};
@@ -309,6 +322,14 @@ impl App {
 impl<'a> Route<'a> {
     /// Adds authorization middleware for this route
     ///
+    /// A request it refuses is an error, answered by the error handler: `401` without a
+    /// bearer token or with one that does not hold up, `400` for an `Authorization` header
+    /// that is not a bearer credential or for plain HTTP where HTTPS is required, `403` for
+    /// a token without the authority asked for and `503` when the token cannot be validated
+    /// right now. Its `WWW-Authenticate` challenge and `Cache-Control: no-store` are added to
+    /// whatever the error handler answers with, so `map_problem` renders it as problem
+    /// details with the challenge in place - see [`Error::with_header`].
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{App, auth::{AuthClaims, roles}};
@@ -343,6 +364,14 @@ impl<'a> Route<'a> {
 #[cfg(feature = "jwt-auth")]
 impl<'a> RouteGroup<'a> {
     /// Adds authorization middleware for this group of routes
+    ///
+    /// A request it refuses is an error, answered by the error handler: `401` without a
+    /// bearer token or with one that does not hold up, `400` for an `Authorization` header
+    /// that is not a bearer credential or for plain HTTP where HTTPS is required, `403` for
+    /// a token without the authority asked for and `503` when the token cannot be validated
+    /// right now. Its `WWW-Authenticate` challenge and `Cache-Control: no-store` are added to
+    /// whatever the error handler answers with, so `map_problem` renders it as problem
+    /// details with the challenge in place - see [`Error::with_header`].
     ///
     /// # Example
     /// ```no_run
@@ -423,105 +452,135 @@ where
 {
     let bts: BearerTokenService = ctx.extract()?;
     if should_reject_for_https(&ctx, &bts)? {
-        return status!(400; [
-            (WWW_AUTHENTICATE, r#"Bearer error="invalid_request", error_description="HTTPS required""#)
-        ]);
+        return Err(refusal(
+            StatusCode::BAD_REQUEST,
+            "HTTPS required",
+            Some(r#"Bearer error="invalid_request", error_description="HTTPS required""#.into()),
+        ));
     }
-    let resp = match resolve_bearer(&ctx) {
+
+    let metadata_url = bts.resource_metadata_url.as_deref();
+    let bearer = match resolve_bearer(&ctx) {
+        Ok(bearer) => bearer,
         Err(_) => {
             let mut challenge = oauth::BearerChallenge::new();
-            if let Some(url) = bts.resource_metadata_url.as_deref() {
+            if let Some(url) = metadata_url {
                 challenge = challenge.with_resource_metadata(url);
             }
-            if ctx
-                .request()
-                .headers()
-                .contains_key(crate::headers::AUTHORIZATION)
-            {
-                // RFC 6750 Section 3.1: credentials were presented but are not
-                // a well-formed Bearer value (wrong scheme, empty token)
-                // - the client should fix the header, not start a flow
-                let challenge = challenge
-                    .with_error(oauth::OAuthErrorCode::InvalidRequest)
-                    .with_description("Authorization header is not a valid Bearer credential");
+            return Err(
+                if ctx
+                    .request()
+                    .headers()
+                    .contains_key(crate::headers::AUTHORIZATION)
+                {
+                    // RFC 6750 Section 3.1: credentials were presented but are not
+                    // a well-formed Bearer value (wrong scheme, empty token)
+                    // - the client should fix the header, not start a flow
+                    const MESSAGE: &str = "Authorization header is not a valid Bearer credential";
+                    let challenge = challenge
+                        .with_error(oauth::OAuthErrorCode::InvalidRequest)
+                        .with_description(MESSAGE);
 
-                status!(400; [
-                    (WWW_AUTHENTICATE, challenge.to_string())
-                ])
-            } else {
-                // RFC 6750 Section 3: no credentials were presented - challenge
-                // with a bare scheme (no error code) so clients can
-                // discover the resource metadata and start an
-                // authorization flow
-                status!(401; [
-                    (WWW_AUTHENTICATE, challenge.to_string())
-                ])
-            }
-        }
-        Ok(bearer) => {
-            #[cfg(feature = "oauth-client")]
-            let decoded = bts.decode_async(bearer.clone()).await;
-            #[cfg(not(feature = "oauth-client"))]
-            let decoded = bts.decode(bearer.clone());
-            match decoded {
-                Ok(claims) if authorizer.validate(&claims) => {
-                    if bts.strip_token_from_request {
-                        stash_bearer(&mut ctx, bearer);
-                        ctx.request_mut()
-                            .headers_mut()
-                            .remove(crate::headers::AUTHORIZATION);
-                    }
-                    ctx.request_mut()
-                        .extensions_mut()
-                        .insert(Authenticated(claims));
-
-                    next(ctx).await
-                }
-                // The token is valid, it just does not carry the authority this route
-                // asks for: RFC 6750 Section 3.1 `insufficient_scope`
-                Ok(_) => {
-                    let metadata_url = bts.resource_metadata_url.as_deref();
-
-                    status!(403; [
-                        (WWW_AUTHENTICATE, authorizer::default_error_msg(metadata_url))
-                    ])
-                }
-                // a server-side failure (unreachable OAuth issuer,
-                // missing security key) is not the client's token
-                // being at fault - no invalid_token challenge
-                Err(err) if err.status().is_server_error() => {
-                    status!(503, "Token validation is temporarily unavailable")
-                }
-                // The token itself did not hold up. Answer with the status its own
-                // failure already carries - 401 for one that is malformed, expired or
-                // signed by the wrong key (see `map_jwt_error_to_status`), and 400 where
-                // the credential is not a bearer value at all, which is a failure of the
-                // request rather than of a token. RFC 6750 Section 3.1 keeps 403 for a
-                // token that is valid but does not carry enough authority, which is the
-                // `Ok(_)` arm above. Answering 403 here would tell a client holding a
-                // stale token that refreshing it cannot help, and it would disagree with
-                // the `invalid_token` code the challenge below carries.
-                Err(err) => {
-                    let metadata_url = bts.resource_metadata_url.as_deref();
-                    let status = err.status();
-                    let www_authenticate = err
-                        .into_inner()
-                        .downcast_ref::<JwtError>()
-                        .map(|e| build_www_authenticate(e.kind(), metadata_url))
-                        .unwrap_or_else(|| authorizer::default_error_msg(metadata_url));
-
-                    status!(status.as_u16(); [
-                        (WWW_AUTHENTICATE, www_authenticate)
-                    ])
-                }
-            }
+                    refusal(
+                        StatusCode::BAD_REQUEST,
+                        MESSAGE,
+                        Some(challenge.to_string()),
+                    )
+                } else {
+                    // RFC 6750 Section 3: no credentials were presented - challenge
+                    // with a bare scheme (no error code) so clients can
+                    // discover the resource metadata and start an
+                    // authorization flow
+                    refusal(
+                        StatusCode::UNAUTHORIZED,
+                        "Bearer token is missing",
+                        Some(challenge.to_string()),
+                    )
+                },
+            );
         }
     };
-    resp.map(|mut resp| {
+
+    #[cfg(feature = "oauth-client")]
+    let decoded = bts.decode_async(bearer.clone()).await;
+    #[cfg(not(feature = "oauth-client"))]
+    let decoded = bts.decode(bearer.clone());
+
+    let claims = match decoded {
+        Ok(claims) if authorizer.validate(&claims) => claims,
+        // The token is valid, it just does not carry the authority this route
+        // asks for: RFC 6750 Section 3.1 `insufficient_scope`
+        Ok(_) => {
+            return Err(refusal(
+                StatusCode::FORBIDDEN,
+                "User does not have required role or permission",
+                Some(authorizer::default_error_msg(metadata_url)),
+            ));
+        }
+        // a server-side failure (unreachable OAuth issuer,
+        // missing security key) is not the client's token
+        // being at fault - no invalid_token challenge
+        Err(err) if err.status().is_server_error() => {
+            return Err(refusal(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Token validation is temporarily unavailable",
+                None,
+            ));
+        }
+        // The token itself did not hold up. Answer with the status its own
+        // failure already carries - 401 for one that is malformed, expired or
+        // signed by the wrong key (see `map_jwt_error_to_status`), and 400 where
+        // the credential is not a bearer value at all, which is a failure of the
+        // request rather than of a token. RFC 6750 Section 3.1 keeps 403 for a
+        // token that is valid but does not carry enough authority, which is the
+        // `Ok(_)` arm above. Answering 403 here would tell a client holding a
+        // stale token that refreshing it cannot help, and it would disagree with
+        // the `invalid_token` code the challenge below carries.
+        Err(err) => {
+            let status = err.status();
+            let (message, challenge) = match err.inner.downcast_ref::<JwtError>() {
+                Some(jwt) => (
+                    describe_jwt_error(jwt.kind()).1,
+                    build_www_authenticate(jwt.kind(), metadata_url),
+                ),
+                None => (
+                    status.canonical_reason().unwrap_or("Invalid token"),
+                    authorizer::default_error_msg(metadata_url),
+                ),
+            };
+            return Err(refusal(status, message, Some(challenge)));
+        }
+    };
+
+    if bts.strip_token_from_request {
+        stash_bearer(&mut ctx, bearer);
+        ctx.request_mut()
+            .headers_mut()
+            .remove(crate::headers::AUTHORIZATION);
+    }
+    ctx.request_mut()
+        .extensions_mut()
+        .insert(Authenticated(claims));
+
+    next(ctx).await.map(|mut resp| {
         resp.headers_mut()
             .insert(CACHE_CONTROL, HeaderValue::from_static(NO_STORE));
         resp
     })
+}
+
+/// A request `authorize` refuses: an error with `status` and `message`, answered with
+/// `challenge` as its `WWW-Authenticate` header and with `Cache-Control: no-store` by
+/// whichever error handler renders it - see [`Error::with_header`]
+#[inline]
+#[cfg(feature = "jwt-auth")]
+fn refusal(status: StatusCode, message: &'static str, challenge: Option<String>) -> Error {
+    let err = Error::from_parts(status, None, message);
+    let err = match challenge {
+        Some(challenge) => err.with_header((WWW_AUTHENTICATE, challenge)),
+        None => err,
+    };
+    err.with_header((CACHE_CONTROL, HeaderValue::from_static(NO_STORE)))
 }
 
 /// Returns the bearer token for this request, preferring the value stashed

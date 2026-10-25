@@ -69,6 +69,11 @@ async fn it_runs_global_middleware_for_an_unmatched_path() {
 #[tokio::test]
 async fn it_runs_global_middleware_for_an_unmapped_method() {
     let server = TestServer::spawn(|app| {
+        app.wrap(|ctx, next| async move {
+            let result = next(ctx).await;
+            let reached = if result.is_err() { "err" } else { "ok" };
+            result.map_err(|err| err.with_header(("x-wrap", reached)))
+        });
         app.map_ok(tag);
         app.map_get(MAPPED, || async { ok!(text: "mapped") });
     })
@@ -81,9 +86,12 @@ async fn it_runs_global_middleware_for_an_unmapped_method() {
         .await
         .unwrap();
 
+    // The `405` is a rejection: it travels the global chain as an error, which `map_ok`
+    // leaves alone, and the error handler answers it with its `Allow` header
     assert_eq!(response.status().as_u16(), 405);
     assert_eq!(response.headers().get("allow").unwrap(), "GET,HEAD");
-    assert_eq!(response.headers().get("x-map-ok").unwrap(), "1");
+    assert_eq!(response.headers().get("x-wrap").unwrap(), "err");
+    assert!(response.headers().get("x-map-ok").is_none());
 
     server.shutdown().await;
 }

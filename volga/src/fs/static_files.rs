@@ -212,7 +212,7 @@ fn serve_layer() -> NextFn {
                 Some(serving) => respond(serving, request.method(), request.headers()).await,
                 // The mount puts one there on the way in, and nothing else calls this
                 // pipeline, so no request arrives here without one.
-                None => status!(500),
+                None => Err(StatusCode::INTERNAL_SERVER_ERROR.into()),
             }
         })
     })
@@ -453,7 +453,7 @@ async fn probe_asset(env: &HostEnv, relative: PathBuf) -> Option<Serving> {
 #[inline]
 async fn respond(serving: &Serving, method: &Method, headers: &HeaderMap) -> HttpResult {
     match serving {
-        Serving::Denied => status!(403, text: ACCESS_DENIED_MESSAGE),
+        Serving::Denied => Err(access_denied()),
         Serving::Listing {
             path,
             content_root,
@@ -478,7 +478,7 @@ async fn respond(serving: &Serving, method: &Method, headers: &HeaderMap) -> Htt
 async fn fallback(method: Method, env: HostEnv, headers: HttpHeaders) -> HttpResult {
     let policy = env.shell_policy();
     match env.fallback_path() {
-        None => status!(404),
+        None => Err(StatusCode::NOT_FOUND.into()),
         Some(path) => respond_with_shell_impl(path, &method, headers.as_map(), policy).await,
     }
 }
@@ -574,13 +574,16 @@ async fn sanitize_path(path: PathBuf, content_root: &Path) -> Result<(PathBuf, P
     let content_root = canonicalize(content_root).await?;
     let path = canonicalize(&path).await?;
     if !path.starts_with(&content_root) {
-        return Err(Error::from_parts(
-            StatusCode::FORBIDDEN,
-            None,
-            ACCESS_DENIED_MESSAGE,
-        ));
+        return Err(access_denied());
     }
     Ok((path, content_root))
+}
+
+/// The error a request for a file the server must not serve is refused with: `403`, through
+/// the error handler
+#[inline]
+fn access_denied() -> Error {
+    Error::from_parts(StatusCode::FORBIDDEN, None, ACCESS_DENIED_MESSAGE)
 }
 
 impl RouteGroup<'_> {
@@ -1127,11 +1130,11 @@ mod tests {
     async fn it_returns_no_fallback() {
         let env = HostEnv::new("tests/static");
 
-        let response = fallback(Method::GET, env, HttpHeaders::from(no_headers()))
+        let err = fallback(Method::GET, env, HttpHeaders::from(no_headers()))
             .await
-            .unwrap();
+            .unwrap_err();
 
-        assert_eq!(response.status(), 404);
+        assert_eq!(err.status(), 404);
     }
 
     #[tokio::test]
@@ -1176,12 +1179,13 @@ mod tests {
     async fn it_responds_with_403_as_shows_files_is_false() {
         let env = HostEnv::new("tests/static");
 
-        let response = serve(&env, "/assets", Method::GET, no_headers())
+        let err = serve(&env, "/assets", Method::GET, no_headers())
             .await
             .unwrap()
-            .unwrap();
+            .unwrap_err();
 
-        assert_eq!(response.status(), 403);
+        assert_eq!(err.status(), 403);
+        assert_eq!(err.to_string(), super::ACCESS_DENIED_MESSAGE);
     }
 
     #[tokio::test]

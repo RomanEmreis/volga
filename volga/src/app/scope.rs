@@ -10,9 +10,6 @@ use hyper::{
     service::Service,
 };
 
-#[cfg(not(feature = "middleware"))]
-use hyper::header::ALLOW;
-
 use crate::{
     ClientIp, HttpBody, HttpRequest, HttpResult, Limit, ShutdownHandle,
     app::{AppEnv, pipeline::Terminal},
@@ -314,9 +311,9 @@ async fn handle_impl(
             route_pipeline.call(request).await
         }
         Terminal::Fallback(fallback) => fallback.call(request).await,
-        Terminal::MethodNotAllowed(allowed) => status!(405; [
-            (ALLOW, allowed.as_ref())
-        ]),
+        Terminal::MethodNotAllowed(allowed) => {
+            Err(crate::app::pipeline::method_not_allowed(Some(&allowed)))
+        }
         Terminal::MalformedPath => Err(Error::from(crate::http::endpoints::route::MalformedPath)),
     };
 

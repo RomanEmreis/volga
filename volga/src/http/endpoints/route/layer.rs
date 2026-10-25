@@ -1,7 +1,8 @@
 //! Represents tools for "local" middleware
 
+use crate::HttpResult;
+use crate::app::pipeline::method_not_allowed;
 use crate::http::endpoints::handlers::RouteHandler;
-use crate::{HttpResult, status};
 
 #[cfg(feature = "middleware")]
 use {
@@ -18,6 +19,11 @@ pub(crate) enum Layer {
     Handler(RouteHandler),
     #[cfg(feature = "middleware")]
     Middleware(MiddlewareFn),
+    /// The route's error handler, set with `map_err`: it is not one more link in the chain
+    /// but the outermost layer of the route's own scope, wherever it was registered, and a
+    /// second one replaces the first
+    #[cfg(feature = "middleware")]
+    ErrorHandler(MiddlewareFn),
 }
 
 impl From<RouteHandler> for Layer {
@@ -41,7 +47,7 @@ impl From<Layer> for RouteHandler {
         match layer {
             Layer::Handler(handler) => handler,
             #[cfg(feature = "middleware")]
-            Layer::Middleware(_) => unreachable!(),
+            Layer::Middleware(_) | Layer::ErrorHandler(_) => unreachable!(),
         }
     }
 }
@@ -52,7 +58,22 @@ impl From<Layer> for RouteHandler {
 #[derive(Clone)]
 pub(crate) struct RouteLayers {
     middleware: Middlewares,
+    /// The route's own error handler, kept apart until the route's scope is closed so that
+    /// it wraps every middleware of the route, the ones registered after it included
+    error_handler: Option<MiddlewareFn>,
     terminal: Option<NextFn>,
+}
+
+#[cfg(feature = "middleware")]
+impl RouteLayers {
+    /// Closes the route's own scope: its error handler becomes the outermost of its layers,
+    /// so whatever wraps the route from now on - a group's middleware - wraps it as well
+    #[inline]
+    fn close_scope(&mut self) {
+        if let Some(error_handler) = self.error_handler.take() {
+            self.middleware.prepend(&[error_handler]);
+        }
+    }
 }
 
 /// Route's middleware pipeline
@@ -82,6 +103,7 @@ impl RoutePipeline {
         #[cfg(feature = "middleware")]
         let pipeline = Self::Builder(Box::new(RouteLayers {
             middleware: Middlewares::new(),
+            error_handler: None,
             terminal: None,
         }));
         #[cfg(not(feature = "middleware"))]
@@ -97,6 +119,7 @@ impl RoutePipeline {
     pub(crate) fn ending_in(terminal: NextFn) -> Self {
         Self::Builder(Box::new(RouteLayers {
             middleware: Middlewares::new(),
+            error_handler: None,
             terminal: Some(terminal),
         }))
     }
@@ -106,12 +129,16 @@ impl RoutePipeline {
     ///
     /// This is how a route group applies its middleware once its closure returns: the layers
     /// already there belong to the route itself or to a nested group, and both run inside the
-    /// group's. A static file mount is layered the same way - it answers under the group's
-    /// prefix rather than through a route, and carries the same pipeline.
+    /// group's. The route's error handler is put in front of the route's own layers first, so
+    /// the group's go around it. A static file mount is layered the same way - it answers
+    /// under the group's prefix rather than through a route, and carries the same pipeline.
     #[cfg(feature = "middleware")]
     pub(crate) fn prepend(&mut self, layers: &[MiddlewareFn]) {
         match self {
-            Self::Builder(builder) => builder.middleware.prepend(layers),
+            Self::Builder(builder) => {
+                builder.close_scope();
+                builder.middleware.prepend(layers)
+            }
             Self::Middleware(_) => (),
         }
     }
@@ -123,6 +150,7 @@ impl RoutePipeline {
             Self::Builder(builder) => match layer {
                 Layer::Handler(handler) => builder.terminal = Some(handler.into_next()),
                 Layer::Middleware(mw) => builder.middleware.add(mw),
+                Layer::ErrorHandler(mw) => builder.error_handler = Some(mw),
             },
             #[cfg(feature = "middleware")]
             Self::Middleware(_) => (),
@@ -139,7 +167,7 @@ impl RoutePipeline {
     pub(crate) fn call(&self, ctx: HttpContext) -> BoxFuture<'static, HttpResult> {
         match self {
             Self::Middleware(Some(next)) => next(ctx),
-            _ => Box::pin(async { status!(405) }),
+            _ => Box::pin(async { Err(method_not_allowed(None)) }),
         }
     }
 
@@ -148,7 +176,7 @@ impl RoutePipeline {
     pub(crate) async fn call(self, req: HttpRequest) -> HttpResult {
         match self {
             Self::Handler(Some(handler)) => handler.call(req).await,
-            _ => status!(405),
+            _ => Err(method_not_allowed(None)),
         }
     }
 
@@ -159,10 +187,13 @@ impl RoutePipeline {
             Self::Middleware(_) => return,
             // Layers with nothing to end in - a pipeline no handler was mapped into - compose
             // to nothing, and are answered `405` like a route with no pipeline at all
-            Self::Builder(builder) => builder
-                .terminal
-                .take()
-                .map(|terminal| builder.middleware.compose(terminal)),
+            Self::Builder(builder) => {
+                builder.close_scope();
+                builder
+                    .terminal
+                    .take()
+                    .map(|terminal| builder.middleware.compose(terminal))
+            }
         };
         *self = Self::Middleware(next)
     }
@@ -265,6 +296,43 @@ mod middleware_tests {
     }
 
     #[tokio::test]
+    async fn it_puts_the_route_error_handler_around_the_route_and_inside_the_group() {
+        let log = Log::default();
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut pipeline = RoutePipeline::from(Layer::from(handler));
+        pipeline.insert(Layer::from(recording(&log, "route 1")));
+        pipeline.insert(Layer::ErrorHandler(recording(&log, "replaced")));
+        pipeline.insert(Layer::ErrorHandler(recording(&log, "route error handler")));
+        pipeline.insert(Layer::from(recording(&log, "route 2")));
+        pipeline.prepend(&[recording(&log, "group")]);
+        pipeline.compose();
+
+        let response = pipeline.call(ctx()).await.unwrap();
+
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["group", "route error handler", "route 1", "route 2"]
+        );
+    }
+
+    #[tokio::test]
+    async fn it_puts_the_route_error_handler_first_without_a_group() {
+        let log = Log::default();
+        let handler: RouteHandler = Func::new(|| async { ok!() });
+
+        let mut pipeline = RoutePipeline::from(Layer::from(handler));
+        pipeline.insert(Layer::from(recording(&log, "route")));
+        pipeline.insert(Layer::ErrorHandler(recording(&log, "route error handler")));
+        pipeline.compose();
+
+        pipeline.call(ctx()).await.unwrap();
+
+        assert_eq!(*log.lock().unwrap(), ["route error handler", "route"]);
+    }
+
+    #[tokio::test]
     async fn it_answers_405_when_no_handler_was_mapped() {
         let log = Log::default();
 
@@ -272,9 +340,9 @@ mod middleware_tests {
         pipeline.insert(Layer::from(recording(&log, "route")));
         pipeline.compose();
 
-        let response = pipeline.call(ctx()).await.unwrap();
+        let err = pipeline.call(ctx()).await.unwrap_err();
 
-        assert_eq!(response.status(), 405);
+        assert_eq!(err.status(), 405);
         assert!(log.lock().unwrap().is_empty());
     }
 }

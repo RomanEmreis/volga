@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.15.0
+
+## Added
+* `Error::with_header` adds a header to whatever response the error answers with, and `Error::headers` reads them back. The framework adds them to the response of the error handler that answers the error - the default one, `map_problem` or one of your own - unless that response sets the header itself, so a protocol header such as a `WWW-Authenticate` challenge or the `Allow` of a `405` survives `app.map_err(|e: Error| status!(500, ..))`. It is separate from `with_response`, which means "answer exactly this": the headers are added to an attached response as well. A handler answering with the error passes it on with its headers, and they are added once, where the error is answered in the end. (#292)
+* `docs/api-design.md` has an error-handling section: `map_ok` sees the success path and explicit responses, `map_err` the rejections, on every level; a scope's handler covers the whole scope; framework rejections are `Err`, and error headers are applied over any handler's response. (#292)
+
+## Changed
+* **Breaking:** `map_err` on a `Route` or a `RouteGroup`, and `map_problem`, which is built on it, covers its whole scope, whatever order it was registered in. It was a link in the middleware chain like any other and covered only what was registered after it: `.filter(..).map_err(h)` left the filter's rejection to the application's handler, and so did the natural order `.authorize(..).map_problem()` with its `401`. A route or a group now has one error handler, and a second `map_err` or `map_problem` replaces the first, as on `App`; the later one used to answer first, and the earlier one saw what it passed on. Unchanged, and now documented: a scoped handler answering with the error passes it on to the group around it and then to `App::map_err`, and the errors of the global middleware and of the application fallback reach `App::map_err` alone. (#292)
+* **Breaking:** The rejections volga produces itself are errors, answered by the error handler. Several were responses that `map_err` and `map_problem` never saw and `map_ok` took for a success, so with `map_problem` a client got problem details on a `413`, plain text on a `429` and an empty body on a `401`. (#292)
+  - `authorize`: `400`, `401`, `403` and `503`, with the `WWW-Authenticate` challenge and `Cache-Control: no-store` as error headers. The error says why - the challenge's description, or "Bearer token is missing" - and the default handler answers with that as a text body, where the body was empty.
+  - Rate limiting: `429`, with the message it had.
+  - The router: the default `404` for a path nothing answers and the `405` for a method its path does not have, with `Allow` as an error header. The default handler answers them with the reason phrase as a text body, "Not Found" and "Method Not Allowed", where the body was empty. A fallback of your own, `map_fallback`, answers with a response as before.
+  - Static files: the `403` for a directory without listing or a path outside the content root, and the `404` where a fallback file is not configured.
+  - Compression: the `406` for an `Accept-Encoding` naming nothing the server can produce, with `Vary` and `Accept-Encoding` as error headers.
+  - Responses that are not rejections stay responses: a CORS preflight's `204`, a static file's `304`, the HTTPS redirect and the answer to an implicit `HEAD`.
+
+  An error handler answering with a fixed status answers every one of these with it now: `app.map_err(|e: Error| status!(500, ..))` turns every `401`, `404`, `405` and `429` into a `500`. Answer with the error's own status, `e.status()`, as the docs and the examples do now. A `map_ok` that adds to or wraps every response no longer sees these, and one that rewrote the default `404` or a `401` moves to `map_err`, or to `map_fallback` for the `404`.
+* The default error handler no longer gives an error an instance before rendering it, and a request no longer clones its URI for it: the handler answers with the error's message alone and never read the instance. A handler of your own still gets it. (#292)
+
+## Fixed
+* An error response carries the CORS headers. The CORS middleware added them to `Ok` responses only, so an error - a handler's `Err`, an extractor's, a `413` - was answered without `Access-Control-Allow-Origin`, and a browser reported a blocked origin instead of the error. The middleware now adds its headers to an error passing through it, as error headers. (#292)
+
 # 0.14.1
 
 ## Added
