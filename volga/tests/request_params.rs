@@ -183,9 +183,6 @@ async fn it_reads_the_route_params_of_every_group_around_a_route() {
 #[tokio::test]
 async fn it_reads_a_route_param_of_a_type_implementing_from_path_arg() {
     let server = TestServer::spawn(|app| {
-        app.map_get("/positional/{id}", |id: OrderId| -> HttpResult {
-            ok!("positional:{}", id.0)
-        });
         app.map_get("/path/{id}", |Path(id): Path<OrderId>| -> HttpResult {
             ok!("path:{}", id.0)
         });
@@ -196,18 +193,14 @@ async fn it_reads_a_route_param_of_a_type_implementing_from_path_arg() {
     })
     .await;
 
-    for (path, expected) in [
-        ("/positional/42", "positional:42"),
-        ("/path/42", "path:42"),
-        ("/tuple/42/7", "tuple:42:7"),
-    ] {
+    for (path, expected) in [("/path/42", "path:42"), ("/tuple/42/7", "tuple:42:7")] {
         let response = server.client().get(server.url(path)).send().await.unwrap();
 
         assert!(response.status().is_success(), "{path}");
         assert_eq!(response.text().await.unwrap(), expected, "{path}");
     }
 
-    for path in ["/positional/nope", "/path/nope", "/tuple/nope/7"] {
+    for path in ["/path/nope", "/tuple/nope/7"] {
         let response = server.client().get(server.url(path)).send().await.unwrap();
 
         assert_eq!(response.status(), 400, "{path}");

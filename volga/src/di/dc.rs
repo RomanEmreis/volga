@@ -4,7 +4,9 @@ use super::{Container, Dependencies, FromContainer, Inject, error::Error as DiEr
 use crate::{
     HttpRequest,
     error::Error,
-    http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+    http::endpoints::args::{
+        FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+    },
 };
 use futures_util::future::{Ready, ready};
 use hyper::http::{Extensions, request::Parts};
@@ -127,6 +129,8 @@ impl<T: Send + Sync + 'static> TryFrom<&Extensions> for Dc<T> {
         Self::from_container(container)
     }
 }
+
+impl<T: Send + Sync> Sealed for Dc<T> {}
 
 impl<T: Send + Sync + 'static> FromRequestRef for Dc<T> {
     #[inline]

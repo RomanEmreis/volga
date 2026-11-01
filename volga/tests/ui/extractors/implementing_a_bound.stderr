@@ -1,0 +1,39 @@
+error[E0277]: `Custom` cannot implement this trait: it is a bound on what volga takes, not an extension point
+ --> tests/ui/extractors/implementing_a_bound.rs:5:25
+  |
+5 | impl FromRequestRef for Custom {
+  |                         ^^^^^^ implement `FromRequestHead` instead
+  |
+help: the trait `FromRequestHead` is not implemented for `Custom`
+ --> tests/ui/extractors/implementing_a_bound.rs:3:1
+  |
+3 | struct Custom;
+  | ^^^^^^^^^^^^^
+  = note: a type of your own becomes a handler and middleware argument by implementing `FromRequestHead`
+  = help: the following other types implement trait `volga::http::endpoints::args::sealed::Sealed`:
+            ()
+            (T1,)
+            (T1, T2)
+            (T1, T2, T3)
+            (T1, T2, T3, T4)
+            (T1, T2, T3, T4, T5)
+            (T1, T2, T3, T4, T5, T6)
+            (T1, T2, T3, T4, T5, T6, T7)
+          and $N others
+  = note: required for `Custom` to implement `volga::http::endpoints::args::sealed::Sealed`
+note: required by a bound in `FromRequestRef`
+ --> src/http/endpoints/args.rs
+  |
+  | pub trait FromRequestRef: Sized + sealed::Sealed {
+  |                                   ^^^^^^^^^^^^^^ required by this bound in `FromRequestRef`
+  = note: `FromRequestRef` is a "sealed trait", because to implement it you also need to implement `volga::http::endpoints::args::sealed::Sealed`, which is not accessible; this is usually done to force you to use one of the provided types that already implement it
+  = help: the following types implement the trait:
+            T
+            volga::auth::Authenticated<T>
+            volga::auth::Basic
+            volga::auth::Bearer
+            volga::auth::BearerTokenService
+            volga::Config<T>
+            volga::di::Dc<T>
+            volga::headers::HttpHeaders
+          and $N others

@@ -1,0 +1,24 @@
+error[E0277]: `Json<u32>` is not an extractor this handler or middleware can take
+ --> tests/ui/middleware/body_extractor.rs:5:9
+  |
+5 |     app.with(async |_: Json<u32>, next| next.await);
+  |         ^^^^ not an extractor
+  |
+  = help: the trait `FromRequestHead` is not implemented for `Json<u32>`
+  = note: a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)
+  = note: `Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`
+  = note: `with`, `filter` and `map_err` read the request without consuming it, so they take the extractors of its head, but not `Json<T>` or any other body extractor
+  = note: a type of your own becomes an extractor by implementing `FromRequestHead`; one read from a path parameter implements `FromPathArg` and is taken as `Path<T>`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
+  = help: the following other types implement trait `FromRequestRef`:
+            (T₁, T₂, …, Tₙ) up to tuples of arity 10
+  = note: required for `Json<u32>` to implement `FromRequestRef`
+  = note: 1 redundant requirement hidden
+  = note: required for `(Json<u32>,)` to implement `FromRequestRef`
+note: required by a bound in `middleware::<impl App>::with`
+ --> src/middleware.rs
+  |
+  |     pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
+  |            ---- required by a bound in this associated function
+...
+  |         Args: FromRequestRef + Send + 'static,
+  |               ^^^^^^^^^^^^^^ required by this bound in `middleware::<impl App>::with`

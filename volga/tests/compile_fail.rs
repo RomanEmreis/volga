@@ -77,3 +77,17 @@ fn it_reports_a_middleware_argument_that_cannot_borrow_the_request() {
     }
     trybuild::TestCases::new().compile_fail("tests/ui/middleware/*.rs");
 }
+
+// The gate on what can read one request together is a `const` block, evaluated when a handler
+// is instantiated. `cargo check` does not get that far, and `trybuild` checks unless a group
+// holds a case that passes, which is what `pass/` is for.
+#[test]
+#[cfg(feature = "full")]
+fn it_reports_extractors_that_cannot_read_one_request_together() {
+    if skipped() {
+        return;
+    }
+    let cases = trybuild::TestCases::new();
+    cases.pass("tests/ui/extractor_combinations/pass/*.rs");
+    cases.compile_fail("tests/ui/extractor_combinations/*.rs");
+}

@@ -7,7 +7,7 @@ use hyper::{header::AsHeaderName, http::request::Parts};
 use super::{FromHeaders, HeaderError, HeaderMap, HeaderName, HeaderValue};
 
 use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
+    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
 };
 
 use std::{
@@ -106,6 +106,8 @@ impl From<&Parts> for HttpHeaders {
 }
 
 /// Extracts `HeadersMap` from request parts into [`HttpHeaders`]
+impl Sealed for HttpHeaders {}
+
 impl FromRequestParts for HttpHeaders {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
@@ -292,6 +294,8 @@ impl<T: FromHeaders> Header<T> {
 
 /// Extracts `HeaderValue` from request parts into `Header<T>``
 /// where T implements [`FromHeaders`] `struct`
+impl<T: FromHeaders> Sealed for Header<T> {}
+
 impl<T: FromHeaders + Send> FromRequestParts for Header<T> {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {

@@ -8,7 +8,7 @@ error[E0277]: `volga::Path<Params>` is not an extractor and cannot be a handler 
   = note: a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)
   = note: `Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`
   = note: `Path<T>` reads by position: `T` is one type implementing `FromPathArg`, or a tuple of them; a struct read field by field goes into `NamedPath<T>`
-  = note: `FromPayload` is internal to volga: a type of your own is read from a path parameter once it implements `FromPathArg`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
+  = note: `FromPayload` is internal to volga: a type of your own becomes an extractor by implementing `FromRequestHead`; one read from a path parameter implements `FromPathArg` and is taken as `Path<T>`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
 help: the trait `volga::http::endpoints::args::FromPayload` is conditionally implemented for `volga::Path<T>`
  --> src/http/endpoints/args/path.rs
   |

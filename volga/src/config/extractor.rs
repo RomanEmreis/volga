@@ -4,7 +4,9 @@ use crate::{
     HttpRequest,
     error::Error,
     http::{
-        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+        endpoints::args::{
+            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+        },
         request_scope::HttpRequestScope,
     },
 };
@@ -57,6 +59,8 @@ impl<T: Send + Sync + 'static> Config<T> {
         Ok(Config(arc))
     }
 }
+
+impl<T: Send + Sync> Sealed for Config<T> {}
 
 impl<T: Send + Sync + 'static> FromRequestParts for Config<T> {
     #[inline]

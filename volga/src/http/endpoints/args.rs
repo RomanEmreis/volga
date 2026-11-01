@@ -5,6 +5,7 @@ use std::{future::Future, ops::RangeInclusive};
 
 use crate::{HttpBody, HttpRequest, error::Error, http::request_scope::HttpRequestScope};
 
+pub use self::head::{FromRequestHead, RequestHead};
 pub use crate::http::endpoints::route::{PathArg, PathArgs};
 
 #[cfg(feature = "di")]
@@ -15,6 +16,7 @@ pub mod cancellation_token;
 pub mod client_ip;
 pub mod file;
 pub mod form;
+mod head;
 #[cfg(feature = "static-files")]
 pub mod host_env;
 pub mod json;
@@ -47,13 +49,74 @@ pub(crate) enum Source {
     Request,
     Full,
     Parts,
+    /// The head, read by a type implementing [`FromRequestHead`]. It can read the path
+    /// parameters as well, which the dispatch therefore leaves in the request.
+    Head,
     Path,
     Body,
     PathArgs,
 }
 
+/// Keeps the traits that appear in volga's signatures as bounds from being implemented
+/// outside of it: what a user implements is [`FromRequestHead`]
+pub(crate) mod sealed {
+    use super::FromRequestHead;
+
+    /// Implemented next to each extractor
+    #[diagnostic::on_unimplemented(
+        message = "`{Self}` cannot implement this trait: it is a bound on what volga takes, not an extension point",
+        label = "implement `FromRequestHead` instead",
+        note = "a type of your own becomes a handler and middleware argument by implementing `FromRequestHead`"
+    )]
+    pub trait Sealed {}
+
+    impl Sealed for () {}
+    impl<T: FromRequestHead> Sealed for T {}
+}
+
 /// Any number of path parameters
 pub(crate) const ANY_PATH_ARITY: RangeInclusive<usize> = 0..=usize::MAX;
+
+/// Refuses extractors that cannot read one request together, each of which would otherwise
+/// be left with nothing to read once the handler is called.
+///
+/// Extractors are read in the order a handler takes them, so what a signature costs does not
+/// depend on how its arguments are sorted. `HttpRequest` takes the body and the head with it,
+/// which makes it a body extractor that an extractor of the head has to stand before. Path
+/// parameters are taken out of the request ahead of all of them, and stand on either side.
+///
+/// It only runs in the `const` block of the tuple's [`FromRequest`], when a handler is built.
+const fn assert_read_together(sources: &[Source]) {
+    let (mut bodies, mut positional, mut whole_path, mut head_taken) = (0, false, false, false);
+    let mut i = 0;
+
+    while i < sources.len() {
+        match sources[i] {
+            Source::Request => {
+                bodies += 1;
+                head_taken = true;
+            }
+            Source::Body | Source::Full => bodies += 1,
+            Source::Path => positional = true,
+            Source::PathArgs => whole_path = true,
+            Source::Parts | Source::Head => assert!(
+                !head_taken,
+                "`HttpRequest` takes the head of the request, so an extractor reading it stands before `HttpRequest`"
+            ),
+            Source::None => {}
+        }
+        i += 1;
+    }
+
+    assert!(
+        bodies <= 1,
+        "a handler takes one extractor of the request body, `HttpRequest` included: the body is a stream that is read once"
+    );
+    assert!(
+        !(positional && whole_path),
+        "a handler reads path parameters either by position or through `Path<T>` / `NamedPath<T>`, not both"
+    );
+}
 
 /// The numbers of path parameters a route can declare for `extractors`, in the order a
 /// handler takes them, to be read from it.
@@ -92,14 +155,18 @@ pub(crate) const fn path_arity(
     min..=max
 }
 
-/// Specifies extractors to read data from HTTP request
+/// The bound on what a handler takes: the tuple of its arguments.
+///
+/// This is a bound, not an extension point: it is sealed, and implemented for `()` and for
+/// tuples of up to 10 extractors. To make a type of your own a handler argument, implement
+/// [`FromRequestHead`].
 #[diagnostic::on_unimplemented(
     message = "`{Self}` cannot be extracted from a request",
     label = "not an extractor",
     note = "a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)",
     note = "`Option<T>` and `Result<T, volga::error::Error>` wrap any of them, `Valid<E>` wraps one whose payload implements `Validate`, and a tuple of up to 10 is an extractor too"
 )]
-pub trait FromRequest: Sized {
+pub trait FromRequest: Sized + sealed::Sealed {
     /// Extracts data from HTTP request
     fn from_request(req: HttpRequest) -> impl Future<Output = Result<Self, Error>> + Send;
 
@@ -125,38 +192,33 @@ pub trait FromRequest: Sized {
     const PATH_ARITY: RangeInclusive<usize> = ANY_PATH_ARITY;
 }
 
-/// Specifies extractors to read data from a borrowed HTTP request
-#[diagnostic::on_unimplemented(
-    message = "`{Self}` cannot be extracted from a borrowed request",
-    label = "not a borrowing extractor",
-    note = "`with`, `filter` and `map_err` read the request without consuming it, so they take the extractors that borrow: `Query<T>`, `Path<T>`, `ClientIp`, `Dc<T>` (feature `di`) and the header types, but not `Json<T>` or any other body extractor"
-)]
-pub trait FromRequestRef: Sized {
+/// The bound on what reads a borrowed HTTP request: what `with` and `filter` take, and what
+/// [`HttpRequest::extract`] reads.
+///
+/// This is a bound, not an extension point: it is sealed. To make a type of your own an
+/// extractor, implement [`FromRequestHead`], which serves here as well.
+pub trait FromRequestRef: Sized + sealed::Sealed {
     /// Extracts data from HTTP request reference
     fn from_request(req: &HttpRequest) -> Result<Self, Error>;
 
-    /// Declares the services this extractor resolves from the DI container.
-    ///
-    /// [`App::run`](crate::App::run) checks that each of them is registered before it
-    /// starts, so that whatever takes this extractor does not answer `500` on every request
-    /// instead. The default declares nothing. An extractor of your own that resolves a
-    /// service from the container declares it here.
+    /// Declares the services this extractor resolves from the DI container, for
+    /// [`App::run`](crate::App::run) to check that each of them is registered
     #[inline]
     #[cfg(feature = "di")]
     fn dependencies(_deps: &mut Dependencies) {}
 }
 
-/// Specifies extractors to read data from HTTP request parts
-pub trait FromRequestParts: Sized {
+/// The bound on what reads HTTP request parts: `map_err` and `map_fallback`, which have no
+/// request left to borrow.
+///
+/// This is a bound, not an extension point: it is sealed. To make a type of your own an
+/// extractor, implement [`FromRequestHead`], which serves here as well.
+pub trait FromRequestParts: Sized + sealed::Sealed {
     /// Extracts data from HTTP request parts
     fn from_parts(parts: &Parts) -> Result<Self, Error>;
 
-    /// Declares the services this extractor resolves from the DI container.
-    ///
-    /// [`App::run`](crate::App::run) checks that each of them is registered before it
-    /// starts, so that whatever takes this extractor does not answer `500` on every request
-    /// instead. The default declares nothing. An extractor of your own that resolves a
-    /// service from the container declares it here.
+    /// Declares the services this extractor resolves from the DI container, for
+    /// [`App::run`](crate::App::run) to check that each of them is registered
     #[inline]
     #[cfg(feature = "di")]
     fn dependencies(_deps: &mut Dependencies) {}
@@ -224,11 +286,11 @@ pub trait FromPathArgs: Sized {
 
 /// Specifies how a type is read from a single path argument
 ///
-/// A type implementing it can be a handler argument of its own (`|id: OrderId|`), an
-/// element of a [`Path<T>`](crate::Path) tuple, or the `T` of a `Path<T>`. It is
-/// implemented for the primitives, the `std::net` addresses, `String`, `Box<str>`,
-/// `Cow<'static, str>`, `Box<[u8]>`, `CString`, `OsString`, `PathBuf` and, with the `uuid`
-/// feature, `uuid::Uuid`.
+/// A type implementing it is the `T` of a [`Path<T>`](crate::Path) or an element of a
+/// `Path<T>` tuple, so the call site names where it is read from. It is implemented for the
+/// primitives, the `std::net` addresses, `String`, `Box<str>`, `Cow<'static, str>`,
+/// `Box<[u8]>`, `CString`, `OsString`, `PathBuf` and, with the `uuid` feature, `uuid::Uuid`,
+/// and these are handler arguments of their own as well (`|id: u64|`).
 ///
 /// The value is percent-decoded by the router before any extractor reads it, and a path
 /// that does not decode is answered `400` - see [`PathArg::value`].
@@ -244,7 +306,7 @@ pub trait FromPathArgs: Sized {
 ///
 /// # Example
 /// ```no_run
-/// use volga::{App, HttpResult, error::Error, ok};
+/// use volga::{App, HttpResult, Path, error::Error, ok};
 /// use volga::http::endpoints::args::{FromPathArg, PathArg};
 ///
 /// struct OrderId(u64);
@@ -256,14 +318,13 @@ pub trait FromPathArgs: Sized {
 /// }
 ///
 /// let mut app = App::new();
-/// app.map_get("/orders/{id}", |id: OrderId| ok!("{}", id.0));
+/// app.map_get("/orders/{id}", |Path(id): Path<OrderId>| ok!("{}", id.0));
 /// ```
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` is not an extractor and cannot be a handler argument",
-    label = "not an extractor",
-    note = "a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)",
-    note = "`Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`",
-    note = "a type of your own is read from a path parameter once it implements `FromPathArg`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds"
+    message = "`{Self}` cannot be read from a path parameter",
+    label = "not a path parameter",
+    note = "a type of your own is read from a path parameter once it implements `FromPathArg`, and is taken as `Path<T>`",
+    note = "to read the parameters into a struct by name, use `NamedPath<T>`"
 )]
 pub trait FromPathArg: Sized {
     /// Extracts data from a path argument
@@ -288,7 +349,7 @@ pub trait FromPathArg: Sized {
     note = "a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)",
     note = "`Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`",
     note = "`Path<T>` reads by position: `T` is one type implementing `FromPathArg`, or a tuple of them; a struct read field by field goes into `NamedPath<T>`",
-    note = "`FromPayload` is internal to volga: a type of your own is read from a path parameter once it implements `FromPathArg`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds"
+    note = "`FromPayload` is internal to volga: a type of your own becomes an extractor by implementing `FromRequestHead`; one read from a path parameter implements `FromPathArg` and is taken as `Path<T>`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds"
 )]
 pub(crate) trait FromPayload: Send + Sized {
     type Future: Future<Output = Result<Self, Error>> + Send;
@@ -344,6 +405,8 @@ impl FromRequestParts for () {
 
 macro_rules! define_generic_from_request {
     ($($T: ident),*) => {
+        impl<$($T),+> sealed::Sealed for ($($T,)+) {}
+
         impl<$($T: FromRequestRef),+> FromRequestRef for ($($T,)+) {
             #[inline]
             fn from_request(req: &HttpRequest) -> Result<Self, Error> {
@@ -402,23 +465,30 @@ macro_rules! define_generic_from_request {
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
             #[inline]
             async fn from_request(req: HttpRequest) -> Result<Self, Error> {
+                // A failure here is a compile error only where the handler is built:
+                // `cargo check` does not instantiate it
+                const { assert_read_together(&[$($T::SOURCE),+]) };
+
                 let uses_path = false $(|| matches!($T::SOURCE, Source::Path))*;
                 let uses_pathargs = false $(|| matches!($T::SOURCE, Source::PathArgs))*;
-
-                if uses_path && uses_pathargs {
-                    return Err(invalid_extractor_combination());
-                }
+                let uses_head = false $(|| matches!($T::SOURCE, Source::Head))*;
 
                 let (mut parts, body) = req.into_parts();
 
                 // Taken out of the request only for an extractor that reads them: an
                 // `HttpRequest` taken instead carries them on, for `path_args` and `extract`
-                // to read, and for the handler `map_ws` and `map_msg` wrap
+                // to read, and for the handler `map_ws` and `map_msg` wrap. So does an
+                // extractor of the user's own, which can read them through the head, at the
+                // cost of a copy that only such a handler pays.
                 let params = if uses_path || uses_pathargs {
                     parts
                         .extensions
                         .get_mut::<HttpRequestScope>()
-                        .map(|s| std::mem::replace(&mut s.params, PathArgs::new()))
+                        .map(|s| if uses_head {
+                            s.params.clone()
+                        } else {
+                            std::mem::replace(&mut s.params, PathArgs::new())
+                        })
                         .unwrap_or_else(PathArgs::new)
                 } else {
                     PathArgs::new()
@@ -475,18 +545,10 @@ macro_rules! define_generic_from_request {
     }
 }
 
-#[cold]
-#[inline(never)]
-fn invalid_extractor_combination() -> Error {
-    Error::client_error(
-        "Invalid extractor combination: Cannot mix Path and PathArgs in the same handler",
-    )
-}
-
 macro_rules! payload_for_path {
     ($src:expr, $parts:expr, $body:expr, $iter:expr) => {{
         match $src {
-            Source::Parts => match $parts.as_ref() {
+            Source::Parts | Source::Head => match $parts.as_ref() {
                 Some(p) => Payload::Parts(p),
                 None => Payload::None,
             },
@@ -515,7 +577,7 @@ macro_rules! payload_for_path {
 macro_rules! payload_for_path_args {
     ($src:expr, $parts:expr, $body:expr, $params:expr) => {{
         match $src {
-            Source::Parts => match $parts.as_ref() {
+            Source::Parts | Source::Head => match $parts.as_ref() {
                 Some(p) => Payload::Parts(p),
                 None => Payload::None,
             },
@@ -551,7 +613,10 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ANY_PATH_ARITY, FromPayload, FromRequest, FromRequestParts, Payload, Source};
+    use super::{
+        ANY_PATH_ARITY, FromPayload, FromRequest, FromRequestParts, Payload, Source,
+        assert_read_together,
+    };
     use crate::error::Error;
     use crate::http::Uri;
     use crate::{Json, NamedPath, Path, Query};
@@ -575,6 +640,64 @@ mod tests {
         let extraction = TestNone::from_payload(Payload::None).await;
         assert!(extraction.is_ok());
         assert_eq!(TestNone::SOURCE, Source::None);
+    }
+
+    #[test]
+    fn it_reads_extractors_that_share_a_request_together() {
+        assert_read_together(&[]);
+        assert_read_together(&[Source::Request]);
+        assert_read_together(&[Source::Body]);
+        assert_read_together(&[Source::Parts, Source::Head, Source::Body, Source::Path]);
+        assert_read_together(&[Source::Path, Source::Path, Source::Full, Source::None]);
+        assert_read_together(&[Source::PathArgs, Source::PathArgs, Source::Head]);
+    }
+
+    #[test]
+    fn it_reads_extractors_of_the_head_before_a_request() {
+        assert_read_together(&[Source::Parts, Source::Request]);
+        assert_read_together(&[Source::Head, Source::Parts, Source::Request]);
+    }
+
+    #[test]
+    fn it_reads_path_params_on_either_side_of_a_request() {
+        assert_read_together(&[Source::Path, Source::Request, Source::Path]);
+        assert_read_together(&[Source::Request, Source::PathArgs]);
+    }
+
+    #[test]
+    #[should_panic(expected = "an extractor reading it stands before `HttpRequest`")]
+    fn it_refuses_a_built_in_extractor_of_the_head_after_a_request() {
+        assert_read_together(&[Source::Request, Source::Parts]);
+    }
+
+    #[test]
+    #[should_panic(expected = "an extractor reading it stands before `HttpRequest`")]
+    fn it_refuses_a_custom_extractor_after_a_request() {
+        assert_read_together(&[Source::Request, Source::Head]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a handler takes one extractor of the request body")]
+    fn it_refuses_two_extractors_of_the_body() {
+        assert_read_together(&[Source::Body, Source::Full]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a handler takes one extractor of the request body")]
+    fn it_refuses_a_request_next_to_a_body_extractor() {
+        assert_read_together(&[Source::Body, Source::Parts, Source::Request]);
+    }
+
+    #[test]
+    #[should_panic(expected = "a handler takes one extractor of the request body")]
+    fn it_refuses_two_requests() {
+        assert_read_together(&[Source::Request, Source::Request]);
+    }
+
+    #[test]
+    #[should_panic(expected = "either by position or through")]
+    fn it_refuses_positional_params_next_to_a_path() {
+        assert_read_together(&[Source::Path, Source::PathArgs]);
     }
 
     #[test]

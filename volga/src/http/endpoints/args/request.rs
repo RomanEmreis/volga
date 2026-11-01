@@ -6,8 +6,11 @@ use futures_util::future::{Ready, ok};
 use hyper::{Method, Uri, http::request::Parts};
 
 use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
+    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
 };
+
+impl Sealed for Uri {}
+impl Sealed for Method {}
 
 impl FromRequestParts for Uri {
     #[inline]

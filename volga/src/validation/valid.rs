@@ -18,7 +18,7 @@ use crate::{
         Parts,
         endpoints::args::{
             FromPayload, FromRequestParts, FromRequestRef, Payload, Source, form::Form, json::Json,
-            path::NamedPath, query::Query,
+            path::NamedPath, query::Query, sealed::Sealed,
         },
     },
     validation::Validate,
@@ -129,7 +129,8 @@ fn constraint_target(
         Source::Path | Source::PathArgs => {
             Some(ConstraintTarget::PathParameter { described_before })
         }
-        Source::None => None,
+        // A type of the user's own describes nothing to put the constraints on
+        Source::Head | Source::None => None,
     }
 }
 
@@ -217,6 +218,8 @@ where
         E::dependencies(deps);
     }
 }
+
+impl<E> Sealed for Valid<E> {}
 
 impl<E, T> FromRequestRef for Valid<E>
 where

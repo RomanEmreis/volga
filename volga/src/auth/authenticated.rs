@@ -10,7 +10,7 @@ use crate::{
     error::Error,
     http::{
         FromRequestParts, FromRequestRef,
-        endpoints::args::{FromPayload, Payload, Source},
+        endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
     },
 };
 use futures_util::future::{Ready, ready};
@@ -106,6 +106,8 @@ where
 }
 
 /// Extracts `Authenticated<T>` from request parts
+impl<T: AuthClaims> Sealed for Authenticated<T> {}
+
 impl<T> FromRequestParts for Authenticated<T>
 where
     T: AuthClaims + Send + Sync + 'static,

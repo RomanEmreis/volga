@@ -5,7 +5,7 @@ use crate::{
     error::Error,
     http::{
         FromRequestParts, FromRequestRef,
-        endpoints::args::{FromPayload, Payload, Source},
+        endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
         request_scope::HttpRequestScope,
     },
 };
@@ -73,6 +73,8 @@ impl TryFrom<&Parts> for ClientIp {
 }
 
 /// Extracts `ClientIp` from request parts
+impl Sealed for ClientIp {}
+
 impl FromRequestParts for ClientIp {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
