@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
+    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
 };
 
 /// `Query<T>` extracts HTTP request query parameters into a named
@@ -96,6 +96,8 @@ impl<T: DeserializeOwned> TryFrom<&Parts> for Query<T> {
 
 /// Extracts `Uri` query from request parts into `Query<T>`
 /// where T is deserializable `struct`
+impl<T> Sealed for Query<T> {}
+
 impl<T: DeserializeOwned> FromRequestParts for Query<T> {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {

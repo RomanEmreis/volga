@@ -8,7 +8,9 @@ use crate::{
     http::{
         Extensions, Parts,
         cookie::get_cookies,
-        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+        endpoints::args::{
+            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+        },
     },
 };
 use cookie::{CookieJar, Key, PrivateJar};
@@ -175,6 +177,8 @@ impl TryFrom<(&Extensions, &HeaderMap)> for PrivateCookies {
             .map_err(Into::into)
     }
 }
+
+impl Sealed for PrivateCookies {}
 
 impl FromRequestRef for PrivateCookies {
     #[inline]

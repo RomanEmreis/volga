@@ -6,7 +6,9 @@ use crate::{
     headers::{COOKIE, HeaderMap, SET_COOKIE},
     http::{
         HttpRequest,
-        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+        endpoints::args::{
+            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+        },
     },
 };
 use cookie::CookieJar;
@@ -103,6 +105,8 @@ pub(crate) fn set_cookies(jar: CookieJar, headers: &mut HeaderMap) {
         }
     }
 }
+
+impl Sealed for Cookies {}
 
 impl FromRequestRef for Cookies {
     #[inline]

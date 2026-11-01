@@ -7,7 +7,9 @@ use crate::{
     headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
     http::{
         Extensions,
-        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+        endpoints::args::{
+            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+        },
         request_scope::HttpRequestScope,
     },
 };
@@ -799,6 +801,8 @@ impl Display for Bearer {
     }
 }
 
+impl Sealed for Bearer {}
+
 impl FromRequestParts for Bearer {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
@@ -840,6 +844,8 @@ impl TryFrom<&Extensions> for BearerTokenService {
             })
     }
 }
+
+impl Sealed for BearerTokenService {}
 
 impl FromRequestParts for BearerTokenService {
     #[inline]

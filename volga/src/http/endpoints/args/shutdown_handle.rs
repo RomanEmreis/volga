@@ -7,7 +7,9 @@ use crate::{
     HttpRequest, ShutdownHandle,
     error::Error,
     http::{
-        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+        endpoints::args::{
+            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+        },
         request_scope::HttpRequestScope,
     },
 };
@@ -29,6 +31,8 @@ impl TryFrom<&Extensions> for ShutdownHandle {
 }
 
 /// Extracts [`ShutdownHandle`] from request parts
+impl Sealed for ShutdownHandle {}
+
 impl FromRequestParts for ShutdownHandle {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {

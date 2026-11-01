@@ -1,7 +1,7 @@
 //! Extractors for the whole Hosting Environment request
 
 use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
+    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
 };
 use crate::{HttpRequest, app::HostEnv, error::Error};
 use futures_util::future::{Ready, ready};
@@ -20,6 +20,8 @@ impl TryFrom<&Extensions> for HostEnv {
         }
     }
 }
+
+impl Sealed for HostEnv {}
 
 impl FromRequestRef for HostEnv {
     #[inline]

@@ -10,7 +10,9 @@ use crate::{
     error::Error,
     http::{
         Extensions,
-        endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+        endpoints::args::{
+            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+        },
         request_scope::HttpRequestScope,
     },
 };
@@ -85,6 +87,8 @@ impl From<&Extensions> for TokenGuard {
 }
 
 /// Extracts `CancellationToken` from request parts
+impl Sealed for TokenGuard {}
+
 impl FromRequestParts for TokenGuard {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {

@@ -81,9 +81,9 @@
 //! app.map_get("/users/{name}", |name: String| async move { name });
 //! ```
 //!
-//! - **Every extractor reads the decoded value** - a positional one (`String`, `u32`,
-//!   `Path<T>`, a `FromPathArg` type of your own) and `NamedPath<T>` alike: `%20` is a
-//!   space, `%25` a `%` and `%31` the `1` a `u32` parses. A `+` is a plus sign, not a space
+//! - **Every extractor reads the decoded value** - a positional one (`String`, `u32`),
+//!   `Path<T>` of any `T` and `NamedPath<T>` alike: `%20` is a space, `%25` a `%` and `%31`
+//!   the `1` a `u32` parses. A `+` is a plus sign, not a space
 //!   (RFC 3986 Section 3.3).
 //! - **An encoded separator stays in its segment.** `%2F` decodes to a `/` inside the value
 //!   it belongs to and never starts a segment of its own, so `GET /users/a%2Fb` binds `id`
@@ -150,11 +150,12 @@
 //!
 //! # Path parameters
 //!
-//! A handler reads the parameters its route declares by position: a positional argument -
-//! `|id: u32|`, or a [`FromPathArg`](crate::http::endpoints::args::FromPathArg) type of your
-//! own - takes the next one, and [`Path<T>`](crate::Path) takes them all, in order. A
-//! handler reading more than its route declares could not run for any request, so mapping
-//! it panics, naming the route:
+//! A handler reads the parameters its route declares by position: a positional argument of
+//! a built-in type, `|id: u32|`, takes the next one, and [`Path<T>`](crate::Path) takes them
+//! all, in order, into a tuple or a
+//! [`FromPathArg`](crate::http::endpoints::args::FromPathArg) type of your own. A handler
+//! reading more than its route declares could not run for any request, so mapping it panics,
+//! naming the route:
 //!
 //! ```should_panic
 //!# use volga::App;

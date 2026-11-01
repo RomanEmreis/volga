@@ -6,6 +6,7 @@ use crate::{
     http::Parts,
     http::endpoints::args::{
         ANY_PATH_ARITY, FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
+        sealed::Sealed,
     },
 };
 use pin_project_lite::pin_project;
@@ -40,6 +41,8 @@ where
         }
     }
 }
+
+impl<T> Sealed for Result<T, Error> {}
 
 impl<T: FromRequestRef> FromRequestRef for Result<T, Error> {
     #[inline]
@@ -118,6 +121,8 @@ mod tests {
         }
     }
 
+    impl Sealed for SuccessExtractor {}
+
     impl FromRequestParts for SuccessExtractor {
         fn from_parts(_: &Parts) -> Result<Self, Error> {
             Ok(SuccessExtractor)
@@ -141,6 +146,8 @@ mod tests {
             err(Error::client_error("Test error"))
         }
     }
+
+    impl Sealed for FailureExtractor {}
 
     impl FromRequestParts for FailureExtractor {
         fn from_parts(_: &Parts) -> Result<Self, Error> {

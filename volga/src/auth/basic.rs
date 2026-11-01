@@ -6,7 +6,7 @@ use crate::{
     headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
     http::{
         FromRequestParts, FromRequestRef,
-        endpoints::args::{FromPayload, Payload, Source},
+        endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
     },
 };
 use base64::Engine;
@@ -78,6 +78,8 @@ impl Display for Basic {
         f.write_str(&self.0)
     }
 }
+
+impl Sealed for Basic {}
 
 impl FromRequestParts for Basic {
     #[inline]

@@ -18,6 +18,7 @@ use std::{
 use crate::http::endpoints::{
     args::{
         FromPathArg, FromPathArgs, FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
+        sealed::Sealed,
     },
     route::{PathArg, PathArgs},
 };
@@ -214,6 +215,9 @@ impl<T: DeserializeOwned + Send> TryFrom<&Parts> for NamedPath<T> {
     }
 }
 
+impl<T> Sealed for Path<T> {}
+impl<T: DeserializeOwned> Sealed for NamedPath<T> {}
+
 impl<T: FromPathArgs + Send> FromRequestParts for Path<T> {
     #[inline]
     fn from_parts(parts: &Parts) -> Result<Self, Error> {
@@ -360,25 +364,55 @@ impl_from_path_arg! {
 #[cfg(feature = "uuid")]
 impl_from_path_arg! { uuid::Uuid }
 
-/// A type read from one path argument is a handler argument of its own
-impl<T: FromPathArg + Send> FromPayload for T {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Path;
-
-    // Its own parameter, and whatever else is left for the ones after it
-    const PATH_ARITY: RangeInclusive<usize> = 1..=usize::MAX;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        // The dispatch hands out one argument per positional extractor, and runs out when
-        // the handler takes more of them than the route declares
-        let Payload::Path(arg) = payload else {
-            return ready(Err(PathError::more_extractors_than_args()));
-        };
-        ready(T::from_owned_path_arg(arg))
-    }
+/// Reads a built-in type as a handler argument of its own, by position.
+///
+/// The dispatch hands out one argument per positional extractor, and runs out when the
+/// handler takes more of them than the route declares.
+#[inline]
+fn positional_from_payload<T: FromPathArg>(payload: Payload<'_>) -> Ready<Result<T, Error>> {
+    let Payload::Path(arg) = payload else {
+        return ready(Err(PathError::more_extractors_than_args()));
+    };
+    ready(T::from_owned_path_arg(arg))
 }
+
+/// The built-in types read from one path argument are handler arguments of their own. A
+/// type of the user's own is not: it is taken as `Path<T>`, which names where it is read from
+/// and leaves bare user types to `FromRequestHead`.
+macro_rules! impl_positional_arg {
+    { $($type:ty),* $(,)? } => {
+        $(impl FromPayload for $type {
+            type Future = Ready<Result<Self, Error>>;
+
+            const SOURCE: Source = Source::Path;
+
+            // Its own parameter, and whatever else is left for the ones after it
+            const PATH_ARITY: RangeInclusive<usize> = 1..=usize::MAX;
+
+            #[inline]
+            fn from_payload(payload: Payload<'_>) -> Self::Future {
+                positional_from_payload(payload)
+            }
+        })*
+    };
+}
+
+impl_positional_arg! {
+    String, Cow<'static, str>, Box<str>, Box<[u8]>,
+    bool,
+    char,
+    i8, i16, i32, i64, i128, isize,
+    u8, u16, u32, u64, u128, usize,
+    f32, f64,
+    NonZero<i8>, NonZero<i16>, NonZero<i32>, NonZero<i64>, NonZero<i128>, NonZero<isize>,
+    NonZero<u8>, NonZero<u16>, NonZero<u32>, NonZero<u64>, NonZero<u128>, NonZero<usize>,
+    IpAddr, SocketAddr, Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6,
+    CString, OsString,
+    PathBuf
+}
+
+#[cfg(feature = "uuid")]
+impl_positional_arg! { uuid::Uuid }
 
 /// A type read from one path argument is the `T` of `Path<T>` on a route declaring exactly
 /// one parameter.

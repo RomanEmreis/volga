@@ -273,6 +273,83 @@ or a `404` rather than report a blocked origin.
 `Error::with_response` is a separate thing: it means "answer exactly this, unformatted". The
 error's headers are added to that response too.
 
+## Extraction
+
+What a user implements, and what is only a bound:
+
+| To get | Implement |
+|---|---|
+| an argument of your own (current user, tenant, locale) | `FromRequestHead` |
+| a value inside `Path<T>` | `FromPathArg`, or `FromPathArgs` for several parameters |
+| a typed header | `FromHeaders` / `headers!` |
+| rules on an extracted value | `Validate` |
+
+One extractor trait serves handlers and middleware alike: a `FromRequestHead` is read wherever a
+built-in extractor of the head is. It is synchronous and leaves the body alone, so it composes
+with a body extractor.
+
+Asynchronous work belongs to a middleware. The extensions of a request are not exposed, in either
+direction: they hold the request scope and the container, and a user's value would sit next to
+them. A value is handed over through a scoped service instead, which there is one of per request,
+and which `App::run` checks at startup:
+
+```rust
+#[derive(Default)]
+struct SessionSlot(OnceLock<Session>);
+
+app.add_scoped_default::<SessionSlot>();
+
+app.with(async |cookies: Cookies, db: Dc<Db>, slot: Dc<SessionSlot>, next: Next| {
+    slot.0.set(db.session(&cookies).await?).ok();
+    next.await
+});
+
+impl FromRequestHead for Session {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        let slot: Dc<SessionSlot> = head.extract()?;
+        slot.0.get().cloned().ok_or_else(unauthorized)
+    }
+
+    fn dependencies(deps: &mut Dependencies) {
+        deps.add::<SessionSlot>();
+    }
+}
+```
+
+Whether the container should fill such a slot itself is the question of #272.
+
+Built-in positional types are taken bare (`|id: u64|`). A user type that reads the path is taken
+as `Path<T>`, so the call site names the source, which a bare `id: OrderId` does not.
+
+`FromRequest`, `FromRequestRef`, `FromRequestParts` and `FromContainer` appear in signatures as
+bounds and are not extension points. They stay public, since a bound has to be nameable: a helper
+generic over a handler or over what `HttpRequest::extract` reads writes them, and a crate-private
+trait in a public signature fails `private_bounds`. They are sealed, so an `impl` of one fails
+where it is written, and points at `FromRequestHead`, instead of compiling and changing nothing.
+
+The body has no trait of its own. A format volga does not know is read in the handler, from
+`HttpBody` or `ByteStream`, with the body limit already applied. `FromPayload` can carry one
+blanket impl and `FromRequestHead` holds it, so a body trait could only come behind a wrapper,
+`Body<T>`, which can be added at any time without breaking anything.
+
+### Extractors that cannot read one request together
+
+Extractors are read in the order a handler takes them, and that order is not rearranged behind
+the user's back: what a signature costs does not depend on how its arguments are sorted. Three
+rules follow:
+
+- A handler takes one extractor of the body, and `HttpRequest` is one: it carries the body, which
+  is a stream that is read once.
+- An extractor of the head stands before `HttpRequest`, which takes the head with it. Path
+  parameters are taken out of the request ahead of everything, so they stand on either side.
+- A handler reads path parameters by position or through `Path<T>` / `NamedPath<T>`, not both.
+
+The tuple's `FromRequest` refuses these in an inline `const` block, which fails the build with
+the message of the rule. The block is evaluated when the handler is instantiated, so `cargo build`
+and `cargo test` report it while `cargo check` and rust-analyzer do not. For the same reason its
+tests build their cases themselves instead of using `trybuild`, which checks by default, and
+assert only the message: what rustc prints around it depends on whether `rust-src` is installed.
+
 ## Type aliases over a wrapper
 
 An alias over a wrapper type is named after the wrapper followed by the name of the inner type,
