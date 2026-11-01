@@ -79,15 +79,71 @@ fn it_reports_a_middleware_argument_that_cannot_borrow_the_request() {
 }
 
 // The gate on what can read one request together is a `const` block, evaluated when a handler
-// is instantiated. `cargo check` does not get that far, and `trybuild` checks unless a group
-// holds a case that passes, which is what `pass/` is for.
+// is instantiated, so these cases have to be built, where `trybuild` only checks. It cannot
+// assert them either: it compares everything rustc prints, and for a `const` block that fails
+// that holds a frame in `core`, which reads differently with `rust-src` installed. So these
+// are built here, and only the message is asserted, which is the part this crate writes.
 #[test]
 #[cfg(feature = "full")]
 fn it_reports_extractors_that_cannot_read_one_request_together() {
+    use std::{fs, path::Path, process::Command};
+
     if skipped() {
         return;
     }
-    let cases = trybuild::TestCases::new();
-    cases.pass("tests/ui/extractor_combinations/pass/*.rs");
-    cases.compile_fail("tests/ui/extractor_combinations/*.rs");
+
+    const CASES: [(&str, &str); 4] = [
+        (
+            "head_after_a_request",
+            "`HttpRequest` takes the head of the request, so an extractor reading it stands before `HttpRequest`",
+        ),
+        (
+            "positional_next_to_path",
+            "a handler reads path parameters either by position or through `Path<T>` / `NamedPath<T>`, not both",
+        ),
+        (
+            "request_next_to_a_body",
+            "a handler takes one extractor of the request body, `HttpRequest` included",
+        ),
+        (
+            "two_bodies",
+            "a handler takes one extractor of the request body, `HttpRequest` included",
+        ),
+    ];
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cases_dir = manifest_dir.join("tests/ui/extractor_combinations");
+    let project = Path::new(env!("CARGO_TARGET_TMPDIR")).join("extractor_combinations");
+    fs::create_dir_all(&project).unwrap();
+
+    let bins: String = CASES
+        .iter()
+        .map(|(name, _)| {
+            let path = cases_dir.join(format!("{name}.rs"));
+            format!("[[bin]]\nname = \"{name}\"\npath = {path:?}\n\n")
+        })
+        .collect();
+    let manifest = format!(
+        "[package]\nname = \"extractor-combinations\"\nversion = \"0.0.0\"\nedition = \"2024\"\n\n\
+         {bins}[dependencies]\nvolga = {{ path = {manifest_dir:?} }}\n\n[workspace]\n"
+    );
+    fs::write(project.join("Cargo.toml"), manifest).unwrap();
+    fs::copy(
+        manifest_dir.join("../Cargo.lock"),
+        project.join("Cargo.lock"),
+    )
+    .unwrap();
+
+    for (name, message) in CASES {
+        let output = Command::new(env!("CARGO"))
+            .args(["build", "--offline", "--bin", name])
+            .env_remove("CARGO_TARGET_DIR")
+            .current_dir(&project)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert!(!output.status.success(), "`{name}` builds");
+        assert!(stderr.contains(message), "`{name}`: {stderr}");
+    }
 }

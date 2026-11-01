@@ -346,8 +346,9 @@ rules follow:
 
 The tuple's `FromRequest` refuses these in an inline `const` block, which fails the build with
 the message of the rule. The block is evaluated when the handler is instantiated, so `cargo build`
-and `cargo test` report it while `cargo check` and rust-analyzer do not. For the same reason the
-UI cases of it need a passing case next to them, or `trybuild` checks instead of building.
+and `cargo test` report it while `cargo check` and rust-analyzer do not. For the same reason its
+tests build their cases themselves instead of using `trybuild`, which checks by default, and
+assert only the message: what rustc prints around it depends on whether `rust-src` is installed.
 
 ## Type aliases over a wrapper
 

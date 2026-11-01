@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## Fixed
 * An error response carries the CORS headers. The CORS middleware added them to `Ok` responses only, so an error - a handler's `Err`, an extractor's, a `413` - was answered without `Access-Control-Allow-Origin`, and a browser reported a blocked origin instead of the error. The middleware now adds its headers to an error passing through it, as error headers. (#292)
 
+## Security
+* `zstd` 0.14.0 -> 0.14.3, `zstd-safe` 8.0.0 -> 8.2.0 and `zstd-sys` 2.1.0 -> 2.1.2 in `Cargo.lock`, resolving RUSTSEC-2026-0391, RUSTSEC-2026-0398, RUSTSEC-2026-0403 and RUSTSEC-2026-0410.
+
 # 0.14.1
 
 ## Added
