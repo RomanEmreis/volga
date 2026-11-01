@@ -340,8 +340,8 @@ rules follow:
 
 - A handler takes one extractor of the body, and `HttpRequest` is one: it carries the body, which
   is a stream that is read once.
-- An extractor of the head stands before `HttpRequest`, which takes the head with it. Path
-  parameters are taken out of the request ahead of everything, so they stand on either side.
+- `HttpRequest` stands last. It is handed the whole request, so nothing after it would have
+  anything to read.
 - A handler reads path parameters by position or through `Path<T>` / `NamedPath<T>`, not both.
 
 The tuple's `FromRequest` refuses these in an inline `const` block, which fails the build with

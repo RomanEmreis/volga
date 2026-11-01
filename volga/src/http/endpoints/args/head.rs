@@ -15,17 +15,8 @@ use crate::{
 use crate::di::Dependencies;
 
 /// The head of a request - everything but the body - as a [`FromRequestHead`] reads it.
-///
-/// One type serves both places an extractor of your own is taken in, a handler and
-/// middleware, which hold the request differently.
 #[derive(Clone, Copy)]
-pub struct RequestHead<'a>(Head<'a>);
-
-#[derive(Clone, Copy)]
-enum Head<'a> {
-    Parts(&'a Parts),
-    Request(&'a HttpRequest),
-}
+pub struct RequestHead<'a>(&'a Parts);
 
 impl fmt::Debug for RequestHead<'_> {
     #[inline]
@@ -38,22 +29,19 @@ impl<'a> RequestHead<'a> {
     /// The head of a request a handler is about to read
     #[inline]
     pub(crate) fn from_parts(parts: &'a Parts) -> Self {
-        Self(Head::Parts(parts))
+        Self(parts)
     }
 
     /// The head of a request a middleware borrows
     #[inline]
     pub(crate) fn from_request(req: &'a HttpRequest) -> Self {
-        Self(Head::Request(req))
+        Self(req.parts())
     }
 
     /// Returns a reference to the HTTP headers of the request.
     #[inline]
     pub fn headers(&self) -> &HeaderMap {
-        match self.0 {
-            Head::Parts(parts) => &parts.headers,
-            Head::Request(req) => req.headers(),
-        }
+        &self.0.headers
     }
 
     /// Reads any extractor of the head: a built-in one or another [`FromRequestHead`].
@@ -79,11 +67,8 @@ impl<'a> RequestHead<'a> {
     /// }
     /// ```
     #[inline]
-    pub fn extract<T: FromRequestParts + FromRequestRef>(&self) -> Result<T, Error> {
-        match self.0 {
-            Head::Parts(parts) => T::from_parts(parts),
-            Head::Request(req) => T::from_request(req),
-        }
+    pub fn extract<T: FromRequestParts>(&self) -> Result<T, Error> {
+        T::from_parts(self.0)
     }
 }
 
@@ -92,8 +77,7 @@ impl<'a> RequestHead<'a> {
 /// A type implementing it is taken wherever a built-in extractor of the head is: as a handler
 /// argument, in `with`, `filter` and `map_err`, as `Option<T>` or `Result<T, Error>`, and
 /// through [`RequestHead::extract`]. It leaves the body alone, so a handler can take a body
-/// extractor next to it. Next to a path extractor it can still read the path parameters, for
-/// which such a handler keeps a copy of them, whether this type reads them or not.
+/// extractor next to it. Next to a path extractor it can still read the path parameters.
 ///
 /// Reading the head is synchronous. Asynchronous work, such as loading a session row, goes to
 /// a middleware, which hands its result over through a scoped service: with the `di` feature,

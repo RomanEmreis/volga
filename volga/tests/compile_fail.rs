@@ -92,10 +92,18 @@ fn it_reports_extractors_that_cannot_read_one_request_together() {
         return;
     }
 
-    const CASES: [(&str, &str); 4] = [
+    const CASES: [(&str, &str); 6] = [
         (
             "head_after_a_request",
-            "`HttpRequest` takes the head of the request, so an extractor reading it stands before `HttpRequest`",
+            "`HttpRequest` takes the whole request, so it stands last",
+        ),
+        (
+            "path_after_a_request",
+            "`HttpRequest` takes the whole request, so it stands last",
+        ),
+        (
+            "positional_after_a_request",
+            "`HttpRequest` takes the whole request, so it stands last",
         ),
         (
             "positional_next_to_path",

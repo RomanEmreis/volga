@@ -78,7 +78,7 @@ impl FromPayload for HttpRequest {
         let Payload::Request(req) = payload else {
             unreachable!()
         };
-        ok(*req)
+        ok(req)
     }
 }
 
@@ -136,7 +136,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let req = HttpRequest::from_payload(Payload::Request(Box::new(req))).await;
+        let req = HttpRequest::from_payload(Payload::Request(req)).await;
 
         assert!(req.is_ok());
 

@@ -1,8 +1,8 @@
 #![allow(missing_docs)]
 #![cfg(feature = "test")]
 
-//! `HttpRequest` carries the body and the head, so it takes no other extractor of the body, and
-//! an extractor of the head stands before it. Path parameters stand on either side.
+//! `HttpRequest` is handed the whole request, so it takes no other extractor of the body and
+//! stands last. What stands before it reads the request without taking it apart.
 
 use http_body_util::BodyExt;
 use std::collections::HashMap;
@@ -46,32 +46,57 @@ async fn it_reads_a_request_after_extractors_of_the_head() {
 }
 
 #[tokio::test]
-async fn it_reads_path_params_on_either_side_of_a_request() {
+async fn it_reads_a_request_after_path_params_and_leaves_them_in_it() {
+    fn args(req: &HttpRequest) -> String {
+        let args: Vec<_> = req.path_args().map(|(k, v)| format!("{k}={v}")).collect();
+        args.join(",")
+    }
+
     let server = TestServer::spawn(|app| {
         app.map_get(
             "/path/{id}",
-            async |req: HttpRequest, Path(id): Path<u32>| -> HttpResult {
-                ok!("{id}:{}", req.uri().path())
+            async |Path(id): Path<u32>, req: HttpRequest| -> HttpResult {
+                ok!("{id}:{}", args(&req))
             },
         );
         app.map_get(
-            "/before/{id}",
-            async |req: HttpRequest, id: u32| -> HttpResult { ok!("{id}:{}", req.uri().path()) },
+            "/positional/{id}",
+            async |id: u32, req: HttpRequest| -> HttpResult { ok!("{id}:{}", args(&req)) },
         );
         app.map_get(
-            "/after/{id}",
-            async |id: u32, req: HttpRequest| -> HttpResult { ok!("{id}:{}", req.uri().path()) },
+            "/owned/{name}",
+            async |name: String, req: HttpRequest| -> HttpResult { ok!("{name}:{}", args(&req)) },
         );
     })
     .await;
 
-    for (path, expected) in [
-        ("/path/7", "7:/path/7"),
-        ("/before/7", "7:/before/7"),
-        ("/after/7", "7:/after/7"),
-    ] {
-        assert_eq!(get(&server, path).await, (200, expected.to_owned()));
-    }
+    assert_eq!(get(&server, "/path/7").await, (200, "7:id=7".to_owned()));
+    assert_eq!(
+        get(&server, "/positional/7").await,
+        (200, "7:id=7".to_owned())
+    );
+    assert_eq!(
+        get(&server, "/owned/ann").await,
+        (200, "ann:name=ann".to_owned())
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_keeps_the_query_cache_of_a_request_handed_to_a_handler() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/query", async |uri: Uri, req: HttpRequest| -> HttpResult {
+            let args: Vec<_> = req.query_args().map(|(k, v)| format!("{k}={v}")).collect();
+            ok!("{}:{}", uri.path(), args.join(","))
+        });
+    })
+    .await;
+
+    assert_eq!(
+        get(&server, "/query?a=1&b=2").await,
+        (200, "/query:a=1,b=2".to_owned())
+    );
 
     server.shutdown().await;
 }

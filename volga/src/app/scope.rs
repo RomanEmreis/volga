@@ -299,7 +299,7 @@ async fn handle_impl(
     // Pre-extract error handler args from parts before consuming them.
     let error_args = extract_error_args(error_handler, &parts);
 
-    let request = HttpRequest::new(Request::from_parts(parts, body)).into_limited(body_limit);
+    let request = HttpRequest::new(parts, body).into_limited(body_limit);
 
     #[cfg(feature = "middleware")]
     let response = pipeline

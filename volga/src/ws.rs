@@ -156,9 +156,8 @@ impl App {
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
             async move {
-                let (parts, body) = req.into_parts();
-                let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await?;
-                let args = Args::from_request(HttpRequest::from_parts(parts, body)).await?;
+                let conn = WebSocketConnection::from_payload(Payload::Parts(req.parts())).await?;
+                let args = Args::from_request(req).await?;
                 conn.on(move |ws| handler.call(ws, args))
             }
         })
@@ -228,9 +227,8 @@ impl App {
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
             async move {
-                let (parts, body) = req.into_parts();
-                let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await?;
-                let args = Args::from_request(HttpRequest::from_parts(parts, body)).await?;
+                let conn = WebSocketConnection::from_payload(Payload::Parts(req.parts())).await?;
+                let args = Args::from_request(req).await?;
                 conn.on(|mut ws| async move {
                     ws.on_msg(move |msg: Msg| handler.call(msg, args.clone()))
                         .await;

@@ -58,8 +58,8 @@ pub(crate) struct HttpRequestScope {
     /// Request body size limit.
     pub(crate) body_limit: RequestBodyLimit,
 
-    /// Route path parameters. Consumed once by the extractor dispatch via
-    /// `std::mem::take` on the mutable extensions reference.
+    /// Route path parameters. They stay here for all of the request, so whatever reads the
+    /// head reads them too, and a positional extractor nothing reads after takes its value.
     pub(crate) params: PathArgs,
 
     /// Reference to the error handler, used by WebSocket connections.
