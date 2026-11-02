@@ -164,6 +164,17 @@ impl HttpRequest {
         std::mem::replace(&mut self.body, HttpBody::empty())
     }
 
+    /// Puts `body` in place of the body of the request, under the body limit of the request,
+    /// as the body it replaces was
+    #[inline]
+    #[cfg(feature = "middleware")]
+    pub(crate) fn set_body(&mut self, body: HttpBody) {
+        self.body = match self.body_limit() {
+            Some(limit) => HttpBody::limited(body, limit),
+            None => body,
+        };
+    }
+
     /// Takes the request, leaving an empty one behind
     #[inline]
     pub(crate) fn take(&mut self) -> Self {
@@ -181,8 +192,10 @@ impl HttpRequest {
             .get_mut(index)
     }
 
-    /// Consumes the request and returns request head and body
+    /// Consumes the request and returns request head and body, for the deprecated
+    /// `HttpRequestMut::into_parts` alone, and goes with it
     #[inline]
+    #[cfg(feature = "middleware")]
     pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
         (self.parts, self.body)
     }
@@ -374,6 +387,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "middleware")]
     fn it_splits_into_parts() {
         let (parts, body) = Request::get("/test")
             .body(HttpBody::empty())

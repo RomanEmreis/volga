@@ -12,7 +12,7 @@ use async_compression::tokio::bufread::{GzipDecoder, ZlibDecoder};
 use async_compression::tokio::bufread::ZstdDecoder;
 
 use crate::{
-    App, HttpBody, HttpRequest, HttpRequestMut, HttpResult,
+    App, HttpBody, HttpRequestMut, HttpResult,
     error::Error,
     headers::{
         ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, ContentEncoding, Encoding, Header, VARY,
@@ -180,23 +180,14 @@ async fn make_decompression_fn(mut ctx: HttpContext, next: NextFn) -> HttpResult
 
 fn decompress(
     encoding: Encoding,
-    request: HttpRequestMut,
+    mut request: HttpRequestMut,
     limits: ResolvedDecompressionLimits,
 ) -> HttpRequestMut {
-    let (mut parts, body) = request.into_parts();
+    let headers = request.headers_mut();
+    headers.remove(CONTENT_LENGTH);
+    headers.remove(CONTENT_ENCODING);
 
-    parts.headers.remove(CONTENT_LENGTH);
-    parts.headers.remove(CONTENT_ENCODING);
-
-    let body_limit = parts
-        .extensions
-        .get::<HttpRequestScope>()
-        .map(|s| s.body_limit)
-        .unwrap_or_default();
-
-    let body = decompress_body(encoding, body, limits);
-
-    HttpRequestMut::new(HttpRequest::from_parts(parts, body).into_limited(body_limit))
+    request.map_body(|body| decompress_body(encoding, body, limits))
 }
 
 #[inline]

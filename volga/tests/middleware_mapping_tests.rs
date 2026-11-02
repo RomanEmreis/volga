@@ -2,6 +2,7 @@
 #![allow(unused)]
 #![cfg(all(feature = "test", feature = "middleware"))]
 
+use http_body_util::BodyExt;
 use hyper::StatusCode;
 use std::io::{Error as IoError, ErrorKind};
 use volga::error::Error;
@@ -10,7 +11,7 @@ use volga::http::FilterResult;
 use volga::middleware::{HttpContext, NextFn};
 use volga::test::TestServer;
 use volga::validation::ValidationError;
-use volga::{HttpRequestMut, HttpResponse, Json, ok, status};
+use volga::{HttpBody, HttpRequest, HttpRequestMut, HttpResponse, HttpResult, Json, ok, status};
 
 headers! {
     (XTest, "x-test")
@@ -103,6 +104,88 @@ async fn it_adds_map_req_middleware() {
 
     assert!(response.status().is_success());
     assert_eq!(response.text().await.unwrap(), "x-test: Pass!");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_replaces_the_request_body_in_tap_req() {
+    let server = TestServer::spawn(|app| {
+        app.tap_req(|req: HttpRequestMut| req.map_body(|_| HttpBody::full("replaced")));
+        app.map_post("/echo", async |req: HttpRequest| -> HttpResult {
+            let body = req.into_body().collect().await?.to_bytes();
+            ok!("{}", String::from_utf8_lossy(&body))
+        });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .post(server.url("/echo"))
+        .body("original")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.text().await.unwrap(), "replaced");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_reads_and_replaces_the_request_body_in_tap_req() {
+    let server = TestServer::spawn(|app| {
+        app.tap_req(|req: HttpRequestMut| async move {
+            req.try_map_body_async(|body| async move {
+                let bytes = body.collect().await?.to_bytes();
+                if bytes.is_empty() {
+                    return Err(Error::client_error("empty body"));
+                }
+                Ok(HttpBody::full(bytes.to_ascii_uppercase()))
+            })
+            .await
+        });
+        app.map_post("/echo", async |req: HttpRequest| -> HttpResult {
+            let body = req.into_body().collect().await?.to_bytes();
+            ok!("{}", String::from_utf8_lossy(&body))
+        });
+    })
+    .await;
+
+    let post = |body: &'static str| server.client().post(server.url("/echo")).body(body).send();
+
+    let response = post("original").await.unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.text().await.unwrap(), "ORIGINAL");
+
+    let response = post("").await.unwrap();
+    assert_eq!(response.status(), 400);
+    assert_eq!(response.text().await.unwrap(), "empty body");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_answers_with_the_error_of_try_map_body() {
+    let server = TestServer::spawn(|app| {
+        app.tap_req(|req: HttpRequestMut| {
+            req.try_map_body(|_| Err(Error::client_error("cannot decode")))
+        });
+        app.map_post("/echo", || async { "reached the handler" });
+    })
+    .await;
+
+    let response = server
+        .client()
+        .post(server.url("/echo"))
+        .body("original")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 400);
+    assert_eq!(response.text().await.unwrap(), "cannot decode");
 
     server.shutdown().await;
 }
