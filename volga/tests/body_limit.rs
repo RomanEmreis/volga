@@ -225,6 +225,58 @@ async fn it_lets_a_group_raise_and_lower_the_application_limit() {
     server.shutdown().await;
 }
 
+/// A body that a middleware puts in place of the request's is read under the same limit, as a
+/// decompressed one is
+#[tokio::test]
+#[cfg(feature = "middleware")]
+async fn it_reads_a_body_replaced_in_tap_req_under_the_limit() {
+    use volga::{HttpBody, HttpRequestMut, Path};
+
+    let server = TestServer::builder()
+        .configure(|app| app.with_body_limit(Limit::Limited(16)))
+        .setup(|app| {
+            app.map_post("/grow/{len}", read_body)
+                .tap_req(|req: HttpRequestMut| {
+                    let Path(len) = req.extract::<Path<usize>>()?;
+                    Ok(req.map_body(|_| HttpBody::full(vec![b'x'; len])))
+                });
+        })
+        .build()
+        .await;
+
+    assert_eq!(post(&server, "/grow/16", 4).await, (200, "16".into()));
+    assert_eq!(post(&server, "/grow/17", 4).await, (413, TOO_LARGE.into()));
+
+    server.shutdown().await;
+}
+
+/// A middleware reads the body under the limit, as a handler does
+#[tokio::test]
+#[cfg(feature = "middleware")]
+async fn it_answers_413_to_a_body_over_the_limit_read_in_tap_req() {
+    use http_body_util::BodyExt;
+    use volga::{HttpBody, HttpRequestMut};
+
+    let server = TestServer::builder()
+        .configure(|app| app.with_body_limit(Limit::Limited(16)))
+        .setup(|app| {
+            app.map_post("/upload", read_body)
+                .tap_req(|req: HttpRequestMut| async move {
+                    req.try_map_body_async(|body| async move {
+                        Ok(HttpBody::full(body.collect().await?.to_bytes()))
+                    })
+                    .await
+                });
+        })
+        .build()
+        .await;
+
+    assert_eq!(post(&server, "/upload", 16).await, (200, "16".into()));
+    assert_eq!(post(&server, "/upload", 17).await, (413, TOO_LARGE.into()));
+
+    server.shutdown().await;
+}
+
 #[tokio::test]
 async fn it_lets_a_route_override_its_group() {
     let server = TestServer::builder()

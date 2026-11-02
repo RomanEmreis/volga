@@ -196,6 +196,16 @@ app.map_err(|err: Error| async move { status!(err.status().as_u16(), "{err}") })
 app.map_problem(); // replaces the handler above
 ```
 
+Outside the builders, `map_*` means what `map` means on `Option`, `Result` and `http::Request`:
+`HttpRequestMut::map_body`, `try_map_body` and `try_map_body_async` transform a value the caller
+owns, the body of the request, and register nothing. `try_` is the fallible form and `_async` the
+asynchronous one, as in `try_insert_header` and `BearerTokenService::decode_async`.
+
+There is no `map_body_async`, on purpose. What a middleware awaits without the body it awaits
+before the call, so the asynchronous form exists to read the body, and reading it can fail: an
+infallible form would leave the error to `unwrap()`, which tears down the connection, or to
+`unwrap_or_default()`, which hands the handler an empty body instead of answering `413`.
+
 ## Error handling
 
 `map_ok` and `map_err` divide what a request can end in between them, and they mean the same on
@@ -290,7 +300,9 @@ with a body extractor.
 
 Asynchronous work belongs to a middleware. The extensions of a request are not exposed, in either
 direction: they hold the request scope and the container, and a user's value would sit next to
-them. A value is handed over through a scoped service instead, which there is one of per request,
+them. Neither is the head that holds them: a middleware changes the headers through the methods
+of `HttpRequestMut` and replaces the body with `map_body`, or with `try_map_body_async` when it
+reads the body first. A value is handed over through a scoped service instead, which there is one of per request,
 and which `App::run` checks at startup:
 
 ```rust
