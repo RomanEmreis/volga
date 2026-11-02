@@ -568,7 +568,7 @@ impl RouteNode {
 
         // A catch-all is the last binding and reads segments nothing else binds, so the
         // segments taken by the parameters before it are not among the ones it reads
-        let args = bindings
+        let args: smallvec::SmallVec<_> = bindings
             .into_iter()
             .map(|binding| {
                 let value = if binding.tail {
@@ -584,7 +584,7 @@ impl RouteNode {
             })
             .collect();
 
-        let params = PathArgs::from_parts(args, None);
+        let params = PathArgs::from(args);
 
         Ok(Some(RouteParams { route, params }))
     }
@@ -604,7 +604,7 @@ impl RouteNode {
         let mut bindings = Bindings::new();
         let route = self.search(path, reading, &mut bindings)?;
 
-        let args = bindings
+        let args: smallvec::SmallVec<_> = bindings
             .into_iter()
             .map(|binding| PathArg {
                 name: Arc::clone(binding.name),
@@ -612,7 +612,7 @@ impl RouteNode {
             })
             .collect();
 
-        let params = PathArgs::from_parts(args, None);
+        let params = PathArgs::from(args);
 
         Some(RouteParams { route, params })
     }

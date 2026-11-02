@@ -39,11 +39,8 @@ where
     #[inline]
     fn args(req: HttpRequest) -> Result<Args, Error> {
         // Nothing matched, so there is no route to read a body for; the
-        // parts carry everything a fallback can act on, and unlike the
-        // payload trait behind `FromRequest` this one is public, so an
-        // extractor defined outside the crate works here.
-        let (parts, _) = req.into_parts();
-        Args::from_parts(&parts)
+        // parts carry everything a fallback can act on
+        Args::from_parts(req.parts())
     }
 }
 

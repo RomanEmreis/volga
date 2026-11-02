@@ -9,6 +9,7 @@ use std::{
     borrow::Cow,
     ffi::{CString, OsString},
     fmt::{self, Display, Formatter},
+    mem::take,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     num::NonZero,
     ops::{Deref, DerefMut, RangeInclusive},
@@ -259,10 +260,10 @@ impl<T: FromPathArgs + Send> FromPayload for Path<T> {
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::PathArgs(params) = payload else {
+        let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_slice(params))
+        ready(parts.try_into())
     }
 }
 
@@ -275,10 +276,10 @@ impl<T: DeserializeOwned + Send> FromPayload for NamedPath<T> {
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::PathArgs(params) = payload else {
+        let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_slice(params))
+        ready(parts.try_into())
     }
 
     #[cfg(feature = "openapi")]
@@ -296,8 +297,8 @@ impl FromPathArg for String {
     }
 
     #[inline]
-    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
-        Ok(arg.value.into_string())
+    fn take_path_arg(arg: &mut PathArg) -> Result<Self, Error> {
+        Ok(take(&mut arg.value).into_string())
     }
 }
 
@@ -308,8 +309,8 @@ impl FromPathArg for Cow<'static, str> {
     }
 
     #[inline]
-    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
-        Ok(Cow::Owned(arg.value.into_string()))
+    fn take_path_arg(arg: &mut PathArg) -> Result<Self, Error> {
+        Ok(Cow::Owned(take(&mut arg.value).into_string()))
     }
 }
 
@@ -320,8 +321,8 @@ impl FromPathArg for Box<str> {
     }
 
     #[inline]
-    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
-        Ok(arg.value)
+    fn take_path_arg(arg: &mut PathArg) -> Result<Self, Error> {
+        Ok(take(&mut arg.value))
     }
 }
 
@@ -332,8 +333,8 @@ impl FromPathArg for Box<[u8]> {
     }
 
     #[inline]
-    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
-        Ok(arg.value.into_boxed_bytes())
+    fn take_path_arg(arg: &mut PathArg) -> Result<Self, Error> {
+        Ok(take(&mut arg.value).into_boxed_bytes())
     }
 }
 
@@ -370,10 +371,11 @@ impl_from_path_arg! { uuid::Uuid }
 /// handler takes more of them than the route declares.
 #[inline]
 fn positional_from_payload<T: FromPathArg>(payload: Payload<'_>) -> Ready<Result<T, Error>> {
-    let Payload::Path(arg) = payload else {
-        return ready(Err(PathError::more_extractors_than_args()));
-    };
-    ready(T::from_owned_path_arg(arg))
+    ready(match payload {
+        Payload::Path(arg) => T::from_path_arg(arg),
+        Payload::PathMut(arg) => T::take_path_arg(arg),
+        _ => Err(PathError::more_extractors_than_args()),
+    })
 }
 
 /// The built-in types read from one path argument are handler arguments of their own. A
@@ -502,7 +504,7 @@ impl PathError {
 #[cfg(test)]
 mod tests {
     use crate::http::endpoints::args::{
-        FromPathArg, FromPayload, FromRequestParts, FromRequestRef, Payload,
+        FromPathArg, FromPayload, FromRequestParts, FromRequestRef, Payload, parts_with,
     };
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::http::request_scope::HttpRequestScope;
@@ -536,7 +538,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = isize::from_payload(Payload::Path(param)).await.unwrap();
+        let id = isize::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -558,7 +560,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = i8::from_payload(Payload::Path(param)).await.unwrap();
+        let id = i8::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -580,7 +582,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = i16::from_payload(Payload::Path(param)).await.unwrap();
+        let id = i16::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -602,7 +604,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = i32::from_payload(Payload::Path(param)).await.unwrap();
+        let id = i32::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -624,7 +626,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = i64::from_payload(Payload::Path(param)).await.unwrap();
+        let id = i64::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -646,7 +648,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = i128::from_payload(Payload::Path(param)).await.unwrap();
+        let id = i128::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -668,7 +670,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = usize::from_payload(Payload::Path(param)).await.unwrap();
+        let id = usize::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -690,7 +692,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = u8::from_payload(Payload::Path(param)).await.unwrap();
+        let id = u8::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -712,7 +714,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = u16::from_payload(Payload::Path(param)).await.unwrap();
+        let id = u16::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -734,7 +736,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = u32::from_payload(Payload::Path(param)).await.unwrap();
+        let id = u32::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -756,7 +758,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = u64::from_payload(Payload::Path(param)).await.unwrap();
+        let id = u64::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -778,7 +780,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = u128::from_payload(Payload::Path(param)).await.unwrap();
+        let id = u128::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 123);
     }
@@ -800,9 +802,70 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = String::from_payload(Payload::Path(param)).await.unwrap();
+        let id = String::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, "123");
+    }
+
+    #[tokio::test]
+    async fn it_takes_the_value_of_a_path_arg_nothing_reads_afterwards() {
+        let mut param = PathArg {
+            name: "name".into(),
+            value: "ann".into(),
+        };
+
+        let name = String::from_payload(Payload::PathMut(&mut param))
+            .await
+            .unwrap();
+
+        assert_eq!(name, "ann");
+        assert!(param.value.is_empty());
+    }
+
+    #[tokio::test]
+    async fn it_takes_the_value_of_a_path_arg_into_any_owned_type() {
+        let param = || PathArg {
+            name: "name".into(),
+            value: "ann".into(),
+        };
+
+        let (mut a, mut b, mut c) = (param(), param(), param());
+        let cow = std::borrow::Cow::<'static, str>::from_payload(Payload::PathMut(&mut a));
+        let boxed = Box::<str>::from_payload(Payload::PathMut(&mut b));
+        let bytes = Box::<[u8]>::from_payload(Payload::PathMut(&mut c));
+
+        assert_eq!(cow.await.unwrap(), "ann");
+        assert_eq!(&*boxed.await.unwrap(), "ann");
+        assert_eq!(&*bytes.await.unwrap(), b"ann");
+        assert!(a.value.is_empty() && b.value.is_empty() && c.value.is_empty());
+    }
+
+    #[tokio::test]
+    async fn it_leaves_the_value_of_a_path_arg_something_reads_afterwards() {
+        let param = PathArg {
+            name: "name".into(),
+            value: "ann".into(),
+        };
+
+        let name = String::from_payload(Payload::Path(&param)).await.unwrap();
+
+        assert_eq!(name, "ann");
+        assert_eq!(param.value(), "ann");
+    }
+
+    #[tokio::test]
+    async fn it_leaves_the_value_of_a_path_arg_a_type_only_parses() {
+        let mut param = PathArg {
+            name: "id".into(),
+            value: "7".into(),
+        };
+
+        let id = u32::from_payload(Payload::PathMut(&mut param))
+            .await
+            .unwrap();
+
+        assert_eq!(id, 7);
+        assert_eq!(param.value(), "7");
     }
 
     #[test]
@@ -822,7 +885,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = Box::<str>::from_payload(Payload::Path(param))
+        let id = Box::<str>::from_payload(Payload::Path(&param))
             .await
             .unwrap();
 
@@ -846,7 +909,7 @@ mod tests {
             name: "id".into(),
             value: "123".into(),
         };
-        let id = Box::<[u8]>::from_payload(Payload::Path(param))
+        let id = Box::<[u8]>::from_payload(Payload::Path(&param))
             .await
             .unwrap();
 
@@ -870,7 +933,7 @@ mod tests {
             name: "id".into(),
             value: "12.3".into(),
         };
-        let id = f32::from_payload(Payload::Path(param)).await.unwrap();
+        let id = f32::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 12.3);
     }
@@ -892,7 +955,7 @@ mod tests {
             name: "id".into(),
             value: "12.3".into(),
         };
-        let id = f64::from_payload(Payload::Path(param)).await.unwrap();
+        let id = f64::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(id, 12.3);
     }
@@ -914,7 +977,7 @@ mod tests {
             name: "flag".into(),
             value: "true".into(),
         };
-        let flag = bool::from_payload(Payload::Path(param)).await.unwrap();
+        let flag = bool::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert!(flag);
     }
@@ -936,7 +999,7 @@ mod tests {
             name: "char".into(),
             value: "a".into(),
         };
-        let char = char::from_payload(Payload::Path(param)).await.unwrap();
+        let char = char::from_payload(Payload::Path(&param)).await.unwrap();
 
         assert_eq!(char, 'a');
     }
@@ -956,7 +1019,7 @@ mod tests {
     async fn it_reads_named_path_from_payload() {
         let args = create_path_args();
 
-        let path = NamedPath::<Params>::from_payload(Payload::PathArgs(&args))
+        let path = NamedPath::<Params>::from_payload(Payload::Parts(&parts_with(args)))
             .await
             .unwrap();
 
@@ -968,7 +1031,7 @@ mod tests {
     async fn it_reads_path_from_payload() {
         let args = create_path_args();
 
-        let path = Path::<(u32, String)>::from_payload(Payload::PathArgs(&args))
+        let path = Path::<(u32, String)>::from_payload(Payload::Parts(&parts_with(args)))
             .await
             .unwrap()
             .0;
@@ -1231,7 +1294,7 @@ mod tests {
 
         #[tokio::test]
         async fn it_reads_uuid_from_payload() {
-            let id = Uuid::from_payload(Payload::Path(arg(ID))).await.unwrap();
+            let id = Uuid::from_payload(Payload::Path(&arg(ID))).await.unwrap();
 
             assert_eq!(id, Uuid::parse_str(ID).unwrap());
         }

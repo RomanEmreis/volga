@@ -134,6 +134,12 @@ impl PathArgs {
         let _ = self.encoded.take();
     }
 
+    /// Returns the argument at `index`, in the order the route declares them
+    #[inline]
+    pub(crate) fn get_mut(&mut self, index: usize) -> Option<&mut PathArg> {
+        self.args.get_mut(index)
+    }
+
     /// Append an item to the args vector.
     #[inline]
     pub(crate) fn push(&mut self, arg: PathArg) {
@@ -158,26 +164,6 @@ impl PathArgs {
         let value = self.encoded.get_or_init(|| encode(&self.args));
 
         Ok(value.as_str())
-    }
-
-    /// Splits [`PathArgs`] into parts
-    #[inline]
-    pub(crate) fn into_parts(self) -> (SmallVec<[PathArg; DEFAULT_DEPTH]>, Option<String>) {
-        let cached = self.encoded.into_inner();
-        (self.args, cached)
-    }
-
-    /// Creates [`PathArgs`] from parts
-    #[inline]
-    pub(crate) fn from_parts(
-        args: SmallVec<[PathArg; DEFAULT_DEPTH]>,
-        cached: Option<String>,
-    ) -> Self {
-        let encoded = OnceLock::new();
-        if let Some(value) = cached {
-            let _ = encoded.set(value);
-        }
-        Self { args, encoded }
     }
 }
 
@@ -215,7 +201,6 @@ impl FromIterator<PathArg> for PathArgs {
     }
 }
 
-#[cfg(test)]
 impl From<SmallVec<[PathArg; DEFAULT_DEPTH]>> for PathArgs {
     #[inline]
     fn from(args: SmallVec<[PathArg; DEFAULT_DEPTH]>) -> Self {
@@ -415,22 +400,19 @@ mod tests {
         let mut args: PathArgs = smallvec::smallvec![arg("id", "123")].into();
 
         // no cache yet
-        let (parts, cached) = args.clone().into_parts();
-        assert_eq!(parts.len(), 1);
-        assert!(cached.is_none());
+        assert_eq!(args.len(), 1);
+        assert!(args.encoded.get().is_none());
 
         // warm cache
         assert_eq!(args.encoded().unwrap(), "id=123");
 
         // cache exists now
-        let (_parts, cached) = args.clone().into_parts();
-        assert_eq!(cached.as_deref(), Some("id=123"));
+        assert_eq!(args.encoded.get().map(String::as_str), Some("id=123"));
 
         // push => must drop cache
         args.push(arg("name", "John"));
 
-        let (_parts, cached) = args.clone().into_parts();
-        assert!(cached.is_none());
+        assert!(args.encoded.get().is_none());
 
         // and recomputes correctly
         assert_eq!(args.encoded().unwrap(), "id=123&name=John");
@@ -485,60 +467,6 @@ mod tests {
 
         // but can compute normally
         assert_eq!(cloned.encoded().unwrap(), "id=123");
-    }
-
-    #[test]
-    fn into_parts_returns_args_and_cached_when_present() {
-        let args: PathArgs = smallvec::smallvec![arg("id", "123"), arg("name", "John")].into();
-
-        // warm cache
-        let _ = args.encoded().unwrap();
-
-        let (parts, cached) = args.into_parts();
-        assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0].name.as_ref(), "id");
-        assert_eq!(parts[0].value.as_ref(), "123");
-        assert_eq!(parts[1].name.as_ref(), "name");
-        assert_eq!(parts[1].value.as_ref(), "John");
-
-        assert_eq!(cached.as_deref(), Some("id=123&name=John"));
-    }
-
-    #[test]
-    fn into_parts_returns_none_cached_if_never_computed() {
-        let args: PathArgs = smallvec::smallvec![arg("id", "123")].into();
-
-        let (_parts, cached) = args.into_parts();
-        assert!(cached.is_none());
-    }
-
-    #[test]
-    fn from_parts_restores_cached_query_str() {
-        let parts: SmallVec<[PathArg; DEFAULT_DEPTH]> =
-            smallvec::smallvec![arg("id", "123"), arg("name", "John")];
-
-        let args = PathArgs::from_parts(parts, Some("id=123&name=John".to_string()));
-
-        // Should return exactly the cached value (not recomputed).
-        let q1 = args.encoded().unwrap();
-        let q2 = args.encoded().unwrap();
-
-        assert_eq!(q1, "id=123&name=John");
-        assert_eq!(q1.as_ptr(), q2.as_ptr());
-    }
-
-    #[test]
-    fn from_parts_with_none_cached_computes_on_demand() {
-        let parts: SmallVec<[PathArg; DEFAULT_DEPTH]> =
-            smallvec::smallvec![arg("id", "123"), arg("name", "John")];
-
-        let args = PathArgs::from_parts(parts, None);
-
-        let q1 = args.encoded().unwrap();
-        let q2 = args.encoded().unwrap();
-
-        assert_eq!(q1, "id=123&name=John");
-        assert_eq!(q1.as_ptr(), q2.as_ptr()); // computed once then cached
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use hyper::http::request::Parts;
 use std::{future::Future, ops::RangeInclusive};
 
-use crate::{HttpBody, HttpRequest, error::Error, http::request_scope::HttpRequestScope};
+use crate::{HttpBody, HttpRequest, error::Error};
 
 pub use self::head::{FromRequestHead, RequestHead};
 pub use crate::http::endpoints::route::{PathArg, PathArgs};
@@ -32,14 +32,20 @@ pub mod sse;
 pub mod vec;
 
 /// Holds the payload for extractors
+// `Request` is by far the largest, and is not boxed: that would allocate for every request a
+// handler taking it receives, and a payload does not outlive the call it is handed to
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Payload<'a> {
     None,
-    Request(Box<HttpRequest>),
+    Request(HttpRequest),
     Full(&'a Parts, HttpBody),
     Parts(&'a Parts),
-    Path(PathArg),
+    /// A positional parameter that something can read after the extractor it is handed to
+    Path(&'a PathArg),
+    /// A positional parameter nothing reads after the extractor it is handed to, which can
+    /// take its value
+    PathMut(&'a mut PathArg),
     Body(HttpBody),
-    PathArgs(&'a PathArgs),
 }
 
 /// Describes a data source for extractors to read from
@@ -50,10 +56,11 @@ pub(crate) enum Source {
     Full,
     Parts,
     /// The head, read by a type implementing [`FromRequestHead`]. It can read the path
-    /// parameters as well, which the dispatch therefore leaves in the request.
+    /// parameters as well, so a positional extractor next to it leaves them in place.
     Head,
     Path,
     Body,
+    /// The head, read by [`Path<T>`](crate::Path) or [`NamedPath<T>`](crate::NamedPath)
     PathArgs,
 }
 
@@ -81,29 +88,25 @@ pub(crate) const ANY_PATH_ARITY: RangeInclusive<usize> = 0..=usize::MAX;
 /// be left with nothing to read once the handler is called.
 ///
 /// Extractors are read in the order a handler takes them, so what a signature costs does not
-/// depend on how its arguments are sorted. `HttpRequest` takes the body and the head with it,
-/// which makes it a body extractor that an extractor of the head has to stand before. Path
-/// parameters are taken out of the request ahead of all of them, and stand on either side.
+/// depend on how its arguments are sorted. `HttpRequest` is handed the whole request, which
+/// makes it a body extractor, and one that stands last.
 ///
 /// It only runs in the `const` block of the tuple's [`FromRequest`], when a handler is built.
 const fn assert_read_together(sources: &[Source]) {
-    let (mut bodies, mut positional, mut whole_path, mut head_taken) = (0, false, false, false);
+    let (mut bodies, mut positional, mut whole_path) = (0, false, false);
+    let mut request_is_last = true;
     let mut i = 0;
 
     while i < sources.len() {
         match sources[i] {
             Source::Request => {
                 bodies += 1;
-                head_taken = true;
+                request_is_last = i + 1 == sources.len();
             }
             Source::Body | Source::Full => bodies += 1,
             Source::Path => positional = true,
             Source::PathArgs => whole_path = true,
-            Source::Parts | Source::Head => assert!(
-                !head_taken,
-                "`HttpRequest` takes the head of the request, so an extractor reading it stands before `HttpRequest`"
-            ),
-            Source::None => {}
+            Source::None | Source::Parts | Source::Head => {}
         }
         i += 1;
     }
@@ -111,6 +114,10 @@ const fn assert_read_together(sources: &[Source]) {
     assert!(
         bodies <= 1,
         "a handler takes one extractor of the request body, `HttpRequest` included: the body is a stream that is read once"
+    );
+    assert!(
+        request_is_last,
+        "`HttpRequest` takes the whole request, so it stands last among the arguments of a handler"
     );
     assert!(
         !(positional && whole_path),
@@ -330,14 +337,13 @@ pub trait FromPathArg: Sized {
     /// Extracts data from a path argument
     fn from_path_arg(arg: &PathArg) -> Result<Self, Error>;
 
-    /// Extracts data from a path argument the caller owns.
+    /// Extracts data from a path argument nothing reads afterwards.
     ///
-    /// A handler argument owns its path argument, so a type that keeps the value, such as
-    /// `String`, takes it without a copy.
+    /// A type that keeps the value, such as `String`, takes it without a copy.
     #[doc(hidden)]
     #[inline]
-    fn from_owned_path_arg(arg: PathArg) -> Result<Self, Error> {
-        Self::from_path_arg(&arg)
+    fn take_path_arg(arg: &mut PathArg) -> Result<Self, Error> {
+        Self::from_path_arg(arg)
     }
 }
 
@@ -463,65 +469,33 @@ macro_rules! define_generic_from_request {
             }
         }
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
+            // Not an `async fn`, which keeps a parameter in a slot of the future and moves it
+            // to a second one
             #[inline]
-            async fn from_request(req: HttpRequest) -> Result<Self, Error> {
-                // A failure here is a compile error only where the handler is built:
-                // `cargo check` does not instantiate it
-                const { assert_read_together(&[$($T::SOURCE),+]) };
+            fn from_request(mut req: HttpRequest) -> impl Future<Output = Result<Self, Error>> + Send {
+                async move {
+                    // A failure here is a compile error only where the handler is built:
+                    // `cargo check` does not instantiate it
+                    const { assert_read_together(&[$($T::SOURCE),+]) };
 
-                let uses_path = false $(|| matches!($T::SOURCE, Source::Path))*;
-                let uses_pathargs = false $(|| matches!($T::SOURCE, Source::PathArgs))*;
-                let uses_head = false $(|| matches!($T::SOURCE, Source::Head))*;
+                    // An `HttpRequest` carries the path parameters on, for `path_args` and
+                    // `extract` to read and for the handler `map_ws` and `map_msg` wrap, and an
+                    // extractor of the user's own can read them through the head, so next to
+                    // these two a positional extractor leaves its parameter where it is
+                    let keeps_params = false
+                        $(|| matches!($T::SOURCE, Source::Request | Source::Head))*;
+                    let mut position = 0;
 
-                let (mut parts, body) = req.into_parts();
-
-                // Taken out of the request only for an extractor that reads them: an
-                // `HttpRequest` taken instead carries them on, for `path_args` and `extract`
-                // to read, and for the handler `map_ws` and `map_msg` wrap. So does an
-                // extractor of the user's own, which can read them through the head, at the
-                // cost of a copy that only such a handler pays.
-                let params = if uses_path || uses_pathargs {
-                    parts
-                        .extensions
-                        .get_mut::<HttpRequestScope>()
-                        .map(|s| if uses_head {
-                            s.params.clone()
-                        } else {
-                            std::mem::replace(&mut s.params, PathArgs::new())
-                        })
-                        .unwrap_or_else(PathArgs::new)
-                } else {
-                    PathArgs::new()
-                };
-
-                let (path_args, cached_query) = params.into_parts();
-
-                let mut parts = Some(parts);
-                let mut body = Some(body);
-
-                if uses_pathargs {
-                    let params = PathArgs::from_parts(path_args, cached_query);
                     let tuple = (
                         $(
                             {
-                                let payload = payload_for_path_args!($T::SOURCE, parts, body, &params);
+                                let payload = next_payload($T::SOURCE, &mut req, &mut position, keeps_params);
                                 $T::from_payload(payload).await?
                             },
                         )*
                     );
-                    return Ok(tuple);
+                    Ok(tuple)
                 }
-
-                let mut iter = path_args.into_iter();
-                let tuple = (
-                    $(
-                        {
-                            let payload = payload_for_path!($T::SOURCE, parts, body, iter);
-                            $T::from_payload(payload).await?
-                        },
-                    )*
-                );
-                Ok(tuple)
             }
 
             #[cfg(feature = "openapi")]
@@ -545,59 +519,35 @@ macro_rules! define_generic_from_request {
     }
 }
 
-macro_rules! payload_for_path {
-    ($src:expr, $parts:expr, $body:expr, $iter:expr) => {{
-        match $src {
-            Source::Parts | Source::Head => match $parts.as_ref() {
-                Some(p) => Payload::Parts(p),
+/// Hands an extractor what it reads from `req`.
+///
+/// `req` stays whole until `HttpRequest` takes it, which [`assert_read_together`] keeps last.
+#[inline]
+fn next_payload<'a>(
+    source: Source,
+    req: &'a mut HttpRequest,
+    position: &mut usize,
+    keeps_params: bool,
+) -> Payload<'a> {
+    match source {
+        Source::Parts | Source::Head | Source::PathArgs => Payload::Parts(req.parts()),
+        Source::Path => {
+            let arg = req.path_arg_mut(*position);
+            *position += 1;
+            match arg {
+                Some(arg) if keeps_params => Payload::Path(arg),
+                Some(arg) => Payload::PathMut(arg),
                 None => Payload::None,
-            },
-            Source::Path => match $iter.next() {
-                Some(arg) => Payload::Path(arg),
-                None => Payload::None,
-            },
-            Source::Body => match $body.take() {
-                Some(b) => Payload::Body(b),
-                None => Payload::None,
-            },
-            Source::Full => match ($parts.as_ref(), $body.take()) {
-                (Some(p), Some(b)) => Payload::Full(p, b),
-                _ => Payload::None,
-            },
-            Source::Request => match ($parts.take(), $body.take()) {
-                (Some(p), Some(b)) => Payload::Request(Box::new(HttpRequest::from_parts(p, b))),
-                _ => Payload::None,
-            },
-            Source::PathArgs => Payload::None,
-            Source::None => Payload::None,
+            }
         }
-    }};
-}
-
-macro_rules! payload_for_path_args {
-    ($src:expr, $parts:expr, $body:expr, $params:expr) => {{
-        match $src {
-            Source::Parts | Source::Head => match $parts.as_ref() {
-                Some(p) => Payload::Parts(p),
-                None => Payload::None,
-            },
-            Source::PathArgs => Payload::PathArgs($params),
-            Source::Body => match $body.take() {
-                Some(b) => Payload::Body(b),
-                None => Payload::None,
-            },
-            Source::Full => match ($parts.as_ref(), $body.take()) {
-                (Some(p), Some(b)) => Payload::Full(p, b),
-                _ => Payload::None,
-            },
-            Source::Request => match ($parts.take(), $body.take()) {
-                (Some(p), Some(b)) => Payload::Request(Box::new(HttpRequest::from_parts(p, b))),
-                _ => Payload::None,
-            },
-            Source::Path => Payload::None,
-            Source::None => Payload::None,
+        Source::Body => Payload::Body(req.take_body()),
+        Source::Full => {
+            let body = req.take_body();
+            Payload::Full(req.parts(), body)
         }
-    }};
+        Source::Request => Payload::Request(req.take()),
+        Source::None => Payload::None,
+    }
 }
 
 define_generic_from_request! { T1 }
@@ -610,6 +560,19 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
+
+/// The head of a request carrying `params`
+#[cfg(test)]
+pub(crate) fn parts_with(params: PathArgs) -> Parts {
+    use crate::http::request_scope::HttpRequestScope;
+
+    let scope = HttpRequestScope {
+        params,
+        ..HttpRequestScope::default()
+    };
+    let req = hyper::Request::get("/").extension(scope).body(()).unwrap();
+    req.into_parts().0
+}
 
 #[cfg(test)]
 mod tests {
@@ -653,27 +616,35 @@ mod tests {
     }
 
     #[test]
-    fn it_reads_extractors_of_the_head_before_a_request() {
+    fn it_reads_a_request_after_everything_else() {
         assert_read_together(&[Source::Parts, Source::Request]);
         assert_read_together(&[Source::Head, Source::Parts, Source::Request]);
+        assert_read_together(&[Source::Path, Source::Path, Source::Request]);
+        assert_read_together(&[Source::PathArgs, Source::Request]);
     }
 
     #[test]
-    fn it_reads_path_params_on_either_side_of_a_request() {
-        assert_read_together(&[Source::Path, Source::Request, Source::Path]);
-        assert_read_together(&[Source::Request, Source::PathArgs]);
-    }
-
-    #[test]
-    #[should_panic(expected = "an extractor reading it stands before `HttpRequest`")]
+    #[should_panic(expected = "so it stands last among the arguments of a handler")]
     fn it_refuses_a_built_in_extractor_of_the_head_after_a_request() {
         assert_read_together(&[Source::Request, Source::Parts]);
     }
 
     #[test]
-    #[should_panic(expected = "an extractor reading it stands before `HttpRequest`")]
+    #[should_panic(expected = "so it stands last among the arguments of a handler")]
     fn it_refuses_a_custom_extractor_after_a_request() {
         assert_read_together(&[Source::Request, Source::Head]);
+    }
+
+    #[test]
+    #[should_panic(expected = "so it stands last among the arguments of a handler")]
+    fn it_refuses_a_positional_param_after_a_request() {
+        assert_read_together(&[Source::Request, Source::Path]);
+    }
+
+    #[test]
+    #[should_panic(expected = "so it stands last among the arguments of a handler")]
+    fn it_refuses_a_path_after_a_request() {
+        assert_read_together(&[Source::Request, Source::PathArgs]);
     }
 
     #[test]

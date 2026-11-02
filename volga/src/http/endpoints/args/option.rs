@@ -87,6 +87,7 @@ impl<T: FromPayload> FromPayload for Option<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::endpoints::args::parts_with;
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::{HttpBody, error::Error};
     use futures_util::future::{Ready, err, ok};
@@ -284,7 +285,7 @@ mod tests {
             value: "123".into(),
         };
 
-        let result = Option::<PathExtractor>::from_payload(Payload::Path(param)).await;
+        let result = Option::<PathExtractor>::from_payload(Payload::Path(&param)).await;
 
         assert!(result.is_ok());
         let option_result = result.unwrap();
@@ -299,7 +300,7 @@ mod tests {
             value: "invalid".into(),
         };
 
-        let result = Option::<PathExtractor>::from_payload(Payload::Path(param)).await;
+        let result = Option::<PathExtractor>::from_payload(Payload::Path(&param)).await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -323,7 +324,7 @@ mod tests {
             name: "id".into(),
             value: "42".into(),
         };
-        let result = Option::<i32>::from_payload(Payload::Path(param)).await;
+        let result = Option::<i32>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some(42));
 
@@ -332,7 +333,7 @@ mod tests {
             name: "id".into(),
             value: "invalid".into(),
         };
-        let result = Option::<i32>::from_payload(Payload::Path(param)).await;
+        let result = Option::<i32>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
 
@@ -341,7 +342,7 @@ mod tests {
             name: "name".into(),
             value: "test".into(),
         };
-        let result = Option::<String>::from_payload(Payload::Path(param)).await;
+        let result = Option::<String>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Some("test".to_string()));
     }
@@ -428,14 +429,16 @@ mod tests {
         .into();
 
         // Valid path should return Some
-        let result = Option::<NamedPath<Params>>::from_payload(Payload::PathArgs(&args)).await;
+        let result =
+            Option::<NamedPath<Params>>::from_payload(Payload::Parts(&parts_with(args))).await;
         assert!(result.is_ok());
         let option_result = result.unwrap();
         assert!(option_result.is_some());
         assert_eq!(option_result.unwrap().id, 123);
 
         let result =
-            Option::<NamedPath<Params>>::from_payload(Payload::PathArgs(&PathArgs::new())).await;
+            Option::<NamedPath<Params>>::from_payload(Payload::Parts(&parts_with(PathArgs::new())))
+                .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -458,7 +461,8 @@ mod tests {
         .into();
 
         // Valid path should return Some
-        let result = Option::<Path<(i32, String)>>::from_payload(Payload::PathArgs(&args)).await;
+        let result =
+            Option::<Path<(i32, String)>>::from_payload(Payload::Parts(&parts_with(args))).await;
         assert!(result.is_ok());
         let option_result = result.unwrap();
         assert!(option_result.is_some());
@@ -468,8 +472,10 @@ mod tests {
         assert_eq!(option_result.0.0, 123);
         assert_eq!(option_result.0.1, "John");
 
-        let result =
-            Option::<Path<(i32, String)>>::from_payload(Payload::PathArgs(&PathArgs::new())).await;
+        let result = Option::<Path<(i32, String)>>::from_payload(Payload::Parts(&parts_with(
+            PathArgs::new(),
+        )))
+        .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }

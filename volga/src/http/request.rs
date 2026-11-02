@@ -10,8 +10,10 @@ use query_args::{QueryArgsCache, QueryArgsIter};
 use std::sync::OnceLock;
 
 use crate::http::{
-    Extensions, Method, Parts, Request, Uri, Version, endpoints::args::FromRequestRef,
-    request::request_body_limit::RequestBodyLimit, request_scope::HttpRequestScope,
+    Extensions, Method, Parts, Request, Uri, Version,
+    endpoints::args::{FromRequestRef, PathArg},
+    request::request_body_limit::RequestBodyLimit,
+    request_scope::HttpRequestScope,
 };
 
 use crate::headers::HeaderMap;
@@ -26,8 +28,10 @@ mod request_mut;
 
 /// Wraps the incoming [`Request`] to enrich its functionality
 pub struct HttpRequest {
-    /// Inner [`Request`]
-    inner: Request<HttpBody>,
+    /// The head of the request, apart from the body, as a [`Request`] does not lend it: the
+    /// extractors of a handler read it here, without taking the request to pieces
+    parts: Parts,
+    body: HttpBody,
     query_args_cache: OnceLock<QueryArgsCache>,
 }
 
@@ -40,11 +44,9 @@ impl std::fmt::Debug for HttpRequest {
 
 impl HttpRequest {
     /// Creates a new [`HttpRequest`]
-    pub(crate) fn new(request: Request<Incoming>) -> Self {
-        Self {
-            inner: request.map(HttpBody::incoming),
-            query_args_cache: OnceLock::new(),
-        }
+    #[inline]
+    pub(crate) fn new(parts: Parts, body: Incoming) -> Self {
+        Self::from_parts(parts, HttpBody::incoming(body))
     }
 
     /// Returns a reference to the associated URI.
@@ -61,7 +63,7 @@ impl HttpRequest {
     /// ```
     #[inline]
     pub fn uri(&self) -> &Uri {
-        self.inner.uri()
+        &self.parts.uri
     }
 
     /// Returns a reference to the associated HTTP header map.
@@ -78,14 +80,14 @@ impl HttpRequest {
     /// ```
     #[inline]
     pub fn headers(&self) -> &HeaderMap {
-        self.inner.headers()
+        &self.parts.headers
     }
 
     /// Returns a mutable reference to the associated HTTP header map.
     #[inline]
     #[allow(unused)]
     pub(crate) fn headers_mut(&mut self) -> &mut HeaderMap {
-        self.inner.headers_mut()
+        &mut self.parts.headers
     }
 
     /// Returns a reference to the associated HTTP method.
@@ -102,26 +104,26 @@ impl HttpRequest {
     /// ```
     #[inline]
     pub fn method(&self) -> &Method {
-        self.inner.method()
+        &self.parts.method
     }
 
     /// Represents a version of the HTTP spec.
     #[inline]
     pub fn version(&self) -> Version {
-        self.inner.version()
+        self.parts.version
     }
 
     /// Returns a reference to the associated extensions.
     #[inline]
     pub(crate) fn extensions(&self) -> &Extensions {
-        self.inner.extensions()
+        &self.parts.extensions
     }
 
     /// Returns a mutable reference to the associated extensions.
     #[inline]
     #[allow(unused)]
     pub(crate) fn extensions_mut(&mut self) -> &mut Extensions {
-        self.inner.extensions_mut()
+        &mut self.parts.extensions
     }
 
     /// Returns the body limit of this [`HttpRequest`], in bytes, or `None` when it has none.
@@ -130,45 +132,67 @@ impl HttpRequest {
     /// of its route group, or else the application's - see
     /// [`Route::with_body_limit`](crate::routing::Route::with_body_limit).
     pub fn body_limit(&self) -> Option<usize> {
-        match self
-            .inner
-            .extensions()
-            .get::<HttpRequestScope>()?
-            .body_limit
-        {
+        match self.parts.extensions.get::<HttpRequestScope>()?.body_limit {
             RequestBodyLimit::Enabled(size) => Some(size),
             RequestBodyLimit::Disabled => None,
         }
     }
 
     #[inline]
-    pub(crate) fn into_limited(self, body_limit: RequestBodyLimit) -> Self {
-        match body_limit {
-            RequestBodyLimit::Disabled => self,
-            RequestBodyLimit::Enabled(limit) => {
-                let (parts, body) = self.into_parts();
-                let body = HttpBody::limited(body, limit);
-                Self::from_parts(parts, body)
-            }
+    pub(crate) fn into_limited(mut self, body_limit: RequestBodyLimit) -> Self {
+        if let RequestBodyLimit::Enabled(limit) = body_limit {
+            self.body = HttpBody::limited(self.body, limit);
         }
+        self
     }
 
     /// Consumes the request and returns just the body
     #[inline]
     pub fn into_body(self) -> HttpBody {
-        self.inner.into_body()
+        self.body
+    }
+
+    /// Returns a reference to the head of the request
+    #[inline]
+    pub(crate) fn parts(&self) -> &Parts {
+        &self.parts
+    }
+
+    /// Takes the body, leaving an empty one behind
+    #[inline]
+    pub(crate) fn take_body(&mut self) -> HttpBody {
+        std::mem::replace(&mut self.body, HttpBody::empty())
+    }
+
+    /// Takes the request, leaving an empty one behind
+    #[inline]
+    pub(crate) fn take(&mut self) -> Self {
+        let (parts, ()) = Request::new(()).into_parts();
+        std::mem::replace(self, Self::from_parts(parts, HttpBody::empty()))
+    }
+
+    /// Returns the path parameter at `index` by position, for a handler argument to read
+    #[inline]
+    pub(crate) fn path_arg_mut(&mut self, index: usize) -> Option<&mut PathArg> {
+        self.parts
+            .extensions
+            .get_mut::<HttpRequestScope>()?
+            .params
+            .get_mut(index)
     }
 
     /// Consumes the request and returns request head and body
+    #[inline]
     pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
-        self.inner.into_parts()
+        (self.parts, self.body)
     }
 
     /// Creates a new `HttpRequest` with the given head and body
+    #[inline]
     pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
-        let request = Request::from_parts(parts, body);
         Self {
-            inner: request,
+            parts,
+            body,
             query_args_cache: OnceLock::new(),
         }
     }
@@ -217,8 +241,8 @@ impl HttpRequest {
     /// # }
     /// ```
     pub fn path_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.inner
-            .extensions()
+        self.parts
+            .extensions
             .get::<HttpRequestScope>()
             .map(|s| &s.params)
             .into_iter()
@@ -246,7 +270,7 @@ impl HttpRequest {
     /// # }
     /// ```
     pub fn query_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        let query = self.inner.uri().query().unwrap_or_default();
+        let query = self.parts.uri.query().unwrap_or_default();
         let cache = self
             .query_args_cache
             .get_or_init(|| QueryArgsCache::new(query));

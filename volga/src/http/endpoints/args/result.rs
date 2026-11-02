@@ -103,6 +103,7 @@ impl<T: FromPayload> FromPayload for Result<T, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::endpoints::args::parts_with;
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::{HttpBody, error::Error};
     use futures_util::future::{Ready, err, ok};
@@ -307,7 +308,7 @@ mod tests {
             value: "123".into(),
         };
 
-        let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(param)).await;
+        let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(&param)).await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -322,7 +323,7 @@ mod tests {
             value: "invalid".into(),
         };
 
-        let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(param)).await;
+        let result = Result::<PathExtractor, Error>::from_payload(Payload::Path(&param)).await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -348,7 +349,7 @@ mod tests {
             name: "id".into(),
             value: "42".into(),
         };
-        let result = Result::<i32, Error>::from_payload(Payload::Path(param)).await;
+        let result = Result::<i32, Error>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
@@ -359,7 +360,7 @@ mod tests {
             name: "id".into(),
             value: "invalid".into(),
         };
-        let result = Result::<i32, Error>::from_payload(Payload::Path(param)).await;
+        let result = Result::<i32, Error>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_err());
@@ -369,7 +370,7 @@ mod tests {
             name: "name".into(),
             value: "test".into(),
         };
-        let result = Result::<String, Error>::from_payload(Payload::Path(param)).await;
+        let result = Result::<String, Error>::from_payload(Payload::Path(&param)).await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
@@ -487,15 +488,17 @@ mod tests {
 
         // Valid path should return Ok(Ok(value))
         let result =
-            Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(&args)).await;
+            Result::<NamedPath<Params>, Error>::from_payload(Payload::Parts(&parts_with(args)))
+                .await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
         assert_eq!(inner_result.unwrap().id, 123);
 
-        let result =
-            Result::<NamedPath<Params>, Error>::from_payload(Payload::PathArgs(&PathArgs::new()))
-                .await;
+        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::Parts(&parts_with(
+            PathArgs::new(),
+        )))
+        .await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_err());
@@ -520,7 +523,8 @@ mod tests {
 
         // Valid path should return Some
         let result =
-            Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(&args)).await;
+            Result::<Path<(i32, String)>, Error>::from_payload(Payload::Parts(&parts_with(args)))
+                .await;
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.is_ok());
@@ -530,9 +534,10 @@ mod tests {
         assert_eq!(result.0.0, 123);
         assert_eq!(result.0.1, "John");
 
-        let result =
-            Result::<Path<(i32, String)>, Error>::from_payload(Payload::PathArgs(&PathArgs::new()))
-                .await;
+        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::Parts(
+            &parts_with(PathArgs::new()),
+        ))
+        .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_err());
     }
