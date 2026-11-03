@@ -5,6 +5,7 @@
 //!
 //! - The first call builds a cache of byte spans (`QueryArgsCache`) for `key=value` pairs.
 //! - Subsequent calls reuse the cache and only slice the original query string.
+//! - A lookup of one key (`find`) reads the query string in place, with no cache.
 //!
 //! ## Semantics
 //! - Only `key=value` pairs are returned.
@@ -41,6 +42,18 @@ impl<'a> QueryArgsIter<'a> {
             iter: cache.pairs.iter(),
         }
     }
+}
+
+/// Returns the value of the first `name=value` pair in `query`, by the semantics above, reading
+/// the query string in place: for a caller that looks up one key and would otherwise build, and
+/// allocate, the cache of the request for it
+#[inline]
+#[cfg(feature = "rate-limiting")]
+pub(super) fn find<'a>(query: &'a str, name: &str) -> Option<&'a str> {
+    query
+        .split('&')
+        .filter_map(|segment| segment.split_once('='))
+        .find_map(|(key, value)| (key == name).then_some(value))
 }
 
 impl<'a> Iterator for QueryArgsIter<'a> {
@@ -200,6 +213,37 @@ mod tests {
                 ("city".into(), "London".into())
             ]
         );
+    }
+
+    #[test]
+    #[cfg(feature = "rate-limiting")]
+    fn it_finds_the_value_the_cache_holds_first() {
+        let queries = [
+            "a=1&b=2",
+            "flag&a=1&x&b=2",
+            "",
+            "a=1&",
+            "a=1&&b=2",
+            "&&",
+            "=1&a=",
+            "a=1=2&b==3",
+            "a=1&a=2",
+            "name=Roman&city=London",
+        ];
+
+        for query in queries {
+            let pairs = parse(query);
+            for (key, _) in &pairs {
+                let first = pairs
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, v)| v.as_str());
+                assert_eq!(find(query, key), first, "{query:?}, {key:?}");
+            }
+            assert_eq!(find(query, "missing"), None, "{query:?}");
+        }
+
+        assert_eq!(find("flag&a=1", "flag"), None);
     }
 
     #[test]

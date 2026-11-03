@@ -32,7 +32,9 @@ pub struct HttpRequest {
     /// extractors of a handler read it here, without taking the request to pieces
     parts: Parts,
     body: HttpBody,
-    query_args_cache: OnceLock<QueryArgsCache>,
+    /// Boxed, as almost no request fills it, and the request moves by value through the
+    /// pipeline: inline, it was 160 of the 432 bytes every handler's future holds and copies
+    query_args_cache: OnceLock<Box<QueryArgsCache>>,
 }
 
 impl std::fmt::Debug for HttpRequest {
@@ -286,8 +288,17 @@ impl HttpRequest {
         let query = self.parts.uri.query().unwrap_or_default();
         let cache = self
             .query_args_cache
-            .get_or_init(|| QueryArgsCache::new(query));
+            .get_or_init(|| Box::new(QueryArgsCache::new(query)));
         QueryArgsIter::new(query, cache)
+    }
+
+    /// Returns the value of the first query parameter named `name`, by the rules of
+    /// [`query_args`](Self::query_args), without building its cache: for a lookup of one key
+    /// per request, which then allocates nothing
+    #[inline]
+    #[cfg(feature = "rate-limiting")]
+    pub(crate) fn query_arg(&self, name: &str) -> Option<&str> {
+        query_args::find(self.parts.uri.query().unwrap_or_default(), name)
     }
 
     /// Returns a typed HTTP header value
@@ -453,6 +464,35 @@ mod tests {
         assert_eq!(args.next().unwrap(), ("id", "123"));
         assert_eq!(args.next().unwrap(), ("name", "John"));
         assert!(args.next().is_none());
+    }
+
+    #[test]
+    fn it_builds_the_query_cache_when_query_args_is_first_called() {
+        let (parts, body) = Request::get("/test?id=123")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        assert!(req.query_args_cache.get().is_none());
+        assert_eq!(req.query_args().collect::<Vec<_>>(), [("id", "123")]);
+        assert!(req.query_args_cache.get().is_some());
+        assert_eq!(req.query_args().collect::<Vec<_>>(), [("id", "123")]);
+    }
+
+    #[test]
+    #[cfg(feature = "rate-limiting")]
+    fn it_looks_up_a_query_arg_without_building_the_cache() {
+        let (parts, body) = Request::get("/test?id=123&name=John&id=7")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+        let req = HttpRequest::from_parts(parts, body);
+
+        assert_eq!(req.query_arg("id"), Some("123"));
+        assert_eq!(req.query_arg("name"), Some("John"));
+        assert_eq!(req.query_arg("age"), None);
+        assert!(req.query_args_cache.get().is_none());
     }
 
     #[test]

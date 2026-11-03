@@ -252,7 +252,8 @@ pub fn header(name: &'static str) -> RateLimitKeySource {
 /// The query parameter value is hashed into a stable `u64`.
 ///
 /// # Notes
-/// - Query parameter names are case-insensitive.
+/// - The name is matched exactly, case included, and neither it nor the value is
+///   percent-decoded. The first parameter of that name is used.
 /// - If the parameter is missing, the key extraction will fail.
 ///
 /// # Example
@@ -266,8 +267,7 @@ pub fn header(name: &'static str) -> RateLimitKeySource {
 pub fn query(name: &'static str) -> RateLimitKeySource {
     let key = PartitionKey::Custom(Arc::new(move |req| {
         let value = req
-            .query_args()
-            .find_map(|(k, v)| if k == name { Some(v) } else { None })
+            .query_arg(name)
             .ok_or_else(|| Error::client_error(format!("Query parameter {name} not found",)))?;
 
         Ok(stable_hash(value))
@@ -281,7 +281,7 @@ pub fn query(name: &'static str) -> RateLimitKeySource {
 /// The route path parameter value is hashed into a stable `u64`.
 ///
 /// # Notes
-/// - Route path parameter names are case-insensitive.
+/// - The name is matched exactly, case included, against the names of the route pattern.
 /// - If the parameter is missing, the key extraction will fail.
 ///
 /// # Example
@@ -307,10 +307,10 @@ pub fn path(name: &'static str) -> RateLimitKeySource {
 
 /// Uses the value of an HTTP cookie as a rate limiting partition key.
 ///
-/// The cookie hashed into a stable `u64`.
+/// The cookie value is hashed into a stable `u64`.
 ///
 /// # Notes
-/// - Cookie names are case-insensitive.
+/// - The name is matched exactly, case included.
 /// - If the cookie is missing, the key extraction will fail.
 ///
 /// # Example
@@ -590,6 +590,29 @@ mod tests {
 
         assert!(matches!(source1.inner, PartitionKey::Custom(_)));
         assert!(matches!(source2.inner, PartitionKey::Custom(_)));
+    }
+
+    #[test]
+    fn it_keys_on_the_value_of_a_query_parameter() {
+        let request = |uri: &str| {
+            let (parts, body) = Request::get(uri)
+                .body(HttpBody::empty())
+                .unwrap()
+                .into_parts();
+            HttpRequest::from_parts(parts, body)
+        };
+        let source = query("api_key");
+
+        let key = source.extract(&request("/?api_key=a&x=1")).unwrap();
+        assert_eq!(key, source.extract(&request("/?x=2&api_key=a")).unwrap());
+        assert_ne!(key, source.extract(&request("/?api_key=b")).unwrap());
+
+        let err = source.extract(&request("/?x=1")).unwrap_err();
+        assert_eq!(err.status(), 400);
+        assert_eq!(err.to_string(), "Query parameter api_key not found");
+
+        assert!(source.extract(&request("/?API_KEY=a")).is_err());
+        assert!(source.extract(&request("/?api%5Fkey=a")).is_err());
     }
 
     #[test]
