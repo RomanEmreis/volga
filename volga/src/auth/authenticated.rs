@@ -5,15 +5,8 @@
 //! user-defined authentication claims to handlers.
 
 use super::claims::AuthClaims;
-use crate::http::RequestHead;
-use crate::{
-    error::Error,
-    http::{
-        FromRequestRef,
-        endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
-    },
-};
-use futures_util::future::{Ready, ready};
+use crate::error::Error;
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 use hyper::http::{Extensions, request::Parts};
 use std::ops::Deref;
 
@@ -105,36 +98,18 @@ where
     }
 }
 
-/// Extracts `Authenticated<T>` from request parts
-impl<T: AuthClaims> Sealed for Authenticated<T> {}
-
-/// Extracts `Authenticated<T>` from request
-impl<T> FromRequestRef for Authenticated<T>
+/// Extracts `Authenticated<T>` from the head of a request
+impl<T> FromRequestHead for Authenticated<T>
 where
     T: AuthClaims + Send + Sync + 'static,
 {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         head.extensions().try_into()
     }
-}
 
-/// Extracts `Authenticated<T>` from the request payload
-impl<T> FromPayload for Authenticated<T>
-where
-    T: AuthClaims + Send + Sync + 'static,
-{
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(parts.try_into())
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]

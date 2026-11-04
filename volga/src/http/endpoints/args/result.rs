@@ -1,10 +1,9 @@
 //! Extractor for Result<T, E>
 
-use crate::http::RequestHead;
 use crate::{
     error::Error,
     http::endpoints::args::{
-        ANY_PATH_ARITY, FromPayload, FromRequestRef, Payload, Source, sealed::Sealed,
+        ANY_PATH_ARITY, FromPayload, FromRequestRef, Payload, RequestHead, Source, sealed::Sealed,
     },
 };
 use pin_project_lite::pin_project;

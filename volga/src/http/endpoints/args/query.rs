@@ -10,8 +10,9 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::http::RequestHead;
-use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed};
+use crate::http::endpoints::args::{
+    FromPayload, FromRequestRef, Payload, RequestHead, Source, sealed::Sealed,
+};
 
 /// `Query<T>` extracts HTTP request query parameters into a named
 /// struct, preserving parameter names.

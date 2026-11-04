@@ -1,18 +1,13 @@
 //! Utilities for private cookies
 
-use crate::http::RequestHead;
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 use crate::{
     di::{Container, Dependencies},
     error::Error,
     headers::HeaderMap,
-    http::{
-        Extensions, Parts,
-        cookie::get_cookies,
-        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
-    },
+    http::{Extensions, Parts, cookie::get_cookies},
 };
 use cookie::{CookieJar, Key, PrivateJar};
-use futures_util::future::{Ready, ready};
 use std::{fs::File, io::Read, path::Path};
 
 /// Represents a cryptographic pass key for [`PrivateCookies`]
@@ -176,11 +171,9 @@ impl TryFrom<(&Extensions, &HeaderMap)> for PrivateCookies {
     }
 }
 
-impl Sealed for PrivateCookies {}
-
-impl FromRequestRef for PrivateCookies {
+impl FromRequestHead for PrivateCookies {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         Self::try_from((head.extensions(), head.headers()))
     }
 
@@ -188,25 +181,9 @@ impl FromRequestRef for PrivateCookies {
     fn dependencies(deps: &mut Dependencies) {
         deps.add::<PrivateKey>();
     }
-}
 
-impl FromPayload for PrivateCookies {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_request(&RequestHead::from_parts(parts)))
-    }
-
-    #[inline]
-    fn dependencies(deps: &mut Dependencies) {
-        deps.add::<PrivateKey>();
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]
@@ -214,6 +191,10 @@ mod tests {
     use super::*;
     use crate::di::ContainerBuilder;
     use crate::headers::{COOKIE, SET_COOKIE};
+    use crate::http::FromRequestRef;
+    use crate::http::endpoints::args::FromPayload;
+    use crate::http::endpoints::args::Payload;
+    use crate::http::endpoints::args::Source;
     use crate::http::{HttpBody, HttpRequest, Request, cookie::set_cookies};
 
     #[test]

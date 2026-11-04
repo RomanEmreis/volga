@@ -16,10 +16,10 @@ use std::{
     path::PathBuf,
 };
 
-use crate::http::RequestHead;
 use crate::http::endpoints::{
     args::{
-        FromPathArg, FromPathArgs, FromPayload, FromRequestRef, Payload, Source, sealed::Sealed,
+        FromPathArg, FromPathArgs, FromPayload, FromRequestRef, Payload, RequestHead, Source,
+        sealed::Sealed,
     },
     route::{PathArg, PathArgs},
 };

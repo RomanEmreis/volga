@@ -1,9 +1,7 @@
 //! Extractors for the whole Hosting Environment request
 
-use crate::http::RequestHead;
-use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed};
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 use crate::{app::HostEnv, error::Error};
-use futures_util::future::{Ready, ready};
 use hyper::http::Extensions;
 
 impl TryFrom<&Extensions> for HostEnv {
@@ -20,27 +18,14 @@ impl TryFrom<&Extensions> for HostEnv {
     }
 }
 
-impl Sealed for HostEnv {}
-
-impl FromRequestRef for HostEnv {
+impl FromRequestHead for HostEnv {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         head.extensions().try_into()
     }
-}
 
-impl FromPayload for HostEnv {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(HostEnv::from_request(&RequestHead::from_parts(parts)))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]
@@ -48,6 +33,10 @@ mod tests {
     use super::*;
     use crate::HttpBody;
     use crate::HttpRequest;
+    use crate::http::FromRequestRef;
+    use crate::http::endpoints::args::FromPayload;
+    use crate::http::endpoints::args::Payload;
+    use crate::http::endpoints::args::Source;
     use hyper::Request;
 
     #[test]

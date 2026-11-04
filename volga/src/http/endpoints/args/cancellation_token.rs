@@ -1,17 +1,12 @@
 //! Extractors for [`CancellationToken`]
 
-use futures_util::future::{Ready, ready};
 use std::ops::{Deref, DerefMut};
 use tokio_util::sync::CancellationToken as TokioCancellationToken;
 
-use crate::http::RequestHead;
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 use crate::{
     error::Error,
-    http::{
-        Extensions,
-        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
-        request_scope::HttpRequestScope,
-    },
+    http::{Extensions, request_scope::HttpRequestScope},
 };
 
 /// See [`tokio_util::sync::CancellationToken`] for more details.
@@ -83,30 +78,15 @@ impl From<&Extensions> for TokenGuard {
     }
 }
 
-/// Extracts `CancellationToken` from request parts
-impl Sealed for TokenGuard {}
-
-/// Extracts `CancellationToken` from request
-impl FromRequestRef for TokenGuard {
+/// Extracts `CancellationToken` from the head of a request
+impl FromRequestHead for TokenGuard {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         Ok(Self::from(head.extensions()))
     }
-}
 
-/// Extracts `CancellationToken` from request parts
-impl FromPayload for TokenGuard {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_request(&RequestHead::from_parts(parts)))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]

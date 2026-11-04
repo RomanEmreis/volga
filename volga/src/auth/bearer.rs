@@ -1,17 +1,12 @@
 //! Tools and utils for Bearer Token Authorization
 
 use crate::auth::{Algorithm, DecodingKey, EncodingKey};
-use crate::http::RequestHead;
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 use crate::{
     error::Error,
     headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
-    http::{
-        Extensions,
-        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
-        request_scope::HttpRequestScope,
-    },
+    http::{Extensions, request_scope::HttpRequestScope},
 };
-use futures_util::future::{Ready, ready};
 use hyper::http::request::Parts;
 use jsonwebtoken::{AlgorithmFamily, Header as JwtHeader, Validation};
 use serde::{Serialize, de::DeserializeOwned};
@@ -799,27 +794,14 @@ impl Display for Bearer {
     }
 }
 
-impl Sealed for Bearer {}
-
-impl FromRequestRef for Bearer {
+impl FromRequestHead for Bearer {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         Self::try_from(head.headers())
     }
-}
 
-impl FromPayload for Bearer {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_request(&RequestHead::from_parts(parts)))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 impl TryFrom<&Extensions> for BearerTokenService {
@@ -836,27 +818,14 @@ impl TryFrom<&Extensions> for BearerTokenService {
     }
 }
 
-impl Sealed for BearerTokenService {}
-
-impl FromRequestRef for BearerTokenService {
+impl FromRequestHead for BearerTokenService {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         Self::try_from(head.extensions())
     }
-}
 
-impl FromPayload for BearerTokenService {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_request(&RequestHead::from_parts(parts)))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]

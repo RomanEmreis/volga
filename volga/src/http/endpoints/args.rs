@@ -79,6 +79,18 @@ pub(crate) mod sealed {
 
     impl Sealed for () {}
     impl<T: FromRequestHead> Sealed for T {}
+
+    /// Whether an extractor of the head can read the path parameters, which a positional
+    /// extractor next to it then leaves in place. Unnameable outside of volga, so only a
+    /// built-in extractor, which reads no parameter, says [`PathAccess::Ignored`]: one of
+    /// the user's own may read them through [`RequestHead::extract`](super::RequestHead::extract).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PathAccess {
+        /// It may read them, so they are copied for the positional extractor
+        MayRead,
+        /// It reads none, so the positional extractor takes its own
+        Ignored,
+    }
 }
 
 /// Any number of path parameters

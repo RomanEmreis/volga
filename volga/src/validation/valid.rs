@@ -11,12 +11,11 @@ use std::{
     task::{Context, Poll},
 };
 
-use crate::http::RequestHead;
 use crate::{
     error::Error,
     http::endpoints::args::{
-        FromPayload, FromRequestRef, Payload, Source, form::Form, json::Json, path::NamedPath,
-        query::Query, sealed::Sealed,
+        FromPayload, FromRequestRef, Payload, RequestHead, Source, form::Form, json::Json,
+        path::NamedPath, query::Query, sealed::Sealed,
     },
     validation::Validate,
 };

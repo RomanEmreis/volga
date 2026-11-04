@@ -1,15 +1,7 @@
 //! Extractors for client IP address
 
-use crate::http::RequestHead;
-use crate::{
-    error::Error,
-    http::{
-        FromRequestRef,
-        endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
-        request_scope::HttpRequestScope,
-    },
-};
-use futures_util::future::{Ready, ready};
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
+use crate::{error::Error, http::request_scope::HttpRequestScope};
 use hyper::http::{Extensions, request::Parts};
 use std::fmt::Display;
 use std::{net::SocketAddr, ops::Deref};
@@ -72,30 +64,15 @@ impl TryFrom<&Parts> for ClientIp {
     }
 }
 
-/// Extracts `ClientIp` from request parts
-impl Sealed for ClientIp {}
-
-/// Extracts `ClientIp` from request
-impl FromRequestRef for ClientIp {
+/// Extracts `ClientIp` from the head of a request
+impl FromRequestHead for ClientIp {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         head.extensions().try_into()
     }
-}
 
-/// Extracts `ClientIp` from request payload
-impl FromPayload for ClientIp {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(parts.try_into())
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]

@@ -1,14 +1,10 @@
 //! Extractors for Dependency Injection
 
 use super::{Container, Dependencies, FromContainer, Inject, error::Error as DiError};
-use crate::{
-    error::Error,
-    http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
-};
-use futures_util::future::{Ready, ready};
+use crate::error::Error;
 use hyper::http::Extensions;
 
-use crate::http::RequestHead;
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 use std::{ops::Deref, sync::Arc};
 
 /// `Dc` stands for Dependency Container.
@@ -128,11 +124,9 @@ impl<T: Send + Sync + 'static> TryFrom<&Extensions> for Dc<T> {
     }
 }
 
-impl<T: Send + Sync> Sealed for Dc<T> {}
-
-impl<T: Send + Sync + 'static> FromRequestRef for Dc<T> {
+impl<T: Send + Sync + 'static> FromRequestHead for Dc<T> {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         head.extensions().try_into()
     }
 
@@ -140,31 +134,15 @@ impl<T: Send + Sync + 'static> FromRequestRef for Dc<T> {
     fn dependencies(deps: &mut Dependencies) {
         deps.add::<T>();
     }
+
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
     #[inline]
     fn from_container(container: &Container) -> Result<Self, Error> {
         container.resolve_shared::<T>().map_err(Into::into).map(Dc)
-    }
-
-    #[inline]
-    fn dependencies(deps: &mut Dependencies) {
-        deps.add::<T>();
-    }
-}
-
-impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 
     #[inline]

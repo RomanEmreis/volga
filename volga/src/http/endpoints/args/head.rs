@@ -10,7 +10,7 @@ use crate::{
     headers::HeaderMap,
     http::{
         Extensions, Method, Uri,
-        endpoints::args::{FromPayload, FromRequestRef, Payload, Source},
+        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::PathAccess},
     },
 };
 
@@ -148,12 +148,20 @@ pub trait FromRequestHead: Sized + Send {
     #[inline]
     #[cfg(feature = "di")]
     fn dependencies(_deps: &mut Dependencies) {}
+
+    /// Whether this extractor can read the path parameters. Its type cannot be named outside
+    /// of volga, so a type of your own keeps the default
+    #[doc(hidden)]
+    const PATH_ACCESS: PathAccess = PathAccess::MayRead;
 }
 
 impl<T: FromRequestHead> FromPayload for T {
     type Future = Ready<Result<Self, Error>>;
 
-    const SOURCE: Source = Source::Head;
+    const SOURCE: Source = match T::PATH_ACCESS {
+        PathAccess::MayRead => Source::Head,
+        PathAccess::Ignored => Source::Parts,
+    };
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {

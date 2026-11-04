@@ -1,19 +1,16 @@
 //! Extractors for HTTP headers
 
 use crate::error::Error;
-use futures_util::future::{Ready, ready};
 use hyper::{header::AsHeaderName, http::request::Parts};
 
 use super::{FromHeaders, HeaderError, HeaderMap, HeaderName, HeaderValue};
-
-use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed};
 
 use std::{
     fmt::{Display, Formatter},
     marker::PhantomData,
 };
 
-use crate::http::RequestHead;
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 pub use try_into_header::TryIntoHeaderPair;
 
 mod try_into_header;
@@ -104,31 +101,15 @@ impl From<&Parts> for HttpHeaders {
     }
 }
 
-/// Extracts `HeadersMap` from request parts into [`HttpHeaders`]
-impl Sealed for HttpHeaders {}
-
-/// Extracts `HeaderValue` from request into `Header<T>``
-/// where T implements [`FromHeaders`] `struct`
-impl FromRequestRef for HttpHeaders {
+/// Extracts the headers of a request into [`HttpHeaders`]
+impl FromRequestHead for HttpHeaders {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         Ok(head.headers().clone().into())
     }
-}
 
-/// Extracts `HeaderMap` from request into `Headers`
-impl FromPayload for HttpHeaders {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_request(&RequestHead::from_parts(parts)))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 /// Typed header that wraps a [`HeaderValue`]
@@ -284,33 +265,15 @@ impl<T: FromHeaders> Header<T> {
     }
 }
 
-/// Extracts `HeaderValue` from request parts into `Header<T>``
-/// where T implements [`FromHeaders`] `struct`
-impl<T: FromHeaders> Sealed for Header<T> {}
-
-/// Extracts `HeaderValue` from request into `Header<T>``
-/// where T implements [`FromHeaders`] `struct`
-impl<T: FromHeaders + Send> FromRequestRef for Header<T> {
+/// Extracts the header `T` names from a request into `Header<T>`
+impl<T: FromHeaders + Send> FromRequestHead for Header<T> {
     #[inline]
-    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
         Self::from_headers_map(head.headers())
     }
-}
 
-/// Extracts `HeaderValue` from request parts into `Header<T>``
-/// where T implements [`FromHeaders`] `struct`
-impl<T: FromHeaders + Send> FromPayload for Header<T> {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_request(&RequestHead::from_parts(parts)))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]

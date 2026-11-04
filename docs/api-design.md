@@ -295,8 +295,8 @@ What a user implements, and what is only a bound:
 | rules on an extracted value | `Validate` |
 
 One extractor trait serves handlers and middleware alike: a `FromRequestHead` is read wherever a
-built-in extractor of the head is. It is synchronous and leaves the body alone, so it composes
-with a body extractor.
+built-in extractor of the head is, and those implement it too. It is synchronous and leaves the
+body alone, so it composes with a body extractor.
 
 Asynchronous work belongs to a middleware. The extensions of a request are not exposed, in either
 direction: they hold the request scope and the container, and a user's value would sit next to
