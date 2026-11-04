@@ -1,18 +1,9 @@
 //! Extractors for [`ShutdownHandle`]
 
-use futures_util::future::{Ready, ready};
-use hyper::http::{Extensions, request::Parts};
+use hyper::http::Extensions;
 
-use crate::{
-    HttpRequest, ShutdownHandle,
-    error::Error,
-    http::{
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
-        request_scope::HttpRequestScope,
-    },
-};
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
+use crate::{ShutdownHandle, error::Error, http::request_scope::HttpRequestScope};
 
 impl TryFrom<&Extensions> for ShutdownHandle {
     type Error = Error;
@@ -30,43 +21,25 @@ impl TryFrom<&Extensions> for ShutdownHandle {
     }
 }
 
-/// Extracts [`ShutdownHandle`] from request parts
-impl Sealed for ShutdownHandle {}
-
-impl FromRequestParts for ShutdownHandle {
+/// Extracts [`ShutdownHandle`] from the head of a request
+impl FromRequestHead for ShutdownHandle {
     #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::try_from(&parts.extensions)
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from(head.extensions())
     }
-}
 
-/// Extracts [`ShutdownHandle`] from request
-impl FromRequestRef for ShutdownHandle {
-    #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from(req.extensions())
-    }
-}
-
-/// Extracts [`ShutdownHandle`] from request parts
-impl FromPayload for ShutdownHandle {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_parts(parts))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::HttpBody;
+    use crate::HttpRequest;
+    use crate::http::FromRequestRef;
+    use crate::http::endpoints::args::FromPayload;
+    use crate::http::endpoints::args::Payload;
     use hyper::Request;
 
     fn scope_with(shutdown: ShutdownHandle) -> HttpRequestScope {
@@ -106,7 +79,7 @@ mod tests {
         let req = HttpRequest::from_parts(parts, body);
 
         assert!(
-            ShutdownHandle::from_request(&req)
+            ShutdownHandle::from_request(&RequestHead::from_request(&req))
                 .unwrap()
                 .is_shutdown_requested()
         );
@@ -116,7 +89,7 @@ mod tests {
     fn it_fails_without_request_scope() {
         let (parts, _) = Request::get("/").body(()).unwrap().into_parts();
 
-        let err = ShutdownHandle::from_parts(&parts).unwrap_err();
+        let err = ShutdownHandle::from_request(&RequestHead::from_parts(&parts)).unwrap_err();
 
         assert_eq!(
             err.to_string(),

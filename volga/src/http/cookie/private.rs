@@ -1,20 +1,13 @@
 //! Utilities for private cookies
 
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 use crate::{
-    HttpRequest,
     di::{Container, Dependencies},
     error::Error,
     headers::HeaderMap,
-    http::{
-        Extensions, Parts,
-        cookie::get_cookies,
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
-    },
+    http::{Extensions, Parts, cookie::get_cookies},
 };
 use cookie::{CookieJar, Key, PrivateJar};
-use futures_util::future::{Ready, ready};
 use std::{fs::File, io::Read, path::Path};
 
 /// Represents a cryptographic pass key for [`PrivateCookies`]
@@ -178,49 +171,19 @@ impl TryFrom<(&Extensions, &HeaderMap)> for PrivateCookies {
     }
 }
 
-impl Sealed for PrivateCookies {}
-
-impl FromRequestRef for PrivateCookies {
+impl FromRequestHead for PrivateCookies {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from((req.extensions(), req.headers()))
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from((head.extensions(), head.headers()))
     }
 
     #[inline]
     fn dependencies(deps: &mut Dependencies) {
         deps.add::<PrivateKey>();
     }
-}
 
-impl FromRequestParts for PrivateCookies {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
-    }
-
-    #[inline]
-    fn dependencies(deps: &mut Dependencies) {
-        deps.add::<PrivateKey>();
-    }
-}
-
-impl FromPayload for PrivateCookies {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_parts(parts))
-    }
-
-    #[inline]
-    fn dependencies(deps: &mut Dependencies) {
-        deps.add::<PrivateKey>();
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]
@@ -228,6 +191,10 @@ mod tests {
     use super::*;
     use crate::di::ContainerBuilder;
     use crate::headers::{COOKIE, SET_COOKIE};
+    use crate::http::FromRequestRef;
+    use crate::http::endpoints::args::FromPayload;
+    use crate::http::endpoints::args::Payload;
+    use crate::http::endpoints::args::Source;
     use crate::http::{HttpBody, HttpRequest, Request, cookie::set_cookies};
 
     #[test]
@@ -352,7 +319,9 @@ mod tests {
         let (parts, body) = request.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let cookies = <PrivateCookies as FromRequestRef>::from_request(&req).unwrap();
+        let cookies =
+            <PrivateCookies as FromRequestRef>::from_request(&RequestHead::from_request(&req))
+                .unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }
@@ -379,7 +348,7 @@ mod tests {
 
         let (parts, _) = request.into_parts();
 
-        let cookies = PrivateCookies::from_parts(&parts).unwrap();
+        let cookies = PrivateCookies::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }

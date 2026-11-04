@@ -23,6 +23,7 @@ use crate::{
         SEC_WEBSOCKET_VERSION, UPGRADE,
     },
     http::{
+        RequestHead,
         endpoints::args::{FromPayload, Payload, Source},
         request_scope::HttpRequestScope,
     },
@@ -304,7 +305,7 @@ impl TryFrom<&Parts> for WebSocketConnection {
                 "Server error: error handler is missing",
             ))?;
 
-        let error_args = extract_error_args(error_handler, parts);
+        let error_args = extract_error_args(error_handler, &RequestHead::from_parts(parts));
 
         let sec_websocket_protocol = parts.headers.get(&SEC_WEBSOCKET_PROTOCOL).cloned();
 

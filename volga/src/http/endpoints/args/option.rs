@@ -1,12 +1,9 @@
 //! Extractor for `Option<T>`
 
 use crate::{
-    HttpRequest,
     error::Error,
-    http::Parts,
     http::endpoints::args::{
-        ANY_PATH_ARITY, FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
-        sealed::Sealed,
+        ANY_PATH_ARITY, FromPayload, FromRequestRef, Payload, RequestHead, Source, sealed::Sealed,
     },
 };
 use pin_project_lite::pin_project;
@@ -46,18 +43,8 @@ impl<T> Sealed for Option<T> {}
 
 impl<T: FromRequestRef> FromRequestRef for Option<T> {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        match T::from_request(req) {
-            Ok(value) => Ok(Some(value)),
-            Err(_) => Ok(None),
-        }
-    }
-}
-
-impl<T: FromRequestParts> FromRequestParts for Option<T> {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        match T::from_parts(parts) {
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        match T::from_request(head) {
             Ok(value) => Ok(Some(value)),
             Err(_) => Ok(None),
         }
@@ -87,6 +74,7 @@ impl<T: FromPayload> FromPayload for Option<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::HttpRequest;
     use crate::http::endpoints::args::parts_with;
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::{HttpBody, error::Error};
@@ -108,14 +96,8 @@ mod tests {
 
     impl Sealed for SuccessExtractor {}
 
-    impl FromRequestParts for SuccessExtractor {
-        fn from_parts(_: &Parts) -> Result<Self, Error> {
-            Ok(SuccessExtractor)
-        }
-    }
-
     impl FromRequestRef for SuccessExtractor {
-        fn from_request(_: &HttpRequest) -> Result<Self, Error> {
+        fn from_request(_: &RequestHead<'_>) -> Result<Self, Error> {
             Ok(SuccessExtractor)
         }
     }
@@ -134,14 +116,8 @@ mod tests {
 
     impl Sealed for FailureExtractor {}
 
-    impl FromRequestParts for FailureExtractor {
-        fn from_parts(_: &Parts) -> Result<Self, Error> {
-            Err(Error::client_error("Test error"))
-        }
-    }
-
     impl FromRequestRef for FailureExtractor {
-        fn from_request(_: &HttpRequest) -> Result<Self, Error> {
+        fn from_request(_: &RequestHead<'_>) -> Result<Self, Error> {
             Err(Error::client_error("Test error"))
         }
     }
@@ -196,7 +172,7 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Option::<SuccessExtractor>::from_parts(&parts);
+        let result = Option::<SuccessExtractor>::from_request(&RequestHead::from_parts(&parts));
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_some());
@@ -208,7 +184,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let result = Option::<SuccessExtractor>::from_request(&req);
+        let result = Option::<SuccessExtractor>::from_request(&RequestHead::from_request(&req));
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_some());
@@ -230,7 +206,7 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Option::<FailureExtractor>::from_parts(&parts);
+        let result = Option::<FailureExtractor>::from_request(&RequestHead::from_parts(&parts));
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -242,7 +218,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let result = Option::<FailureExtractor>::from_request(&req);
+        let result = Option::<FailureExtractor>::from_request(&RequestHead::from_request(&req));
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());

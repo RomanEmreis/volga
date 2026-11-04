@@ -9,8 +9,16 @@ error[E0277]: `Json<u32>` is not an extractor this handler or middleware can tak
   = note: `Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`
   = note: `with`, `filter` and `map_err` read the request without consuming it, so they take the extractors of its head, but not `Json<T>` or any other body extractor
   = note: a type of your own becomes an extractor by implementing `FromRequestHead`; one read from a path parameter implements `FromPathArg` and is taken as `Path<T>`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
-  = help: the following other types implement trait `FromRequestRef`:
-            (T₁, T₂, …, Tₙ) up to tuples of arity 10
+  = help: the following other types implement trait `FromRequestHead`:
+            Authenticated<T>
+            Basic
+            Bearer
+            BearerTokenService
+            ClientIp
+            Config<T>
+            Cookies
+            Dc<T>
+          and $N others
   = note: required for `Json<u32>` to implement `FromRequestRef`
   = note: 1 redundant requirement hidden
   = note: required for `(Json<u32>,)` to implement `FromRequestRef`

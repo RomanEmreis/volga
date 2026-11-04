@@ -7,8 +7,8 @@ use crate::{
     HttpRequest, HttpResult,
     error::Error,
     http::{
-        FromRequestParts, GenericHandler, IntoResponse, StatusCode, endpoints::handlers::Handler,
-        marker,
+        FromRequestRef, GenericHandler, IntoResponse, RequestHead, StatusCode,
+        endpoints::handlers::Handler, marker,
     },
 };
 
@@ -28,7 +28,7 @@ pub struct FallbackFunc<F, Args, M = marker::Async>(pub(crate) F, PhantomData<fn
 impl<F, Args, R, M> FallbackFunc<F, Args, M>
 where
     F: GenericHandler<Args, M, Output = R>,
-    Args: FromRequestParts + Send + 'static,
+    Args: FromRequestRef + Send + 'static,
     R: IntoResponse,
 {
     pub(crate) fn new(func: F) -> Self {
@@ -39,15 +39,15 @@ where
     #[inline]
     fn args(req: HttpRequest) -> Result<Args, Error> {
         // Nothing matched, so there is no route to read a body for; the
-        // parts carry everything a fallback can act on
-        Args::from_parts(req.parts())
+        // head carries everything a fallback can act on
+        Args::from_request(&RequestHead::from_request(&req))
     }
 }
 
 impl<F, Args, R, M> FallbackHandler for FallbackFunc<F, Args, M>
 where
     F: GenericHandler<Args, M, Output = R>,
-    Args: FromRequestParts + Send + 'static,
+    Args: FromRequestRef + Send + 'static,
     R: IntoResponse,
 {
     #[inline]
@@ -65,7 +65,7 @@ where
 impl<F, Args, R, M> Handler for FallbackFunc<F, Args, M>
 where
     F: GenericHandler<Args, M, Output = R>,
-    Args: FromRequestParts + Send + 'static,
+    Args: FromRequestRef + Send + 'static,
     R: IntoResponse + 'static,
     M: 'static,
 {
@@ -91,7 +91,7 @@ where
 impl<F, Args, R, M> From<FallbackFunc<F, Args, M>> for PipelineFallbackHandler
 where
     F: GenericHandler<Args, M, Output = R>,
-    Args: FromRequestParts + Send + 'static,
+    Args: FromRequestRef + Send + 'static,
     R: IntoResponse,
     M: 'static,
 {

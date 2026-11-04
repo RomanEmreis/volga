@@ -1,9 +1,9 @@
-use volga::{HttpRequest, error::Error, http::FromRequestRef};
+use volga::{error::Error, http::{FromRequestRef, RequestHead}};
 
 struct Custom;
 
 impl FromRequestRef for Custom {
-    fn from_request(_: &HttpRequest) -> Result<Self, Error> {
+    fn from_request(_: &RequestHead<'_>) -> Result<Self, Error> {
         Ok(Custom)
     }
 }

@@ -4,30 +4,29 @@ use super::Error;
 use crate::{
     HttpResponse, HttpResult,
     headers::HeaderMap,
-    http::{FromRequestParts, IntoResponse, MapErr, marker},
+    http::{FromRequestRef, IntoResponse, MapErr, RequestHead, marker},
     status,
 };
 use futures_util::future::BoxFuture;
 use hyper::Uri;
-use hyper::http::request::Parts;
 
 use std::sync::Arc;
 
 /// Trait for types that represent a global error handler.
 ///
-/// Instead of receiving full request [`Parts`] at error time (which would
-/// require cloning them on every request), an `ErrorHandler` pre-extracts
-/// whatever arguments it needs *before* the parts are consumed and returns
+/// Instead of receiving the head of the request at error time (which would
+/// require cloning it on every request), an `ErrorHandler` pre-extracts
+/// whatever arguments it needs *before* the request is consumed and returns
 /// them as a type-erased [`ErasedErrorArgs`]. The extracted args are dropped
 /// on the happy path and invoked only if the handler returns an error.
 pub trait ErrorHandler: Send + Sync {
-    /// Extracts handler arguments from the request parts before they are consumed.
+    /// Extracts handler arguments from the head of the request before it is consumed.
     ///
     /// Called on every matched request. The returned [`ErasedErrorArgs`] is
     /// dropped if no error occurs, or invoked with the error if one does.
-    fn extract(&self, parts: &Parts) -> Box<dyn ErasedErrorArgs + Send>;
+    fn extract(&self, head: &RequestHead<'_>) -> Box<dyn ErasedErrorArgs + Send>;
 
-    /// Returns whether this handler requires argument extraction from [`Parts`].
+    /// Returns whether this handler requires argument extraction from the head of the request.
     ///
     /// When `false`, the framework skips the `Box<dyn ErasedErrorArgs>`
     /// allocation entirely and stores nothing. Overridden to `false`
@@ -41,7 +40,7 @@ pub trait ErrorHandler: Send + Sync {
 
 /// Type-erased, pre-extracted error handler arguments.
 ///
-/// Produced by [`ErrorHandler::extract`] before request parts are consumed.
+/// Produced by [`ErrorHandler::extract`] before the request is consumed.
 /// Stores the handler closure and its already-extracted arguments so that
 /// `parts.clone()` is never needed on the hot path.
 pub trait ErasedErrorArgs: Send {
@@ -86,9 +85,9 @@ pub(crate) struct DefaultErrorHandler;
 
 impl ErrorHandler for DefaultErrorHandler {
     #[inline]
-    fn extract(&self, parts: &Parts) -> Box<dyn ErasedErrorArgs + Send> {
+    fn extract(&self, head: &RequestHead<'_>) -> Box<dyn ErasedErrorArgs + Send> {
         Box::new(DefaultErrorArgs {
-            uri: parts.uri.clone(),
+            uri: head.uri().clone(),
         })
     }
 
@@ -104,7 +103,7 @@ pub struct ErrorFunc<F, R, Args, M = marker::Async>
 where
     F: MapErr<Args, M, Output = R>,
     R: IntoResponse,
-    Args: FromRequestParts + Send,
+    Args: FromRequestRef + Send,
 {
     func: F,
     _marker: std::marker::PhantomData<fn(Args, M) -> R>,
@@ -114,7 +113,7 @@ impl<F, R, Args, M> ErrorFunc<F, R, Args, M>
 where
     F: MapErr<Args, M, Output = R>,
     R: IntoResponse,
-    Args: FromRequestParts + Send,
+    Args: FromRequestRef + Send,
 {
     pub(crate) fn new(func: F) -> Self {
         Self {
@@ -174,13 +173,13 @@ impl<F, R, Args, M> ErrorHandler for ErrorFunc<F, R, Args, M>
 where
     F: MapErr<Args, M, Output = R> + Clone + 'static,
     R: IntoResponse + 'static,
-    Args: FromRequestParts + Send + 'static,
+    Args: FromRequestRef + Send + 'static,
     M: 'static,
 {
     #[inline]
-    fn extract(&self, parts: &Parts) -> Box<dyn ErasedErrorArgs + Send> {
-        let uri = parts.uri.clone();
-        match Args::from_parts(parts) {
+    fn extract(&self, head: &RequestHead<'_>) -> Box<dyn ErasedErrorArgs + Send> {
+        let uri = head.uri().clone();
+        match Args::from_request(head) {
             Ok(args) => Box::new(BoundErrorArgs {
                 func: self.func.clone(),
                 args,
@@ -196,7 +195,7 @@ impl<F, R, Args, M> From<ErrorFunc<F, R, Args, M>> for PipelineErrorHandler
 where
     F: MapErr<Args, M, Output = R>,
     R: IntoResponse + 'static,
-    Args: FromRequestParts + Send + 'static,
+    Args: FromRequestRef + Send + 'static,
     M: 'static,
 {
     #[inline]
@@ -271,16 +270,19 @@ pub(crate) fn with_error_headers(mut resp: HttpResponse, headers: HeaderMap) -> 
     resp
 }
 
-/// Extracts error handler arguments from request parts before they are consumed.
+/// Extracts error handler arguments from the head of the request before it is consumed.
 ///
 /// Returns [`ErrorArgsSlot::Default`] when the pipeline uses [`DefaultErrorHandler`]
 /// (no custom `map_err` configured), avoiding a `Box` allocation on the happy path.
 /// Returns [`ErrorArgsSlot::Custom`] for user-configured handlers, pre-extracting
-/// their `Args` from parts while they are still available.
+/// their `Args` from the head while it is still available.
 #[inline]
-pub(crate) fn extract_error_args(handler: &PipelineErrorHandler, parts: &Parts) -> ErrorArgsSlot {
+pub(crate) fn extract_error_args(
+    handler: &PipelineErrorHandler,
+    head: &RequestHead<'_>,
+) -> ErrorArgsSlot {
     if handler.needs_parts_extraction() {
-        ErrorArgsSlot::Custom(handler.extract(parts))
+        ErrorArgsSlot::Custom(handler.extract(head))
     } else {
         ErrorArgsSlot::Default
     }
@@ -292,6 +294,7 @@ mod tests {
         DefaultErrorHandler, Error, ErrorArgsSlot, ErrorFunc, PipelineErrorHandler, answer_with,
         default_error_handler, extract_error_args,
     };
+    use crate::http::RequestHead;
     use crate::{error::ErrorHandler, status};
     use http_body_util::BodyExt;
     use hyper::Request;
@@ -389,7 +392,7 @@ mod tests {
 
         let req = Request::get("/foo/bar?baz").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        let extracted = handler.extract(&parts);
+        let extracted = handler.extract(&RequestHead::from_parts(&parts));
         let response = extracted.call(error).await;
 
         assert!(response.is_ok());
@@ -410,7 +413,7 @@ mod tests {
 
         let req = Request::get("/foo/bar?baz").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        let slot = extract_error_args(&handler, &parts);
+        let slot = extract_error_args(&handler, &RequestHead::from_parts(&parts));
         assert!(matches!(slot, ErrorArgsSlot::Custom(_)));
 
         let response = slot.call(error).await;
@@ -429,7 +432,7 @@ mod tests {
 
         let req = Request::get("/foo/bar").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        let slot = extract_error_args(&handler, &parts);
+        let slot = extract_error_args(&handler, &RequestHead::from_parts(&parts));
 
         assert!(matches!(slot, ErrorArgsSlot::Default));
     }
@@ -442,7 +445,7 @@ mod tests {
 
         let req = Request::get("/foo/bar").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        let slot = extract_error_args(&handler, &parts);
+        let slot = extract_error_args(&handler, &RequestHead::from_parts(&parts));
         let response = slot.call(error).await;
 
         assert!(response.is_ok());

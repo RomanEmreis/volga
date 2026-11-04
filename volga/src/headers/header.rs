@@ -1,20 +1,16 @@
 //! Extractors for HTTP headers
 
-use crate::{HttpRequest, error::Error};
-use futures_util::future::{Ready, ready};
+use crate::error::Error;
 use hyper::{header::AsHeaderName, http::request::Parts};
 
 use super::{FromHeaders, HeaderError, HeaderMap, HeaderName, HeaderValue};
-
-use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-};
 
 use std::{
     fmt::{Display, Formatter},
     marker::PhantomData,
 };
 
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 pub use try_into_header::TryIntoHeaderPair;
 
 mod try_into_header;
@@ -23,7 +19,7 @@ mod try_into_header;
 ///
 /// This type is intended for read-only access and does not allow
 /// mutating the underlying request headers.
-/// For mutating headers, use [`HttpRequest`] extractor instead.
+/// For mutating headers, use [`HttpRequest`](crate::HttpRequest) extractor instead.
 ///
 /// # Example
 /// ```no_run
@@ -105,38 +101,15 @@ impl From<&Parts> for HttpHeaders {
     }
 }
 
-/// Extracts `HeadersMap` from request parts into [`HttpHeaders`]
-impl Sealed for HttpHeaders {}
-
-impl FromRequestParts for HttpHeaders {
+/// Extracts the headers of a request into [`HttpHeaders`]
+impl FromRequestHead for HttpHeaders {
     #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Ok(parts.into())
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Ok(head.headers().clone().into())
     }
-}
 
-/// Extracts `HeaderValue` from request into `Header<T>``
-/// where T implements [`FromHeaders`] `struct`
-impl FromRequestRef for HttpHeaders {
-    #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Ok(req.headers().clone().into())
-    }
-}
-
-/// Extracts `HeaderMap` from request into `Headers`
-impl FromPayload for HttpHeaders {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_parts(parts))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 /// Typed header that wraps a [`HeaderValue`]
@@ -292,47 +265,23 @@ impl<T: FromHeaders> Header<T> {
     }
 }
 
-/// Extracts `HeaderValue` from request parts into `Header<T>``
-/// where T implements [`FromHeaders`] `struct`
-impl<T: FromHeaders> Sealed for Header<T> {}
-
-impl<T: FromHeaders + Send> FromRequestParts for Header<T> {
+/// Extracts the header `T` names from a request into `Header<T>`
+impl<T: FromHeaders + Send> FromRequestHead for Header<T> {
     #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::from_headers_map(&parts.headers)
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::from_headers_map(head.headers())
     }
-}
 
-/// Extracts `HeaderValue` from request into `Header<T>``
-/// where T implements [`FromHeaders`] `struct`
-impl<T: FromHeaders + Send> FromRequestRef for Header<T> {
-    #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::from_headers_map(req.headers())
-    }
-}
-
-/// Extracts `HeaderValue` from request parts into `Header<T>``
-/// where T implements [`FromHeaders`] `struct`
-impl<T: FromHeaders + Send> FromPayload for Header<T> {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_parts(parts))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]
 mod tests {
     use crate::headers::{ContentType, Header, HttpHeaders};
+    use crate::http::FromRequestRef;
+    use crate::http::RequestHead;
     use crate::http::endpoints::args::{FromPayload, Payload};
-    use crate::http::{FromRequestParts, FromRequestRef};
     use crate::{HttpBody, HttpRequest};
     use hyper::http::HeaderValue;
     use hyper::{HeaderMap, Request};
@@ -433,7 +382,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let headers = HttpHeaders::from_parts(&parts).unwrap();
+        let headers = HttpHeaders::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(headers.get_raw("content-type").unwrap(), "text/plain");
     }
@@ -448,7 +397,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let headers = HttpHeaders::from_request(&req).unwrap();
+        let headers = HttpHeaders::from_request(&RequestHead::from_request(&req)).unwrap();
 
         assert_eq!(headers.get_raw("content-type").unwrap(), "text/plain");
     }
@@ -463,7 +412,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let headers = HttpHeaders::from_request(&req).unwrap();
+        let headers = HttpHeaders::from_request(&RequestHead::from_request(&req)).unwrap();
         let headers = headers.to_map();
 
         assert_eq!(headers.get("content-type").unwrap(), "text/plain");
@@ -478,7 +427,8 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let header: Header<ContentType> = Header::from_parts(&parts).unwrap();
+        let header: Header<ContentType> =
+            Header::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(header.as_ref(), "text/plain");
     }
@@ -493,7 +443,8 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let header: Header<ContentType> = Header::from_request(&req).unwrap();
+        let header: Header<ContentType> =
+            Header::from_request(&RequestHead::from_request(&req)).unwrap();
 
         assert_eq!(header.as_ref(), "text/plain");
     }

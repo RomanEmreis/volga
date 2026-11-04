@@ -1,15 +1,7 @@
 //! Extractors for client IP address
 
-use crate::{
-    HttpRequest,
-    error::Error,
-    http::{
-        FromRequestParts, FromRequestRef,
-        endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
-        request_scope::HttpRequestScope,
-    },
-};
-use futures_util::future::{Ready, ready};
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
+use crate::{error::Error, http::request_scope::HttpRequestScope};
 use hyper::http::{Extensions, request::Parts};
 use std::fmt::Display;
 use std::{net::SocketAddr, ops::Deref};
@@ -72,43 +64,21 @@ impl TryFrom<&Parts> for ClientIp {
     }
 }
 
-/// Extracts `ClientIp` from request parts
-impl Sealed for ClientIp {}
-
-impl FromRequestParts for ClientIp {
+/// Extracts `ClientIp` from the head of a request
+impl FromRequestHead for ClientIp {
     #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        head.extensions().try_into()
     }
-}
 
-/// Extracts `ClientIp` from request
-impl FromRequestRef for ClientIp {
-    #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        req.extensions().try_into()
-    }
-}
-
-/// Extracts `ClientIp` from request payload
-impl FromPayload for ClientIp {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(parts.try_into())
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
+    use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload};
     use crate::http::request_scope::HttpRequestScope;
     use crate::{HttpBody, HttpRequest};
     use hyper::{Request, http::Extensions};
@@ -165,7 +135,7 @@ mod tests {
             .unwrap();
 
         let (parts, _) = req.into_parts();
-        let client_ip = ClientIp::from_parts(&parts).unwrap();
+        let client_ip = ClientIp::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(client_ip, ip);
     }
@@ -181,7 +151,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let client_ip = ClientIp::from_request(&req).unwrap();
+        let client_ip = ClientIp::from_request(&RequestHead::from_request(&req)).unwrap();
 
         assert_eq!(client_ip, ip);
     }

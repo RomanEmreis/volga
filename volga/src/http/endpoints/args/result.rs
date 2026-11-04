@@ -1,12 +1,9 @@
 //! Extractor for Result<T, E>
 
 use crate::{
-    HttpRequest,
     error::Error,
-    http::Parts,
     http::endpoints::args::{
-        ANY_PATH_ARITY, FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
-        sealed::Sealed,
+        ANY_PATH_ARITY, FromPayload, FromRequestRef, Payload, RequestHead, Source, sealed::Sealed,
     },
 };
 use pin_project_lite::pin_project;
@@ -46,24 +43,8 @@ impl<T> Sealed for Result<T, Error> {}
 
 impl<T: FromRequestRef> FromRequestRef for Result<T, Error> {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        match T::from_request(req) {
-            Ok(value) => Ok(Ok(value)),
-            Err(err) => Ok(Err(err)),
-        }
-    }
-
-    #[inline]
-    #[cfg(feature = "di")]
-    fn dependencies(deps: &mut crate::di::Dependencies) {
-        T::dependencies(deps);
-    }
-}
-
-impl<T: FromRequestParts> FromRequestParts for Result<T, Error> {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        match T::from_parts(parts) {
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        match T::from_request(head) {
             Ok(value) => Ok(Ok(value)),
             Err(err) => Ok(Err(err)),
         }
@@ -103,6 +84,7 @@ impl<T: FromPayload> FromPayload for Result<T, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::HttpRequest;
     use crate::http::endpoints::args::parts_with;
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::{HttpBody, error::Error};
@@ -124,14 +106,8 @@ mod tests {
 
     impl Sealed for SuccessExtractor {}
 
-    impl FromRequestParts for SuccessExtractor {
-        fn from_parts(_: &Parts) -> Result<Self, Error> {
-            Ok(SuccessExtractor)
-        }
-    }
-
     impl FromRequestRef for SuccessExtractor {
-        fn from_request(_: &HttpRequest) -> Result<Self, Error> {
+        fn from_request(_: &RequestHead<'_>) -> Result<Self, Error> {
             Ok(SuccessExtractor)
         }
     }
@@ -150,14 +126,8 @@ mod tests {
 
     impl Sealed for FailureExtractor {}
 
-    impl FromRequestParts for FailureExtractor {
-        fn from_parts(_: &Parts) -> Result<Self, Error> {
-            Err(Error::client_error("Test error"))
-        }
-    }
-
     impl FromRequestRef for FailureExtractor {
-        fn from_request(_: &HttpRequest) -> Result<Self, Error> {
+        fn from_request(_: &RequestHead<'_>) -> Result<Self, Error> {
             Err(Error::client_error("Test error"))
         }
     }
@@ -213,7 +183,8 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<SuccessExtractor, Error>::from_parts(&parts);
+        let result =
+            Result::<SuccessExtractor, Error>::from_request(&RequestHead::from_parts(&parts));
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -226,7 +197,8 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let result = Result::<SuccessExtractor, Error>::from_request(&req);
+        let result =
+            Result::<SuccessExtractor, Error>::from_request(&RequestHead::from_request(&req));
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -250,7 +222,8 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<FailureExtractor, Error>::from_parts(&parts);
+        let result =
+            Result::<FailureExtractor, Error>::from_request(&RequestHead::from_parts(&parts));
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -263,7 +236,8 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let result = Result::<FailureExtractor, Error>::from_request(&req);
+        let result =
+            Result::<FailureExtractor, Error>::from_request(&RequestHead::from_request(&req));
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();

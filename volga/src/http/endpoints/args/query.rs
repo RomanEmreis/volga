@@ -1,6 +1,6 @@
 //! Extractors for uri query
 
-use crate::{HttpRequest, error::Error};
+use crate::error::Error;
 use futures_util::future::{Ready, ready};
 use hyper::{Uri, http::request::Parts};
 use serde::de::DeserializeOwned;
@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+    FromPayload, FromRequestRef, Payload, RequestHead, Source, sealed::Sealed,
 };
 
 /// `Query<T>` extracts HTTP request query parameters into a named
@@ -98,19 +98,12 @@ impl<T: DeserializeOwned> TryFrom<&Parts> for Query<T> {
 /// where T is deserializable `struct`
 impl<T> Sealed for Query<T> {}
 
-impl<T: DeserializeOwned> FromRequestParts for Query<T> {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
-    }
-}
-
 /// Extracts `Uri` query from request into `Query<T>`
 /// where T is deserializable `struct`
 impl<T: DeserializeOwned> FromRequestRef for Query<T> {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        req.uri().try_into()
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        head.uri().try_into()
     }
 }
 

@@ -1,17 +1,12 @@
 //! Tools and utils for Basic Authorization
 
+use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
 use crate::{
-    HttpRequest,
     error::Error,
     headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
-    http::{
-        FromRequestParts, FromRequestRef,
-        endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
-    },
 };
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use futures_util::future::{Ready, ready};
 use hyper::http::request::Parts;
 use std::fmt::{Display, Formatter};
 
@@ -79,34 +74,14 @@ impl Display for Basic {
     }
 }
 
-impl Sealed for Basic {}
-
-impl FromRequestParts for Basic {
+impl FromRequestHead for Basic {
     #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::try_from(parts)
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from(head.headers())
     }
-}
 
-impl FromRequestRef for Basic {
-    #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from(req.headers())
-    }
-}
-
-impl FromPayload for Basic {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ready(Self::from_parts(parts))
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 impl Basic {
@@ -129,6 +104,10 @@ impl Basic {
 mod tests {
     use super::*;
     use crate::headers::{AUTHORIZATION, Authorization, HeaderMap, HeaderValue};
+    use crate::http::FromRequestRef;
+    use crate::http::endpoints::args::FromPayload;
+    use crate::http::endpoints::args::Payload;
+    use crate::http::endpoints::args::Source;
     use base64::Engine;
     use base64::engine::general_purpose::STANDARD;
     use hyper::Request;
@@ -236,7 +215,7 @@ mod tests {
             .unwrap();
         let (parts, _) = req.into_parts();
 
-        let basic = Basic::from_parts(&parts).unwrap();
+        let basic = Basic::from_request(&RequestHead::from_parts(&parts)).unwrap();
         let expected = STANDARD.encode("parts:test");
         assert_eq!(basic.to_string(), expected);
     }

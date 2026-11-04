@@ -3,69 +3,30 @@
 use crate::{HttpBody, HttpRequest, error::Error};
 use futures_util::future::{Ready, ok};
 
-use hyper::{Method, Uri, http::request::Parts};
+use hyper::{Method, Uri};
 
 use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
+    FromPayload, FromRequestHead, Payload, RequestHead, Source, sealed::PathAccess,
 };
 
-impl Sealed for Uri {}
-impl Sealed for Method {}
-
-impl FromRequestParts for Uri {
+impl FromRequestHead for Uri {
     #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Ok(parts.uri.clone())
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Ok(head.uri().clone())
     }
+
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
-impl FromRequestRef for Uri {
+impl FromRequestHead for Method {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Ok(req.uri().clone())
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Ok(head.method().clone())
     }
-}
 
-impl FromRequestParts for Method {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Ok(parts.method.clone())
-    }
-}
-
-impl FromRequestRef for Method {
-    #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Ok(req.method().clone())
-    }
-}
-
-impl FromPayload for Uri {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ok(parts.uri.clone())
-    }
-}
-
-impl FromPayload for Method {
-    type Future = Ready<Result<Self, Error>>;
-
-    const SOURCE: Source = Source::Parts;
-
-    #[inline]
-    fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
-            unreachable!()
-        };
-        ok(parts.method.clone())
-    }
+    // Reads no path parameter, so a positional extractor next to it takes its own
+    const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
 impl FromPayload for HttpRequest {
@@ -98,8 +59,10 @@ impl FromPayload for HttpBody {
 
 #[cfg(test)]
 mod tests {
-    use super::{FromPayload, FromRequestParts, Payload};
+    use super::{FromPayload, Payload};
     use crate::error::Error;
+    use crate::http::FromRequestRef;
+    use crate::http::RequestHead;
     use crate::{HttpBody, HttpRequest};
     use http_body_util::BodyExt;
     use hyper::{Method, Request, Uri};
@@ -109,7 +72,8 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let uri: Result<Uri, Error> = FromRequestParts::from_parts(&parts);
+        let uri: Result<Uri, Error> =
+            FromRequestRef::from_request(&RequestHead::from_parts(&parts));
 
         assert!(uri.is_ok());
 
@@ -122,7 +86,7 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let method = Method::from_parts(&parts);
+        let method = Method::from_request(&RequestHead::from_parts(&parts));
 
         assert!(method.is_ok());
 

@@ -202,7 +202,7 @@ use crate::http::endpoints::{
 
 use crate::http::endpoints::route::same_position;
 use crate::http::request::request_body_limit::RequestBodyLimit;
-use crate::http::{FromRequestParts, IntoResponse};
+use crate::http::{FromRequestRef, IntoResponse};
 use hyper::Method;
 use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
@@ -1139,7 +1139,7 @@ impl<'a> RouteGroup<'a> {
     ///   CORS policy applies to it too.
     ///
     /// The handler takes the same arguments [`App::map_fallback`] does - anything
-    /// implementing [`FromRequestParts`]. It binds the parameters its prefix declares and
+    /// implementing [`FromRequestRef`]. It binds the parameters its prefix declares and
     /// nothing else, the same at the prefix and below it, and the path the request was aimed
     /// at is there to read through [`Uri`](crate::http::Uri). Under a prefix that ends in a
     /// catch-all, `/files/{*path}`, it answers what that catch-all reads, and binds it as the
@@ -1182,7 +1182,7 @@ impl<'a> RouteGroup<'a> {
     pub fn map_fallback<F, Args, R, M>(&mut self, handler: F) -> &mut Self
     where
         F: GenericHandler<Args, M, Output = R>,
-        Args: FromRequestParts + Send + 'static,
+        Args: FromRequestRef + Send + 'static,
         R: IntoResponse + 'static,
         M: 'static,
     {
