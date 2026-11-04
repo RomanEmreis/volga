@@ -1,10 +1,10 @@
 //! Extractors for client IP address
 
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     error::Error,
     http::{
-        FromRequestParts, FromRequestRef,
+        FromRequestRef,
         endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
         request_scope::HttpRequestScope,
     },
@@ -75,18 +75,11 @@ impl TryFrom<&Parts> for ClientIp {
 /// Extracts `ClientIp` from request parts
 impl Sealed for ClientIp {}
 
-impl FromRequestParts for ClientIp {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
-    }
-}
-
 /// Extracts `ClientIp` from request
 impl FromRequestRef for ClientIp {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        req.extensions().try_into()
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        head.extensions().try_into()
     }
 }
 
@@ -108,7 +101,7 @@ impl FromPayload for ClientIp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
+    use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload};
     use crate::http::request_scope::HttpRequestScope;
     use crate::{HttpBody, HttpRequest};
     use hyper::{Request, http::Extensions};
@@ -165,7 +158,7 @@ mod tests {
             .unwrap();
 
         let (parts, _) = req.into_parts();
-        let client_ip = ClientIp::from_parts(&parts).unwrap();
+        let client_ip = ClientIp::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(client_ip, ip);
     }
@@ -181,7 +174,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let client_ip = ClientIp::from_request(&req).unwrap();
+        let client_ip = ClientIp::from_request(&RequestHead::from_request(&req)).unwrap();
 
         assert_eq!(client_ip, ip);
     }

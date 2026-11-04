@@ -14,7 +14,7 @@ use super::{
     App, HttpResponse,
     headers::{HeaderMap, TryIntoHeaderPair},
     http::{
-        FromRequestParts, GenericHandler, IntoResponse, MapErr, StatusCode,
+        FromRequestRef, GenericHandler, IntoResponse, MapErr, StatusCode,
         endpoints::route::check_path_arity,
     },
 };
@@ -539,7 +539,7 @@ impl App {
     where
         F: MapErr<Args, M, Output = R>,
         R: IntoResponse + 'static,
-        Args: FromRequestParts + Send + 'static,
+        Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
         let handler: PipelineErrorHandler = ErrorFunc::new(handler).into();
@@ -566,7 +566,7 @@ impl App {
     /// mount's prefix, so neither of them reaches this one.
     ///
     /// It takes the same arguments [`map_err`](Self::map_err) does - anything
-    /// implementing [`FromRequestParts`], which covers headers, the URI,
+    /// implementing [`FromRequestRef`], which covers headers, the URI,
     #[cfg_attr(
         feature = "di",
         doc = "cookies, [`ClientIp`](crate::ClientIp) and [`Dc<T>`](crate::di::Dc)."
@@ -612,7 +612,7 @@ impl App {
     pub fn map_fallback<F, Args, R, M>(&mut self, handler: F) -> &mut Self
     where
         F: GenericHandler<Args, M, Output = R>,
-        Args: FromRequestParts + Send + 'static,
+        Args: FromRequestRef + Send + 'static,
         R: IntoResponse,
         M: 'static,
     {

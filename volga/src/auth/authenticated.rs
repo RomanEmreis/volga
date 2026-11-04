@@ -5,11 +5,11 @@
 //! user-defined authentication claims to handlers.
 
 use super::claims::AuthClaims;
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     error::Error,
     http::{
-        FromRequestParts, FromRequestRef,
+        FromRequestRef,
         endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
     },
 };
@@ -108,24 +108,14 @@ where
 /// Extracts `Authenticated<T>` from request parts
 impl<T: AuthClaims> Sealed for Authenticated<T> {}
 
-impl<T> FromRequestParts for Authenticated<T>
-where
-    T: AuthClaims + Send + Sync + 'static,
-{
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
-    }
-}
-
 /// Extracts `Authenticated<T>` from request
 impl<T> FromRequestRef for Authenticated<T>
 where
     T: AuthClaims + Send + Sync + 'static,
 {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        req.extensions().try_into()
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        head.extensions().try_into()
     }
 }
 
@@ -151,7 +141,7 @@ where
 mod tests {
     use super::*;
     use crate::claims;
-    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
+    use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload};
     use crate::{HttpBody, HttpRequest};
     use hyper::{Request, http::Extensions};
     use serde::{Deserialize, Serialize};
@@ -208,7 +198,8 @@ mod tests {
         let req = Request::get("/").extension(auth.clone()).body(()).unwrap();
 
         let (parts, _) = req.into_parts();
-        let from_parts = Authenticated::<MyClaims>::from_parts(&parts).unwrap();
+        let from_parts =
+            Authenticated::<MyClaims>::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(from_parts.sub, auth.sub);
     }
@@ -226,7 +217,8 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let from_req = Authenticated::<MyClaims>::from_request(&req).unwrap();
+        let from_req =
+            Authenticated::<MyClaims>::from_request(&RequestHead::from_request(&req)).unwrap();
 
         assert_eq!(from_req.sub, auth.sub);
     }

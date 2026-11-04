@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 use crate::http::{
     Extensions, Method, Parts, Request, Uri, Version,
-    endpoints::args::{FromRequestRef, PathArg},
+    endpoints::args::{FromRequestRef, PathArg, RequestHead},
     request::request_body_limit::RequestBodyLimit,
     request_scope::HttpRequestScope,
 };
@@ -115,8 +115,10 @@ impl HttpRequest {
         self.parts.version
     }
 
-    /// Returns a reference to the associated extensions.
+    /// Returns a reference to the associated extensions, for the middleware: an extractor
+    /// reads them through [`RequestHead`]
     #[inline]
+    #[cfg(feature = "middleware")]
     pub(crate) fn extensions(&self) -> &Extensions {
         &self.parts.extensions
     }
@@ -236,7 +238,7 @@ impl HttpRequest {
     /// ```
     #[inline]
     pub fn extract<T: FromRequestRef>(&self) -> Result<T, Error> {
-        T::from_request(self)
+        T::from_request(&RequestHead::from_request(self))
     }
 
     /// Returns iterator of URL path params

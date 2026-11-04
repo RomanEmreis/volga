@@ -1,16 +1,14 @@
 //! Utilities for private cookies
 
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     di::{Container, Dependencies},
     error::Error,
     headers::HeaderMap,
     http::{
         Extensions, Parts,
         cookie::get_cookies,
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
+        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
     },
 };
 use cookie::{CookieJar, Key, PrivateJar};
@@ -182,20 +180,8 @@ impl Sealed for PrivateCookies {}
 
 impl FromRequestRef for PrivateCookies {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from((req.extensions(), req.headers()))
-    }
-
-    #[inline]
-    fn dependencies(deps: &mut Dependencies) {
-        deps.add::<PrivateKey>();
-    }
-}
-
-impl FromRequestParts for PrivateCookies {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from((head.extensions(), head.headers()))
     }
 
     #[inline]
@@ -214,7 +200,7 @@ impl FromPayload for PrivateCookies {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 
     #[inline]
@@ -352,7 +338,9 @@ mod tests {
         let (parts, body) = request.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let cookies = <PrivateCookies as FromRequestRef>::from_request(&req).unwrap();
+        let cookies =
+            <PrivateCookies as FromRequestRef>::from_request(&RequestHead::from_request(&req))
+                .unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }
@@ -379,7 +367,7 @@ mod tests {
 
         let (parts, _) = request.into_parts();
 
-        let cookies = PrivateCookies::from_parts(&parts).unwrap();
+        let cookies = PrivateCookies::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }

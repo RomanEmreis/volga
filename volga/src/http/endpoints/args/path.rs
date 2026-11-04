@@ -1,6 +1,6 @@
 //! Extractors for route/path segments
 
-use crate::{HttpRequest, error::Error, http::request_scope::HttpRequestScope};
+use crate::{error::Error, http::request_scope::HttpRequestScope};
 use futures_util::future::{Ready, ready};
 use hyper::http::{Extensions, request::Parts};
 use serde::de::DeserializeOwned;
@@ -16,10 +16,10 @@ use std::{
     path::PathBuf,
 };
 
+use crate::http::RequestHead;
 use crate::http::endpoints::{
     args::{
-        FromPathArg, FromPathArgs, FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
-        sealed::Sealed,
+        FromPathArg, FromPathArgs, FromPayload, FromRequestRef, Payload, Source, sealed::Sealed,
     },
     route::{PathArg, PathArgs},
 };
@@ -219,33 +219,19 @@ impl<T: DeserializeOwned + Send> TryFrom<&Parts> for NamedPath<T> {
 impl<T> Sealed for Path<T> {}
 impl<T: DeserializeOwned> Sealed for NamedPath<T> {}
 
-impl<T: FromPathArgs + Send> FromRequestParts for Path<T> {
+impl<T: FromPathArgs + Send> FromRequestRef for Path<T> {
     #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        path_args_from_extensions(head.extensions()).and_then(Self::from_slice)
     }
 
     const PATH_ARITY: RangeInclusive<usize> = T::ARITY;
 }
 
-impl<T: DeserializeOwned + Send> FromRequestParts for NamedPath<T> {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
-    }
-}
-
-impl<T: FromPathArgs + Send> FromRequestRef for Path<T> {
-    #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        path_args_from_extensions(req.extensions()).and_then(Self::from_slice)
-    }
-}
-
 impl<T: DeserializeOwned + Send> FromRequestRef for NamedPath<T> {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        path_args_from_extensions(req.extensions()).and_then(Self::from_slice)
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        path_args_from_extensions(head.extensions()).and_then(Self::from_slice)
     }
 }
 
@@ -503,8 +489,9 @@ impl PathError {
 
 #[cfg(test)]
 mod tests {
+    use crate::http::RequestHead;
     use crate::http::endpoints::args::{
-        FromPathArg, FromPayload, FromRequestParts, FromRequestRef, Payload, parts_with,
+        FromPathArg, FromPayload, FromRequestRef, Payload, parts_with,
     };
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::http::request_scope::HttpRequestScope;
@@ -1105,7 +1092,7 @@ mod tests {
             .unwrap();
 
         let (parts, _) = req.into_parts();
-        let path = NamedPath::<Params>::from_parts(&parts).unwrap();
+        let path = NamedPath::<Params>::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
@@ -1124,7 +1111,9 @@ mod tests {
             .unwrap();
 
         let (parts, _) = req.into_parts();
-        let path = Path::<(u32, String)>::from_parts(&parts).unwrap().0;
+        let path = Path::<(u32, String)>::from_request(&RequestHead::from_parts(&parts))
+            .unwrap()
+            .0;
 
         assert_eq!(path.0, 123u32);
         assert_eq!(path.1, "John")
@@ -1144,7 +1133,7 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
-        let path = NamedPath::<Params>::from_request(&req).unwrap();
+        let path = NamedPath::<Params>::from_request(&RequestHead::from_request(&req)).unwrap();
 
         assert_eq!(path.id, 123u32);
         assert_eq!(path.name, "John")
@@ -1164,7 +1153,9 @@ mod tests {
 
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
-        let path = Path::<(u32, String)>::from_request(&req).unwrap().0;
+        let path = Path::<(u32, String)>::from_request(&RequestHead::from_request(&req))
+            .unwrap()
+            .0;
 
         assert_eq!(path.0, 123u32);
         assert_eq!(path.1, "John")

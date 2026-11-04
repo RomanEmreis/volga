@@ -16,6 +16,7 @@ use crate::{
     error::{Error, handler::extract_error_args},
     headers::CACHE_CONTROL,
     http::{
+        RequestHead,
         endpoints::{FindResult, route::PathArgs},
         request_scope::HttpRequestScope,
     },
@@ -296,10 +297,10 @@ async fn handle_impl(
         config: env.config.clone(),
     });
 
-    // Pre-extract error handler args from parts before consuming them.
-    let error_args = extract_error_args(error_handler, &parts);
-
     let request = HttpRequest::new(parts, body).into_limited(body_limit);
+
+    // Pre-extract error handler args from the head before the request is consumed.
+    let error_args = extract_error_args(error_handler, &RequestHead::from_request(&request));
 
     #[cfg(feature = "middleware")]
     let response = pipeline

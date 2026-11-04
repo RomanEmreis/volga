@@ -1,18 +1,15 @@
 //! Extractors for [`CancellationToken`]
 
 use futures_util::future::{Ready, ready};
-use hyper::http::request::Parts;
 use std::ops::{Deref, DerefMut};
 use tokio_util::sync::CancellationToken as TokioCancellationToken;
 
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     error::Error,
     http::{
         Extensions,
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
+        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
         request_scope::HttpRequestScope,
     },
 };
@@ -89,18 +86,11 @@ impl From<&Extensions> for TokenGuard {
 /// Extracts `CancellationToken` from request parts
 impl Sealed for TokenGuard {}
 
-impl FromRequestParts for TokenGuard {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Ok(Self::from(&parts.extensions))
-    }
-}
-
 /// Extracts `CancellationToken` from request
 impl FromRequestRef for TokenGuard {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Ok(Self::from(req.extensions()))
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Ok(Self::from(head.extensions()))
     }
 }
 
@@ -115,14 +105,15 @@ impl FromPayload for TokenGuard {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::http::RequestHead;
     use crate::http::endpoints::args::cancellation_token::TokenGuard;
-    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
+    use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload};
     use crate::http::request_scope::HttpRequestScope;
     use crate::{HttpBody, HttpRequest};
     use hyper::Request;
@@ -157,7 +148,7 @@ mod tests {
     fn it_gets_new_token_from_parts_if_scope_missing() {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        assert!(TokenGuard::from_parts(&parts).is_ok());
+        assert!(TokenGuard::from_request(&RequestHead::from_parts(&parts)).is_ok());
     }
 
     #[test]
@@ -187,7 +178,7 @@ mod tests {
             .unwrap();
 
         let (parts, _) = req.into_parts();
-        let token = TokenGuard::from_parts(&parts).unwrap();
+        let token = TokenGuard::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert!(token.is_cancelled());
     }
@@ -205,7 +196,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let token = TokenGuard::from_request(&req).unwrap();
+        let token = TokenGuard::from_request(&RequestHead::from_request(&req)).unwrap();
 
         assert!(token.is_cancelled());
     }

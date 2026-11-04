@@ -2,15 +2,13 @@
 
 use super::{Container, Dependencies, FromContainer, Inject, error::Error as DiError};
 use crate::{
-    HttpRequest,
     error::Error,
-    http::endpoints::args::{
-        FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-    },
+    http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
 };
 use futures_util::future::{Ready, ready};
-use hyper::http::{Extensions, request::Parts};
+use hyper::http::Extensions;
 
+use crate::http::RequestHead;
 use std::{ops::Deref, sync::Arc};
 
 /// `Dc` stands for Dependency Container.
@@ -134,21 +132,8 @@ impl<T: Send + Sync> Sealed for Dc<T> {}
 
 impl<T: Send + Sync + 'static> FromRequestRef for Dc<T> {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        req.extensions().try_into()
-    }
-
-    #[inline]
-    fn dependencies(deps: &mut Dependencies) {
-        deps.add::<T>();
-    }
-}
-
-impl<T: Send + Sync + 'static> FromRequestParts for Dc<T> {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        let ext = &parts.extensions;
-        ext.try_into()
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        head.extensions().try_into()
     }
 
     #[inline]
@@ -179,7 +164,7 @@ impl<T: Send + Sync + 'static> FromPayload for Dc<T> {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 
     #[inline]
@@ -204,7 +189,8 @@ impl<T: Send + Sync + 'static> Inject for Dc<T> {
 mod tests {
     use super::{Dc, DiError};
     use crate::di::{Container, ContainerBuilder, Inject};
-    use crate::http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload};
+    use crate::http::RequestHead;
+    use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload};
     use crate::{HttpBody, HttpRequest};
     use hyper::Request;
     use hyper::http::Extensions;
@@ -312,7 +298,7 @@ mod tests {
         let req = HttpRequest::from_parts(parts, HttpBody::empty());
 
         // Act
-        let dc = Dc::<Cache>::from_request(&req).unwrap();
+        let dc = Dc::<Cache>::from_request(&RequestHead::from_request(&req)).unwrap();
 
         // Assert
         assert_eq!(dc.lock().unwrap().first().cloned(), Some(1));
@@ -331,7 +317,7 @@ mod tests {
         req.extensions_mut().insert(container);
         let (parts, _) = req.into_parts();
 
-        let dc = Dc::<Cache>::from_parts(&parts).unwrap();
+        let dc = Dc::<Cache>::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(dc.lock().unwrap().first().cloned(), Some(1));
     }

@@ -3,40 +3,25 @@
 use crate::{HttpBody, HttpRequest, error::Error};
 use futures_util::future::{Ready, ok};
 
-use hyper::{Method, Uri, http::request::Parts};
+use hyper::{Method, Uri};
 
-use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-};
+use crate::http::RequestHead;
+use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed};
 
 impl Sealed for Uri {}
 impl Sealed for Method {}
 
-impl FromRequestParts for Uri {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Ok(parts.uri.clone())
-    }
-}
-
 impl FromRequestRef for Uri {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Ok(req.uri().clone())
-    }
-}
-
-impl FromRequestParts for Method {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Ok(parts.method.clone())
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Ok(head.uri().clone())
     }
 }
 
 impl FromRequestRef for Method {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Ok(req.method().clone())
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Ok(head.method().clone())
     }
 }
 
@@ -98,8 +83,10 @@ impl FromPayload for HttpBody {
 
 #[cfg(test)]
 mod tests {
-    use super::{FromPayload, FromRequestParts, Payload};
+    use super::{FromPayload, Payload};
     use crate::error::Error;
+    use crate::http::FromRequestRef;
+    use crate::http::RequestHead;
     use crate::{HttpBody, HttpRequest};
     use http_body_util::BodyExt;
     use hyper::{Method, Request, Uri};
@@ -109,7 +96,8 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let uri: Result<Uri, Error> = FromRequestParts::from_parts(&parts);
+        let uri: Result<Uri, Error> =
+            FromRequestRef::from_request(&RequestHead::from_parts(&parts));
 
         assert!(uri.is_ok());
 
@@ -122,7 +110,7 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let method = Method::from_parts(&parts);
+        let method = Method::from_request(&RequestHead::from_parts(&parts));
 
         assert!(method.is_ok());
 

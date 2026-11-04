@@ -1,17 +1,14 @@
 //! `Config<T>` extractor - provides read access to a pre-deserialized config section.
 
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     error::Error,
     http::{
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
+        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
         request_scope::HttpRequestScope,
     },
 };
 use futures_util::future::{Ready, ready};
-use hyper::http::request::Parts;
 use std::{ops::Deref, sync::Arc};
 
 /// Provides read access to a pre-deserialized config section `T`.
@@ -62,17 +59,10 @@ impl<T: Send + Sync + 'static> Config<T> {
 
 impl<T: Send + Sync> Sealed for Config<T> {}
 
-impl<T: Send + Sync + 'static> FromRequestParts for Config<T> {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::from_extensions(&parts.extensions)
-    }
-}
-
 impl<T: Send + Sync + 'static> FromRequestRef for Config<T> {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::from_extensions(req.extensions())
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::from_extensions(head.extensions())
     }
 }
 
@@ -85,7 +75,7 @@ impl<T: Send + Sync + 'static> FromPayload for Config<T> {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 }
 
@@ -122,7 +112,7 @@ mod tests {
         let mut req = hyper::Request::get("/").body(()).unwrap();
         *req.extensions_mut() = ext;
         let (parts, _) = req.into_parts();
-        let cfg = Config::<Db>::from_parts(&parts).unwrap();
+        let cfg = Config::<Db>::from_request(&RequestHead::from_parts(&parts)).unwrap();
         assert_eq!(cfg.url, "postgres://localhost/mydb");
     }
 
@@ -130,7 +120,7 @@ mod tests {
     fn config_missing_store_returns_err() {
         let req = hyper::Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
-        let result = Config::<Db>::from_parts(&parts);
+        let result = Config::<Db>::from_request(&RequestHead::from_parts(&parts));
         assert!(result.is_err());
     }
 
@@ -144,7 +134,7 @@ mod tests {
         let mut req = hyper::Request::get("/").body(()).unwrap();
         *req.extensions_mut() = ext;
         let (parts, _) = req.into_parts();
-        let result = Config::<Other>::from_parts(&parts);
+        let result = Config::<Other>::from_request(&RequestHead::from_parts(&parts));
         assert!(result.is_err());
     }
 }

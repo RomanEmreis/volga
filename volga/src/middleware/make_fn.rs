@@ -31,7 +31,7 @@ where
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let filter = filter.clone();
         async move {
-            let args = Args::from_request(ctx.request())?;
+            let args = ctx.extract::<Args>()?;
             let result = filter.filter(args).await.into();
 
             match result.into_inner() {
@@ -55,7 +55,7 @@ where
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            match Args::from_request(ctx.request()) {
+            match ctx.extract::<Args>() {
                 Err(err) => err.into_response(),
                 Ok(args) => match next(ctx).await {
                     Ok(resp) => map.map_ok(resp, args).await.into_response(),
@@ -79,7 +79,7 @@ where
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            match Args::from_request(ctx.request()) {
+            match ctx.extract::<Args>() {
                 Err(err) => err.into_response(),
                 Ok(args) => match next(ctx).await {
                     Err(err) => {
@@ -155,7 +155,7 @@ where
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let middleware = middleware.clone();
         async move {
-            match Args::from_request(ctx.request()) {
+            match ctx.extract::<Args>() {
                 Err(err) => err.into_response(),
                 Ok(args) => {
                     let next = Next::new(ctx, next);

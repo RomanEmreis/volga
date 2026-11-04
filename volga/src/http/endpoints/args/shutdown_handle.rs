@@ -1,15 +1,14 @@
 //! Extractors for [`ShutdownHandle`]
 
 use futures_util::future::{Ready, ready};
-use hyper::http::{Extensions, request::Parts};
+use hyper::http::Extensions;
 
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest, ShutdownHandle,
+    ShutdownHandle,
     error::Error,
     http::{
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
+        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
         request_scope::HttpRequestScope,
     },
 };
@@ -33,18 +32,11 @@ impl TryFrom<&Extensions> for ShutdownHandle {
 /// Extracts [`ShutdownHandle`] from request parts
 impl Sealed for ShutdownHandle {}
 
-impl FromRequestParts for ShutdownHandle {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::try_from(&parts.extensions)
-    }
-}
-
 /// Extracts [`ShutdownHandle`] from request
 impl FromRequestRef for ShutdownHandle {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from(req.extensions())
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from(head.extensions())
     }
 }
 
@@ -59,7 +51,7 @@ impl FromPayload for ShutdownHandle {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 }
 
@@ -67,6 +59,7 @@ impl FromPayload for ShutdownHandle {
 mod tests {
     use super::*;
     use crate::HttpBody;
+    use crate::HttpRequest;
     use hyper::Request;
 
     fn scope_with(shutdown: ShutdownHandle) -> HttpRequestScope {
@@ -106,7 +99,7 @@ mod tests {
         let req = HttpRequest::from_parts(parts, body);
 
         assert!(
-            ShutdownHandle::from_request(&req)
+            ShutdownHandle::from_request(&RequestHead::from_request(&req))
                 .unwrap()
                 .is_shutdown_requested()
         );
@@ -116,7 +109,7 @@ mod tests {
     fn it_fails_without_request_scope() {
         let (parts, _) = Request::get("/").body(()).unwrap().into_parts();
 
-        let err = ShutdownHandle::from_parts(&parts).unwrap_err();
+        let err = ShutdownHandle::from_request(&RequestHead::from_parts(&parts)).unwrap_err();
 
         assert_eq!(
             err.to_string(),

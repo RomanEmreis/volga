@@ -199,30 +199,15 @@ pub trait FromRequest: Sized + sealed::Sealed {
     const PATH_ARITY: RangeInclusive<usize> = ANY_PATH_ARITY;
 }
 
-/// The bound on what reads a borrowed HTTP request: what `with` and `filter` take, and what
-/// [`HttpRequest::extract`] reads.
+/// The bound on what reads the head of a request without consuming it: what `with`,
+/// `filter`, `map_err` and `map_fallback` take, and what [`HttpRequest::extract`] and
+/// [`RequestHead::extract`] read.
 ///
 /// This is a bound, not an extension point: it is sealed. To make a type of your own an
 /// extractor, implement [`FromRequestHead`], which serves here as well.
 pub trait FromRequestRef: Sized + sealed::Sealed {
-    /// Extracts data from HTTP request reference
-    fn from_request(req: &HttpRequest) -> Result<Self, Error>;
-
-    /// Declares the services this extractor resolves from the DI container, for
-    /// [`App::run`](crate::App::run) to check that each of them is registered
-    #[inline]
-    #[cfg(feature = "di")]
-    fn dependencies(_deps: &mut Dependencies) {}
-}
-
-/// The bound on what reads HTTP request parts: `map_err` and `map_fallback`, which have no
-/// request left to borrow.
-///
-/// This is a bound, not an extension point: it is sealed. To make a type of your own an
-/// extractor, implement [`FromRequestHead`], which serves here as well.
-pub trait FromRequestParts: Sized + sealed::Sealed {
-    /// Extracts data from HTTP request parts
-    fn from_parts(parts: &Parts) -> Result<Self, Error>;
+    /// Extracts data from the head of a request
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error>;
 
     /// Declares the services this extractor resolves from the DI container, for
     /// [`App::run`](crate::App::run) to check that each of them is registered
@@ -397,14 +382,7 @@ impl FromRequest for () {
 
 impl FromRequestRef for () {
     #[inline]
-    fn from_request(_: &HttpRequest) -> Result<Self, Error> {
-        Ok(())
-    }
-}
-
-impl FromRequestParts for () {
-    #[inline]
-    fn from_parts(_: &Parts) -> Result<Self, Error> {
+    fn from_request(_: &RequestHead<'_>) -> Result<Self, Error> {
         Ok(())
     }
 }
@@ -415,27 +393,10 @@ macro_rules! define_generic_from_request {
 
         impl<$($T: FromRequestRef),+> FromRequestRef for ($($T,)+) {
             #[inline]
-            fn from_request(req: &HttpRequest) -> Result<Self, Error> {
+            fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
                 let tuple = (
                     $(
-                    $T::from_request(req)?,
-                    )*
-                );
-                Ok(tuple)
-            }
-
-            #[inline]
-            #[cfg(feature = "di")]
-            fn dependencies(deps: &mut Dependencies) {
-                $( $T::dependencies(deps); )*
-            }
-        }
-        impl<$($T: FromRequestParts),+> FromRequestParts for ($($T,)+) {
-            #[inline]
-            fn from_parts(parts: &Parts) -> Result<Self, Error> {
-                let tuple = (
-                    $(
-                    $T::from_parts(parts)?,
+                    $T::from_request(head)?,
                     )*
                 );
                 Ok(tuple)
@@ -576,11 +537,9 @@ pub(crate) fn parts_with(params: PathArgs) -> Parts {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ANY_PATH_ARITY, FromPayload, FromRequest, FromRequestParts, Payload, Source,
-        assert_read_together,
-    };
+    use super::{ANY_PATH_ARITY, FromPayload, FromRequest, Payload, Source, assert_read_together};
     use crate::error::Error;
+    use crate::http::FromRequestRef;
     use crate::http::Uri;
     use crate::{Json, NamedPath, Path, Query};
     use futures_util::future::{Ready, ok};
@@ -734,18 +693,18 @@ mod tests {
 
     #[test]
     fn it_reads_the_arity_of_a_path_a_fallback_takes() {
-        assert_eq!(<(Uri,) as FromRequestParts>::PATH_ARITY, ANY_PATH_ARITY);
-        assert_eq!(<(Path<u32>, Uri) as FromRequestParts>::PATH_ARITY, 1..=1);
+        assert_eq!(<(Uri,) as FromRequestRef>::PATH_ARITY, ANY_PATH_ARITY);
+        assert_eq!(<(Path<u32>, Uri) as FromRequestRef>::PATH_ARITY, 1..=1);
         assert_eq!(
-            <(Uri, Path<(u32, u32)>) as FromRequestParts>::PATH_ARITY,
+            <(Uri, Path<(u32, u32)>) as FromRequestRef>::PATH_ARITY,
             2..=usize::MAX
         );
         assert_eq!(
-            <(Option<Path<u32>>,) as FromRequestParts>::PATH_ARITY,
+            <(Option<Path<u32>>,) as FromRequestRef>::PATH_ARITY,
             ANY_PATH_ARITY
         );
         assert_eq!(
-            <(Result<Path<u32>, Error>,) as FromRequestParts>::PATH_ARITY,
+            <(Result<Path<u32>, Error>,) as FromRequestRef>::PATH_ARITY,
             ANY_PATH_ARITY
         );
     }

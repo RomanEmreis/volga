@@ -1,11 +1,10 @@
 //! Extractors for the whole Hosting Environment request
 
-use crate::http::endpoints::args::{
-    FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-};
-use crate::{HttpRequest, app::HostEnv, error::Error};
+use crate::http::RequestHead;
+use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed};
+use crate::{app::HostEnv, error::Error};
 use futures_util::future::{Ready, ready};
-use hyper::http::{Extensions, request::Parts};
+use hyper::http::Extensions;
 
 impl TryFrom<&Extensions> for HostEnv {
     type Error = Error;
@@ -25,15 +24,8 @@ impl Sealed for HostEnv {}
 
 impl FromRequestRef for HostEnv {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        req.extensions().try_into()
-    }
-}
-
-impl FromRequestParts for HostEnv {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        HostEnv::try_from(&parts.extensions)
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        head.extensions().try_into()
     }
 }
 
@@ -47,7 +39,7 @@ impl FromPayload for HostEnv {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(HostEnv::from_parts(parts))
+        ready(HostEnv::from_request(&RequestHead::from_parts(parts)))
     }
 }
 
@@ -55,6 +47,7 @@ impl FromPayload for HostEnv {
 mod tests {
     use super::*;
     use crate::HttpBody;
+    use crate::HttpRequest;
     use hyper::Request;
 
     #[test]
@@ -86,7 +79,7 @@ mod tests {
 
         let req = HttpRequest::from_parts(parts, body);
 
-        let result = HostEnv::from_request(&req).unwrap();
+        let result = HostEnv::from_request(&RequestHead::from_request(&req)).unwrap();
         assert_eq!(result, HostEnv::new("root"));
     }
 
@@ -99,7 +92,7 @@ mod tests {
 
         let req = HttpRequest::from_parts(parts, body);
 
-        let err = HostEnv::from_request(&req).unwrap_err();
+        let err = HostEnv::from_request(&RequestHead::from_request(&req)).unwrap_err();
 
         assert_eq!(
             err.to_string(),
@@ -115,7 +108,7 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        let result = HostEnv::from_parts(&parts).unwrap();
+        let result = HostEnv::from_request(&RequestHead::from_parts(&parts)).unwrap();
         assert_eq!(result, HostEnv::new("root"));
     }
 
@@ -126,7 +119,7 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        let err = HostEnv::from_parts(&parts).unwrap_err();
+        let err = HostEnv::from_request(&RequestHead::from_parts(&parts)).unwrap_err();
         assert_eq!(
             err.to_string(),
             "Server Error: hosting environment is not specified"

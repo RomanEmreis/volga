@@ -11,15 +11,12 @@ use std::{
     task::{Context, Poll},
 };
 
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     error::Error,
-    http::{
-        Parts,
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, form::Form, json::Json,
-            path::NamedPath, query::Query, sealed::Sealed,
-        },
+    http::endpoints::args::{
+        FromPayload, FromRequestRef, Payload, Source, form::Form, json::Json, path::NamedPath,
+        query::Query, sealed::Sealed,
     },
     validation::Validate,
 };
@@ -227,25 +224,8 @@ where
     T: Validate,
 {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        E::from_request(req).and_then(validate)
-    }
-
-    #[inline]
-    #[cfg(feature = "di")]
-    fn dependencies(deps: &mut crate::di::Dependencies) {
-        E::dependencies(deps);
-    }
-}
-
-impl<E, T> FromRequestParts for Valid<E>
-where
-    E: FromRequestParts + Deref<Target = T>,
-    T: Validate,
-{
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        E::from_parts(parts).and_then(validate)
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        E::from_request(head).and_then(validate)
     }
 
     #[inline]
@@ -260,9 +240,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Valid, ValidQuery};
-    use crate::http::endpoints::args::{
-        FromPayload, FromRequestParts, FromRequestRef, Payload, Source,
-    };
+    use crate::http::RequestHead;
+    use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source};
     use crate::validation::{Validate, ValidationError};
     use crate::{HttpBody, HttpRequest, Json, Query, http::StatusCode};
     use hyper::Request;
@@ -389,7 +368,7 @@ mod tests {
         let req = Request::get("/items?per_page=0").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        assert!(Valid::<Query<Filter>>::from_parts(&parts).is_err());
+        assert!(Valid::<Query<Filter>>::from_request(&RequestHead::from_parts(&parts)).is_err());
     }
 
     #[test]
@@ -400,7 +379,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let valid = Valid::<Query<Filter>>::from_request(&req).unwrap();
+        let valid = Valid::<Query<Filter>>::from_request(&RequestHead::from_request(&req)).unwrap();
 
         assert_eq!(valid.per_page, 25);
         assert_eq!(valid.to_string(), "25");
@@ -411,7 +390,7 @@ mod tests {
         let (parts, body) = req.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        assert!(Valid::<Query<Filter>>::from_request(&req).is_err());
+        assert!(Valid::<Query<Filter>>::from_request(&RequestHead::from_request(&req)).is_err());
     }
 
     #[test]

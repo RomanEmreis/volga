@@ -333,8 +333,11 @@ Whether the container should fill such a slot itself is the question of #272.
 Built-in positional types are taken bare (`|id: u64|`). A user type that reads the path is taken
 as `Path<T>`, so the call site names the source, which a bare `id: OrderId` does not.
 
-`FromRequest`, `FromRequestRef`, `FromRequestParts` and `FromContainer` appear in signatures as
-bounds and are not extension points. They stay public, since a bound has to be nameable: a helper
+`FromRequest`, `FromRequestRef` and `FromContainer` appear in signatures as bounds and are not
+extension points. `FromRequest` is what a handler takes, read from the whole request, and
+`FromRequestRef` what everything that leaves the request in place takes - `with`, `filter`,
+`map_err`, `map_fallback`, `HttpRequest::extract` and `RequestHead::extract` - read from its head
+through `RequestHead`, which is what a `FromRequestHead` reads as well. They stay public, since a bound has to be nameable: a helper
 generic over a handler or over what `HttpRequest::extract` reads writes them, and a crate-private
 trait in a public signature fails `private_bounds`. They are sealed, so an `impl` of one fails
 where it is written, and points at `FromRequestHead`, instead of compiling and changing nothing.

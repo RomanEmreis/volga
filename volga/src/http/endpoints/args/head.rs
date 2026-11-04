@@ -8,7 +8,10 @@ use crate::{
     HttpRequest,
     error::Error,
     headers::HeaderMap,
-    http::endpoints::args::{FromPayload, FromRequestParts, FromRequestRef, Payload, Source},
+    http::{
+        Extensions, Method, Uri,
+        endpoints::args::{FromPayload, FromRequestRef, Payload, Source},
+    },
 };
 
 #[cfg(feature = "di")]
@@ -40,8 +43,27 @@ impl<'a> RequestHead<'a> {
 
     /// Returns a reference to the HTTP headers of the request.
     #[inline]
-    pub fn headers(&self) -> &HeaderMap {
+    pub fn headers(&self) -> &'a HeaderMap {
         &self.0.headers
+    }
+
+    /// The URI of the request, for the built-in extractors
+    #[inline]
+    pub(crate) fn uri(&self) -> &'a Uri {
+        &self.0.uri
+    }
+
+    /// The method of the request, for the built-in extractors
+    #[inline]
+    pub(crate) fn method(&self) -> &'a Method {
+        &self.0.method
+    }
+
+    /// The extensions of the request, for the built-in extractors. They hold the request
+    /// scope and the container, and stay crate-private, see #272
+    #[inline]
+    pub(crate) fn extensions(&self) -> &'a Extensions {
+        &self.0.extensions
     }
 
     /// Reads any extractor of the head: a built-in one or another [`FromRequestHead`].
@@ -67,8 +89,8 @@ impl<'a> RequestHead<'a> {
     /// }
     /// ```
     #[inline]
-    pub fn extract<T: FromRequestParts>(&self) -> Result<T, Error> {
-        T::from_parts(self.0)
+    pub fn extract<T: FromRequestRef>(&self) -> Result<T, Error> {
+        T::from_request(self)
     }
 }
 
@@ -148,23 +170,10 @@ impl<T: FromRequestHead> FromPayload for T {
     }
 }
 
-impl<T: FromRequestHead> FromRequestParts for T {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        T::from_head(&RequestHead::from_parts(parts))
-    }
-
-    #[inline]
-    #[cfg(feature = "di")]
-    fn dependencies(deps: &mut Dependencies) {
-        <T as FromRequestHead>::dependencies(deps);
-    }
-}
-
 impl<T: FromRequestHead> FromRequestRef for T {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        T::from_head(&RequestHead::from_request(req))
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        T::from_head(head)
     }
 
     #[inline]

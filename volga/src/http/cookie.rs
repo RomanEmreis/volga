@@ -1,15 +1,10 @@
 //! Set of utils to work with Cookies
 
-use crate::http::Parts;
+use crate::http::RequestHead;
 use crate::{
     error::Error,
     headers::{COOKIE, HeaderMap, SET_COOKIE},
-    http::{
-        HttpRequest,
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
-    },
+    http::endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
 };
 use cookie::CookieJar;
 use futures_util::future::{Ready, ready};
@@ -110,15 +105,8 @@ impl Sealed for Cookies {}
 
 impl FromRequestRef for Cookies {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Ok(Cookies::from(req.headers()))
-    }
-}
-
-impl FromRequestParts for Cookies {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Ok(Cookies::from(&parts.headers))
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Ok(Cookies::from(head.headers()))
     }
 }
 
@@ -132,7 +120,7 @@ impl FromPayload for Cookies {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 }
 
@@ -140,6 +128,7 @@ impl FromPayload for Cookies {
 mod tests {
     use super::*;
     use crate::HttpBody;
+    use crate::HttpRequest;
     use crate::headers::HeaderValue;
     use hyper::Request;
 
@@ -225,7 +214,7 @@ mod tests {
 
         let (parts, _) = request.into_parts();
 
-        let cookies = Cookies::from_parts(&parts).unwrap();
+        let cookies = Cookies::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }
@@ -240,7 +229,9 @@ mod tests {
         let (parts, body) = request.into_parts();
         let request = HttpRequest::from_parts(parts, body);
 
-        let cookies = <Cookies as FromRequestRef>::from_request(&request).unwrap();
+        let cookies =
+            <Cookies as FromRequestRef>::from_request(&RequestHead::from_request(&request))
+                .unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }

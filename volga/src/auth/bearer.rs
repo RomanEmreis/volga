@@ -1,15 +1,13 @@
 //! Tools and utils for Bearer Token Authorization
 
 use crate::auth::{Algorithm, DecodingKey, EncodingKey};
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     error::Error,
     headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
     http::{
         Extensions,
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
+        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
         request_scope::HttpRequestScope,
     },
 };
@@ -803,17 +801,10 @@ impl Display for Bearer {
 
 impl Sealed for Bearer {}
 
-impl FromRequestParts for Bearer {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::try_from(parts)
-    }
-}
-
 impl FromRequestRef for Bearer {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from(req.headers())
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from(head.headers())
     }
 }
 
@@ -827,7 +818,7 @@ impl FromPayload for Bearer {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 }
 
@@ -847,17 +838,10 @@ impl TryFrom<&Extensions> for BearerTokenService {
 
 impl Sealed for BearerTokenService {}
 
-impl FromRequestParts for BearerTokenService {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::try_from(&parts.extensions)
-    }
-}
-
 impl FromRequestRef for BearerTokenService {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from(req.extensions())
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from(head.extensions())
     }
 }
 
@@ -871,7 +855,7 @@ impl FromPayload for BearerTokenService {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 }
 

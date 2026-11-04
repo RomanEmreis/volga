@@ -1,16 +1,14 @@
 //! Utilities for signed cookies
 
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     di::{Container, Dependencies},
     error::Error,
     headers::HeaderMap,
     http::{
         Extensions, Parts,
         cookie::get_cookies,
-        endpoints::args::{
-            FromPayload, FromRequestParts, FromRequestRef, Payload, Source, sealed::Sealed,
-        },
+        endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::Sealed},
     },
 };
 use cookie::{CookieJar, Key, SignedJar};
@@ -181,20 +179,8 @@ impl Sealed for SignedCookies {}
 
 impl FromRequestRef for SignedCookies {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from((req.extensions(), req.headers()))
-    }
-
-    #[inline]
-    fn dependencies(deps: &mut Dependencies) {
-        deps.add::<SignedKey>();
-    }
-}
-
-impl FromRequestParts for SignedCookies {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        parts.try_into()
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from((head.extensions(), head.headers()))
     }
 
     #[inline]
@@ -213,7 +199,7 @@ impl FromPayload for SignedCookies {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 
     #[inline]
@@ -351,7 +337,9 @@ mod tests {
         let (parts, body) = request.into_parts();
         let req = HttpRequest::from_parts(parts, body);
 
-        let cookies = <SignedCookies as FromRequestRef>::from_request(&req).unwrap();
+        let cookies =
+            <SignedCookies as FromRequestRef>::from_request(&RequestHead::from_request(&req))
+                .unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }
@@ -378,7 +366,7 @@ mod tests {
 
         let (parts, _) = request.into_parts();
 
-        let cookies = SignedCookies::from_parts(&parts).unwrap();
+        let cookies = SignedCookies::from_request(&RequestHead::from_parts(&parts)).unwrap();
 
         assert_eq!(cookies.get("test").unwrap().value(), "value");
     }

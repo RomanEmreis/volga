@@ -1,11 +1,11 @@
 //! Tools and utils for Basic Authorization
 
+use crate::http::RequestHead;
 use crate::{
-    HttpRequest,
     error::Error,
     headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
     http::{
-        FromRequestParts, FromRequestRef,
+        FromRequestRef,
         endpoints::args::{FromPayload, Payload, Source, sealed::Sealed},
     },
 };
@@ -81,17 +81,10 @@ impl Display for Basic {
 
 impl Sealed for Basic {}
 
-impl FromRequestParts for Basic {
-    #[inline]
-    fn from_parts(parts: &Parts) -> Result<Self, Error> {
-        Self::try_from(parts)
-    }
-}
-
 impl FromRequestRef for Basic {
     #[inline]
-    fn from_request(req: &HttpRequest) -> Result<Self, Error> {
-        Self::try_from(req.headers())
+    fn from_request(head: &RequestHead<'_>) -> Result<Self, Error> {
+        Self::try_from(head.headers())
     }
 }
 
@@ -105,7 +98,7 @@ impl FromPayload for Basic {
         let Payload::Parts(parts) = payload else {
             unreachable!()
         };
-        ready(Self::from_parts(parts))
+        ready(Self::from_request(&RequestHead::from_parts(parts)))
     }
 }
 
@@ -236,7 +229,7 @@ mod tests {
             .unwrap();
         let (parts, _) = req.into_parts();
 
-        let basic = Basic::from_parts(&parts).unwrap();
+        let basic = Basic::from_request(&RequestHead::from_parts(&parts)).unwrap();
         let expected = STANDARD.encode("parts:test");
         assert_eq!(basic.to_string(), expected);
     }
