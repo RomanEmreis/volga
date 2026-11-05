@@ -341,9 +341,10 @@ mod tests {
         let req = Request::get("/items?per_page=25").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let valid = ValidQuery::<Filter>::from_payload(Payload::Parts(&parts))
-            .await
-            .unwrap();
+        let valid =
+            ValidQuery::<Filter>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
+                .await
+                .unwrap();
 
         assert_eq!(valid.per_page, 25);
     }
@@ -353,10 +354,11 @@ mod tests {
         let req = Request::get("/items?per_page=1000000").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let err = ValidQuery::<Filter>::from_payload(Payload::Parts(&parts))
-            .await
-            .err()
-            .unwrap();
+        let err =
+            ValidQuery::<Filter>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
+                .await
+                .err()
+                .unwrap();
 
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
         assert_eq!(err.to_string(), "per_page: must be between 1 and 100");

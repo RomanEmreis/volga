@@ -136,9 +136,11 @@ mod tests {
         let req = Request::get("/").extension(auth.clone()).body(()).unwrap();
 
         let (parts, _) = req.into_parts();
-        let from_payload = Authenticated::<MyClaims>::from_payload(Payload::Parts(&parts))
-            .await
-            .unwrap();
+        let from_payload = Authenticated::<MyClaims>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await
+        .unwrap();
 
         assert_eq!(from_payload.sub, auth.sub);
     }

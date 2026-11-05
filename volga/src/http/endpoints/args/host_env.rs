@@ -123,7 +123,9 @@ mod tests {
             .unwrap()
             .into_parts();
 
-        let result = HostEnv::from_payload(Payload::Parts(&parts)).await.unwrap();
+        let result = HostEnv::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
+            .await
+            .unwrap();
         assert_eq!(result, HostEnv::new("root"));
     }
 

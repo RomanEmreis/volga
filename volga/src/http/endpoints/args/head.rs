@@ -9,8 +9,9 @@ use crate::{
     error::Error,
     headers::HeaderMap,
     http::{
-        Extensions, Method, Uri,
+        Method, Uri,
         endpoints::args::{FromPayload, FromRequestRef, Payload, Source, sealed::PathAccess},
+        request_scope::HttpRequestScope,
     },
 };
 
@@ -19,7 +20,11 @@ use crate::di::Dependencies;
 
 /// The head of a request - everything but the body - as a [`FromRequestHead`] reads it.
 #[derive(Clone, Copy)]
-pub struct RequestHead<'a>(&'a Parts);
+pub struct RequestHead<'a> {
+    parts: &'a Parts,
+    /// The scope of the request, a field of [`HttpRequest`] that the head lends with it
+    scope: Option<&'a HttpRequestScope>,
+}
 
 impl fmt::Debug for RequestHead<'_> {
     #[inline]
@@ -29,41 +34,76 @@ impl fmt::Debug for RequestHead<'_> {
 }
 
 impl<'a> RequestHead<'a> {
-    /// The head of a request a handler is about to read
-    #[inline]
-    pub(crate) fn from_parts(parts: &'a Parts) -> Self {
-        Self(parts)
-    }
-
-    /// The head of a request a middleware borrows
+    /// The head of a request, with its scope
     #[inline]
     pub(crate) fn from_request(req: &'a HttpRequest) -> Self {
-        Self(req.parts())
+        Self {
+            parts: req.parts(),
+            scope: req.scope(),
+        }
+    }
+
+    /// The head of a request that has no scope, as one that was not routed has none
+    #[inline]
+    #[cfg(any(test, feature = "__fuzzing"))]
+    pub(crate) fn from_parts(parts: &'a Parts) -> Self {
+        Self { parts, scope: None }
+    }
+
+    /// The head of a request with the scope given
+    #[inline]
+    #[cfg(test)]
+    pub(crate) fn with_scope(parts: &'a Parts, scope: &'a HttpRequestScope) -> Self {
+        Self {
+            parts,
+            scope: Some(scope),
+        }
     }
 
     /// Returns a reference to the HTTP headers of the request.
     #[inline]
     pub fn headers(&self) -> &'a HeaderMap {
-        &self.0.headers
+        &self.parts.headers
+    }
+
+    /// The scope of the request, for the built-in extractors, `None` when it was not routed
+    #[inline]
+    pub(crate) fn scope(&self) -> Option<&'a HttpRequestScope> {
+        self.scope
+    }
+
+    /// The whole head, for the WebSocket handshake, which reads its version and extensions
+    #[inline]
+    #[cfg(feature = "ws")]
+    pub(crate) fn parts(&self) -> &'a Parts {
+        self.parts
     }
 
     /// The URI of the request, for the built-in extractors
     #[inline]
     pub(crate) fn uri(&self) -> &'a Uri {
-        &self.0.uri
+        &self.parts.uri
     }
 
     /// The method of the request, for the built-in extractors
     #[inline]
     pub(crate) fn method(&self) -> &'a Method {
-        &self.0.method
+        &self.parts.method
     }
 
-    /// The extensions of the request, for the built-in extractors. They hold the request
-    /// scope and the container, and stay crate-private, see #272
+    /// The extensions of the request, for the built-in extractors of what is still kept there:
+    /// the container, `HostEnv` and the claims of `Authenticated<T>`. They stay crate-private,
+    /// see #272
     #[inline]
-    pub(crate) fn extensions(&self) -> &'a Extensions {
-        &self.0.extensions
+    #[cfg(any(
+        feature = "di",
+        feature = "jwt-auth",
+        feature = "static-files",
+        feature = "signed-cookie",
+        feature = "private-cookie"
+    ))]
+    pub(crate) fn extensions(&self) -> &'a crate::http::Extensions {
+        &self.parts.extensions
     }
 
     /// Reads any extractor of the head: a built-in one or another [`FromRequestHead`].
@@ -165,10 +205,10 @@ impl<T: FromRequestHead> FromPayload for T {
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
+        let Payload::Parts(head) = payload else {
             unreachable!()
         };
-        ready(T::from_head(&RequestHead::from_parts(parts)))
+        ready(T::from_head(&head))
     }
 
     #[inline]

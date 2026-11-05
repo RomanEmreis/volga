@@ -85,7 +85,7 @@ impl<T: FromPayload> FromPayload for Result<T, Error> {
 mod tests {
     use super::*;
     use crate::HttpRequest;
-    use crate::http::endpoints::args::parts_with;
+    use crate::http::endpoints::args::request_with;
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::{HttpBody, error::Error};
     use futures_util::future::{Ready, err, ok};
@@ -171,7 +171,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<SuccessExtractor, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result = Result::<SuccessExtractor, Error>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -210,7 +213,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<FailureExtractor, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result = Result::<FailureExtractor, Error>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -268,7 +274,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<BodyExtractor, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result = Result::<BodyExtractor, Error>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -309,7 +318,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<PathExtractor, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result = Result::<PathExtractor, Error>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -357,9 +369,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result =
-            Result::<Result<SuccessExtractor, Error>, Error>::from_payload(Payload::Parts(&parts))
-                .await;
+        let result = Result::<Result<SuccessExtractor, Error>, Error>::from_payload(
+            Payload::Parts(RequestHead::from_parts(&parts)),
+        )
+        .await;
 
         assert!(result.is_ok());
         let outer = result.unwrap();
@@ -368,9 +381,10 @@ mod tests {
         assert!(inner.is_ok());
 
         // Test Result<Result<T, Error>, Error> - inner failure
-        let result =
-            Result::<Result<FailureExtractor, Error>, Error>::from_payload(Payload::Parts(&parts))
-                .await;
+        let result = Result::<Result<FailureExtractor, Error>, Error>::from_payload(
+            Payload::Parts(RequestHead::from_parts(&parts)),
+        )
+        .await;
 
         assert!(result.is_ok());
         let outer = result.unwrap();
@@ -461,17 +475,18 @@ mod tests {
         .into();
 
         // Valid path should return Ok(Ok(value))
-        let result =
-            Result::<NamedPath<Params>, Error>::from_payload(Payload::Parts(&parts_with(args)))
-                .await;
+        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::Parts(
+            RequestHead::from_request(&request_with(args)),
+        ))
+        .await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
         assert!(inner_result.is_ok());
         assert_eq!(inner_result.unwrap().id, 123);
 
-        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::Parts(&parts_with(
-            PathArgs::new(),
-        )))
+        let result = Result::<NamedPath<Params>, Error>::from_payload(Payload::Parts(
+            RequestHead::from_request(&request_with(PathArgs::new())),
+        ))
         .await;
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -496,9 +511,10 @@ mod tests {
         .into();
 
         // Valid path should return Some
-        let result =
-            Result::<Path<(i32, String)>, Error>::from_payload(Payload::Parts(&parts_with(args)))
-                .await;
+        let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::Parts(
+            RequestHead::from_request(&request_with(args)),
+        ))
+        .await;
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.is_ok());
@@ -509,7 +525,7 @@ mod tests {
         assert_eq!(result.0.1, "John");
 
         let result = Result::<Path<(i32, String)>, Error>::from_payload(Payload::Parts(
-            &parts_with(PathArgs::new()),
+            RequestHead::from_request(&request_with(PathArgs::new())),
         ))
         .await;
         assert!(result.is_ok());
@@ -534,7 +550,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<CustomExtractor, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result = Result::<CustomExtractor, Error>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();
@@ -562,7 +581,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Result::<ValueExtractor, Error>::from_payload(Payload::Parts(&parts)).await;
+        let result = Result::<ValueExtractor, Error>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         let inner_result = result.unwrap();

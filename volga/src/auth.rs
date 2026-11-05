@@ -590,8 +590,7 @@ fn refusal(status: StatusCode, message: &'static str, challenge: Option<String>)
 /// step has already stripped the credential.
 #[cfg(feature = "jwt-auth")]
 fn resolve_bearer(ctx: &HttpContext) -> Result<Bearer, Error> {
-    use crate::http::request_scope::HttpRequestScope;
-    if let Some(scope) = ctx.request().extensions().get::<HttpRequestScope>()
+    if let Some(scope) = ctx.request().scope()
         && let Some(bearer) = scope.bearer.as_ref()
     {
         return Ok(bearer.clone());
@@ -604,11 +603,7 @@ fn resolve_bearer(ctx: &HttpContext) -> Result<Bearer, Error> {
 /// Idempotent: a token already present in the scope is left untouched.
 #[cfg(feature = "jwt-auth")]
 fn stash_bearer(ctx: &mut HttpContext, bearer: Bearer) {
-    use crate::http::request_scope::HttpRequestScope;
-    if let Some(scope) = ctx
-        .request_mut()
-        .extensions_mut()
-        .get_mut::<HttpRequestScope>()
+    if let Some(scope) = ctx.request_mut().scope_mut()
         && scope.bearer.is_none()
     {
         scope.bearer = Some(bearer);

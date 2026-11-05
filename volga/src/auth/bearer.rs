@@ -5,7 +5,6 @@ use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAcc
 use crate::{
     error::Error,
     headers::{AUTHORIZATION, Authorization, Header, HeaderMap, HeaderValue},
-    http::{Extensions, request_scope::HttpRequestScope},
 };
 use hyper::http::request::Parts;
 use jsonwebtoken::{AlgorithmFamily, Header as JwtHeader, Validation};
@@ -804,24 +803,14 @@ impl FromRequestHead for Bearer {
     const PATH_ACCESS: PathAccess = PathAccess::Ignored;
 }
 
-impl TryFrom<&Extensions> for BearerTokenService {
-    type Error = Error;
-
+impl FromRequestHead for BearerTokenService {
     #[inline]
-    fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
-        extensions
-            .get::<HttpRequestScope>()
+    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
+        head.scope()
             .and_then(|s| s.bearer_token_service.clone())
             .ok_or_else(|| {
                 Error::server_error("Bearer Token authorization is not properly configured")
             })
-    }
-}
-
-impl FromRequestHead for BearerTokenService {
-    #[inline]
-    fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
-        Self::try_from(head.extensions())
     }
 
     // Reads no path parameter, so a positional extractor next to it takes its own
@@ -833,7 +822,6 @@ mod tests {
     use super::*;
     use crate::auth::{Algorithm, DecodingKey, EncodingKey};
     use crate::headers::{HeaderMap, HeaderValue};
-    use crate::http::Extensions;
     use hyper::Request;
     use serde::{Deserialize, Serialize};
     use std::collections::HashSet;
@@ -1461,24 +1449,25 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwn1I4TcBJ6EOlcz30oJJWCF1FXoK
     }
 
     #[tokio::test]
-    async fn it_tests_bearer_token_service_from_extensions_success() {
-        use crate::http::request_scope::HttpRequestScope;
+    async fn it_tests_bearer_token_service_from_the_scope() {
+        use crate::http::{FromRequestRef, RequestHead, request_scope::HttpRequestScope};
         let service = BearerTokenService::from(BearerAuthConfig::default());
-        let mut extensions = Extensions::new();
-        extensions.insert(HttpRequestScope {
+        let scope = HttpRequestScope {
             bearer_token_service: Some(service.clone()),
             ..HttpRequestScope::default()
-        });
+        };
+        let (parts, _) = Request::get("/").body(()).unwrap().into_parts();
 
-        let result = BearerTokenService::try_from(&extensions);
+        let result = BearerTokenService::from_request(&RequestHead::with_scope(&parts, &scope));
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn it_tests_bearer_token_service_from_extensions_missing() {
-        let extensions = Extensions::new();
+    async fn it_tests_bearer_token_service_without_a_scope() {
+        use crate::http::{FromRequestRef, RequestHead};
+        let (parts, _) = Request::get("/").body(()).unwrap().into_parts();
 
-        let result = BearerTokenService::try_from(&extensions);
+        let result = BearerTokenService::from_request(&RequestHead::from_parts(&parts));
         assert!(result.is_err());
         assert!(
             result

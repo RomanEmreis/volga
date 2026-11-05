@@ -75,7 +75,7 @@ impl<T: FromPayload> FromPayload for Option<T> {
 mod tests {
     use super::*;
     use crate::HttpRequest;
-    use crate::http::endpoints::args::parts_with;
+    use crate::http::endpoints::args::request_with;
     use crate::http::endpoints::route::{PathArg, PathArgs};
     use crate::{HttpBody, error::Error};
     use futures_util::future::{Ready, err, ok};
@@ -161,7 +161,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Option::<SuccessExtractor>::from_payload(Payload::Parts(&parts)).await;
+        let result = Option::<SuccessExtractor>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_some());
@@ -195,7 +198,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Option::<FailureExtractor>::from_payload(Payload::Parts(&parts)).await;
+        let result = Option::<FailureExtractor>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -248,7 +254,9 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Option::<BodyExtractor>::from_payload(Payload::Parts(&parts)).await;
+        let result =
+            Option::<BodyExtractor>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
+                .await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -287,7 +295,9 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Option::<PathExtractor>::from_payload(Payload::Parts(&parts)).await;
+        let result =
+            Option::<PathExtractor>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
+                .await;
 
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -329,7 +339,10 @@ mod tests {
         let req = Request::get("/").body(()).unwrap();
         let (parts, _) = req.into_parts();
 
-        let result = Option::<Option<SuccessExtractor>>::from_payload(Payload::Parts(&parts)).await;
+        let result = Option::<Option<SuccessExtractor>>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         let outer = result.unwrap();
@@ -337,7 +350,10 @@ mod tests {
         assert!(outer.unwrap().is_some());
 
         // Test Option<Option<T>> - inner failure
-        let result = Option::<Option<FailureExtractor>>::from_payload(Payload::Parts(&parts)).await;
+        let result = Option::<Option<FailureExtractor>>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await;
 
         assert!(result.is_ok());
         let outer = result.unwrap();
@@ -405,16 +421,19 @@ mod tests {
         .into();
 
         // Valid path should return Some
-        let result =
-            Option::<NamedPath<Params>>::from_payload(Payload::Parts(&parts_with(args))).await;
+        let result = Option::<NamedPath<Params>>::from_payload(Payload::Parts(
+            RequestHead::from_request(&request_with(args)),
+        ))
+        .await;
         assert!(result.is_ok());
         let option_result = result.unwrap();
         assert!(option_result.is_some());
         assert_eq!(option_result.unwrap().id, 123);
 
-        let result =
-            Option::<NamedPath<Params>>::from_payload(Payload::Parts(&parts_with(PathArgs::new())))
-                .await;
+        let result = Option::<NamedPath<Params>>::from_payload(Payload::Parts(
+            RequestHead::from_request(&request_with(PathArgs::new())),
+        ))
+        .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
     }
@@ -437,8 +456,10 @@ mod tests {
         .into();
 
         // Valid path should return Some
-        let result =
-            Option::<Path<(i32, String)>>::from_payload(Payload::Parts(&parts_with(args))).await;
+        let result = Option::<Path<(i32, String)>>::from_payload(Payload::Parts(
+            RequestHead::from_request(&request_with(args)),
+        ))
+        .await;
         assert!(result.is_ok());
         let option_result = result.unwrap();
         assert!(option_result.is_some());
@@ -448,9 +469,9 @@ mod tests {
         assert_eq!(option_result.0.0, 123);
         assert_eq!(option_result.0.1, "John");
 
-        let result = Option::<Path<(i32, String)>>::from_payload(Payload::Parts(&parts_with(
-            PathArgs::new(),
-        )))
+        let result = Option::<Path<(i32, String)>>::from_payload(Payload::Parts(
+            RequestHead::from_request(&request_with(PathArgs::new())),
+        ))
         .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());

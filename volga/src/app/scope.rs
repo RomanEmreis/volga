@@ -268,9 +268,9 @@ async fn handle_impl(
     let body_limit = body_limit.unwrap_or(env.body_limit);
 
     let error_handler = pipeline.error_handler();
-    let (mut parts, body) = request.into_parts();
+    let (parts, body) = request.into_parts();
 
-    parts.extensions.insert(HttpRequestScope {
+    let scope = HttpRequestScope {
         client_ip: ClientIp(peer_addr),
         cancellation_token,
         shutdown,
@@ -295,9 +295,11 @@ async fn handle_impl(
         trusted_proxies: env.trusted_proxies.clone(),
         #[cfg(feature = "config")]
         config: env.config.clone(),
-    });
+    };
 
-    let request = HttpRequest::new(parts, body).into_limited(body_limit);
+    let request = HttpRequest::new(parts, body)
+        .with_scope(scope)
+        .into_limited(body_limit);
 
     // Pre-extract error handler args from the head before the request is consumed.
     let error_args = extract_error_args(error_handler, &RequestHead::from_request(&request));

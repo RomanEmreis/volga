@@ -17,7 +17,7 @@ use crate::{
     headers::{
         ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, ContentEncoding, Encoding, Header, VARY,
     },
-    http::{StatusCode, request_scope::HttpRequestScope},
+    http::StatusCode,
     middleware::{HttpContext, NextFn},
     routing::{Route, RouteGroup},
     status,
@@ -155,8 +155,7 @@ async fn make_decompression_fn(mut ctx: HttpContext, next: NextFn) -> HttpResult
     if let Ok(content_encoding) = ctx.extract::<Header<ContentEncoding>>() {
         let limits = ctx
             .request()
-            .extensions()
-            .get::<HttpRequestScope>()
+            .scope()
             .map(|s| s.decompression_limits)
             .unwrap_or_else(|| DecompressionLimits::default().resolved());
 

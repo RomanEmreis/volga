@@ -18,9 +18,6 @@ use crate::di::Container;
 #[cfg(feature = "rate-limiting")]
 use crate::rate_limiting::{GlobalRateLimiter, RateLimiter};
 
-#[cfg(feature = "rate-limiting")]
-use crate::http::request_scope::HttpRequestScope;
-
 /// Describes current HTTP context which consists of the current HTTP request data
 /// and the reference to the method handler for this request
 pub struct HttpContext {
@@ -166,11 +163,7 @@ impl HttpContext {
     #[inline]
     #[cfg(feature = "rate-limiting")]
     fn rate_limiter(&self) -> Option<&Arc<GlobalRateLimiter>> {
-        self.request
-            .extensions()
-            .get::<HttpRequestScope>()?
-            .rate_limiter
-            .as_ref()
+        self.request.as_read_only().scope()?.rate_limiter.as_ref()
     }
 
     /// Returns a reference to a Fixed Window Rate Limiter

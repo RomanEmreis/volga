@@ -366,7 +366,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let headers = HttpHeaders::from_payload(Payload::Parts(&parts))
+        let headers = HttpHeaders::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
             .await
             .unwrap();
 
@@ -459,7 +459,9 @@ mod tests {
         let (parts, _) = req.into_parts();
 
         let header: Header<ContentType> =
-            Header::from_payload(Payload::Parts(&parts)).await.unwrap();
+            Header::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
+                .await
+                .unwrap();
 
         assert_eq!(header.as_ref(), "text/plain");
     }

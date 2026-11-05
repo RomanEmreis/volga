@@ -116,7 +116,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let method = Method::from_payload(Payload::Parts(&parts)).await;
+        let method = Method::from_payload(Payload::Parts(RequestHead::from_parts(&parts))).await;
 
         assert!(method.is_ok());
 
@@ -130,7 +130,7 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let uri = Uri::from_payload(Payload::Parts(&parts)).await;
+        let uri = Uri::from_payload(Payload::Parts(RequestHead::from_parts(&parts))).await;
 
         assert!(uri.is_ok());
 

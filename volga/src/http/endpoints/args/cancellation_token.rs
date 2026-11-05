@@ -3,11 +3,8 @@
 use std::ops::{Deref, DerefMut};
 use tokio_util::sync::CancellationToken as TokioCancellationToken;
 
+use crate::error::Error;
 use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
-use crate::{
-    error::Error,
-    http::{Extensions, request_scope::HttpRequestScope},
-};
 
 /// See [`tokio_util::sync::CancellationToken`] for more details.
 pub type CancellationToken = TokenGuard;
@@ -67,22 +64,16 @@ impl Clone for TokenGuard {
     }
 }
 
-impl From<&Extensions> for TokenGuard {
-    #[inline]
-    fn from(extensions: &Extensions) -> Self {
-        let token = extensions
-            .get::<HttpRequestScope>()
-            .map(|s| s.cancellation_token.clone())
-            .unwrap_or_default();
-        Self::new(token)
-    }
-}
-
 /// Extracts `CancellationToken` from the head of a request
 impl FromRequestHead for TokenGuard {
     #[inline]
     fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
-        Ok(Self::from(head.extensions()))
+        let token = head
+            .scope()
+            .map(|s| s.cancellation_token.clone())
+            .unwrap_or_default();
+
+        Ok(Self::new(token))
     }
 
     // Reads no path parameter, so a positional extractor next to it takes its own
@@ -111,15 +102,14 @@ mod tests {
         let token = TokioCancellationToken::new();
         token.cancel();
 
-        let req = Request::get("/")
-            .extension(make_scope_with_token(token))
-            .body(())
-            .unwrap();
+        let scope = make_scope_with_token(token);
+        let req = Request::get("/").body(()).unwrap();
 
         let (parts, _) = req.into_parts();
-        let token = TokenGuard::from_payload(Payload::Parts(&parts))
-            .await
-            .unwrap();
+        let token =
+            TokenGuard::from_payload(Payload::Parts(RequestHead::with_scope(&parts, &scope)))
+                .await
+                .unwrap();
 
         assert!(token.is_cancelled());
     }
@@ -132,33 +122,15 @@ mod tests {
     }
 
     #[test]
-    fn it_gets_from_extensions() {
-        let token = TokioCancellationToken::new();
-        token.cancel();
-
-        let req = Request::get("/")
-            .extension(make_scope_with_token(token))
-            .body(())
-            .unwrap();
-
-        let (parts, _) = req.into_parts();
-        let token = TokenGuard::from(&parts.extensions);
-
-        assert!(token.is_cancelled());
-    }
-
-    #[test]
     fn it_gets_from_request_parts() {
         let token = TokioCancellationToken::new();
         token.cancel();
 
-        let req = Request::get("/")
-            .extension(make_scope_with_token(token))
-            .body(())
-            .unwrap();
+        let scope = make_scope_with_token(token);
+        let req = Request::get("/").body(()).unwrap();
 
         let (parts, _) = req.into_parts();
-        let token = TokenGuard::from_request(&RequestHead::from_parts(&parts)).unwrap();
+        let token = TokenGuard::from_request(&RequestHead::with_scope(&parts, &scope)).unwrap();
 
         assert!(token.is_cancelled());
     }
@@ -168,13 +140,11 @@ mod tests {
         let token = TokioCancellationToken::new();
         token.cancel();
 
-        let req = Request::get("/")
-            .extension(make_scope_with_token(token))
-            .body(HttpBody::empty())
-            .unwrap();
+        let scope = make_scope_with_token(token);
+        let req = Request::get("/").body(HttpBody::empty()).unwrap();
 
         let (parts, body) = req.into_parts();
-        let req = HttpRequest::from_parts(parts, body);
+        let req = HttpRequest::from_parts(parts, body).with_scope(scope);
 
         let token = TokenGuard::from_request(&RequestHead::from_request(&req)).unwrap();
 
