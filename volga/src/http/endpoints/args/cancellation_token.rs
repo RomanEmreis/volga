@@ -72,7 +72,7 @@ impl FromRequestHead for TokenGuard {
             .scope()
             .map(|s| s.cancellation_token.clone())
             .unwrap_or_default();
-        
+
         Ok(Self::new(token))
     }
 
