@@ -8,7 +8,7 @@ use sha1::{Digest, Sha1};
 use std::future::Future;
 
 use hyper::{
-    http::{Method, Version, request::Parts},
+    http::{Method, Version},
     upgrade::OnUpgrade,
 };
 
@@ -25,7 +25,6 @@ use crate::{
     http::{
         RequestHead,
         endpoints::args::{FromPayload, Payload, Source},
-        request_scope::HttpRequestScope,
     },
     ok, status,
 };
@@ -243,10 +242,10 @@ fn header_contains_token(value: &HeaderValue, token: &str) -> bool {
     false
 }
 
-impl TryFrom<&Parts> for WebSocketConnection {
-    type Error = Error;
-
-    fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
+impl WebSocketConnection {
+    /// Checks the handshake in the head of the request and takes what the upgrade needs
+    fn from_head(head: RequestHead<'_>) -> Result<Self, Error> {
+        let parts = head.parts();
         let sec_websocket_key = if parts.version <= Version::HTTP_11 {
             if parts.method != Method::GET {
                 return Err(WebSocketError::invalid_method());
@@ -297,15 +296,14 @@ impl TryFrom<&Parts> for WebSocketConnection {
             .ok_or(WebSocketError::not_upgradable_connection())?
             .clone();
 
-        let error_handler = parts
-            .extensions
-            .get::<HttpRequestScope>()
+        let error_handler = head
+            .scope()
             .map(|s| &s.error_handler)
             .ok_or(Error::server_error(
                 "Server error: error handler is missing",
             ))?;
 
-        let error_args = extract_error_args(error_handler, &RequestHead::from_parts(parts));
+        let error_args = extract_error_args(error_handler, &head);
 
         let sec_websocket_protocol = parts.headers.get(&SEC_WEBSOCKET_PROTOCOL).cloned();
 
@@ -327,10 +325,10 @@ impl FromPayload for WebSocketConnection {
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
+        let Payload::Parts(head) = payload else {
             unreachable!()
         };
-        ready(parts.try_into())
+        ready(Self::from_head(head))
     }
 }
 
@@ -340,6 +338,7 @@ mod tests {
     use crate::error::ErrorFunc;
     use crate::error::handler::PipelineErrorHandler;
     use crate::headers::SEC_WEBSOCKET_PROTOCOL;
+    use crate::http::RequestHead;
     use crate::http::{
         endpoints::args::{FromPayload, Payload},
         request_scope::HttpRequestScope,
@@ -362,16 +361,18 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(HttpRequestScope {
+        let scope = HttpRequestScope {
             error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
-        });
+        };
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts))
-            .await
-            .unwrap();
+        let conn = WebSocketConnection::from_payload(Payload::Parts(RequestHead::with_scope(
+            &parts, &scope,
+        )))
+        .await
+        .unwrap();
 
         assert_eq!(conn.protocol, None);
         assert_eq!(
@@ -382,7 +383,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_tries_to_create_not_upgradable_ws_connection_from_payload() {
-        let mut req = Request::get("/ws")
+        let req = Request::get("/ws")
             .version(Version::HTTP_11)
             .header("upgrade", "websocket")
             .header("connection", "Upgrade")
@@ -392,14 +393,17 @@ mod tests {
             .unwrap();
 
         let error_handler = PipelineErrorHandler::from(ErrorFunc::new(|_| async move {}));
-        req.extensions_mut().insert(HttpRequestScope {
+        let scope = HttpRequestScope {
             error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
-        });
+        };
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(RequestHead::with_scope(
+            &parts, &scope,
+        )))
+        .await;
 
         assert!(conn.is_err());
     }
@@ -420,7 +424,9 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
+        let conn =
+            WebSocketConnection::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
+                .await;
 
         assert!(conn.is_err());
     }
@@ -439,14 +445,17 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(HttpRequestScope {
+        let scope = HttpRequestScope {
             error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
-        });
+        };
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(RequestHead::with_scope(
+            &parts, &scope,
+        )))
+        .await;
 
         assert!(conn.is_err());
     }
@@ -465,14 +474,17 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(HttpRequestScope {
+        let scope = HttpRequestScope {
             error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
-        });
+        };
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(RequestHead::with_scope(
+            &parts, &scope,
+        )))
+        .await;
 
         assert!(conn.is_err());
     }
@@ -491,14 +503,17 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(HttpRequestScope {
+        let scope = HttpRequestScope {
             error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
-        });
+        };
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(RequestHead::with_scope(
+            &parts, &scope,
+        )))
+        .await;
 
         assert!(conn.is_err());
     }
@@ -517,14 +532,17 @@ mod tests {
 
         let u = hyper::upgrade::on(&mut req);
         req.extensions_mut().insert(u);
-        req.extensions_mut().insert(HttpRequestScope {
+        let scope = HttpRequestScope {
             error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
-        });
+        };
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::from_payload(Payload::Parts(&parts)).await;
+        let conn = WebSocketConnection::from_payload(Payload::Parts(RequestHead::with_scope(
+            &parts, &scope,
+        )))
+        .await;
 
         assert!(conn.is_err());
     }
@@ -543,14 +561,14 @@ mod tests {
         req.extensions_mut().insert(u);
         req.extensions_mut()
             .insert(hyper::ext::Protocol::from_static("websocket"));
-        req.extensions_mut().insert(HttpRequestScope {
+        let scope = HttpRequestScope {
             error_handler: error_handler.clone(),
             ..HttpRequestScope::default()
-        });
+        };
 
         let (parts, _) = req.into_parts();
 
-        let conn = WebSocketConnection::try_from(&parts).unwrap();
+        let conn = WebSocketConnection::from_head(RequestHead::with_scope(&parts, &scope)).unwrap();
 
         let conn = conn
             .with_max_frame_size(1024)

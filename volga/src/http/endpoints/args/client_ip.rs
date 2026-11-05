@@ -1,8 +1,7 @@
 //! Extractors for client IP address
 
+use crate::error::Error;
 use crate::http::{FromRequestHead, RequestHead, endpoints::args::sealed::PathAccess};
-use crate::{error::Error, http::request_scope::HttpRequestScope};
-use hyper::http::{Extensions, request::Parts};
 use std::fmt::Display;
 use std::{net::SocketAddr, ops::Deref};
 
@@ -43,32 +42,13 @@ impl ClientIp {
     }
 }
 
-impl TryFrom<&Extensions> for ClientIp {
-    type Error = Error;
-
-    #[inline]
-    fn try_from(extensions: &Extensions) -> Result<Self, Self::Error> {
-        extensions
-            .get::<HttpRequestScope>()
-            .map(|s| s.client_ip)
-            .ok_or_else(|| Error::server_error("Client IP: missing"))
-    }
-}
-
-impl TryFrom<&Parts> for ClientIp {
-    type Error = Error;
-
-    #[inline]
-    fn try_from(parts: &Parts) -> Result<Self, Self::Error> {
-        ClientIp::try_from(&parts.extensions)
-    }
-}
-
 /// Extracts `ClientIp` from the head of a request
 impl FromRequestHead for ClientIp {
     #[inline]
     fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
-        head.extensions().try_into()
+        head.scope()
+            .map(|s| s.client_ip)
+            .ok_or_else(|| Error::server_error("Client IP: missing"))
     }
 
     // Reads no path parameter, so a positional extractor next to it takes its own
@@ -81,7 +61,7 @@ mod tests {
     use crate::http::endpoints::args::{FromPayload, FromRequestRef, Payload};
     use crate::http::request_scope::HttpRequestScope;
     use crate::{HttpBody, HttpRequest};
-    use hyper::{Request, http::Extensions};
+    use hyper::{Request, http::request::Parts};
 
     fn make_scope(ip: ClientIp) -> HttpRequestScope {
         HttpRequestScope {
@@ -90,68 +70,52 @@ mod tests {
         }
     }
 
+    fn parts() -> Parts {
+        Request::get("/").body(()).unwrap().into_parts().0
+    }
+
     #[tokio::test]
     async fn it_reads_from_payload() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
-        let req = Request::get("/")
-            .extension(make_scope(ip))
-            .body(())
-            .unwrap();
+        let (parts, scope) = (parts(), make_scope(ip));
 
-        let (parts, _) = req.into_parts();
-        let client_ip = ClientIp::from_payload(Payload::Parts(&parts))
-            .await
-            .unwrap();
+        let client_ip =
+            ClientIp::from_payload(Payload::Parts(RequestHead::with_scope(&parts, &scope)))
+                .await
+                .unwrap();
 
         assert_eq!(client_ip, ip);
     }
 
     #[test]
-    fn it_gets_from_extensions() {
+    fn it_gets_from_the_scope() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
-        let mut extensions = Extensions::new();
-        extensions.insert(make_scope(ip));
+        let (parts, scope) = (parts(), make_scope(ip));
 
-        let client_ip = ClientIp::try_from(&extensions).unwrap();
+        let client_ip = ClientIp::from_request(&RequestHead::with_scope(&parts, &scope)).unwrap();
 
         assert_eq!(client_ip, ip);
     }
 
     #[test]
-    fn it_gets_err_from_extensions_if_missing() {
-        let extensions = Extensions::new();
+    fn it_gets_err_without_a_scope() {
+        let parts = parts();
 
-        let client_ip = ClientIp::try_from(&extensions);
+        let client_ip = ClientIp::from_request(&RequestHead::from_parts(&parts));
 
         assert!(client_ip.is_err());
     }
 
     #[test]
-    fn it_gets_from_request_parts() {
-        let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
-        let req = Request::get("/")
-            .extension(make_scope(ip))
-            .body(())
-            .unwrap();
-
-        let (parts, _) = req.into_parts();
-        let client_ip = ClientIp::from_request(&RequestHead::from_parts(&parts)).unwrap();
-
-        assert_eq!(client_ip, ip);
-    }
-
-    #[test]
     fn it_gets_from_request_ref() {
         let ip = ClientIp(SocketAddr::from(([0, 0, 0, 0], 8080)));
-        let req = Request::get("/")
-            .extension(make_scope(ip))
+        let (parts, body) = Request::get("/")
             .body(HttpBody::empty())
-            .unwrap();
+            .unwrap()
+            .into_parts();
+        let req = HttpRequest::from_parts(parts, body).with_scope(make_scope(ip));
 
-        let (parts, body) = req.into_parts();
-        let req = HttpRequest::from_parts(parts, body);
-
-        let client_ip = ClientIp::from_request(&RequestHead::from_request(&req)).unwrap();
+        let client_ip = req.extract::<ClientIp>().unwrap();
 
         assert_eq!(client_ip, ip);
     }

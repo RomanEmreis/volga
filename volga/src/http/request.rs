@@ -32,6 +32,11 @@ pub struct HttpRequest {
     /// extractors of a handler read it here, without taking the request to pieces
     parts: Parts,
     body: HttpBody,
+    /// The framework's own state for this request, set when it is routed: a field rather than
+    /// an entry of the extensions, so reading it is a pointer away instead of a hash probe,
+    /// and nothing that reaches the extensions reaches it. `None` for a request that was not
+    /// routed by a running server
+    scope: Option<Box<HttpRequestScope>>,
     /// Boxed, as almost no request fills it, and the request moves by value through the
     /// pipeline: inline, it was 160 of the 432 bytes every handler's future holds and copies
     query_args_cache: OnceLock<Box<QueryArgsCache>>,
@@ -136,7 +141,7 @@ impl HttpRequest {
     /// of its route group, or else the application's - see
     /// [`Route::with_body_limit`](crate::routing::Route::with_body_limit).
     pub fn body_limit(&self) -> Option<usize> {
-        match self.parts.extensions.get::<HttpRequestScope>()?.body_limit {
+        match self.scope()?.body_limit {
             RequestBodyLimit::Enabled(size) => Some(size),
             RequestBodyLimit::Disabled => None,
         }
@@ -160,6 +165,26 @@ impl HttpRequest {
     #[inline]
     pub(crate) fn parts(&self) -> &Parts {
         &self.parts
+    }
+
+    /// Returns the scope of the request, `None` when it was not routed by a running server
+    #[inline]
+    pub(crate) fn scope(&self) -> Option<&HttpRequestScope> {
+        self.scope.as_deref()
+    }
+
+    /// Returns the scope of the request, for a middleware that writes to it
+    #[inline]
+    #[cfg(feature = "jwt-auth")]
+    pub(crate) fn scope_mut(&mut self) -> Option<&mut HttpRequestScope> {
+        self.scope.as_deref_mut()
+    }
+
+    /// Gives the request its scope, as the request is routed
+    #[inline]
+    pub(crate) fn with_scope(mut self, scope: HttpRequestScope) -> Self {
+        self.scope = Some(Box::new(scope));
+        self
     }
 
     /// Takes the body, leaving an empty one behind
@@ -189,27 +214,30 @@ impl HttpRequest {
     /// Returns the path parameter at `index` by position, for a handler argument to read
     #[inline]
     pub(crate) fn path_arg_mut(&mut self, index: usize) -> Option<&mut PathArg> {
-        self.parts
-            .extensions
-            .get_mut::<HttpRequestScope>()?
-            .params
-            .get_mut(index)
+        self.scope.as_deref_mut()?.params.get_mut(index)
     }
 
     /// Consumes the request and returns request head and body, for the deprecated
-    /// `HttpRequestMut::into_parts` alone, and goes with it
+    /// `HttpRequestMut::into_parts` alone, and goes with it. The scope travels in the
+    /// extensions of the head, where it lived before it was a field, for
+    /// `HttpRequestMut::from_parts` to take it back
     #[inline]
     #[cfg(feature = "middleware")]
     pub(crate) fn into_parts(self) -> (Parts, HttpBody) {
-        (self.parts, self.body)
+        let mut parts = self.parts;
+        if let Some(scope) = self.scope {
+            parts.extensions.insert(*scope);
+        }
+        (parts, self.body)
     }
 
-    /// Creates a new `HttpRequest` with the given head and body
+    /// Creates a new `HttpRequest` with the given head and body, and no scope
     #[inline]
     pub(crate) fn from_parts(parts: Parts, body: HttpBody) -> Self {
         Self {
             parts,
             body,
+            scope: None,
             query_args_cache: OnceLock::new(),
         }
     }
@@ -258,9 +286,7 @@ impl HttpRequest {
     /// # }
     /// ```
     pub fn path_args(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.parts
-            .extensions
-            .get::<HttpRequestScope>()
+        self.scope()
             .map(|s| &s.params)
             .into_iter()
             .flat_map(|args| {
@@ -430,16 +456,14 @@ mod tests {
         ]
         .into();
 
-        let req = Request::get("/")
-            .extension(HttpRequestScope {
-                params: args,
-                ..HttpRequestScope::default()
-            })
-            .body(HttpBody::empty())
-            .unwrap();
+        let scope = HttpRequestScope {
+            params: args,
+            ..HttpRequestScope::default()
+        };
+        let req = Request::get("/").body(HttpBody::empty()).unwrap();
 
         let (parts, body) = req.into_parts();
-        let req = HttpRequest::from_parts(parts, body);
+        let req = HttpRequest::from_parts(parts, body).with_scope(scope);
 
         let mut args = req.path_args();
         let mut args_2 = req.path_args();
@@ -560,13 +584,13 @@ mod tests {
             body_limit: RequestBodyLimit::Enabled(100),
             ..HttpRequestScope::default()
         };
+        let scope = scope;
         let (parts, body) = Request::get("/test")
-            .extension(scope)
             .body(HttpBody::full("Hello, World!"))
             .unwrap()
             .into_parts();
 
-        let req = HttpRequest::from_parts(parts, body);
+        let req = HttpRequest::from_parts(parts, body).with_scope(scope);
 
         assert_eq!(req.body_limit(), Some(100))
     }

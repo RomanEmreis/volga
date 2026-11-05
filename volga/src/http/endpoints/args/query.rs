@@ -116,10 +116,10 @@ impl<T: DeserializeOwned + Send> FromPayload for Query<T> {
 
     #[inline]
     fn from_payload(payload: Payload<'_>) -> Self::Future {
-        let Payload::Parts(parts) = payload else {
+        let Payload::Parts(head) = payload else {
             unreachable!()
         };
-        ready(parts.try_into())
+        ready(head.uri().try_into())
     }
 
     #[cfg(feature = "openapi")]
@@ -143,6 +143,7 @@ impl QueryError {
 #[cfg(test)]
 mod tests {
     use crate::Query;
+    use crate::http::RequestHead;
     use crate::http::endpoints::args::{FromPayload, Payload};
     use hyper::{Request, Uri};
     use serde::Deserialize;
@@ -167,7 +168,7 @@ mod tests {
         let (parts, _) = req.into_parts();
         //let uri = "https://www.example.com/api/get?name=John&age=33".parse::<Uri>().unwrap();
 
-        let query = Query::<User>::from_payload(Payload::Parts(&parts))
+        let query = Query::<User>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
             .await
             .unwrap();
 
@@ -182,9 +183,10 @@ mod tests {
         let (parts, _) = req.into_parts();
         //let uri = "https://www.example.com/api/get?name=John".parse::<Uri>().unwrap();
 
-        let query = Query::<OptionalUser>::from_payload(Payload::Parts(&parts))
-            .await
-            .unwrap();
+        let query =
+            Query::<OptionalUser>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
+                .await
+                .unwrap();
 
         assert!(query.age.is_none());
         assert_eq!(query.0.name.unwrap(), "John");
@@ -197,9 +199,11 @@ mod tests {
         let (parts, _) = req.into_parts();
         //let uri = "https://www.example.com/api/get?name=John&age=33".parse::<Uri>().unwrap();
 
-        let query = Query::<HashMap<String, String>>::from_payload(Payload::Parts(&parts))
-            .await
-            .unwrap();
+        let query = Query::<HashMap<String, String>>::from_payload(Payload::Parts(
+            RequestHead::from_parts(&parts),
+        ))
+        .await
+        .unwrap();
 
         assert_eq!(query.0.get("name").unwrap(), "John");
         assert_eq!(query.0.get("age").unwrap(), "33");

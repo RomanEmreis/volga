@@ -2,7 +2,7 @@
 
 use crate::http::IntoResponse;
 use crate::http::endpoints::{
-    args::{FromPayload, FromRequest, Payload},
+    args::{FromPayload, FromRequest, Payload, RequestHead},
     handlers::GenericHandler,
     route::{check_path_arity, param_count},
 };
@@ -156,7 +156,10 @@ impl App {
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
             async move {
-                let conn = WebSocketConnection::from_payload(Payload::Parts(req.parts())).await?;
+                let conn = WebSocketConnection::from_payload(Payload::Parts(
+                    RequestHead::from_request(&req),
+                ))
+                .await?;
                 let args = Args::from_request(req).await?;
                 conn.on(move |ws| handler.call(ws, args))
             }
@@ -227,7 +230,10 @@ impl App {
         self.map_conn(pattern, move |req: HttpRequest| {
             let handler = handler.clone();
             async move {
-                let conn = WebSocketConnection::from_payload(Payload::Parts(req.parts())).await?;
+                let conn = WebSocketConnection::from_payload(Payload::Parts(
+                    RequestHead::from_request(&req),
+                ))
+                .await?;
                 let args = Args::from_request(req).await?;
                 conn.on(|mut ws| async move {
                     ws.on_msg(move |msg: Msg| handler.call(msg, args.clone()))

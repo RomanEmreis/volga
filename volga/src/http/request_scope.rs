@@ -1,7 +1,7 @@
-//! Per-request data consolidated into a single extension entry.
+//! The framework's own per-request state, in one allocation.
 //!
-//! [`HttpRequestScope`] replaces N individual `Box<dyn Any>` heap allocations
-//! (one per extension insert) with a single allocation per request.
+//! [`HttpRequestScope`] is a field of [`HttpRequest`](crate::HttpRequest), set when the request
+//! is routed, and lent to the extractors through [`RequestHead`](crate::http::RequestHead).
 
 use tokio_util::sync::CancellationToken;
 
@@ -35,11 +35,13 @@ use {
 #[cfg(feature = "config")]
 use crate::config::store::ConfigStore;
 
-/// Consolidates all per-request data previously stored as individual extension
-/// entries into a single heap allocation.
+/// The framework's own state for one request, in a single heap allocation.
 ///
-/// Replaces N separate `Box<dyn Any>` allocations and hashmap inserts with one,
-/// inserted as a single extension entry per matched request.
+/// It is a field of the request rather than an entry of its extensions: reading it is a
+/// pointer away instead of a hash probe, and nothing that reaches the extensions reaches it.
+///
+/// `Clone` only for the deprecated `HttpRequestMut::into_parts`, which hands the scope over in
+/// the extensions of the head, where they require it; it goes with that alias.
 #[derive(Clone)]
 pub(crate) struct HttpRequestScope {
     /// The client's IP address.

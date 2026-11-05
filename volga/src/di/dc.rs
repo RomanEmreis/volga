@@ -214,17 +214,17 @@ mod tests {
 
         let (parts, _) = req.into_parts();
 
-        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts))
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
             .await
             .unwrap();
         dc.lock().unwrap().push(2);
 
-        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts))
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
             .await
             .unwrap();
         dc.lock().unwrap().push(3);
 
-        let dc = Dc::<Cache>::from_payload(Payload::Parts(&parts))
+        let dc = Dc::<Cache>::from_payload(Payload::Parts(RequestHead::from_parts(&parts)))
             .await
             .unwrap();
         let dc = dc.lock().unwrap();

@@ -289,7 +289,7 @@ mod tests {
         request.headers_mut().extend(headers);
 
         let (parts, _) = request.into_parts();
-        let payload = Payload::Parts(&parts);
+        let payload = Payload::Parts(RequestHead::from_parts(&parts));
 
         let cookies = PrivateCookies::from_payload(payload).await.unwrap();
 

@@ -38,9 +38,8 @@ impl<T: Send + Sync> Deref for Config<T> {
 }
 
 impl<T: Send + Sync + 'static> Config<T> {
-    fn from_extensions(ext: &hyper::http::Extensions) -> Result<Self, Error> {
-        let store = ext
-            .get::<HttpRequestScope>()
+    fn from_scope(scope: Option<&HttpRequestScope>) -> Result<Self, Error> {
+        let store = scope
             .and_then(|s| s.config.as_ref())
             .ok_or_else(|| Error::server_error("Config store not found in extensions"))?;
         let arc = store
@@ -53,7 +52,7 @@ impl<T: Send + Sync + 'static> Config<T> {
 impl<T: Send + Sync + 'static> FromRequestHead for Config<T> {
     #[inline]
     fn from_head(head: &RequestHead<'_>) -> Result<Self, Error> {
-        Self::from_extensions(head.extensions())
+        Self::from_scope(head.scope())
     }
 
     // Reads no path parameter, so a positional extractor next to it takes its own
@@ -66,7 +65,6 @@ mod tests {
     use crate::config::store::{ConfigStore, SectionKind};
     use crate::http::FromRequestRef;
     use crate::http::request_scope::HttpRequestScope;
-    use hyper::http::Extensions;
     use serde::Deserialize;
 
     #[derive(Debug, Deserialize, PartialEq)]
@@ -74,27 +72,23 @@ mod tests {
         url: String,
     }
 
-    fn make_extensions() -> Extensions {
+    fn make_scope() -> HttpRequestScope {
         let json = serde_json::json!({ "db": { "url": "postgres://localhost/mydb" } });
         let mut store = ConfigStore::new();
         store
             .register::<Db>("db", SectionKind::Required, &json)
             .unwrap();
-        let mut ext = Extensions::new();
-        ext.insert(HttpRequestScope {
+        HttpRequestScope {
             config: Some(Arc::new(store)),
             ..HttpRequestScope::default()
-        });
-        ext
+        }
     }
 
     #[test]
     fn config_deref_reads_field() {
-        let ext = make_extensions();
-        let mut req = hyper::Request::get("/").body(()).unwrap();
-        *req.extensions_mut() = ext;
-        let (parts, _) = req.into_parts();
-        let cfg = Config::<Db>::from_request(&RequestHead::from_parts(&parts)).unwrap();
+        let scope = make_scope();
+        let (parts, _) = hyper::Request::get("/").body(()).unwrap().into_parts();
+        let cfg = Config::<Db>::from_request(&RequestHead::with_scope(&parts, &scope)).unwrap();
         assert_eq!(cfg.url, "postgres://localhost/mydb");
     }
 
@@ -112,11 +106,9 @@ mod tests {
         struct Other {
             _x: u32,
         }
-        let ext = make_extensions();
-        let mut req = hyper::Request::get("/").body(()).unwrap();
-        *req.extensions_mut() = ext;
-        let (parts, _) = req.into_parts();
-        let result = Config::<Other>::from_request(&RequestHead::from_parts(&parts));
+        let scope = make_scope();
+        let (parts, _) = hyper::Request::get("/").body(()).unwrap().into_parts();
+        let result = Config::<Other>::from_request(&RequestHead::with_scope(&parts, &scope));
         assert!(result.is_err());
     }
 }

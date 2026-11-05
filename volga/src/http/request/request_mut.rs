@@ -4,7 +4,9 @@ use crate::{
     HttpBody, HttpRequest,
     error::Error,
     headers::{FromHeaders, Header, HeaderMap, HeaderName, HeaderValue},
-    http::{Extensions, FromRequestRef, Method, Parts, Uri, Version},
+    http::{
+        Extensions, FromRequestRef, Method, Parts, Uri, Version, request_scope::HttpRequestScope,
+    },
 };
 
 /// A mutable HTTP request used during the middleware pipeline.
@@ -130,6 +132,13 @@ impl HttpRequestMut {
     #[allow(unused)]
     pub(crate) fn extensions_mut(&mut self) -> &mut Extensions {
         self.inner.extensions_mut()
+    }
+
+    /// Returns the scope of the request, for a middleware that writes to it
+    #[inline]
+    #[cfg(feature = "jwt-auth")]
+    pub(crate) fn scope_mut(&mut self) -> Option<&mut HttpRequestScope> {
+        self.inner.scope_mut()
     }
 
     /// Returns a typed HTTP header value
@@ -484,8 +493,14 @@ impl HttpRequestMut {
         note = "replace the body with `map_body`, `try_map_body` or `try_map_body_async`; the \
                 head holds the request scope, which is not exposed"
     )]
-    pub fn from_parts(parts: Parts, body: HttpBody) -> Self {
+    pub fn from_parts(mut parts: Parts, body: HttpBody) -> Self {
+        // `into_parts` left the scope in the extensions, where it lived before it was a field
+        let scope = parts.extensions.remove::<HttpRequestScope>();
         let inner = HttpRequest::from_parts(parts, body);
+        let inner = match scope {
+            Some(scope) => inner.with_scope(scope),
+            None => inner,
+        };
         Self { inner }
     }
 }
@@ -604,16 +619,20 @@ mod tests {
     fn create_req_with(limit: RequestBodyLimit, body: &'static str) -> HttpRequestMut {
         use crate::http::request_scope::HttpRequestScope;
 
+        let scope = HttpRequestScope {
+            body_limit: limit,
+            ..HttpRequestScope::default()
+        };
         let (parts, body) = Request::post("/")
-            .extension(HttpRequestScope {
-                body_limit: limit,
-                ..HttpRequestScope::default()
-            })
             .body(HttpBody::full(body))
             .unwrap()
             .into_parts();
 
-        HttpRequestMut::new(HttpRequest::from_parts(parts, body).into_limited(limit))
+        HttpRequestMut::new(
+            HttpRequest::from_parts(parts, body)
+                .with_scope(scope)
+                .into_limited(limit),
+        )
     }
 
     async fn read_body(req: HttpRequestMut) -> Result<Bytes, Error> {
@@ -641,16 +660,14 @@ mod tests {
         ]
         .into();
 
-        let req = Request::get("/")
-            .extension(HttpRequestScope {
-                params: args,
-                ..HttpRequestScope::default()
-            })
-            .body(HttpBody::empty())
-            .unwrap();
+        let scope = HttpRequestScope {
+            params: args,
+            ..HttpRequestScope::default()
+        };
+        let req = Request::get("/").body(HttpBody::empty()).unwrap();
 
         let (parts, body) = req.into_parts();
-        let req = HttpRequestMut::new(HttpRequest::from_parts(parts, body));
+        let req = HttpRequestMut::new(HttpRequest::from_parts(parts, body).with_scope(scope));
 
         let mut args = req.path_args();
 
@@ -881,6 +898,33 @@ mod tests {
             .map_body(|_| HttpBody::full("longer than eight bytes"));
 
         assert_eq!(read_body(req).await.unwrap(), "longer than eight bytes");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn it_keeps_the_scope_through_into_parts_and_from_parts() {
+        let args: PathArgs = smallvec::smallvec![PathArg {
+            name: "id".into(),
+            value: "7".into()
+        }]
+        .into();
+        let scope = HttpRequestScope {
+            params: args,
+            body_limit: RequestBodyLimit::Enabled(8),
+            ..HttpRequestScope::default()
+        };
+        let (parts, body) = Request::get("/")
+            .body(HttpBody::empty())
+            .unwrap()
+            .into_parts();
+        let req = HttpRequestMut::new(HttpRequest::from_parts(parts, body).with_scope(scope));
+
+        let (parts, body) = req.into_parts();
+        let req = HttpRequestMut::from_parts(parts, body);
+
+        assert_eq!(req.path_args().collect::<Vec<_>>(), [("id", "7")]);
+        assert_eq!(req.body_limit(), Some(8));
+        assert!(req.extensions().get::<HttpRequestScope>().is_none());
     }
 
     #[tokio::test]

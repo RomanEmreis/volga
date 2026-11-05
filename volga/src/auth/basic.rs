@@ -227,7 +227,7 @@ mod tests {
             .body(())
             .unwrap();
         let (parts, _) = req.into_parts();
-        let payload = Payload::Parts(&parts);
+        let payload = Payload::Parts(RequestHead::from_parts(&parts));
 
         let basic = Basic::from_payload(payload).await.unwrap();
 

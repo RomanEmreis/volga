@@ -39,7 +39,8 @@ pub(crate) enum Payload<'a> {
     None,
     Request(HttpRequest),
     Full(&'a Parts, HttpBody),
-    Parts(&'a Parts),
+    /// The head, with the scope of the request
+    Parts(RequestHead<'a>),
     /// A positional parameter that something can read after the extractor it is handed to
     Path(&'a PathArg),
     /// A positional parameter nothing reads after the extractor it is handed to, which can
@@ -503,7 +504,9 @@ fn next_payload<'a>(
     keeps_params: bool,
 ) -> Payload<'a> {
     match source {
-        Source::Parts | Source::Head | Source::PathArgs => Payload::Parts(req.parts()),
+        Source::Parts | Source::Head | Source::PathArgs => {
+            Payload::Parts(RequestHead::from_request(req))
+        }
         Source::Path => {
             let arg = req.path_arg_mut(*position);
             *position += 1;
@@ -534,17 +537,20 @@ define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9 }
 define_generic_from_request! { T1, T2, T3, T4, T5, T6, T7, T8, T9, T10 }
 
-/// The head of a request carrying `params`
+/// A request whose scope carries `params`
 #[cfg(test)]
-pub(crate) fn parts_with(params: PathArgs) -> Parts {
+pub(crate) fn request_with(params: PathArgs) -> HttpRequest {
     use crate::http::request_scope::HttpRequestScope;
 
     let scope = HttpRequestScope {
         params,
         ..HttpRequestScope::default()
     };
-    let req = hyper::Request::get("/").extension(scope).body(()).unwrap();
-    req.into_parts().0
+    let (parts, body) = hyper::Request::get("/")
+        .body(crate::HttpBody::empty())
+        .unwrap()
+        .into_parts();
+    HttpRequest::from_parts(parts, body).with_scope(scope)
 }
 
 #[cfg(test)]

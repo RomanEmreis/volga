@@ -4,7 +4,7 @@ use crate::{
     App, ClientIp, HttpRequest, HttpResult,
     error::{Error, IntoError},
     headers::{FORWARDED, X_FORWARDED_FOR},
-    http::{StatusCode, request_scope::HttpRequestScope},
+    http::StatusCode,
     middleware::{HttpContext, Middleware, NextFn},
     routing::{Route, RouteGroup},
 };
@@ -1300,11 +1300,7 @@ fn stable_hash<T: Hash + ?Sized>(value: &T) -> u64 {
 fn extract_client_ip(req: &HttpRequest, remote_addr: SocketAddr) -> IpAddr {
     let peer = remote_addr.ip();
 
-    let Some(trusted) = req
-        .extensions()
-        .get::<HttpRequestScope>()
-        .and_then(|s| s.trusted_proxies.as_ref())
-    else {
+    let Some(trusted) = req.scope().and_then(|s| s.trusted_proxies.as_ref()) else {
         return peer;
     };
 
@@ -1428,17 +1424,15 @@ mod tests {
     fn create_request() -> HttpRequest {
         use crate::http::request_scope::HttpRequestScope;
 
-        let (mut parts, body) = Request::get("/")
+        let (parts, body) = Request::get("/")
             .body(HttpBody::empty())
             .unwrap()
             .into_parts();
 
-        parts.extensions.insert(HttpRequestScope {
+        HttpRequest::from_parts(parts, body).with_scope(HttpRequestScope {
             client_ip: ClientIp(SocketAddr::new(IpAddr::V4(127_u32.into()), 8080)),
             ..HttpRequestScope::default()
-        });
-
-        HttpRequest::from_parts(parts, body)
+        })
     }
 
     fn create_request_with_trusted_proxy() -> HttpRequest {
@@ -1454,19 +1448,17 @@ mod tests {
     ) -> HttpRequest {
         use crate::http::request_scope::HttpRequestScope;
 
-        let (mut parts, body) = Request::get("/")
+        let (parts, body) = Request::get("/")
             .body(HttpBody::empty())
             .unwrap()
             .into_parts();
 
         let trusted: HashSet<IpAddr> = trusted_proxies.into_iter().collect();
-        parts.extensions.insert(HttpRequestScope {
+        HttpRequest::from_parts(parts, body).with_scope(HttpRequestScope {
             client_ip: ClientIp(SocketAddr::new(peer, 8080)),
             trusted_proxies: Some(Arc::new(trusted)),
             ..HttpRequestScope::default()
-        });
-
-        HttpRequest::from_parts(parts, body)
+        })
     }
 
     #[test]
