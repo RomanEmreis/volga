@@ -7,7 +7,7 @@ error[E0277]: `Json<u32>` is not an extractor this handler or middleware can tak
   = help: the trait `FromRequestHead` is not implemented for `Json<u32>`
   = note: a handler takes extractors: `Json<T>`, `Query<T>`, `Path<T>`, `Form<T>`, `Vec<T>` (a JSON array, as `Json<Vec<T>>` reads one), `File`, `ByteStream`, `ClientIp`, `CancellationToken`, `HttpRequest`, `Dc<T>` (feature `di`), `Multipart` (feature `multipart`)
   = note: `Option<T>` and `Result<T, volga::error::Error>` wrap any of them, and `Valid<E>` wraps one whose payload implements `Validate`
-  = note: `with`, `filter` and `map_err` read the request without consuming it, so they take the extractors of its head, but not `Json<T>` or any other body extractor
+  = note: `with`, `filter`, `map_ok`, `map_err`, `map_fallback` and `tap_req` read the request without consuming it, so they take the extractors of its head, but not `Json<T>` or any other body extractor
   = note: a type of your own becomes an extractor by implementing `FromRequestHead`; one read from a path parameter implements `FromPathArg` and is taken as `Path<T>`; otherwise it travels inside an extractor - `Json<T>` / `Query<T>` / `Form<T>` deserialize it, `NamedPath<T>` reads the path into it by name, `Header<T>` takes a `FromHeaders` (or `#[http_header]`), `Dc<T>` whatever the container holds
   = help: the following other types implement trait `FromRequestHead`:
             Authenticated<T>

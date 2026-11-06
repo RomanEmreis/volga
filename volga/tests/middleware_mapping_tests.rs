@@ -191,6 +191,79 @@ async fn it_answers_with_the_error_of_try_map_body() {
 }
 
 #[tokio::test]
+async fn it_passes_extractors_of_the_head_to_tap_req() {
+    #[derive(serde::Deserialize)]
+    struct Page {
+        page: u32,
+    }
+
+    let server = TestServer::spawn(|app| {
+        app.tap_req(
+            |mut req: HttpRequestMut, page: volga::Query<Page>| async move {
+                req.try_insert_header::<XTest>(page.page.to_string().as_str())?;
+                Ok(req)
+            },
+        );
+        app.map_get("/test", |headers: HttpHeaders| async move {
+            headers.try_get::<XTest>().map(|v| v.to_string())
+        });
+    })
+    .await;
+
+    assert_eq!(
+        get(&server, "/test?page=7").await,
+        (200, "text/plain; charset=utf-8".into(), "x-test: 7".into())
+    );
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_reads_the_extractors_of_tap_req_before_the_closure_changes_the_request() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/test", |headers: HttpHeaders| async move {
+            headers.try_get::<XTest>().map(|v| v.to_string())
+        })
+        .tap_req(|mut req: HttpRequestMut, before: Header<XTest>| {
+            req.try_insert_header::<XTest>(format!("{} -> changed", before.as_str()?).as_str())?;
+            Ok(req)
+        });
+    })
+    .await;
+
+    let res = server
+        .client()
+        .get(server.url("/test"))
+        .header("x-test", "original")
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    assert_eq!(res.text().await.unwrap(), "x-test: original -> changed");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn it_answers_with_the_error_of_an_extractor_tap_req_cannot_read() {
+    let server = TestServer::spawn(|app| {
+        app.map_get("/test", || async { "reached the handler" })
+            .tap_req(|_: HttpRequestMut, _: Header<XTest>| async move {
+                Err(Error::server_error("the closure ran"))
+            });
+    })
+    .await;
+
+    // The extractor's own rejection, and the closure never ran
+    let (status, _, body) = get(&server, "/test").await;
+    assert_eq!(status, 404);
+    assert_eq!(body, "Header: `x-test` not found");
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
 async fn it_adds_map_ok_middleware_for_route() {
     let server = TestServer::spawn(|app| {
         app.map_get("/test", async || "Pass!")

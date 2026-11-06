@@ -24,7 +24,7 @@ use make_fn::*;
 use std::sync::Arc;
 
 #[cfg(feature = "di")]
-use crate::di::{Dependencies, FromContainer};
+use crate::di::Dependencies;
 
 pub use handler::{Filter, MapOk, Middleware, Next, TapReq, With};
 pub use http_context::HttpContext;
@@ -357,6 +357,10 @@ impl App {
     /// The middleware receives ownership of the incoming request and may
     /// transform it before it is passed to the next stage.
     ///
+    /// Like `with` and `filter`, it takes extractors after the request: anything implementing
+    /// [`FromRequestRef`]. They are read before the closure runs, so they describe the request
+    /// as it arrives at this middleware, not as the closure leaves it.
+    ///
     /// The return type may be either:
     /// - `HttpRequestMut`
     /// - `Result<HttpRequestMut, Error>`
@@ -386,6 +390,28 @@ impl App {
     ///# }
     /// ```
     ///
+    /// Taking an extractor after the request:
+    /// ```no_run
+    /// use serde::Deserialize;
+    /// use volga::{App, HttpRequestMut, Query, headers::headers};
+    ///
+    /// headers! {
+    ///     (Locale, "x-locale")
+    /// }
+    ///
+    /// #[derive(Deserialize)]
+    /// struct Lang {
+    ///     lang: String,
+    /// }
+    ///
+    /// let mut app = App::new();
+    ///
+    /// app.tap_req(|mut req: HttpRequestMut, q: Query<Lang>| {
+    ///     req.try_insert_header::<Locale>(q.lang.as_str())?;
+    ///     Ok(req)
+    /// });
+    /// ```
+    ///
     /// # Security
     ///
     /// `tap_req` grants full mutable ownership of the incoming request, including
@@ -393,71 +419,19 @@ impl App {
     /// stripped or overwritten before downstream middleware and handlers observe
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
-    #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R, M>(&mut self, map: F) -> &mut Self
     where
         F: TapReq<Args, M, Output = R>,
         R: IntoTapResult,
-        Args: FromContainer + Send + 'static,
+        Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
         let tap_req_fn = make_tap_req_fn(map);
 
+        #[cfg(feature = "di")]
         self.require_while_held(&tap_req_fn, "global `tap_req`", Args::dependencies);
 
         self.pipeline.middlewares_mut().add(tap_req_fn);
-        self
-    }
-
-    /// Registers request-tapping middleware.
-    ///
-    /// The middleware receives ownership of the incoming request and may
-    /// transform it before it is passed to the next stage.
-    ///
-    /// The return type may be either:
-    /// - `HttpRequestMut`
-    /// - `Result<HttpRequestMut, Error>`
-    ///
-    /// See [`IntoTapResult`] for details.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
-    ///
-    /// headers! {
-    ///     (CustomHeader, "X-Custom-Header")
-    /// }
-    ///
-    ///# #[tokio::main]
-    ///# async fn main() -> std::io::Result<()> {
-    /// let mut app = App::new();
-    ///
-    /// app.tap_req(|mut req: HttpRequestMut| async move {
-    ///     req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
-    ///     req
-    /// });
-    ///
-    /// app.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y });
-    ///
-    ///# app.run().await
-    ///# }
-    /// ```
-    ///
-    /// # Security
-    ///
-    /// `tap_req` grants full mutable ownership of the incoming request, including
-    /// all headers. Security-critical values such as `Authorization` can be
-    /// stripped or overwritten before downstream middleware and handlers observe
-    /// them. Only register trusted closures and be mindful that registration order
-    /// determines which code sees the original request.
-    #[cfg(not(feature = "di"))]
-    pub fn tap_req<F, R, M>(&mut self, map: F) -> &mut Self
-    where
-        F: TapReq<(), M, Output = R>,
-        R: IntoTapResult,
-        M: 'static,
-    {
-        self.pipeline.middlewares_mut().add(make_tap_req_fn(map));
         self
     }
 
@@ -745,6 +719,10 @@ impl<'a> Route<'a> {
     /// The middleware receives ownership of the incoming request and may
     /// transform it before it is passed to the next stage.
     ///
+    /// Like `with` and `filter`, it takes extractors after the request: anything implementing
+    /// [`FromRequestRef`]. They are read before the closure runs, so they describe the request
+    /// as it arrives at this middleware, not as the closure leaves it.
+    ///
     /// The return type may be either:
     /// - `HttpRequestMut`
     /// - `Result<HttpRequestMut, Error>`
@@ -781,72 +759,20 @@ impl<'a> Route<'a> {
     /// stripped or overwritten before downstream middleware and handlers observe
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
-    #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R, M>(self, map: F) -> Self
     where
         F: TapReq<Args, M, Output = R>,
         R: IntoTapResult,
-        Args: FromContainer + Send + 'static,
+        Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
-        let map_err_fn = make_tap_req_fn(map);
+        let tap_req_fn = make_tap_req_fn(map);
 
+        #[cfg(feature = "di")]
         self.app
-            .require_while_held(&map_err_fn, self.consumer("tap_req"), Args::dependencies);
+            .require_while_held(&tap_req_fn, self.consumer("tap_req"), Args::dependencies);
 
-        self.map_middleware(map_err_fn)
-    }
-
-    /// Registers request-tapping middleware.
-    ///
-    /// The middleware receives ownership of the incoming request and may
-    /// transform it before it is passed to the next stage.
-    ///
-    /// The return type may be either:
-    /// - `HttpRequestMut`
-    /// - `Result<HttpRequestMut, Error>`
-    ///
-    /// See [`IntoTapResult`] for details.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
-    ///
-    /// headers! {
-    ///     (CustomHeader, "X-Custom-Header")
-    /// }
-    ///
-    ///# #[tokio::main]
-    ///# async fn main() -> std::io::Result<()> {
-    /// let mut app = App::new();
-    ///
-    /// app
-    ///     .map_get("/sum/{x}/{y}", |x: i32, y: i32| async move { x + y })
-    ///     .tap_req(|mut req: HttpRequestMut| async move {
-    ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
-    ///         req
-    ///     });
-    ///
-    ///# app.run().await
-    ///# }
-    /// ```
-    ///
-    /// # Security
-    ///
-    /// `tap_req` grants full mutable ownership of the incoming request, including
-    /// all headers. Security-critical values such as `Authorization` can be
-    /// stripped or overwritten before downstream middleware and handlers observe
-    /// them. Only register trusted closures and be mindful that registration order
-    /// determines which code sees the original request.
-    #[cfg(not(feature = "di"))]
-    pub fn tap_req<F, R, M>(self, map: F) -> Self
-    where
-        F: TapReq<(), M, Output = R>,
-        R: IntoTapResult,
-        M: 'static,
-    {
-        let map_err_fn = make_tap_req_fn(map);
-        self.map_middleware(map_err_fn)
+        self.map_middleware(tap_req_fn)
     }
 
     /// Adds a middleware for this route that can take any parameters that implement [`FromRequestRef`]
@@ -1183,6 +1109,10 @@ impl<'a> RouteGroup<'a> {
     /// The middleware receives ownership of the incoming request and may
     /// transform it before it is passed to the next stage.
     ///
+    /// Like `with` and `filter`, it takes extractors after the request: anything implementing
+    /// [`FromRequestRef`]. They are read before the closure runs, so they describe the request
+    /// as it arrives at this middleware, not as the closure leaves it.
+    ///
     /// The return type may be either:
     /// - `HttpRequestMut`
     /// - `Result<HttpRequestMut, Error>`
@@ -1221,73 +1151,18 @@ impl<'a> RouteGroup<'a> {
     /// stripped or overwritten before downstream middleware and handlers observe
     /// them. Only register trusted closures and be mindful that registration order
     /// determines which code sees the original request.
-    #[cfg(feature = "di")]
     pub fn tap_req<F, Args, R, M>(&mut self, map: F) -> &mut Self
     where
         F: TapReq<Args, M, Output = R>,
         R: IntoTapResult,
-        Args: FromContainer + Send + 'static,
+        Args: FromRequestRef + Send + 'static,
         M: 'static,
     {
         let tap_req_fn = make_tap_req_fn(map);
 
+        #[cfg(feature = "di")]
         self.require_services(&tap_req_fn, "tap_req", Args::dependencies);
 
-        self.middleware.push(tap_req_fn);
-        self
-    }
-
-    /// Registers request-tapping middleware.
-    ///
-    /// The middleware receives ownership of the incoming request and may
-    /// transform it before it is passed to the next stage.
-    ///
-    /// The return type may be either:
-    /// - `HttpRequestMut`
-    /// - `Result<HttpRequestMut, Error>`
-    ///
-    /// See [`IntoTapResult`] for details.
-    ///
-    /// # Example
-    /// ```no_run
-    /// use volga::{App, HttpRequestMut, headers::{Header, headers}};
-    ///
-    /// headers! {
-    ///     (CustomHeader, "X-Custom-Header")
-    /// }
-    ///
-    ///# #[tokio::main]
-    ///# async fn main() -> std::io::Result<()> {
-    /// let mut app = App::new();
-    ///
-    /// app.group("/positive", |api| {
-    ///     api.tap_req(|mut req: HttpRequestMut| async move {
-    ///         req.insert_header(Header::<CustomHeader>::from_static("Custom Value"));
-    ///         req
-    ///     });
-    ///     api.map_get("/sum/{x}/{y}", |x: i32, y: i32| async move {
-    ///         x + y
-    ///     });
-    /// });
-    ///# app.run().await
-    ///# }
-    /// ```
-    ///
-    /// # Security
-    ///
-    /// `tap_req` grants full mutable ownership of the incoming request, including
-    /// all headers. Security-critical values such as `Authorization` can be
-    /// stripped or overwritten before downstream middleware and handlers observe
-    /// them. Only register trusted closures and be mindful that registration order
-    /// determines which code sees the original request.
-    #[cfg(not(feature = "di"))]
-    pub fn tap_req<F, R, M>(&mut self, map: F) -> &mut Self
-    where
-        F: TapReq<(), M, Output = R>,
-        R: IntoTapResult,
-        M: 'static,
-    {
-        let tap_req_fn = make_tap_req_fn(map);
         self.middleware.push(tap_req_fn);
         self
     }

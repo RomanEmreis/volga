@@ -9,7 +9,7 @@ pub use self::head::{FromRequestHead, RequestHead};
 pub use crate::http::endpoints::route::{PathArg, PathArgs};
 
 #[cfg(feature = "di")]
-use crate::di::{Container, Dependencies, FromContainer};
+use crate::di::Dependencies;
 
 pub mod byte_stream;
 pub mod cancellation_token;
@@ -424,23 +424,6 @@ macro_rules! define_generic_from_request {
             // Each of them is handed all the parameters, none by position
             const PATH_ARITY: RangeInclusive<usize> =
                 path_arity(&[$((Source::Parts, $T::PATH_ARITY)),+]);
-        }
-        #[cfg(feature = "di")]
-        impl<$($T: FromContainer),+> FromContainer for ($($T,)+) {
-            #[inline]
-            fn from_container(container: &Container) -> Result<Self, Error> {
-                let tuple = (
-                    $(
-                    $T::from_container(container)?,
-                    )*
-                );
-                Ok(tuple)
-            }
-
-            #[inline]
-            fn dependencies(deps: &mut Dependencies) {
-                $( $T::dependencies(deps); )*
-            }
         }
         impl<$($T: FromPayload),+> FromRequest for ($($T,)+) {
             // Not an `async fn`, which keeps a parameter in a slot of the future and moves it

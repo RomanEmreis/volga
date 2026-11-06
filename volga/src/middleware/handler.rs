@@ -169,34 +169,6 @@ where
     }
 }
 
-#[cfg(not(feature = "di"))]
-impl<Func, Fut: Send> TapReq<(), marker::Async> for Func
-where
-    Func: Fn(HttpRequestMut) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future,
-{
-    type Output = Fut::Output;
-
-    #[inline]
-    fn tap_req(&self, req: HttpRequestMut, _args: ()) -> impl Future<Output = Self::Output> + Send {
-        self(req)
-    }
-}
-
-#[cfg(not(feature = "di"))]
-impl<Func, R> TapReq<(), marker::Immediate> for Func
-where
-    Func: Fn(HttpRequestMut) -> R + Send + Sync + Clone + 'static,
-    R: IntoTapResult + Send,
-{
-    type Output = R;
-
-    #[inline]
-    fn tap_req(&self, req: HttpRequestMut, _args: ()) -> impl Future<Output = Self::Output> + Send {
-        std::future::ready(self(req))
-    }
-}
-
 macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
     impl<Func, Fut: Send, $($param,)*> With<($($param,)*)> for Func
     where
@@ -239,7 +211,6 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
             std::future::ready((self)($($param,)*))
         }
     }
-    #[cfg(feature = "di")]
     impl<Func, Fut: Send, $($param,)*> TapReq<($($param,)*), marker::Async> for Func
     where
         Func: Fn(HttpRequestMut,$($param,)*) -> Fut + Send + Sync + Clone + 'static,
@@ -254,7 +225,6 @@ macro_rules! define_generic_mw_handler ({ $($param:ident)* } => {
         }
     }
     // `IntoTapResult` is what keeps a future out of this impl; see `GenericHandler`
-    #[cfg(feature = "di")]
     impl<Func, R, $($param,)*> TapReq<($($param,)*), marker::Immediate> for Func
     where
         Func: Fn(HttpRequestMut,$($param,)*) -> R + Send + Sync + Clone + 'static,

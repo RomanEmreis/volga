@@ -333,10 +333,10 @@ Whether the container should fill such a slot itself is the question of #272.
 Built-in positional types are taken bare (`|id: u64|`). A user type that reads the path is taken
 as `Path<T>`, so the call site names the source, which a bare `id: OrderId` does not.
 
-`FromRequest`, `FromRequestRef` and `FromContainer` appear in signatures as bounds and are not
-extension points. `FromRequest` is what a handler takes, read from the whole request, and
-`FromRequestRef` what everything that leaves the request in place takes - `with`, `filter`,
-`map_err`, `map_fallback`, `HttpRequest::extract` and `RequestHead::extract` - read from its head
+`FromRequest` and `FromRequestRef` appear in signatures as bounds and are not extension points.
+`FromRequest` is what a handler takes, read from the whole request, and `FromRequestRef` what
+everything that leaves the request in place takes - `with`, `filter`, `map_ok`, `map_err`,
+`map_fallback`, `tap_req`, `HttpRequest::extract` and `RequestHead::extract` - read from its head
 through `RequestHead`, which is what a `FromRequestHead` reads as well. They stay public, since a bound has to be nameable: a helper
 generic over a handler or over what `HttpRequest::extract` reads writes them, and a crate-private
 trait in a public signature fails `private_bounds`. They are sealed, so an `impl` of one fails
@@ -346,6 +346,17 @@ The body has no trait of its own. A format volga does not know is read in the ha
 `HttpBody` or `ByteStream`, with the body limit already applied. `FromPayload` can carry one
 blanket impl and `FromRequestHead` holds it, so a body trait could only come behind a wrapper,
 `Body<T>`, which can be added at any time without breaking anything.
+
+### One rule for the arguments of a middleware
+
+Every closure middleware takes its extra arguments as `FromRequestRef` extractors, whatever its
+shape. Only the first, shape-specific argument differs: `Next` for `with`, `HttpResponse` for
+`map_ok`, `Error` for `map_err` and `HttpRequestMut` for `tap_req`. A Cargo feature adds
+extractors and never changes the signature of a method: `tap_req` took only `Dc<T>`, and only with
+`di`, until #294.
+
+`tap_req` reads its extractors before the closure takes the request, so they describe the request
+as it arrives at that middleware, not as the closure leaves it.
 
 ### Extractors that cannot read one request together
 

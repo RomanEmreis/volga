@@ -22,7 +22,7 @@
 //! registered. A service resolved while a request runs - through `HttpContext::resolve` or
 //! the [`Container`] itself - cannot be seen at startup.
 
-use super::{App, error::Error, http::endpoints::args::sealed::Sealed};
+use super::{App, error::Error};
 use std::{borrow::Cow, sync::Arc};
 pub use {
     self::dc::Dc,
@@ -34,28 +34,6 @@ pub mod dc;
 /// Dependency injection errors
 pub mod error {
     pub use volga_di::error::{Error, Issue, ValidationError};
-}
-
-/// The bound on what reads a borrowed DI container: the arguments of `tap_req`, which are
-/// [`Dc<T>`] and tuples of it.
-///
-/// This is a bound, not an extension point: it is sealed. To make a type of your own an
-/// extractor, implement [`FromRequestHead`](crate::http::FromRequestHead).
-pub trait FromContainer: Sized + Sealed {
-    /// Extracts data from DI container
-    fn from_container(container: &Container) -> Result<Self, Error>;
-
-    /// Declares the services this extractor resolves from the container, for [`App::run`] to
-    /// check that each of them is registered
-    #[inline]
-    fn dependencies(_deps: &mut Dependencies) {}
-}
-
-impl FromContainer for () {
-    #[inline]
-    fn from_container(_: &Container) -> Result<Self, Error> {
-        Ok(())
-    }
 }
 
 impl crate::error::IntoError for error::Error {
