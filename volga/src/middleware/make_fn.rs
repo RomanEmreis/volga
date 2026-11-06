@@ -8,9 +8,6 @@ use crate::error::handler::answer_with;
 use crate::http::{FromRequestRef, IntoResponse, MapErr, request::IntoTapResult};
 use std::sync::Arc;
 
-#[cfg(feature = "di")]
-use crate::di::FromContainer;
-
 /// Wraps a closure into [`MiddlewareFn`]
 #[inline]
 pub(super) fn make_fn<F>(middleware: F) -> MiddlewareFn
@@ -98,18 +95,18 @@ where
 
 /// Wraps a closure for the request mapping into [`MiddlewareFn`]
 #[inline]
-#[cfg(feature = "di")]
 pub(super) fn make_tap_req_fn<F, Args, R, M>(map: F) -> MiddlewareFn
 where
     F: TapReq<Args, M, Output = R>,
     R: IntoTapResult,
-    Args: FromContainer + Send + 'static,
+    Args: FromRequestRef + Send + 'static,
     M: 'static,
 {
     let middleware_fn = move |ctx: HttpContext, next: NextFn| {
         let map = map.clone();
         async move {
-            match ctx.container().and_then(|c| Args::from_container(c)) {
+            // Read before the closure takes the request, so they describe it as it arrives
+            match ctx.extract::<Args>() {
                 Err(err) => err.into_response(),
                 Ok(args) => {
                     let (req, pipeline, cors) = ctx.into_parts();
@@ -118,27 +115,6 @@ where
                     next(ctx).await
                 }
             }
-        }
-    };
-    make_fn(middleware_fn)
-}
-
-/// Wraps a closure for the request mapping into [`MiddlewareFn`]
-#[inline]
-#[cfg(not(feature = "di"))]
-pub(super) fn make_tap_req_fn<F, R, M>(map: F) -> MiddlewareFn
-where
-    F: TapReq<(), M, Output = R>,
-    R: IntoTapResult,
-    M: 'static,
-{
-    let middleware_fn = move |ctx: HttpContext, next: NextFn| {
-        let map = map.clone();
-        async move {
-            let (req, pipeline, cors) = ctx.into_parts();
-            let req = map.tap_req(req, ()).await.into_result()?;
-            let ctx = HttpContext::from_parts(req, pipeline, cors);
-            next(ctx).await
         }
     };
     make_fn(middleware_fn)

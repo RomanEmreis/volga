@@ -70,10 +70,12 @@ impl HeaderError {
         Self::header_missing_impl(T::NAME.as_str())
     }
 
+    /// A header the request was required to carry and does not: the request is malformed,
+    /// not a resource missing, so `400`
     #[inline]
     pub(crate) fn header_missing_impl(header: &str) -> Error {
         Error::from_parts(
-            StatusCode::NOT_FOUND,
+            StatusCode::BAD_REQUEST,
             None,
             format!("Header: `{header}` not found"),
         )
@@ -147,7 +149,7 @@ mod tests {
     fn header_missing_impl_builds_not_found_error() {
         let err = HeaderError::header_missing_impl("x-test");
 
-        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
 
         let msg = err.to_string();
         assert!(msg.contains("Header: `x-test` not found"));
@@ -157,7 +159,7 @@ mod tests {
     fn header_missing_uses_from_headers_name() {
         let err = HeaderError::header_missing::<XTest>();
 
-        assert_eq!(err.status, StatusCode::NOT_FOUND);
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
         let msg = err.to_string();
         assert!(msg.contains("Header: `x-test` not found"));
     }

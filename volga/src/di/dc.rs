@@ -1,6 +1,6 @@
 //! Extractors for Dependency Injection
 
-use super::{Container, Dependencies, FromContainer, Inject, error::Error as DiError};
+use super::{Container, Dependencies, Inject, error::Error as DiError};
 use crate::error::Error;
 use hyper::http::Extensions;
 
@@ -120,7 +120,7 @@ impl<T: Send + Sync + 'static> TryFrom<&Extensions> for Dc<T> {
         // Borrow the container rather than clone it. This runs once per `Dc<T>` argument
         // of every handler, and the container is only read here.
         let container: &Container = extensions.try_into()?;
-        Self::from_container(container)
+        container.resolve_shared::<T>().map_err(Into::into).map(Dc)
     }
 }
 
@@ -137,18 +137,6 @@ impl<T: Send + Sync + 'static> FromRequestHead for Dc<T> {
 
     // Reads no path parameter, so a positional extractor next to it takes its own
     const PATH_ACCESS: PathAccess = PathAccess::Ignored;
-}
-
-impl<T: Send + Sync + 'static> FromContainer for Dc<T> {
-    #[inline]
-    fn from_container(container: &Container) -> Result<Self, Error> {
-        container.resolve_shared::<T>().map_err(Into::into).map(Dc)
-    }
-
-    #[inline]
-    fn dependencies(deps: &mut Dependencies) {
-        deps.add::<T>();
-    }
 }
 
 impl<T: Send + Sync + 'static> Inject for Dc<T> {
