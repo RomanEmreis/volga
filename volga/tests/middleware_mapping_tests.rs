@@ -257,7 +257,7 @@ async fn it_answers_with_the_error_of_an_extractor_tap_req_cannot_read() {
 
     // The extractor's own rejection, and the closure never ran
     let (status, _, body) = get(&server, "/test").await;
-    assert_eq!(status, 404);
+    assert_eq!(status, 400);
     assert_eq!(body, "Header: `x-test` not found");
 
     server.shutdown().await;
