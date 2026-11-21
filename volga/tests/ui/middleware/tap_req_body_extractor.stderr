@@ -25,8 +25,9 @@ error[E0277]: `Json<u32>` is not an extractor this handler or middleware can tak
 note: required by a bound in `middleware::<impl App>::tap_req`
  --> src/middleware.rs
   |
+  | impl App {
+...
   |     pub fn tap_req<F, Args, R, M>(&mut self, map: F) -> &mut Self
-  |            ------- required by a bound in this associated function
 ...
   |         Args: FromRequestRef + Send + 'static,
   |               ^^^^^^^^^^^^^^ required by this bound in `middleware::<impl App>::tap_req`

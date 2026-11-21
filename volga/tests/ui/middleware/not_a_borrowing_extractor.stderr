@@ -29,8 +29,9 @@ help: the trait `FromRequestHead` is not implemented for `NotAnExtractor`
 note: required by a bound in `middleware::<impl App>::with`
  --> src/middleware.rs
   |
+  | impl App {
+...
   |     pub fn with<F, R, Args>(&mut self, middleware: F) -> &mut Self
-  |            ---- required by a bound in this associated function
 ...
   |         Args: FromRequestRef + Send + 'static,
   |               ^^^^^^^^^^^^^^ required by this bound in `middleware::<impl App>::with`

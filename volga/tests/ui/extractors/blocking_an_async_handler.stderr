@@ -12,8 +12,9 @@ error[E0277]: `BlockingFn<{async closure@$DIR/tests/ui/extractors/blocking_an_as
 note: required by a bound in `router::<impl App>::map_get`
  --> src/app/router.rs
   |
+  | impl App {
+...
   |     pub fn map_get<'a, F, R, Args, M>(&'a mut self, pattern: &'a str, handler: F) -> Route<'a>
-  |            ------- required by a bound in this associated function
   |     where
   |         F: GenericHandler<Args, M, Output = R>,
   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `router::<impl App>::map_get`
