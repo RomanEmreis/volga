@@ -8,3 +8,6 @@ publish = false
 volga = { path = "../../volga", features = ["cookie", "basic-auth"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 uuid = { workspace = true, features = ["v4"] }
+
+[lints]
+workspace = true

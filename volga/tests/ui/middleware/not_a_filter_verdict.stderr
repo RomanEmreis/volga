@@ -13,8 +13,9 @@ error[E0277]: `{closure@$DIR/tests/ui/middleware/not_a_filter_verdict.rs:5:16: 5
 note: required by a bound in `middleware::<impl App>::filter`
  --> src/middleware.rs
   |
+  | impl App {
+...
   |     pub fn filter<F, Args, M>(&mut self, filter: F) -> &mut Self
-  |            ------ required by a bound in this associated function
   |     where
   |         F: Filter<Args, M>,
   |            ^^^^^^^^^^^^^^^ required by this bound in `middleware::<impl App>::filter`

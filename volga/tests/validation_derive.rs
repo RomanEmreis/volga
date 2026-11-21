@@ -845,6 +845,9 @@ mod spec {
     }
 }
 
+// The repeated `#[validate(..)]` is the case under test. `allow` rather than `expect`, so
+// that a clippy older than 1.100, which does not see it, has nothing left unfulfilled
+#[allow(clippy::duplicated_attributes)]
 #[derive(Deserialize, Validate)]
 struct Twice {
     // Both rules run, so the field really is bounded by the tighter of the two
