@@ -132,7 +132,7 @@ fn negotiate(accept_encoding: Header<AcceptEncoding>, http_result: HttpResult) -
             not(feature = "compression-brotli"),
             not(feature = "compression-gzip")
         ))]
-        return compress(Encoding::Gzip, http_result);
+        return compress(Encoding::Zstd, http_result);
 
         #[cfg(all(
             not(feature = "compression-brotli"),
