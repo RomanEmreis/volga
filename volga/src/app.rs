@@ -8,10 +8,7 @@ use crate::{
     server::{LingeringStream, Server},
 };
 use connection::Connection;
-use hyper_util::{
-    rt::TokioIo,
-    server::graceful::{GracefulShutdown, Watcher},
-};
+use hyper_util::server::graceful::{GracefulShutdown, Watcher};
 
 use std::{
     fmt,
@@ -649,12 +646,16 @@ impl App {
     ///
     /// The timer runs from the moment the server starts waiting for a request, so it also
     /// closes an HTTP/1 keep-alive connection that stays idle that long between requests. It
-    /// does not run while a handler works or a body is read. With TLS, the same timeout
-    /// bounds the handshake. HTTP/2 has no such timer: its requests are frames on a
-    /// connection that has already been set up.
+    /// does not run while a handler works or a body is read.
+    ///
+    /// The same timeout bounds what comes before the head: the TLS handshake, and the first
+    /// bytes of a connection where the server tells HTTP/1 from HTTP/2 by them - with both
+    /// protocols enabled, or with WebSockets - or waits for the HTTP/2 preface. Each of these
+    /// steps has the whole timeout. Past its preface an HTTP/2 connection is not timed: its
+    /// requests are frames on a connection that has already been set up.
     ///
     /// Available with the `http1` or the `tls` feature. A server built with `http2` and
-    /// `tls` but without `http1` applies it to the TLS handshake alone.
+    /// `tls` but without `http1` applies it to the TLS handshake and the HTTP/2 preface.
     ///
     /// - `Limit::Default` - 30 seconds.
     /// - `Limit::Limited(timeout)` - the given timeout. **Panics** if it is zero, which would
@@ -1183,7 +1184,7 @@ impl App {
         let (stream, linger) = LingeringStream::new(stream);
 
         #[cfg(not(feature = "tls"))]
-        Server::new(TokioIo::new(stream), peer_addr)
+        Server::new(stream, peer_addr)
             .serve(app_instance, watcher, cancellation_token)
             .await;
 
@@ -1215,13 +1216,11 @@ impl App {
                     return;
                 }
             };
-            let io = TokioIo::new(stream);
-            Server::new(io, peer_addr)
+            Server::new(stream, peer_addr)
                 .serve(app_instance, watcher, cancellation_token)
                 .await;
         } else {
-            let io = TokioIo::new(stream);
-            Server::new(io, peer_addr)
+            Server::new(stream, peer_addr)
                 .serve(app_instance, watcher, cancellation_token)
                 .await;
         };

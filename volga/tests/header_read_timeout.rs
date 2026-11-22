@@ -7,11 +7,13 @@
 //! connection builder, which volga did not set: a client sending its headers a byte at a time
 //! held its connection for as long as it liked. The timer runs whenever the server waits for
 //! a request, so it also closes an idle keep-alive connection, and never while a handler works.
+//! A server with both protocols, or with WebSockets, reads the first bytes of a connection to
+//! tell HTTP/1 from HTTP/2 before that timer runs: those are bounded by the same timeout.
 
 use std::time::{Duration, Instant};
-use tokio::io::AsyncReadExt;
 #[cfg(feature = "http1")]
 use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::net::TcpStream;
 use volga::test::TestServer;
 use volga::{Limit, ok};
@@ -48,7 +50,7 @@ async fn connect(server: &TestServer) -> TcpStream {
 
 /// Reads until the server closes the connection or `within` passes, and returns what was read
 /// and whether the connection was closed
-async fn read_until_closed(tcp: &mut TcpStream, within: Duration) -> (String, bool) {
+async fn read_until_closed(tcp: &mut (impl AsyncRead + Unpin), within: Duration) -> (String, bool) {
     let mut received = Vec::new();
     let mut buf = [0u8; 1024];
     let deadline = tokio::time::Instant::now() + within;
@@ -146,6 +148,40 @@ async fn it_does_not_time_out_a_handler() {
     server.shutdown().await;
 }
 
+/// The server reads the first bytes of a connection to tell HTTP/1 from HTTP/2 before either
+/// protocol's own handling starts: a client sending nothing is bounded all the same
+#[tokio::test]
+#[cfg(feature = "http1")]
+async fn it_closes_a_connection_that_sends_nothing() {
+    let server = server(Limit::Limited(TIMEOUT)).await;
+    let mut tcp = connect(&server).await;
+
+    let started = Instant::now();
+    let (received, closed) = read_until_closed(&mut tcp, CLOSE_WITHIN).await;
+
+    assert!(closed, "the connection is still open");
+    assert!(started.elapsed() >= TIMEOUT, "closed before the timeout");
+    assert!(received.is_empty(), "unexpected bytes: {received}");
+
+    server.shutdown().await;
+}
+
+/// A start that could still be the HTTP/2 preface keeps the protocol undecided where the
+/// server speaks both. A server of HTTP/1 alone refuses it right away, which is fine too
+#[tokio::test]
+#[cfg(feature = "http1")]
+async fn it_closes_a_connection_that_stops_inside_the_http2_preface() {
+    let server = server(Limit::Limited(TIMEOUT)).await;
+    let mut tcp = connect(&server).await;
+
+    tcp.write_all(b"PRI * HTTP/2.0\r\n").await.unwrap();
+    let (_, closed) = read_until_closed(&mut tcp, CLOSE_WITHIN).await;
+
+    assert!(closed, "the connection is still open");
+
+    server.shutdown().await;
+}
+
 #[cfg(feature = "http1")]
 #[tokio::test]
 async fn it_keeps_a_connection_without_a_timeout() {
@@ -208,6 +244,40 @@ mod tls {
 
         let started = Instant::now();
         let (_, closed) = read_until_closed(&mut tcp, CLOSE_WITHIN).await;
+
+        assert!(closed, "the connection is still open");
+        assert!(started.elapsed() >= TIMEOUT, "closed before the timeout");
+
+        server.shutdown().await;
+    }
+
+    /// A client that completes the handshake and then sends nothing
+    #[tokio::test]
+    async fn it_closes_a_tls_connection_that_sends_nothing() {
+        use std::sync::Arc;
+        use tokio_rustls::TlsConnector;
+        use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, pem::PemObject};
+        use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+
+        let server = https_server().await;
+
+        let mut roots = RootCertStore::empty();
+        roots
+            .add(CertificateDer::from_pem_slice(include_bytes!("tls/ca.pem")).unwrap())
+            .unwrap();
+        let config = ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let mut tls = TlsConnector::from(Arc::new(config))
+            .connect(
+                ServerName::try_from("127.0.0.1").unwrap(),
+                connect(&server).await,
+            )
+            .await
+            .unwrap();
+
+        let started = Instant::now();
+        let (_, closed) = read_until_closed(&mut tls, CLOSE_WITHIN).await;
 
         assert!(closed, "the connection is still open");
         assert!(started.elapsed() >= TIMEOUT, "closed before the timeout");
