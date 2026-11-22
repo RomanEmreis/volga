@@ -8,6 +8,14 @@ use crate::{
 };
 use std::io::Error;
 
+#[cfg(any(feature = "http1", feature = "tls"))]
+use std::time::Duration;
+
+/// How long a client has to send the head of a request when
+/// [`App::with_header_read_timeout`] is not set
+#[cfg(any(feature = "http1", feature = "tls"))]
+const DEFAULT_HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[cfg(any(
     feature = "tls",
     feature = "rate-limiting",
@@ -69,6 +77,11 @@ pub(crate) struct AppEnv {
 
     /// Maximum number of HTTP headers per request.
     pub(crate) max_header_count: Limit<usize>,
+
+    /// How long a client has to send the head of a request, and to complete a TLS handshake;
+    /// `None` for no limit.
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    pub(crate) header_read_timeout: Option<Duration>,
 
     /// Request/Middleware pipeline
     pub(super) pipeline: Pipeline,
@@ -231,6 +244,12 @@ impl TryFrom<App> for AppEnv {
             pipeline: app.pipeline.build(),
             max_header_count: app.max_header_count,
             max_header_size: app.max_header_size,
+            #[cfg(any(feature = "http1", feature = "tls"))]
+            header_read_timeout: match app.header_read_timeout {
+                Limit::Default => Some(DEFAULT_HEADER_READ_TIMEOUT),
+                Limit::Limited(timeout) => Some(timeout),
+                Limit::Unlimited => None,
+            },
             cache_control: default_cache_control,
             #[cfg(any(
                 feature = "decompression-brotli",
@@ -326,8 +345,25 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "jwt-auth")]
     #[test]
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    fn it_resolves_header_read_timeout() {
+        let resolve = |limit| -> Option<Duration> {
+            let app = App::default().with_header_read_timeout(limit);
+            let env: AppEnv = app.try_into().unwrap();
+            env.header_read_timeout
+        };
+
+        assert_eq!(resolve(Limit::Default), Some(Duration::from_secs(30)));
+        assert_eq!(
+            resolve(Limit::Limited(Duration::from_secs(5))),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(resolve(Limit::Unlimited), None);
+    }
+
+    #[test]
+    #[cfg(feature = "jwt-auth")]
     fn it_accepts_keys_that_suit_the_configured_algs() {
         use crate::auth::{Algorithm, DecodingKey, EncodingKey};
 

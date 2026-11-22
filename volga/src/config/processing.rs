@@ -71,6 +71,8 @@ impl App {
             max_header_count: Option<usize>,
             max_connections: Option<usize>,
             shutdown_timeout_secs: Option<u64>,
+            #[cfg(any(feature = "http1", feature = "tls"))]
+            header_read_timeout_secs: Option<u64>,
         }
 
         let Some(s) = parse_section::<ServerSection>(value, "server")? else {
@@ -100,6 +102,14 @@ impl App {
         }
         if let Some(secs) = s.shutdown_timeout_secs {
             self = self.with_shutdown_timeout(std::time::Duration::from_secs(secs));
+        }
+        #[cfg(any(feature = "http1", feature = "tls"))]
+        if let Some(secs) = s.header_read_timeout_secs {
+            self = self.with_header_read_timeout(if secs == 0 {
+                crate::Limit::Unlimited
+            } else {
+                crate::Limit::Limited(std::time::Duration::from_secs(secs))
+            });
         }
 
         Ok(self)
@@ -459,6 +469,31 @@ mod tests {
         let app = App::new().with_config(|cfg| cfg.with_file(&path));
 
         assert_eq!(app.shutdown_timeout(), std::time::Duration::from_secs(3));
+    }
+
+    #[test]
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    fn server_section_sets_header_read_timeout() {
+        let file = write_toml("[server]\nheader_read_timeout_secs = 5\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        assert_eq!(
+            app.header_read_timeout(),
+            crate::Limit::Limited(std::time::Duration::from_secs(5))
+        );
+    }
+
+    #[test]
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    fn server_section_disables_header_read_timeout_with_zero() {
+        let file = write_toml("[server]\nheader_read_timeout_secs = 0\n");
+        let path = file.path().to_str().unwrap().to_owned();
+
+        let app = App::new().with_config(|cfg| cfg.with_file(&path));
+
+        assert_eq!(app.header_read_timeout(), crate::Limit::Unlimited);
     }
 
     #[test]

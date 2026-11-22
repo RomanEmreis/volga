@@ -29,7 +29,7 @@ fn valid_token() -> String {
     encode(
         &Header::default(),
         &claims,
-        &JwtEncodingKey::from_secret(SECRET),
+        &JwtEncodingKey::from_secret(SECRET).unwrap(),
     )
     .expect("failed to sign the benchmark token")
 }

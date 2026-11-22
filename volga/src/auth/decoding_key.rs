@@ -117,7 +117,7 @@ oP/qAYIpT1laaG8pxhqNdYYq6wtBut8vKlP9Urf2GMy7Bu5o3Bh6+pQ3
         let token = encode(
             &Header::new(Algorithm::HS256),
             &serde_json::json!({}),
-            &EncodingKey::from_secret(b"secret"),
+            &EncodingKey::from_secret(b"secret").unwrap(),
         )
         .unwrap();
         assert!(verifies(&key, &token, Algorithm::HS256));

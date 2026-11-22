@@ -93,12 +93,11 @@ Runtime: Linux containers (Colima)
 Running 30s test @ http://volga:7878/plaintext
   8 threads and 512 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   539.89us    3.00ms 213.60ms   99.94%
-    Req/Sec   131.04k    14.14k 296.06k    95.76%
-  31080913 requests in 29.83s, 3.76GB read
-  Socket errors: connect 0, read 0, write 0, timeout 987
-Requests/sec: 1,041,952.40
-Transfer/sec: 129.18MB
+    Latency   471.31us  214.79us  10.39ms   70.51%
+    Req/Sec   133.91k     3.51k  156.38k    85.17%
+  31979551 requests in 30.03s, 3.87GB read
+Requests/sec: 1064931.96
+Transfer/sec:    132.03MB
 ```
 
 > ⚠️ Benchmark results are provided for reference only.

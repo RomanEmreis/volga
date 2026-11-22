@@ -40,7 +40,7 @@ fn token(role: &str, exp: u64) -> String {
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(SECRET),
+        &EncodingKey::from_secret(SECRET).unwrap(),
     )
     .expect("failed to sign the token")
 }
@@ -160,7 +160,7 @@ async fn it_rejects_a_token_signed_with_the_wrong_key_as_unauthorized() {
             role: "admin".into(),
             exp: FAR_FUTURE,
         },
-        &EncodingKey::from_secret(b"another secret"),
+        &EncodingKey::from_secret(b"another secret").unwrap(),
     )
     .expect("failed to sign the token");
 
