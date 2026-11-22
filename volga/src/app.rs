@@ -231,6 +231,12 @@ pub struct App {
     /// Maximum number of simultaneous TCP connections.
     max_connections: Limit<usize>,
 
+    /// How long a client has to send the head of a request, and to complete a TLS handshake.
+    ///
+    /// Default: 30 seconds
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    header_read_timeout: Limit<Duration>,
+
     /// Pre-built config store (populated by `with_config`/`with_default_config`, passed to `AppEnv`)
     #[cfg(feature = "config")]
     pub(crate) config_store: Option<Arc<crate::config::ConfigStore>>,
@@ -319,6 +325,8 @@ impl App {
             max_header_count: Limit::Default,
             max_header_size: Limit::Default,
             max_connections: Limit::Default,
+            #[cfg(any(feature = "http1", feature = "tls"))]
+            header_read_timeout: Limit::Default,
             cache_control: None,
             show_greeter: cfg!(debug_assertions),
             #[cfg(feature = "http2")]
@@ -466,6 +474,12 @@ impl App {
     #[cfg(all(test, feature = "config"))]
     pub(crate) fn shutdown_timeout(&self) -> Duration {
         self.shutdown_timeout
+    }
+
+    /// Returns how long a client has to send the head of a request.
+    #[cfg(all(test, feature = "config", any(feature = "http1", feature = "tls")))]
+    pub(crate) fn header_read_timeout(&self) -> Limit<Duration> {
+        self.header_read_timeout
     }
 
     /// Replaces the host and/or the port of the current address, keeping whichever half
@@ -623,6 +637,47 @@ impl App {
     /// - `Unlimited`: Disables connection limiting entirely.
     pub fn with_max_connections(mut self, count: Limit<usize>) -> Self {
         self.max_connections = count;
+        self
+    }
+
+    /// Sets how long a client has to send the head of a request - the request line and the
+    /// headers - before its connection is closed.
+    ///
+    /// Without it, a client sending its headers a byte at a time holds a connection for as
+    /// long as it likes, and enough of them take every permit of
+    /// [`with_max_connections`](Self::with_max_connections).
+    ///
+    /// The timer runs from the moment the server starts waiting for a request, so it also
+    /// closes an HTTP/1 keep-alive connection that stays idle that long between requests. It
+    /// does not run while a handler works or a body is read. With TLS, the same timeout
+    /// bounds the handshake. HTTP/2 has no such timer: its requests are frames on a
+    /// connection that has already been set up.
+    ///
+    /// Available with the `http1` or the `tls` feature. A server built with `http2` and
+    /// `tls` but without `http1` applies it to the TLS handshake alone.
+    ///
+    /// - `Limit::Default` - 30 seconds.
+    /// - `Limit::Limited(timeout)` - the given timeout. **Panics** if it is zero, which would
+    ///   close every connection whose head has not arrived with the first read.
+    /// - `Limit::Unlimited` - no timeout.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use std::time::Duration;
+    /// use volga::{App, Limit};
+    ///
+    /// let app = App::new().with_header_read_timeout(Limit::Limited(Duration::from_secs(10)));
+    /// ```
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    pub fn with_header_read_timeout(mut self, timeout: Limit<Duration>) -> Self {
+        if let Limit::Limited(timeout) = timeout {
+            assert!(
+                !timeout.is_zero(),
+                "header read timeout cannot be zero; use Limit::Unlimited to disable it"
+            );
+        }
+
+        self.header_read_timeout = timeout;
         self
     }
 
@@ -1133,13 +1188,18 @@ impl App {
             .await;
 
         #[cfg(feature = "tls")]
-        if let Some(acceptor) = app_instance.upgrade().and_then(|app| app.acceptor()) {
+        if let Some((acceptor, handshake_timeout)) = app_instance.upgrade().and_then(|app| {
+            app.acceptor()
+                .map(|acceptor| (acceptor, app.header_read_timeout))
+        }) {
             // The watcher is held from the moment the connection was accepted, and a handshake
             // is not a connection hyper can be told to wind down. One still in progress when
             // the accept loop breaks has sent no request yet, so it is dropped rather than
-            // waited for - otherwise a client that never finishes it holds up the shutdown
+            // waited for - otherwise a client that never finishes it holds up the shutdown.
+            // A client that never finishes it holds a connection the same way a client that
+            // never finishes the head of a request does, so the header read timeout bounds it
             let result = tokio::select! {
-                result = acceptor.accept(stream) => result,
+                result = within(handshake_timeout, acceptor.accept(stream)) => result,
                 _ = shutdown_tx.closed() => return,
             };
 
@@ -1147,7 +1207,11 @@ impl App {
                 Ok(tls_stream) => tls_stream,
                 Err(_err) => {
                     #[cfg(feature = "tracing")]
-                    tracing::error!("failed to perform tls handshake: {_err:#}");
+                    if _err.kind() == io::ErrorKind::TimedOut {
+                        tracing::debug!("tls handshake timed out");
+                    } else {
+                        tracing::error!("failed to perform tls handshake: {_err:#}");
+                    }
                     return;
                 }
             };
@@ -1164,6 +1228,21 @@ impl App {
 
         linger.close().await;
     }
+}
+
+/// Awaits `io`, failing with [`io::ErrorKind::TimedOut`] if it takes longer than `timeout`
+#[cfg(feature = "tls")]
+async fn within<T>(
+    timeout: Option<Duration>,
+    io: impl Future<Output = io::Result<T>>,
+) -> io::Result<T> {
+    let Some(timeout) = timeout else {
+        return io.await;
+    };
+
+    tokio::time::timeout(timeout, io)
+        .await
+        .unwrap_or_else(|_| Err(io::Error::new(io::ErrorKind::TimedOut, "timed out")))
 }
 
 #[inline]
@@ -1195,6 +1274,7 @@ fn create_tokio_runtime() -> Option<tokio::runtime::Runtime> {
 mod tests {
     use crate::http::request::request_body_limit::RequestBodyLimit;
     use crate::{App, Limit};
+    use std::time::Duration;
 
     #[test]
     fn it_creates_app_with_default_socket() {
@@ -1213,11 +1293,45 @@ mod tests {
         assert_eq!(app.shutdown_timeout, std::time::Duration::from_secs(10));
     }
 
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    #[test]
+    fn it_uses_default_header_read_timeout() {
+        let app = App::new();
+
+        assert_eq!(app.header_read_timeout, Limit::Default);
+    }
+
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    #[test]
+    fn it_sets_header_read_timeout() {
+        let app = App::new().with_header_read_timeout(Limit::Limited(Duration::from_secs(5)));
+
+        assert_eq!(
+            app.header_read_timeout,
+            Limit::Limited(Duration::from_secs(5))
+        );
+    }
+
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    #[test]
+    fn it_disables_header_read_timeout() {
+        let app = App::new().with_header_read_timeout(Limit::Unlimited);
+
+        assert_eq!(app.header_read_timeout, Limit::Unlimited);
+    }
+
+    #[cfg(any(feature = "http1", feature = "tls"))]
+    #[test]
+    #[should_panic(expected = "header read timeout cannot be zero")]
+    fn it_panics_on_zero_header_read_timeout() {
+        let _ = App::new().with_header_read_timeout(Limit::Limited(Duration::ZERO));
+    }
+
     #[test]
     fn it_sets_shutdown_timeout() {
-        let app = App::new().with_shutdown_timeout(std::time::Duration::from_millis(250));
+        let app = App::new().with_shutdown_timeout(Duration::from_millis(250));
 
-        assert_eq!(app.shutdown_timeout, std::time::Duration::from_millis(250));
+        assert_eq!(app.shutdown_timeout, Duration::from_millis(250));
     }
 
     #[test]

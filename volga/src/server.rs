@@ -23,6 +23,28 @@ pub(super) struct Server<I: Read + Write + Unpin> {
     peer_addr: SocketAddr,
 }
 
+/// Logs the error a connection ended with.
+///
+/// A client that did not send the head of a request within the header read timeout is
+/// routine - every HTTP/1 keep-alive connection left idle that long ends that way - so it is
+/// logged at `debug` rather than `error`.
+#[cfg(feature = "tracing")]
+fn log_connection_error(err: &(dyn std::error::Error + 'static)) {
+    if is_timeout(err) {
+        tracing::debug!("connection closed: {err:#}");
+    } else {
+        tracing::error!("error serving connection: {err:#}");
+    }
+}
+
+/// Whether `err`, or an error it was caused by, is a timeout reported by hyper
+#[cfg(feature = "tracing")]
+fn is_timeout(err: &(dyn std::error::Error + 'static)) -> bool {
+    std::iter::successors(Some(err), |err| err.source())
+        .filter_map(|err| err.downcast_ref::<hyper::Error>())
+        .any(hyper::Error::is_timeout)
+}
+
 impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
     #[inline]
     pub(super) fn new(io: I, peer_addr: SocketAddr) -> Self {

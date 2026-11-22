@@ -977,7 +977,7 @@ MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwn1I4TcBJ6EOlcz30oJJWCF1FXoK
         let hs256 = jsonwebtoken::encode(
             &JwtHeader::default(),
             &claims_without_iss(),
-            &jsonwebtoken::EncodingKey::from_secret(SECRET),
+            &jsonwebtoken::EncodingKey::from_secret(SECRET).unwrap(),
         )
         .unwrap();
         let refused = service.decode::<serde_json::Value>(Bearer(hs256.into()));

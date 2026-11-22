@@ -3,6 +3,8 @@ use crate::app::{AppEnv, scope::Scope};
 use crate::limits::{Http2Limits, Limit};
 use hyper::rt::{Read, Write};
 use hyper_util::rt::TokioExecutor;
+#[cfg(feature = "http1")]
+use hyper_util::rt::TokioTimer;
 use hyper_util::server::graceful::Watcher;
 use std::sync::Arc;
 
@@ -26,8 +28,15 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
             let mut connection_builder = Builder::new(TokioExecutor::new());
 
             #[cfg(feature = "http1")]
-            if let Limit::Limited(max_header_count) = env.max_header_count {
-                connection_builder.http1().max_headers(max_header_count);
+            {
+                connection_builder
+                    .http1()
+                    .timer(TokioTimer::new())
+                    .header_read_timeout(env.header_read_timeout);
+
+                if let Limit::Limited(max_header_count) = env.max_header_count {
+                    connection_builder.http1().max_headers(max_header_count);
+                }
             }
 
             let http2_builder = &mut connection_builder.http2();
@@ -50,7 +59,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
 
             if let Err(_err) = connection.await {
                 #[cfg(feature = "tracing")]
-                tracing::error!("error serving connection: {_err:#}");
+                super::log_connection_error(&*_err);
                 scoped_cancellation_token.cancel();
             }
         }
@@ -70,7 +79,7 @@ impl<I: Send + Read + Write + Unpin + 'static> Server<I> {
 
             if let Err(_err) = connection.await {
                 #[cfg(feature = "tracing")]
-                tracing::error!("error serving connection: {_err:#}");
+                super::log_connection_error(&_err);
                 scoped_cancellation_token.cancel();
             }
         }

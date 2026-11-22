@@ -53,9 +53,42 @@ macro_rules! jwt_key {
             #[doc = concat!("Builds an HMAC key from a raw byte slice.")]
             ///
             /// Use with `HS256`, `HS384`, or `HS512`.
+            ///
+            /// Equivalent to `try_from_secret(secret).expect(...)`. Panics if
+            /// `secret` is empty: with an empty key anyone can sign a token
+            /// the server accepts. Intended for startup configuration where
+            /// failing fast is preferred.
             #[inline]
             pub fn from_secret(secret: &[u8]) -> Self {
-                Self(jsonwebtoken::$inner::from_secret(secret))
+                Self::try_from_secret(secret).unwrap_or_else(|e| panic!("{e}"))
+            }
+
+            #[doc = concat!("Builds an HMAC key from a raw byte slice.")]
+            ///
+            /// Use with `HS256`, `HS384`, or `HS512`.
+            ///
+            /// Returns an error if `secret` is empty.
+            ///
+            /// # Example
+            /// ```no_run
+            #[doc = concat!("use volga::auth::", stringify!($name), ";")]
+            ///
+            #[doc = concat!(
+                "let key = ", stringify!($name), "::try_from_secret(b\"my-secret\")?;"
+            )]
+            /// # Ok::<(), volga::error::Error>(())
+            /// ```
+            #[inline]
+            pub fn try_from_secret(secret: &[u8]) -> Result<Self, $crate::error::Error> {
+                if secret.is_empty() {
+                    return Err($crate::error::Error::server_error(
+                        "an HMAC secret cannot be empty",
+                    ));
+                }
+
+                jsonwebtoken::$inner::from_secret(secret)
+                    .map(Self)
+                    .map_err($crate::error::Error::from_jwt_error)
             }
 
             /// Builds an HMAC key by base64-decoding a string.
@@ -101,7 +134,7 @@ macro_rules! jwt_key {
             /// Reads the env var `name` and builds an HMAC key from its bytes.
             ///
             /// Equivalent to `try_from_env(name).expect(...)`. Panics if the
-            /// variable is missing or not valid UTF-8. Intended for startup
+            /// variable is missing, empty or not valid UTF-8. Intended for startup
             /// configuration where failing fast is preferred.
             ///
             /// # Example
@@ -118,7 +151,7 @@ macro_rules! jwt_key {
             /// Reads the env var `name` and builds an HMAC key from its bytes.
             ///
             /// Returns an error with a message that includes the variable
-            /// name if the variable is missing or not valid UTF-8.
+            /// name if the variable is missing, empty or not valid UTF-8.
             ///
             /// # Example
             /// ```no_run
@@ -132,7 +165,13 @@ macro_rules! jwt_key {
             #[inline]
             pub fn try_from_env(name: &str) -> Result<Self, $crate::error::Error> {
                 let value = $crate::auth::key::read_env_var(name)?;
-                Ok(Self::from_secret(value.as_bytes()))
+                if value.is_empty() {
+                    return Err($crate::error::Error::server_error(format!(
+                        "{name} env var is empty"
+                    )));
+                }
+
+                Self::try_from_secret(value.as_bytes())
             }
 
             /// Reads the env var `name` and base64-decodes it into an HMAC key.
@@ -163,7 +202,8 @@ macro_rules! jwt_key {
             /// Reads the file at `path` and builds an HMAC key from its raw
             /// bytes.
             ///
-            /// Panics on I/O errors. Intended for startup configuration.
+            /// Panics on I/O errors and on an empty file. Intended for startup
+            /// configuration.
             ///
             /// # Example
             /// ```no_run
@@ -180,12 +220,22 @@ macro_rules! jwt_key {
 
             /// Reads the file at `path` and builds an HMAC key from its raw
             /// bytes.
+            ///
+            /// Returns an error if the file cannot be read or is empty.
             #[inline]
             pub fn try_from_file<P: AsRef<std::path::Path>>(
                 path: P,
             ) -> Result<Self, $crate::error::Error> {
-                let bytes = $crate::auth::key::read_key_file(path.as_ref())?;
-                Ok(Self::from_secret(&bytes))
+                let path = path.as_ref();
+                let bytes = $crate::auth::key::read_key_file(path)?;
+                if bytes.is_empty() {
+                    return Err($crate::error::Error::server_error(format!(
+                        "key file {} is empty",
+                        path.display()
+                    )));
+                }
+
+                Self::try_from_secret(&bytes)
             }
 
             /// Reads the PEM file at `path` and auto-detects the key format
@@ -257,6 +307,7 @@ macro_rules! jwt_key_tests {
         #[test]
         fn it_creates_from_secrets() {
             let _ = $name::from_secret(SECRET);
+            assert!($name::try_from_secret(SECRET).is_ok());
             assert!($name::from_base64_secret(SECRET_B64).is_ok());
             assert!($name::from_base64_secret("not valid base64!!!").is_err());
         }
@@ -286,6 +337,28 @@ macro_rules! jwt_key_tests {
             // ...and CARGO_PKG_NAME is not valid base64
             assert!($name::try_from_env_base64("CARGO_PKG_NAME").is_err());
             assert!($name::try_from_env_base64("VOLGA_TEST_KEY_B64_MISSING_XYZ").is_err());
+        }
+
+        #[test]
+        fn it_refuses_an_empty_secret() {
+            let err = $name::try_from_secret(b"").unwrap_err();
+            assert_eq!(
+                err.status(),
+                $crate::http::StatusCode::INTERNAL_SERVER_ERROR
+            );
+            assert!(err.to_string().contains("cannot be empty"), "got: {err}");
+
+            let path = temp_path("empty", "key");
+            std::fs::write(&path, b"").unwrap();
+            let err = $name::try_from_file(&path).unwrap_err().to_string();
+            std::fs::remove_file(&path).ok();
+            assert!(err.contains("is empty"), "got: {err}");
+        }
+
+        #[test]
+        #[should_panic(expected = "an HMAC secret cannot be empty")]
+        fn it_panics_on_an_empty_secret() {
+            let _ = $name::from_secret(b"");
         }
 
         #[test]

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+# 0.15.1
+
+## Added
+* `App::with_header_read_timeout` sets how long a client has to send the head of a request, 30 seconds by default, and `Limit::Unlimited` turns it off; `header_read_timeout_secs` in the `[server]` section of a config file sets it too, `0` for no timeout. With TLS it bounds the handshake as well. HTTP/2 has no such timer, so the setting exists with the `http1` or the `tls` feature, and a server built with `http2` and `tls` alone applies it to the handshake. (#313)
+* `EncodingKey::try_from_secret` and `DecodingKey::try_from_secret` build an HMAC key and return an error for an empty secret, as `try_from_env` does for a missing variable.
+
+## Changed
+* `EncodingKey::from_secret` and `DecodingKey::from_secret` panic on an empty secret, as `from_env` does on a missing variable: with an empty key anyone can sign a token the server accepts. They are called where the authentication is configured, before the server starts, so a misconfigured secret - an env var read with a fallback to `""`, say - stops the start instead of serving. `try_from_env`, `try_from_file` and their panicking forms refuse an empty variable or file the same way. jsonwebtoken 12 rejects empty HMAC keys, and the signatures stay as they were.
+
+## Security
+* A client sending the head of a request a byte at a time could hold its connection for as long as it liked, and a client that never finished a TLS handshake likewise, so a few of them took every permit of `with_max_connections`. hyper has a header read timeout of 30 seconds, but it only runs with a timer set on the connection, and volga set none. It sets one now, and the timeout applies. The timer runs whenever the server waits for a request, so it also closes an HTTP/1 keep-alive connection left idle for that long between requests; it does not run while a handler works or a body is read. A connection that ends that way is logged at `debug` rather than `error`. (#313)
+* `jsonwebtoken` 11.1 -> 12.0, which fixes remaining type confusion of the `sub`, `iss` and `aud` claims and rejects tokens with unknown critical header extensions (`crit`).
+
 # 0.15.0
 
 ## Added
