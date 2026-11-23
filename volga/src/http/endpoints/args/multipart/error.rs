@@ -15,6 +15,11 @@ impl MultipartError {
         Error::client_error("Multipart error: file name is missing")
     }
 
+    #[inline]
+    pub(super) fn invalid_file_name() -> Error {
+        Error::client_error("Multipart error: the file name is not a valid file name")
+    }
+
     /// The multipart could not be read
     #[inline]
     pub(super) fn read_error(error: multer::Error) -> Error {

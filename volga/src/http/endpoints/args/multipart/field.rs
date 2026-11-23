@@ -18,6 +18,9 @@ pub struct Field(pub(super) multer::Field<'static>);
 
 impl Field {
     /// Tries to read a file name, if it's not present tries to read a field name, otherwise returns [`Error`]
+    ///
+    /// It is the client's name, as sent: it may hold `/`, `\` or `..`. [`save`](Self::save)
+    /// keeps it inside its folder; a path built from it by hand has to do the same.
     #[inline]
     pub fn try_get_file_name(&self) -> Result<&str, Error> {
         self.0
@@ -46,6 +49,11 @@ impl Field {
 
     /// Asynchronously writes a multipart field as a file stream to disk with a name taken from `CONTENT_DISPOSITION` header
     ///
+    /// The file goes into the `path` folder whatever the name: only what follows its last
+    /// `/` or `\` is used, so `../../etc/passwd` is saved as `passwd`. A name with nothing
+    /// usable left, such as `..` or one ending in a separator, is answered with
+    /// `400 Bad Request`, as a missing one is.
+    ///
     /// # Example
     /// ```no_run
     /// use volga::{HttpResult, Multipart, ok};
@@ -60,6 +68,8 @@ impl Field {
     #[inline]
     pub async fn save(self, path: impl AsRef<Path>) -> Result<(), std::io::Error> {
         let file_name = self.try_get_file_name()?;
+        let file_name =
+            crate::fs::file_name_in_folder(file_name).ok_or(MultipartError::invalid_file_name())?;
         let file_path = path.as_ref().join(file_name);
         self.save_as(file_path).await
     }

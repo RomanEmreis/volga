@@ -1,4 +1,5 @@
-//! Percent-decoding of a request path
+//! Percent-decoding of a request path, and of the `filename*` of a `Content-Disposition`
+//! (RFC 8187 Section 3.2.1), whose escapes follow the same rules
 //!
 //! A path is decoded one segment at a time, after it has been split on the separators it
 //! was written with - so an encoded separator, `%2F`, never starts a segment of its own,

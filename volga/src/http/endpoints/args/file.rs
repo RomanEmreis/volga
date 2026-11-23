@@ -1,12 +1,15 @@
 //! Extractors for file stream
 
-use crate::{ByteStream, error::Error, headers::CONTENT_DISPOSITION};
+use crate::{
+    ByteStream, error::Error, fs::file_name_in_folder, headers::CONTENT_DISPOSITION,
+    headers::content_disposition::parse_filename,
+};
 use bytes::Bytes;
 use futures_util::future::{Ready, ok};
 use futures_util::{TryFutureExt, TryStreamExt};
 use http_body_util::BodyExt;
 use hyper::body::Body;
-use std::path::Path;
+use std::{borrow::Cow, path::Path};
 use tokio::io::{AsyncWriteExt, BufWriter};
 
 use crate::http::{
@@ -42,19 +45,25 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> std::fmt::Debug for FileStrea
 
 impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     /// Create a new file stream
-    fn new(name: Option<&str>, stream: B) -> Self {
-        Self {
-            name: name.map(|s| s.to_string()),
-            stream,
-        }
+    fn new(name: Option<String>, stream: B) -> Self {
+        Self { name, stream }
     }
 
-    /// Returns a file name
+    /// Returns the file name from the request's [`CONTENT_DISPOSITION`] header: `filename*`
+    /// when it is there, `filename` otherwise, unquoted.
+    ///
+    /// It is the client's name, as sent: it may hold `/`, `\` or `..`. [`save`](Self::save)
+    /// keeps it inside its folder; a path built from it by hand has to do the same.
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
     }
 
     /// Asynchronously writes a file stream to disk with a name taken from [`CONTENT_DISPOSITION`] header
+    ///
+    /// The file goes into the `path` folder whatever the name: only what follows its last
+    /// `/` or `\` is used, so `../../etc/passwd` is saved as `passwd`. A name with nothing
+    /// usable left, such as `..` or one ending in a separator, is answered with
+    /// `400 Bad Request`, as a missing one is.
     ///
     /// # Example
     /// ```no_run
@@ -69,6 +78,7 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     #[inline]
     pub async fn save(self, path: impl AsRef<Path>) -> Result<(), Error> {
         let file_name = self.name().ok_or(FileStreamError::missing_name())?;
+        let file_name = file_name_in_folder(file_name).ok_or(FileStreamError::invalid_name())?;
         let file_path = path.as_ref().join(file_name);
 
         self.save_as(file_path).await
@@ -115,19 +125,6 @@ impl<B: Body<Data = Bytes, Error = Error> + Unpin> FileStream<B> {
     ) -> ByteStream<impl futures_util::Stream<Item = Result<Bytes, Error>>> {
         ByteStream::new(self.into_stream())
     }
-
-    #[inline]
-    fn parse_file_name(content_disposition: &str) -> Option<&str> {
-        let parts: Vec<&str> = content_disposition.split(';').collect();
-        for part in parts {
-            let part = part.trim();
-            if part.starts_with("filename=") {
-                let file_name = part.trim_start_matches("filename=").trim_matches('"');
-                return Some(file_name);
-            }
-        }
-        None
-    }
 }
 
 /// Extracts a file stream from the request body
@@ -141,11 +138,14 @@ impl FromPayload for File {
         let Payload::Full(parts, body) = payload else {
             unreachable!()
         };
+
         let name = parts
             .headers
             .get(&CONTENT_DISPOSITION)
-            .and_then(|header| header.to_str().ok())
-            .and_then(Self::parse_file_name);
+            .and_then(|header| std::str::from_utf8(header.as_bytes()).ok())
+            .and_then(parse_filename)
+            .map(Cow::into_owned);
+
         ok(FileStream::new(name, body))
     }
 
@@ -170,6 +170,11 @@ impl FileStreamError {
         Error::client_error(
             "File Stream error: file name is missing in the \"Content-Disposition\" header",
         )
+    }
+
+    #[inline]
+    fn invalid_name() -> Error {
+        Error::client_error("File Stream error: the file name is not a valid file name")
     }
 }
 
@@ -233,5 +238,75 @@ mod tests {
         assert_eq!(content.len(), 33);
 
         tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    fn request_with_name(content_disposition: &str) -> hyper::http::request::Parts {
+        let (parts, _) = Request::get("/")
+            .header(CONTENT_DISPOSITION, content_disposition)
+            .body(())
+            .unwrap()
+            .into_parts();
+        parts
+    }
+
+    async fn file_stream(content_disposition: &str) -> FileStream<HttpBody> {
+        let parts = request_with_name(content_disposition);
+        FileStream::from_payload(Payload::Full(&parts, HttpBody::full("content")))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn it_reads_an_escaped_or_ext_name() {
+        let stream = file_stream(r#"attachment; filename="a\"b.txt""#).await;
+        assert_eq!(stream.name(), Some("a\"b.txt"));
+
+        let stream = file_stream(
+            "attachment; filename=\"r_sum_.pdf\"; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf",
+        )
+        .await;
+        assert_eq!(stream.name(), Some("résumé.pdf"));
+
+        let stream = file_stream("attachment; filename=\"résumé.pdf\"").await;
+        assert_eq!(stream.name(), Some("résumé.pdf"));
+    }
+
+    #[tokio::test]
+    async fn it_saves_inside_the_folder_whatever_the_name() {
+        let outer = tempfile::tempdir().unwrap();
+        let inner = outer.path().join("inner");
+        tokio::fs::create_dir(&inner).await.unwrap();
+
+        for name in ["../escape.txt", "/escape.txt", "..\\escape.txt"] {
+            let header = format!("attachment; filename=\"{}\"", name.replace('\\', "\\\\"));
+            file_stream(&header).await.save(&inner).await.unwrap();
+
+            assert!(inner.join("escape.txt").exists(), "{name}");
+            assert!(!outer.path().join("escape.txt").exists(), "{name}");
+            tokio::fs::remove_file(inner.join("escape.txt"))
+                .await
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn it_refuses_a_name_with_nothing_usable_left() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for name in ["..", ".", "a/", ""] {
+            let header = format!("attachment; filename=\"{name}\"");
+            let err = file_stream(&header)
+                .await
+                .save(dir.path())
+                .await
+                .unwrap_err();
+            assert_eq!(err.status(), 400, "{name}");
+        }
+
+        let err = FileStream::new(None, HttpBody::full("x"))
+            .save(dir.path())
+            .await
+            .unwrap_err();
+        assert_eq!(err.status(), 400);
     }
 }
