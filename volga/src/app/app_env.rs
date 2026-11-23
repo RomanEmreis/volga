@@ -11,11 +11,6 @@ use std::io::Error;
 #[cfg(any(feature = "http1", feature = "tls"))]
 use std::time::Duration;
 
-/// How long a client has to send the head of a request when
-/// [`App::with_header_read_timeout`] is not set
-#[cfg(any(feature = "http1", feature = "tls"))]
-const DEFAULT_HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
-
 #[cfg(any(
     feature = "tls",
     feature = "rate-limiting",
@@ -245,10 +240,11 @@ impl TryFrom<App> for AppEnv {
             max_header_count: app.max_header_count,
             max_header_size: app.max_header_size,
             #[cfg(any(feature = "http1", feature = "tls"))]
+            // Off unless set: hyper makes a new timer for every request head, and registering
+            // it locks the timer wheel that all workers share (see `with_header_read_timeout`)
             header_read_timeout: match app.header_read_timeout {
-                Limit::Default => Some(DEFAULT_HEADER_READ_TIMEOUT),
                 Limit::Limited(timeout) => Some(timeout),
-                Limit::Unlimited => None,
+                Limit::Default | Limit::Unlimited => None,
             },
             cache_control: default_cache_control,
             #[cfg(any(
@@ -354,7 +350,7 @@ mod tests {
             env.header_read_timeout
         };
 
-        assert_eq!(resolve(Limit::Default), Some(Duration::from_secs(30)));
+        assert_eq!(resolve(Limit::Default), None);
         assert_eq!(
             resolve(Limit::Limited(Duration::from_secs(5))),
             Some(Duration::from_secs(5))
