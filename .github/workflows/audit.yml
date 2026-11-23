@@ -1,0 +1,31 @@
+name: Security audit
+
+# New RustSec advisories against the dependencies `main` already has. The
+# `audit` job in `rust.yml` audits only changes that touch dependencies, so
+# this is where an advisory published against an existing one shows up: the
+# run fails, and GitHub notifies whoever last changed the schedule below.
+#
+# Plain `cargo audit` rather than `rustsec/audit-check`: on a schedule that
+# action opens an issue per advisory, informational ones included, and leaves
+# the run green.
+on:
+  schedule:
+    # 01:00 UTC, 05:00 GMT+4.
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Security audit
+        run: cargo audit
