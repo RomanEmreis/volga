@@ -28,28 +28,34 @@ jobs:
   # `format_check`'s result itself.
   #
   # Only the jobs with nothing upstream but `format_check` are gated; `build`, `test`,
-  # `cross_platform` and `coverage` are skipped with them. `format_check` and `audit` always
-  # run: the path check reads every file name, documentation included, and an advisory can
-  # be published against a `Cargo.lock` nobody changed.
+  # `cross_platform` and `coverage` are skipped with them. `format_check` always runs: the
+  # path check reads every file name, documentation included. `audit` always runs as a job,
+  # but audits only a change that touches a manifest, a lockfile or this workflow (`deps`,
+  # which fails open the same way): an advisory published against a dependency `main`
+  # already has is not the change's doing, and it used to fail every open pull request
+  # until `main` moved off it. The daily run in `audit.yml` catches those.
   #
   # `fuzz.yml` skips documentation-only pull requests too, by the same list.
   changes:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      deps: ${{ steps.diff.outputs.deps }}
     steps:
       - uses: actions/checkout@v4
         with:
           # A pull request checks out the merge commit GitHub tests, and its first parent
           # is the base branch as it stands - so the two commits are all the diff needs
           fetch-depth: 2
-      - name: Tell code changes from documentation ones
+      - name: Tell code and dependency changes from documentation ones
         id: diff
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           # Keep in step with `paths-ignore` in fuzz.yml
           DOCS_ONLY: '^(.*\.md|LICENSE|\.github/CODEOWNERS|\.github/ISSUE_TEMPLATE/.*)$'
+          # What `audit` has to look at: a manifest, a lockfile, or this workflow
+          DEPS: '(^|/)Cargo\.(toml|lock)$|^\.github/workflows/rust\.yml$'
         run: |
           set -uo pipefail
 
@@ -67,6 +73,7 @@ jobs:
           esac
 
           code=true
+          deps=true
           # `--no-renames` lists both sides of a rename, so moving a source file under
           # `docs/` still counts as a code change
           if [ -n "$base" ] && files="$(git diff --no-renames --name-only "$base" HEAD)"; then
@@ -77,11 +84,16 @@ jobs:
               code=false
               echo "::notice::Documentation changed alone; the build, lint and test jobs are skipped."
             fi
+            if ! grep -qE "$DEPS" <<< "$files"; then
+              deps=false
+              echo "::notice::No manifest, lockfile or workflow change; the daily audit covers the dependencies."
+            fi
           else
             echo "No diff to read for a '$EVENT' event; running everything."
           fi
 
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "deps=$deps" >> "$GITHUB_OUTPUT"
 
   format_check:
     runs-on: ubuntu-latest
@@ -196,7 +208,10 @@ jobs:
 
   audit:
     runs-on: ubuntu-latest
-    needs: format_check
+    needs: [format_check, changes]
+    # The job always runs, since `audit` is a required check; whether it audits anything is
+    # up to `changes` (see there), and a failed `changes` leaves `deps` empty, so it audits
+    if: ${{ !cancelled() && needs.format_check.result == 'success' }}
 
     # audit-check publishes results via the Checks API; without `checks: write`
     # it fails hard on push and silently passes on pull_request.
@@ -207,6 +222,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Security audit
+        if: ${{ needs.changes.outputs.deps != 'false' }}
         uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}

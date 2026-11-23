@@ -230,7 +230,7 @@ pub struct App {
 
     /// How long a client has to send the head of a request, and to complete a TLS handshake.
     ///
-    /// Default: 30 seconds
+    /// Default: no timeout
     #[cfg(any(feature = "http1", feature = "tls"))]
     header_read_timeout: Limit<Duration>,
 
@@ -654,10 +654,17 @@ impl App {
     /// steps has the whole timeout. Past its preface an HTTP/2 connection is not timed: its
     /// requests are frames on a connection that has already been set up.
     ///
+    /// It is off by default, since the timer has a price on every request: hyper makes a new
+    /// one for each request head and registers it with the timer wheel of the runtime, which
+    /// every worker locks. That halved the throughput of a plain-text HTTP/1 benchmark at
+    /// about a million requests a second (hyper 1.12, tokio 1.54); a server that does more
+    /// work per request loses a smaller share. A server behind a proxy that bounds slow
+    /// clients itself does not need it.
+    ///
     /// Available with the `http1` or the `tls` feature. A server built with `http2` and
     /// `tls` but without `http1` applies it to the TLS handshake and the HTTP/2 preface.
     ///
-    /// - `Limit::Default` - 30 seconds.
+    /// - `Limit::Default` - no timeout.
     /// - `Limit::Limited(timeout)` - the given timeout. **Panics** if it is zero, which would
     ///   close every connection whose head has not arrived with the first read.
     /// - `Limit::Unlimited` - no timeout.
