@@ -3,6 +3,7 @@
 use super::{
     CacheControl, ContentType, Header,
     cache_control::{NO_CACHE, NO_STORE, PRIVATE, PUBLIC},
+    params::push_quoted,
 };
 
 #[cfg(feature = "static-files")]
@@ -92,18 +93,19 @@ impl ContentType {
         subtype: &str,
         boundary: &str,
     ) -> Result<Header<Self>, crate::error::Error> {
-        let value = if boundary_needs_quoting(boundary) {
-            format!("multipart/{subtype}; boundary=\"{boundary}\"")
+        let mut value = format!("multipart/{subtype}; boundary=");
+        if boundary_needs_quoting(boundary) {
+            push_quoted(&mut value, boundary.chars());
         } else {
-            format!("multipart/{subtype}; boundary={boundary}")
-        };
+            value.push_str(boundary);
+        }
+
         Self::from_bytes(value.as_bytes())
     }
 }
 
 /// Returns `true` if `value` contains any RFC 2045 tspecial or whitespace and must
-/// therefore be wrapped in `"..."` when used as a Content-Type parameter value.
-/// The validated boundary alphabet excludes `"` and `\`, so simple wrapping is safe.
+/// therefore be written as a quoted-string when used as a Content-Type parameter value.
 #[inline]
 fn boundary_needs_quoting(value: &str) -> bool {
     value.bytes().any(|b| {
@@ -354,6 +356,12 @@ mod multipart_content_type_tests {
     fn boundary_with_internal_space_is_quoted() {
         let h = ContentType::multipart_form_data("with space");
         assert_eq!(h.as_ref(), "multipart/form-data; boundary=\"with space\"");
+    }
+
+    #[test]
+    fn boundary_with_quote_or_backslash_is_escaped() {
+        let h = ContentType::multipart_custom("mixed", r#"a"b\c"#).unwrap();
+        assert_eq!(h.as_ref(), r#"multipart/mixed; boundary="a\"b\\c""#);
     }
 
     #[test]

@@ -39,7 +39,7 @@ pub use self::etag::ETagSource;
 pub use volga_macros::http_header;
 
 pub mod cache_control;
-mod content_disposition;
+pub(crate) mod content_disposition;
 pub mod encoding;
 pub mod etag;
 pub mod extract;
@@ -47,6 +47,7 @@ pub mod header;
 pub(crate) mod helpers;
 mod known_headers;
 pub mod macros;
+pub(crate) mod params;
 pub mod quality;
 
 /// Identifying the originating IP address of a client connecting to a web server through a proxy server.

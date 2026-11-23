@@ -4,7 +4,7 @@ pub use field::Field;
 pub use part::{Part, PartBody};
 
 use crate::error::Error;
-use crate::headers::{CONTENT_TYPE, HeaderMap};
+use crate::headers::{CONTENT_TYPE, HeaderMap, params::params};
 use error::MultipartError;
 use futures_util::future::{Ready, ready};
 
@@ -164,27 +164,16 @@ impl Multipart {
     /// not confuse the match - the parameter name lookup is structural, not textual.
     fn parse_boundary(headers: &HeaderMap) -> Option<String> {
         let content_type = headers.get(CONTENT_TYPE)?.to_str().ok()?;
-        let trimmed = content_type.trim_start();
-        let (ty, after_slash) = trimmed.split_once('/')?;
+        let (ty, after_slash) = content_type.trim_start().split_once('/')?;
         if !ty.eq_ignore_ascii_case("multipart") {
             return None;
         }
+
         // Skip the subtype to the first ';'; absent ';' means no parameters at all.
-        let mut rest = after_slash.split_once(';')?.1;
-        loop {
-            rest = trim_ows(rest);
-            if rest.is_empty() {
-                return None;
-            }
-            let (name, after_eq) = rest.split_once('=')?;
-            let name = name.trim();
-            let (value, tail) = parse_param_value(trim_ows(after_eq))?;
-            if name.eq_ignore_ascii_case("boundary") {
-                return if value.is_empty() { None } else { Some(value) };
-            }
-            // Advance past the trailing ';' (if any) to the next parameter.
-            rest = trim_ows(tail).strip_prefix(';')?;
-        }
+        let (_, rest) = after_slash.split_once(';')?;
+        let (_, boundary) = params(rest).find(|(name, _)| name.eq_ignore_ascii_case("boundary"))?;
+        let boundary = boundary.value();
+        (!boundary.is_empty()).then(|| boundary.into_owned())
     }
 
     #[inline]
@@ -372,38 +361,6 @@ impl FromPayload for Multipart {
 /// Forwards every per-part header verbatim - `Content-Type`, `Content-Disposition`
 /// (preserving `filename*` and other parameters), `Content-Range`, plus any custom
 /// header - so proxy / forwarding flows produce a semantically-equivalent body.
-/// Strips RFC 7230 OWS (optional whitespace: SP / HTAB) from the front of `s`.
-#[inline]
-fn trim_ows(s: &str) -> &str {
-    s.trim_start_matches([' ', '\t'])
-}
-
-/// Parses a Content-Type parameter value at the start of `s`. Handles either a
-/// `token` (consumed up to the next `;` or end) or a `quoted-string` per RFC 7230
-/// (with backslash-quoted-pair escapes). Returns the unquoted value and the
-/// remainder of the input after the value.
-fn parse_param_value(s: &str) -> Option<(String, &str)> {
-    if let Some(after_quote) = s.strip_prefix('"') {
-        let mut value = String::new();
-        let mut chars = after_quote.char_indices();
-        while let Some((idx, c)) = chars.next() {
-            match c {
-                '"' => return Some((value, &after_quote[idx + c.len_utf8()..])),
-                '\\' => match chars.next() {
-                    Some((_, esc)) => value.push(esc),
-                    None => return None,
-                },
-                other => value.push(other),
-            }
-        }
-        None
-    } else {
-        let end = s.find(';').unwrap_or(s.len());
-        let value = s[..end].trim_end_matches([' ', '\t']).to_owned();
-        Some((value, &s[end..]))
-    }
-}
-
 fn field_to_part(mut field: multer::Field<'static>) -> Part {
     use crate::headers::{ContentDisposition, ContentType, Header};
 
@@ -525,6 +482,53 @@ mod tests {
 
         while let Some(field) = multipart.next_field().await.unwrap() {
             assert_eq!(field.try_get_file_name().unwrap(), "my_text_field");
+        }
+    }
+
+    fn multipart_with_file_name(file_name: &str) -> Request<HttpBody> {
+        let data = format!(
+            "--X-BOUNDARY\r\nContent-Disposition: form-data; name=\"f\"; filename=\"{file_name}\"\r\n\r\nabcd\r\n--X-BOUNDARY--\r\n"
+        );
+
+        Request::get("/")
+            .header(CONTENT_TYPE, "multipart/form-data; boundary=X-BOUNDARY")
+            .body(HttpBody::full(data))
+            .unwrap()
+    }
+
+    async fn first_field(file_name: &str) -> super::Field {
+        let (parts, body) = multipart_with_file_name(file_name).into_parts();
+        let mut multipart = Multipart::from_payload(Payload::Full(&parts, body))
+            .await
+            .unwrap();
+        multipart.next_field().await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn it_saves_a_field_inside_the_folder_whatever_the_name() {
+        let outer = tempfile::tempdir().unwrap();
+        let inner = outer.path().join("inner");
+        tokio::fs::create_dir(&inner).await.unwrap();
+
+        for name in ["../escape.txt", "/escape.txt", "a/b/escape.txt"] {
+            first_field(name).await.save(&inner).await.unwrap();
+
+            assert!(inner.join("escape.txt").exists(), "{name}");
+            assert!(!outer.path().join("escape.txt").exists(), "{name}");
+            tokio::fs::remove_file(inner.join("escape.txt"))
+                .await
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn it_refuses_a_field_name_with_nothing_usable_left() {
+        let dir = tempfile::tempdir().unwrap();
+
+        for name in ["..", "a/"] {
+            let err = first_field(name).await.save(dir.path()).await.unwrap_err();
+            let err = crate::error::Error::from(err);
+            assert_eq!(err.status(), 400, "{name}");
         }
     }
 
