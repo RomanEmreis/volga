@@ -102,7 +102,7 @@ impl Part {
         let body: PartBody = value.into().into();
         Ok(Self {
             content_type: Some(ContentType::text_utf_8()),
-            content_disposition: Some(make_form_disposition(name.as_ref(), None)?),
+            content_disposition: Some(ContentDisposition::form_data(name.as_ref(), None)?),
             extra: None,
             body,
         })
@@ -123,7 +123,7 @@ impl Part {
     pub fn try_bytes(name: impl AsRef<str>, bytes: impl Into<Bytes>) -> Result<Self, Error> {
         Ok(Self {
             content_type: Some(ContentType::stream()),
-            content_disposition: Some(make_form_disposition(name.as_ref(), None)?),
+            content_disposition: Some(ContentDisposition::form_data(name.as_ref(), None)?),
             extra: None,
             body: PartBody::Bytes(bytes.into()),
         })
@@ -152,7 +152,10 @@ impl Part {
             .unwrap_or_else(|_| ContentType::stream());
         Ok(Self {
             content_type: Some(ct),
-            content_disposition: Some(make_form_disposition(name.as_ref(), Some(filename_str))?),
+            content_disposition: Some(ContentDisposition::form_data(
+                name.as_ref(),
+                Some(filename_str),
+            )?),
             extra: None,
             body: PartBody::Bytes(bytes.into()),
         })
@@ -189,7 +192,7 @@ impl Part {
     {
         Ok(Self {
             content_type: Some(content_type),
-            content_disposition: Some(make_form_disposition(
+            content_disposition: Some(ContentDisposition::form_data(
                 name.as_ref(),
                 Some(filename.as_ref()),
             )?),
@@ -217,7 +220,7 @@ impl Part {
     /// Fallible counterpart of [`Part::with_disposition`]. Returns `Err` if `name` or
     /// `filename` contains bytes that are invalid in an HTTP header value.
     pub fn try_with_disposition(self, name: &str, filename: Option<&str>) -> Result<Self, Error> {
-        Ok(self.with_disposition_raw(make_form_disposition(name, filename)?))
+        Ok(self.with_disposition_raw(ContentDisposition::form_data(name, filename)?))
     }
 
     /// Sets the Content-Disposition header verbatim - for cases not covered by the
@@ -269,36 +272,6 @@ impl Part {
     #[inline]
     pub(super) fn into_body(self) -> PartBody {
         self.body
-    }
-}
-
-/// Builds a `Content-Disposition` header value of the form
-/// `form-data; name="<name>"[; filename="<filename>"]` with backslash-escaping
-/// of `"` and `\` in the parameter values per RFC 7578 / RFC 2183.
-/// Returns `Err` if `name` or `filename` contains bytes that aren't valid in an HTTP
-/// header value (e.g. CR / LF / NUL).
-pub(super) fn make_form_disposition(
-    name: &str,
-    filename: Option<&str>,
-) -> Result<Header<ContentDisposition>, Error> {
-    let mut s = String::with_capacity(32);
-    s.push_str("form-data; name=\"");
-    escape_disposition_param(&mut s, name);
-    s.push('"');
-    if let Some(fname) = filename {
-        s.push_str("; filename=\"");
-        escape_disposition_param(&mut s, fname);
-        s.push('"');
-    }
-    Header::<ContentDisposition>::from_bytes(s.as_bytes())
-}
-
-fn escape_disposition_param(out: &mut String, value: &str) {
-    for ch in value.chars() {
-        if ch == '"' || ch == '\\' {
-            out.push('\\');
-        }
-        out.push(ch);
     }
 }
 
