@@ -236,7 +236,7 @@ fn limited_decompressed_stream<R>(
 where
     R: TryStream<Ok = bytes::Bytes, Error = std::io::Error>,
 {
-    stream.map_err(Into::into).and_then(move |chunk| {
+    stream.map_err(decoder_error).and_then(move |chunk| {
         let decompressed = state.add_decompressed(chunk.len());
         let compressed = state.compressed();
 
@@ -250,6 +250,21 @@ where
 
         ready(res)
     })
+}
+
+/// Turns an error of the decoder into the error of the body
+///
+/// What the decoder passes on from the compressed side - a decompression limit, the body
+/// limit, a body that failed to arrive - comes wrapped by `StreamReader` and keeps its status.
+/// Anything else the decoder raised itself, on a body that is not a valid stream of its
+/// encoding: garbage or a stream cut short, a client error whatever `ErrorKind` the codec
+/// gives it (`Other`, `UnexpectedEof` or `InvalidData`, depending on the codec and the fault).
+#[inline]
+fn decoder_error(err: std::io::Error) -> Error {
+    match err.into_inner().map(|inner| inner.downcast::<Error>()) {
+        Some(Ok(error)) => *error,
+        _ => DecompressionError::InvalidCompressedBody.into(),
+    }
 }
 
 #[inline]
@@ -284,6 +299,7 @@ enum DecompressionError {
     CompressedBodyTooLarge,
     DecompressedBodyTooLarge,
     ExpansionRatioExceeded,
+    InvalidCompressedBody,
 }
 
 impl Display for DecompressionError {
@@ -296,11 +312,13 @@ impl Display for DecompressionError {
 impl crate::error::IntoError for DecompressionError {
     #[inline]
     fn into_error(self) -> Error {
-        Error::from_parts(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            None,
-            format!("Decompression error: {self}"),
-        )
+        let status = match self {
+            Self::InvalidCompressedBody => StatusCode::BAD_REQUEST,
+            Self::CompressedBodyTooLarge
+            | Self::DecompressedBodyTooLarge
+            | Self::ExpansionRatioExceeded => StatusCode::PAYLOAD_TOO_LARGE,
+        };
+        Error::from_parts(status, None, format!("Decompression error: {self}"))
     }
 }
 
@@ -330,6 +348,18 @@ mod tests {
             body.collect().await.unwrap().to_bytes(),
             Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}")
         );
+    }
+
+    /// A large-window stream (marker `0x11`, a 1 GiB window, an empty last meta-block) is a
+    /// malformed body: RFC 7932, which `br` names, has windows of at most 16 MiB
+    #[tokio::test]
+    #[cfg(feature = "decompression-brotli")]
+    async fn it_rejects_large_window_brotli() {
+        let body = HttpBody::full(&[0x11, 0xde][..]);
+        let body = brotli(body, DecompressionLimits::default().resolved());
+
+        let error = body.collect().await.unwrap_err();
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -456,6 +486,37 @@ mod tests {
         );
 
         assert!(body.collect().await.is_err());
+    }
+
+    #[test]
+    fn it_keeps_the_status_of_an_error_passed_on_by_the_decoder() {
+        let passed_on =
+            std::io::Error::from(Error::from(DecompressionError::CompressedBodyTooLarge));
+        let error = decoder_error(passed_on);
+
+        assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            error.to_string(),
+            "Decompression error: CompressedBodyTooLarge"
+        );
+    }
+
+    #[test]
+    fn it_answers_400_to_an_error_of_the_decoder() {
+        let errors = [
+            std::io::Error::other("Unknown frame descriptor"),
+            std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid gzip header"),
+        ];
+
+        for err in errors {
+            let error = decoder_error(err);
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                error.to_string(),
+                "Decompression error: InvalidCompressedBody"
+            );
+        }
     }
 
     #[test]
