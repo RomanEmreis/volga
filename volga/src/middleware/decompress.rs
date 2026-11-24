@@ -1,6 +1,8 @@
 //! Decompression middleware
 //!
-//! Middleware that decompresses the HTTP request body
+//! Middleware that decompresses the HTTP request body. A body that is not a valid stream of
+//! its `Content-Encoding` is answered with `400 Bad Request`, and so is a zstd frame declaring
+//! a window over 8 MiB, the limit RFC 9659 sets for the `zstd` content coding.
 
 #[cfg(feature = "decompression-brotli")]
 use async_compression::tokio::bufread::BrotliDecoder;
@@ -9,7 +11,7 @@ use async_compression::tokio::bufread::BrotliDecoder;
 use async_compression::tokio::bufread::{GzipDecoder, ZlibDecoder};
 
 #[cfg(feature = "decompression-zstd")]
-use async_compression::tokio::bufread::ZstdDecoder;
+use async_compression::{tokio::bufread::ZstdDecoder, zstd::DParameter};
 
 use crate::{
     App, HttpBody, HttpRequestMut, HttpResult,
@@ -71,15 +73,21 @@ impl DecompressionState {
     }
 }
 
+/// The largest window a zstd frame may declare, as a power of two: 2^23, 8 MiB, the limit
+/// RFC 9659 sets for the `zstd` content coding. zstd's own default is 2^27, 128 MiB, and the
+/// decoder sizes its buffers from the window in the frame header, before any output exists for
+/// the decompression limits to count.
+#[cfg(feature = "decompression-zstd")]
+const ZSTD_WINDOW_LOG_MAX: u32 = 23;
+
 macro_rules! impl_decompressor {
-    ($algo:ident, $decoder:ident, $mm:literal) => {
+    ($algo:ident, |$reader:ident| $decoder:expr) => {
         #[inline]
         fn $algo(body: HttpBody, limits: ResolvedDecompressionLimits) -> HttpBody {
             let state = Arc::new(DecompressionState::default());
             let body_stream = limited_compressed_stream(body, limits, state.clone());
-            let stream_reader = StreamReader::new(body_stream);
-            let mut decoder = $decoder::new(stream_reader);
-            decoder.multiple_members($mm);
+            let $reader = StreamReader::new(body_stream);
+            let decoder = $decoder;
             let decompressed_body =
                 limited_decompressed_stream(ReaderStream::new(decoder), limits, state);
 
@@ -91,16 +99,23 @@ macro_rules! impl_decompressor {
 }
 
 #[cfg(feature = "decompression-brotli")]
-impl_decompressor!(brotli, BrotliDecoder, false);
+impl_decompressor!(brotli, |reader| BrotliDecoder::new(reader));
 
 #[cfg(feature = "decompression-gzip")]
-impl_decompressor!(gzip, GzipDecoder, true);
+impl_decompressor!(gzip, |reader| {
+    let mut decoder = GzipDecoder::new(reader);
+    decoder.multiple_members(true);
+    decoder
+});
 
 #[cfg(feature = "decompression-gzip")]
-impl_decompressor!(deflate, ZlibDecoder, false);
+impl_decompressor!(deflate, |reader| ZlibDecoder::new(reader));
 
 #[cfg(feature = "decompression-zstd")]
-impl_decompressor!(zstd, ZstdDecoder, false);
+impl_decompressor!(zstd, |reader| ZstdDecoder::with_params(
+    reader,
+    &[DParameter::window_log_max(ZSTD_WINDOW_LOG_MAX)]
+));
 
 impl App {
     /// Configures limits for the decompression middleware.

@@ -206,6 +206,41 @@ async fn it_rejects_a_stream_cut_short() {
     }
 }
 
+/// Encodes `data` as zstd with a window of 2^`window_log`. The size of the input is not
+/// pledged, so the frame declares that window rather than one cut to the input.
+async fn zstd_with_window(window_log: u32, data: &[u8]) -> Vec<u8> {
+    use async_compression::{Level, zstd::CParameter};
+
+    let mut encoder = ZstdEncoder::with_quality_and_params(
+        Vec::new(),
+        Level::Default,
+        &[CParameter::window_log(window_log)],
+    );
+    encoder.write_all(data).await.unwrap();
+    encoder.shutdown().await.unwrap();
+    encoder.into_inner()
+}
+
+/// RFC 9659 caps the window of the `zstd` content coding at 8 MiB
+#[tokio::test]
+async fn it_accepts_zstd_with_a_window_of_8_mib() {
+    let body = zstd_with_window(23, b"{\"age\":33,\"name\":\"John\"}").await;
+
+    let (status, text) = post_compressed("zstd", body).await;
+
+    assert_eq!(status, 200, "{text}");
+}
+
+#[tokio::test]
+async fn it_rejects_zstd_with_a_window_over_8_mib() {
+    let body = zstd_with_window(24, b"{\"age\":33,\"name\":\"John\"}").await;
+
+    let (status, text) = post_compressed("zstd", body).await;
+
+    assert_eq!(status, 400);
+    assert_eq!(text, INVALID_COMPRESSED_BODY);
+}
+
 /// The gzip header passes and the deflate stream after it does not: flate2 reports that as
 /// `ErrorKind::Other`, where a broken header is `InvalidData`
 #[tokio::test]
