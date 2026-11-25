@@ -11,7 +11,7 @@ use async_compression::tokio::bufread::BrotliDecoder;
 use async_compression::tokio::bufread::{GzipDecoder, ZlibDecoder};
 
 #[cfg(feature = "decompression-zstd")]
-use async_compression::{tokio::bufread::ZstdDecoder, zstd::DParameter};
+use async_compression::tokio::bufread::ZstdDecoder;
 
 use crate::{
     App, HttpBody, HttpRequestMut, HttpResult,
@@ -73,13 +73,6 @@ impl DecompressionState {
     }
 }
 
-/// The largest window a zstd frame may declare, as a power of two: 2^23, 8 MiB, the limit
-/// RFC 9659 sets for the `zstd` content coding. zstd's own default is 2^27, 128 MiB, and the
-/// decoder sizes its buffers from the window in the frame header, before any output exists for
-/// the decompression limits to count.
-#[cfg(feature = "decompression-zstd")]
-const ZSTD_WINDOW_LOG_MAX: u32 = 23;
-
 macro_rules! impl_decompressor {
     ($algo:ident, |$reader:ident| $decoder:expr) => {
         #[inline]
@@ -111,11 +104,11 @@ impl_decompressor!(gzip, |reader| {
 #[cfg(feature = "decompression-gzip")]
 impl_decompressor!(deflate, |reader| ZlibDecoder::new(reader));
 
+// A window of at most 8 MiB, the limit RFC 9659 sets for the `zstd` content coding, where zstd
+// allows 128 MiB by default: the decoder sizes its buffers from the window in the frame header,
+// before any output exists for the decompression limits to count
 #[cfg(feature = "decompression-zstd")]
-impl_decompressor!(zstd, |reader| ZstdDecoder::with_params(
-    reader,
-    &[DParameter::window_log_max(ZSTD_WINDOW_LOG_MAX)]
-));
+impl_decompressor!(zstd, |reader| ZstdDecoder::new_for_http(reader));
 
 impl App {
     /// Configures limits for the decompression middleware.
