@@ -34,7 +34,7 @@ smallvec = "1.15.1"
 # optional
 arc-swap = { version = "1.9.5", optional = true }
 toml = { version = "1.1.2",   optional = true }
-async-compression = { version = "0.4.52", features = ["tokio"], optional = true }
+async-compression = { version = "0.4.54", features = ["tokio"], optional = true }
 base64 = { workspace = true, optional = true }
 cookie = { version = "0.18.3", features = ["percent-encode"], optional = true }
 jsonwebtoken = { workspace = true, features = ["aws_lc_rs"], optional = true }

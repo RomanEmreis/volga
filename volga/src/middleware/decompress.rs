@@ -1,6 +1,8 @@
 //! Decompression middleware
 //!
-//! Middleware that decompresses the HTTP request body
+//! Middleware that decompresses the HTTP request body. A body that is not a valid stream of
+//! its `Content-Encoding` is answered with `400 Bad Request`, and so is a zstd frame declaring
+//! a window over 8 MiB, the limit RFC 9659 sets for the `zstd` content coding.
 
 #[cfg(feature = "decompression-brotli")]
 use async_compression::tokio::bufread::BrotliDecoder;
@@ -72,14 +74,13 @@ impl DecompressionState {
 }
 
 macro_rules! impl_decompressor {
-    ($algo:ident, $decoder:ident, $mm:literal) => {
+    ($algo:ident, |$reader:ident| $decoder:expr) => {
         #[inline]
         fn $algo(body: HttpBody, limits: ResolvedDecompressionLimits) -> HttpBody {
             let state = Arc::new(DecompressionState::default());
             let body_stream = limited_compressed_stream(body, limits, state.clone());
-            let stream_reader = StreamReader::new(body_stream);
-            let mut decoder = $decoder::new(stream_reader);
-            decoder.multiple_members($mm);
+            let $reader = StreamReader::new(body_stream);
+            let decoder = $decoder;
             let decompressed_body =
                 limited_decompressed_stream(ReaderStream::new(decoder), limits, state);
 
@@ -91,16 +92,23 @@ macro_rules! impl_decompressor {
 }
 
 #[cfg(feature = "decompression-brotli")]
-impl_decompressor!(brotli, BrotliDecoder, false);
+impl_decompressor!(brotli, |reader| BrotliDecoder::new(reader));
 
 #[cfg(feature = "decompression-gzip")]
-impl_decompressor!(gzip, GzipDecoder, true);
+impl_decompressor!(gzip, |reader| {
+    let mut decoder = GzipDecoder::new(reader);
+    decoder.multiple_members(true);
+    decoder
+});
 
 #[cfg(feature = "decompression-gzip")]
-impl_decompressor!(deflate, ZlibDecoder, false);
+impl_decompressor!(deflate, |reader| ZlibDecoder::new(reader));
 
+// A window of at most 8 MiB, the limit RFC 9659 sets for the `zstd` content coding, where zstd
+// allows 128 MiB by default: the decoder sizes its buffers from the window in the frame header,
+// before any output exists for the decompression limits to count
 #[cfg(feature = "decompression-zstd")]
-impl_decompressor!(zstd, ZstdDecoder, false);
+impl_decompressor!(zstd, |reader| ZstdDecoder::new_for_http(reader));
 
 impl App {
     /// Configures limits for the decompression middleware.
@@ -236,7 +244,7 @@ fn limited_decompressed_stream<R>(
 where
     R: TryStream<Ok = bytes::Bytes, Error = std::io::Error>,
 {
-    stream.map_err(Into::into).and_then(move |chunk| {
+    stream.map_err(decoder_error).and_then(move |chunk| {
         let decompressed = state.add_decompressed(chunk.len());
         let compressed = state.compressed();
 
@@ -250,6 +258,21 @@ where
 
         ready(res)
     })
+}
+
+/// Turns an error of the decoder into the error of the body
+///
+/// What the decoder passes on from the compressed side - a decompression limit, the body
+/// limit, a body that failed to arrive - comes wrapped by `StreamReader` and keeps its status.
+/// Anything else the decoder raised itself, on a body that is not a valid stream of its
+/// encoding: garbage or a stream cut short, a client error whatever `ErrorKind` the codec
+/// gives it (`Other`, `UnexpectedEof` or `InvalidData`, depending on the codec and the fault).
+#[inline]
+fn decoder_error(err: std::io::Error) -> Error {
+    match err.into_inner().map(|inner| inner.downcast::<Error>()) {
+        Some(Ok(error)) => *error,
+        _ => DecompressionError::InvalidCompressedBody.into(),
+    }
 }
 
 #[inline]
@@ -284,6 +307,7 @@ enum DecompressionError {
     CompressedBodyTooLarge,
     DecompressedBodyTooLarge,
     ExpansionRatioExceeded,
+    InvalidCompressedBody,
 }
 
 impl Display for DecompressionError {
@@ -296,11 +320,13 @@ impl Display for DecompressionError {
 impl crate::error::IntoError for DecompressionError {
     #[inline]
     fn into_error(self) -> Error {
-        Error::from_parts(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            None,
-            format!("Decompression error: {self}"),
-        )
+        let status = match self {
+            Self::InvalidCompressedBody => StatusCode::BAD_REQUEST,
+            Self::CompressedBodyTooLarge
+            | Self::DecompressedBodyTooLarge
+            | Self::ExpansionRatioExceeded => StatusCode::PAYLOAD_TOO_LARGE,
+        };
+        Error::from_parts(status, None, format!("Decompression error: {self}"))
     }
 }
 
@@ -330,6 +356,18 @@ mod tests {
             body.collect().await.unwrap().to_bytes(),
             Bytes::from_static(b"{\"age\":33,\"name\":\"John\"}")
         );
+    }
+
+    /// A large-window stream (marker `0x11`, a 1 GiB window, an empty last meta-block) is a
+    /// malformed body: RFC 7932, which `br` names, has windows of at most 16 MiB
+    #[tokio::test]
+    #[cfg(feature = "decompression-brotli")]
+    async fn it_rejects_large_window_brotli() {
+        let body = HttpBody::full(&[0x11, 0xde][..]);
+        let body = brotli(body, DecompressionLimits::default().resolved());
+
+        let error = body.collect().await.unwrap_err();
+        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -456,6 +494,37 @@ mod tests {
         );
 
         assert!(body.collect().await.is_err());
+    }
+
+    #[test]
+    fn it_keeps_the_status_of_an_error_passed_on_by_the_decoder() {
+        let passed_on =
+            std::io::Error::from(Error::from(DecompressionError::CompressedBodyTooLarge));
+        let error = decoder_error(passed_on);
+
+        assert_eq!(error.status(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(
+            error.to_string(),
+            "Decompression error: CompressedBodyTooLarge"
+        );
+    }
+
+    #[test]
+    fn it_answers_400_to_an_error_of_the_decoder() {
+        let errors = [
+            std::io::Error::other("Unknown frame descriptor"),
+            std::io::Error::from(std::io::ErrorKind::UnexpectedEof),
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid gzip header"),
+        ];
+
+        for err in errors {
+            let error = decoder_error(err);
+            assert_eq!(error.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                error.to_string(),
+                "Decompression error: InvalidCompressedBody"
+            );
+        }
     }
 
     #[test]
